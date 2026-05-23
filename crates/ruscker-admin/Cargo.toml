@@ -41,6 +41,9 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
 
+# Persistence (Phase 2)
+sqlx = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 insta = { workspace = true }

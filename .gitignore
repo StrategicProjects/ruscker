@@ -1,0 +1,47 @@
+# Rust
+/target
+**/*.rs.bk
+Cargo.lock.bak
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local config / secrets
+.env
+.env.local
+*.local.yml
+secrets/
+
+# Build outputs
+/dist
+/build
+
+# Database
+*.db
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Logs
+*.log
+/logs
+
+# Coverage
+/coverage
+*.profraw
+
+# Generated docs
+/docs/_build
+
+# Claude Code memory (kept local, not pushed to GitHub)
+CLAUDE.md
+**/CLAUDE.md
+.claude/

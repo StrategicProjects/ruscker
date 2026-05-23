@@ -1,0 +1,16 @@
+[package]
+name = "ruscker-docker"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Docker backend implementation for Ruscker"
+
+# NOTE: this crate is a STUB. The real implementation (phase 3) will
+# add bollard, tracing, anyhow, chrono, etc. See CLAUDE.md in this
+# crate for the full dependency list.
+
+[dependencies]
+ruscker-config = { path = "../ruscker-config" }
+ruscker-core = { path = "../ruscker-core" }
+async-trait = { workspace = true }

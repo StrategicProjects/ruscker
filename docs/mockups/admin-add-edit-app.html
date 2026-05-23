@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker · Editar app — Aurora Prime</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="_shared.css">
+</head>
+<body>
+<div class="page-wrap">
+<div class="mockup-meta"><a href="index.html">← todos os mockups</a><span>admin / add-edit-app</span></div>
+<div class="mockup-frame">
+
+<div style="padding: 1rem 0;">
+
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; padding-bottom: 12px; border-bottom: 0.5px solid var(--color-border-tertiary);">
+  <div>
+    <div style="font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 2px;">Apps · Editar</div>
+    <div style="font-size: 18px; font-weight: 500;">Aurora Prime</div>
+  </div>
+  <div style="display: flex; gap: 8px;">
+    <button style="font-size: 13px;">Cancelar</button>
+    <button style="font-size: 13px; background: var(--color-text-primary); color: var(--color-background-primary); border-color: var(--color-text-primary);">Salvar alterações</button>
+  </div>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px;">
+
+<div>
+
+<div style="margin-bottom: 20px;">
+  <div style="font-size: 13px; color: var(--color-text-secondary); margin-bottom: 8px;">Tipo</div>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">
+    <div style="padding: 10px 6px; border: 2px solid var(--color-border-info); background: var(--color-background-info); border-radius: var(--border-radius-md); text-align: center; font-size: 12px;">
+      <i class="ti ti-app-window" style="font-size: 18px; display: block; margin-bottom: 2px; color: var(--color-text-info);" aria-hidden="true"></i>
+      <span style="color: var(--color-text-info); font-weight: 500;">App container</span>
+    </div>
+    <div style="padding: 10px 6px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); text-align: center; font-size: 12px; color: var(--color-text-secondary);">
+      <i class="ti ti-external-link" style="font-size: 18px; display: block; margin-bottom: 2px;" aria-hidden="true"></i>
+      Link externo
+    </div>
+    <div style="padding: 10px 6px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); text-align: center; font-size: 12px; color: var(--color-text-secondary);">
+      <i class="ti ti-presentation" style="font-size: 18px; display: block; margin-bottom: 2px;" aria-hidden="true"></i>
+      Apresentação
+    </div>
+    <div style="padding: 10px 6px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); text-align: center; font-size: 12px; color: var(--color-text-secondary);">
+      <i class="ti ti-file-text" style="font-size: 18px; display: block; margin-bottom: 2px;" aria-hidden="true"></i>
+      Relatório
+    </div>
+  </div>
+</div>
+
+<div style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin: 24px 0 12px;">Identidade</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 4px;">ID</label>
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <input type="text" value="auroraprime" style="flex: 1; font-family: var(--font-mono); font-size: 13px;" />
+    <span style="font-size: 12px; color: var(--color-text-success); display: flex; align-items: center; gap: 4px;"><i class="ti ti-check" aria-hidden="true"></i>disponível</span>
+  </div>
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 4px;">Gerado a partir do nome. Usado em /app/auroraprime/</div>
+</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 4px;">Nome de exibição</label>
+  <input type="text" value="Aurora Prime" style="width: 100%;" />
+</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 4px;">Descrição <span style="color: var(--color-text-tertiary); font-weight: 400;">· HTML inline permitido</span></label>
+  <textarea style="width: 100%; min-height: 56px; font-size: 13px; padding: 8px; resize: vertical;">Painel de monitoramento das iniciativas estratégicas do Governo de Pernambuco.</textarea>
+</div>
+
+<div style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin: 24px 0 12px;">Visual</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 6px;">Logo do card</label>
+  <div style="display: flex; gap: 10px; align-items: center;">
+    <div style="width: 88px; height: 56px; background: var(--color-background-secondary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); display: flex; align-items: center; justify-content: center; color: var(--color-text-tertiary); font-size: 11px;">auroraprime<br>.png</div>
+    <div style="display: flex; flex-direction: column; gap: 4px; flex: 1;">
+      <button style="font-size: 12px; padding: 4px 10px;"><i class="ti ti-upload" style="font-size: 13px; margin-right: 4px;" aria-hidden="true"></i>Enviar nova</button>
+      <button style="font-size: 12px; padding: 4px 10px;"><i class="ti ti-photo" style="font-size: 13px; margin-right: 4px;" aria-hidden="true"></i>Galeria</button>
+    </div>
+  </div>
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 4px;">Recomendado 466×300. Será otimizado para WebP automaticamente.</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+  <div>
+    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Acesso</label>
+    <select style="width: 100%;">
+      <option>🔒 Restrito (lock)</option>
+      <option>🔓 Livre (lock_open)</option>
+    </select>
+  </div>
+  <div>
+    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Estado</label>
+    <select style="width: 100%;">
+      <option>Ativo</option>
+      <option>Inativo</option>
+    </select>
+  </div>
+</div>
+
+<div style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin: 24px 0 12px;">Container</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 4px;">Imagem Docker</label>
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <input type="text" value="milkway/auroraprime-app:latest" style="flex: 1; font-family: var(--font-mono); font-size: 12px;" />
+    <span style="font-size: 12px; color: var(--color-text-success); white-space: nowrap; display: flex; align-items: center; gap: 4px;"><i class="ti ti-check" aria-hidden="true"></i>imagem ok</span>
+  </div>
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 4px;">Verificada há 3s · 412 MB · pushed em 18/05</div>
+</div>
+
+<div style="margin-bottom: 14px;">
+  <label style="font-size: 13px; display: block; margin-bottom: 4px;">Credenciais do registry</label>
+  <select style="width: 100%;">
+    <option>Docker Hub — milkway</option>
+    <option>+ Adicionar credencial…</option>
+  </select>
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 4px;">Credenciais ficam criptografadas, nunca aparecem no YAML</div>
+</div>
+
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+  <div>
+    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Sessões/container</label>
+    <input type="number" value="10" style="width: 100%;" />
+    <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px;">padrão: 10</div>
+  </div>
+  <div>
+    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Vida máx. (min)</label>
+    <input type="number" value="360" style="width: 100%;" />
+    <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 2px;">6 horas</div>
+  </div>
+  <div>
+    <label style="font-size: 13px; display: block; margin-bottom: 4px;">Heartbeat</label>
+    <select style="width: 100%;">
+      <option>Padrão (1h)</option>
+      <option>Nunca expirar</option>
+      <option>Customizado…</option>
+    </select>
+  </div>
+</div>
+
+<div style="margin-top: 20px; padding: 12px 14px; background: var(--color-background-secondary); border-radius: var(--border-radius-md); display: flex; align-items: center; justify-content: space-between; cursor: pointer;">
+  <div style="display: flex; align-items: center; gap: 8px;">
+    <i class="ti ti-chevron-right" style="font-size: 16px; color: var(--color-text-tertiary);" aria-hidden="true"></i>
+    <span style="font-size: 13px; font-weight: 500;">Configurações avançadas</span>
+    <span style="font-size: 11px; color: var(--color-text-tertiary);">variáveis, volumes, limites, rede</span>
+  </div>
+  <span style="font-size: 11px; color: var(--color-text-tertiary);">0 alterações</span>
+</div>
+
+<div style="margin-top: 16px; padding: 10px 12px; background: var(--color-background-success); border-radius: var(--border-radius-md); font-size: 12px; color: var(--color-text-success); display: flex; align-items: center; gap: 8px;">
+  <i class="ti ti-check" aria-hidden="true"></i>
+  Tudo válido. ID único, imagem encontrada, logo no tamanho recomendado.
+</div>
+
+</div>
+
+<div style="position: relative;">
+  <div style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">Prévia do card</div>
+
+  <div style="background: var(--color-background-secondary); padding: 16px; border-radius: var(--border-radius-lg);">
+    <div style="background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 14px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+        <span style="background: #06D6A0; color: #04553f; font-size: 10px; font-weight: 500; padding: 2px 10px; border-radius: 10px;">APP</span>
+        <i class="ti ti-lock" style="font-size: 16px; color: var(--color-text-danger);" aria-hidden="true"></i>
+      </div>
+      <div style="background: var(--color-background-secondary); border-radius: var(--border-radius-md); height: 92px; display: flex; align-items: center; justify-content: center; color: var(--color-text-tertiary); font-size: 11px; margin-bottom: 12px;">auroraprime.png</div>
+      <div style="font-size: 14px; font-weight: 500; margin-bottom: 6px;">Aurora Prime</div>
+      <div style="font-size: 11px; color: var(--color-text-secondary); line-height: 1.5; margin-bottom: 12px;">Painel de monitoramento das iniciativas estratégicas do Governo de Pernambuco.</div>
+      <div style="background: linear-gradient(135deg,#7c3aed 0%,#c026d3 100%); color: white; font-size: 11px; font-weight: 500; padding: 6px; border-radius: var(--border-radius-md); text-align: center;">Abrir aplicativo</div>
+      <div style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 10px; text-align: center;">Atualizado em 18/05/2025</div>
+    </div>
+  </div>
+
+  <div style="font-size: 11px; color: var(--color-text-tertiary); margin-top: 8px; line-height: 1.5;">
+    Atualiza ao vivo conforme você edita. Aparece exatamente assim na landing page.
+  </div>
+
+  <div style="margin-top: 20px; padding: 12px; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md);">
+    <div style="font-size: 12px; font-weight: 500; margin-bottom: 8px;">Ações</div>
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <a href="#" style="font-size: 12px; color: var(--color-text-info); display: flex; align-items: center; gap: 6px; text-decoration: none;"><i class="ti ti-player-play" aria-hidden="true"></i>Testar abrindo agora</a>
+      <a href="#" style="font-size: 12px; color: var(--color-text-info); display: flex; align-items: center; gap: 6px; text-decoration: none;"><i class="ti ti-copy" aria-hidden="true"></i>Duplicar como template</a>
+      <a href="#" style="font-size: 12px; color: var(--color-text-info); display: flex; align-items: center; gap: 6px; text-decoration: none;"><i class="ti ti-history" aria-hidden="true"></i>Ver histórico (12 versões)</a>
+      <a href="#" style="font-size: 12px; color: var(--color-text-danger); display: flex; align-items: center; gap: 6px; text-decoration: none;"><i class="ti ti-trash" aria-hidden="true"></i>Excluir app</a>
+    </div>
+  </div>
+</div>
+
+</div>
+</div>
+
+</div>
+</div>
+</body>
+</html>

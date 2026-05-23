@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker — Mockups</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<style>
+:root {
+  --bg: #fafaf7;
+  --surface: #fff;
+  --text: #1a1a1a;
+  --text-muted: #6b6b66;
+  --border: #e8e6df;
+  --info: #185fa5;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a1a;
+    --surface: #242424;
+    --text: #f0f0f0;
+    --text-muted: #999;
+    --border: #333;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--text);
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  margin: 0; padding: 2rem;
+  max-width: 880px;
+  margin-left: auto; margin-right: auto;
+  line-height: 1.55;
+}
+h1 { font-size: 28px; font-weight: 500; margin-bottom: .4rem; }
+.lede { color: var(--text-muted); margin: 0 0 2.5rem; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+@media (max-width: 640px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  display: block;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+  text-decoration: none;
+  color: inherit;
+  transition: transform .15s, border-color .15s;
+}
+.card:hover { transform: translateY(-2px); border-color: var(--text); }
+.card .ico {
+  width: 36px; height: 36px;
+  background: rgba(0,0,0,0.04);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  .card .ico { background: rgba(255,255,255,0.06); }
+}
+.card h3 { font-size: 15px; font-weight: 500; margin: 0 0 4px; }
+.card p { font-size: 13px; color: var(--text-muted); margin: 0; }
+hr { border: 0; height: 0.5px; background: var(--border); margin: 2.5rem 0; }
+section h2 { font-size: 18px; font-weight: 500; margin: 0 0 16px; }
+.note {
+  background: var(--surface);
+  border-left: 3px solid var(--info);
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+</style>
+</head>
+<body>
+
+<h1>Ruscker — Mockups</h1>
+<p class="lede">Direção visual das telas. Cada mockup é um arquivo HTML standalone usando as mesmas
+variáveis CSS para tema claro e escuro automáticos.</p>
+
+<section>
+<h2>Admin</h2>
+<div class="grid">
+  <a class="card" href="admin-add-edit-app.html">
+    <div class="ico"><i class="ti ti-edit"></i></div>
+    <h3>Adicionar / editar app</h3>
+    <p>Formulário tipo-dirigido com prévia do card ao vivo, configurações avançadas escondidas, validação de imagem e credenciais.</p>
+  </a>
+  <a class="card" href="admin-landing-editor.html">
+    <div class="ico"><i class="ti ti-layout-distribute-vertical"></i></div>
+    <h3>Editor de landing page</h3>
+    <p>Estrutura da página por seções editáveis e reordenáveis: cabeçalho, hero, legendas, filtros, grid, rodapé.</p>
+  </a>
+  <a class="card" href="admin-dashboard.html">
+    <div class="ico"><i class="ti ti-chart-bar"></i></div>
+    <h3>Dashboard de monitoramento</h3>
+    <p>Métricas agregadas, tabela de containers ativos com utilização inline, gráfico de sessões 24h, eventos recentes.</p>
+  </a>
+</div>
+</section>
+
+<hr>
+
+<section>
+<h2>Landing page pública</h2>
+<div class="grid">
+  <a class="card" href="landing-page.html">
+    <div class="ico"><i class="ti ti-browser"></i></div>
+    <h3>Página completa</h3>
+    <p>Header com logos e título, hero, legendas de tipos e acesso, filtros, grid de cards, rodapé.</p>
+  </a>
+  <a class="card" href="landing-filters-cards-refined.html">
+    <div class="ico"><i class="ti ti-filter"></i></div>
+    <h3>Filtros e cards (refinados)</h3>
+    <p>Versão final dos filtros com chips coloridos contáveis, seletor de acesso bem posicionado, novo tipo "API" para Plumber2.</p>
+  </a>
+</div>
+</section>
+
+<hr>
+
+<section>
+<h2>Arquitetura</h2>
+<div class="grid">
+  <a class="card" href="load-balancing-architecture.html">
+    <div class="ico"><i class="ti ti-share"></i></div>
+    <h3>Balanceamento de carga</h3>
+    <p>Como o proxy roteia novas sessões para a réplica menos ocupada, com sticky sessions para Shiny.</p>
+  </a>
+</div>
+</section>
+
+<hr>
+<p class="note">Estas são wireframes/protótipos visuais. A implementação real será com Askama + HTMX + Tailwind 4
+e usará a fonte Jost (carregada do CDN ou self-hosted) para preservar a identidade visual atual.</p>
+
+</body>
+</html>

@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker · Landing page pública</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.browser-chrome{background:var(--color-background-secondary);border-top-left-radius:var(--border-radius-lg);border-top-right-radius:var(--border-radius-lg);padding:8px 12px;display:flex;align-items:center;gap:10px;border-bottom:0.5px solid var(--color-border-tertiary)}
+.browser-dots{display:flex;gap:5px}
+.browser-dots span{width:10px;height:10px;border-radius:50%}
+.browser-url{flex:1;background:var(--color-background-primary);border-radius:5px;padding:3px 10px;font-size:11px;color:var(--color-text-secondary);font-family:var(--font-mono);text-align:center}
+
+.landing{font-family:'Jost', sans-serif;background:#f8f9fa;color:#1a1a1a}
+.landing-header{display:flex;align-items:center;justify-content:space-between;padding:10px 24px;background:#fff;border-bottom:0.5px solid #e0e0e0}
+.landing-header .logo-stub{width:48px;height:26px;background:#eee;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#888}
+.landing-header .title{font-size:15px;font-weight:500;letter-spacing:0.3px}
+
+.landing-hero{padding:20px 24px;background:#fff;border-bottom:0.5px solid #e8e8e8}
+.landing-hero h1{font-size:20px;font-weight:500;margin:0 0 4px}
+.landing-hero p{font-size:12px;color:#555;margin:0;max-width:600px;line-height:1.55}
+
+.legend-row{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:#555;padding:10px 24px;background:#fff;border-bottom:0.5px solid #e8e8e8;align-items:center}
+.legend-row .tag{padding:1px 7px;border-radius:5px;font-size:9px;font-weight:500}
+
+.filter-row{display:flex;align-items:center;gap:8px;padding:10px 24px;background:#fff;border-bottom:0.5px solid #e8e8e8}
+.search-box{position:relative;flex:1;max-width:280px}
+.search-box input{width:100%;padding:5px 8px 5px 26px;border:0.5px solid #d0d0d0;border-radius:5px;font-size:12px;font-family:inherit}
+.search-box i{position:absolute;left:8px;top:50%;transform:translateY(-50%);color:#888;font-size:13px}
+.filter-chip{padding:3px 8px;border:0.5px solid #d0d0d0;border-radius:12px;font-size:11px;background:#fff;color:#555;cursor:pointer}
+.filter-chip.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+
+.cards-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:14px 24px;background:#f8f9fa}
+.app-card{background:#fff;border-radius:7px;padding:10px;box-shadow:0 1px 2px rgba(0,0,0,0.04);display:flex;flex-direction:column;gap:8px}
+.card-top{display:flex;justify-content:space-between;align-items:center}
+.card-tag{font-size:9px;font-weight:600;padding:1px 7px;border-radius:6px;letter-spacing:0.3px}
+.card-lock{font-size:12px}
+.card-lock.lock{color:#d9534f}
+.card-lock.lock-open{color:#5cb85c}
+.card-logo{background:#f4f4f0;border-radius:5px;height:48px;display:flex;align-items:center;justify-content:center;font-size:8px;color:#888;text-align:center}
+.card-title{font-size:11.5px;font-weight:600;color:#1a1a1a;line-height:1.2}
+.card-desc{font-size:9.5px;color:#555;line-height:1.4;flex:1}
+.card-btn{background:linear-gradient(135deg,#7c3aed 0%,#c026d3 100%);color:#fff;font-size:9.5px;font-weight:500;padding:4px;border-radius:5px;text-align:center;letter-spacing:0.2px}
+.card-update{font-size:8px;color:#888;text-align:center}
+
+.section-divider{padding:14px 24px 4px;background:#f8f9fa;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888;font-weight:500}
+
+.landing-footer{padding:14px 24px;background:#fff;border-top:0.5px solid #e8e8e8;font-size:9px;color:#888;text-align:center;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="page-wrap">
+<div class="mockup-meta"><a href="index.html">← todos os mockups</a><span>landing / página pública</span></div>
+<div class="mockup-frame" style="padding: 0; overflow: hidden;">
+
+<div class="browser-chrome">
+  <div class="browser-dots">
+    <span style="background:#ff5f57"></span>
+    <span style="background:#febc2e"></span>
+    <span style="background:#28c840"></span>
+  </div>
+  <div class="browser-url">monitoramento.sepe.pe.gov.br</div>
+  <span style="font-size:11px;color:var(--color-text-tertiary)">▾</span>
+</div>
+
+<div class="landing">
+
+  <div class="landing-header">
+    <div class="logo-stub">logo_pe</div>
+    <div class="title">Monitoramento Estratégico</div>
+    <div class="logo-stub">logo_sepe</div>
+  </div>
+
+  <div class="landing-hero">
+    <h1>Portal de Monitoramento Estratégico</h1>
+    <p>Acompanhamento das iniciativas estratégicas do Governo de Pernambuco. Reúne painéis, relatórios e ferramentas usadas pelas secretarias para monitorar entregas e resultados.</p>
+  </div>
+
+  <div class="legend-row">
+    <span style="font-weight:500;color:#1a1a1a">Tipos:</span>
+    <span><span class="tag" style="background:#06D6A0;color:#0a4d3a">APP</span> Aplicação</span>
+    <span><span class="tag" style="background:#FFD166;color:#5a4500">APT</span> Apresentação</span>
+    <span><span class="tag" style="background:#EF476F;color:#fff">RLT</span> Relatório</span>
+    <span><span class="tag" style="background:#26547C;color:#fff">PCT</span> Pacote R</span>
+    <span style="font-weight:500;color:#1a1a1a;margin-left:14px">Acesso:</span>
+    <span><i class="ti ti-lock" style="color:#d9534f"></i> Restrito</span>
+    <span><i class="ti ti-lock-open" style="color:#5cb85c"></i> Livre</span>
+  </div>
+
+  <div class="filter-row">
+    <div class="search-box">
+      <i class="ti ti-search"></i>
+      <input type="text" placeholder="Buscar por nome ou descrição…" />
+    </div>
+    <span class="filter-chip active">Todos · 28</span>
+    <span class="filter-chip">APP · 10</span>
+    <span class="filter-chip">APT · 5</span>
+    <span class="filter-chip">RLT · 2</span>
+    <span class="filter-chip">PCT · 11</span>
+    <span style="margin-left:auto;font-size:10px;color:#888">28 ativos · 3 inativos</span>
+  </div>
+
+  <div class="section-divider">Aplicações</div>
+
+  <div class="cards-grid">
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#06D6A0;color:#0a4d3a">APP</span>
+        <i class="ti ti-lock card-lock lock"></i>
+      </div>
+      <div class="card-logo">auroraprime.png</div>
+      <div class="card-title">Aurora Prime</div>
+      <div class="card-desc">Painel das iniciativas estratégicas do Governo de Pernambuco.</div>
+      <div class="card-btn">Abrir aplicativo</div>
+      <div class="card-update">Atualizado em 18/05/2025</div>
+    </div>
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#06D6A0;color:#0a4d3a">APP</span>
+        <i class="ti ti-lock card-lock lock"></i>
+      </div>
+      <div class="card-logo">creches_painel.png</div>
+      <div class="card-title">Painel Creches</div>
+      <div class="card-desc">Monitoramento da iniciativa de construção de 250 creches.</div>
+      <div class="card-btn">Abrir aplicativo</div>
+      <div class="card-update">Atualizado em 12/05/2025</div>
+    </div>
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#06D6A0;color:#0a4d3a">APP</span>
+        <i class="ti ti-lock card-lock lock"></i>
+      </div>
+      <div class="card-logo">hortensias.png</div>
+      <div class="card-title">Hortensias</div>
+      <div class="card-desc">Sistema integrado de informações do Conseplan.</div>
+      <div class="card-btn">Abrir aplicativo</div>
+      <div class="card-update">Atualizado em 30/04/2025</div>
+    </div>
+  </div>
+
+  <div class="section-divider">Pacotes R</div>
+
+  <div class="cards-grid">
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#26547C;color:#fff">PCT</span>
+        <i class="ti ti-lock-open card-lock lock-open"></i>
+      </div>
+      <div class="card-logo">bigdatape.png</div>
+      <div class="card-title">bigdatape</div>
+      <div class="card-desc">Cliente R para acesso ao Big Data Pernambuco.</div>
+      <div class="card-btn">Abrir documentação</div>
+      <div class="card-update">github.com/milkway/bigdatape</div>
+    </div>
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#26547C;color:#fff">PCT</span>
+        <i class="ti ti-lock-open card-lock lock-open"></i>
+      </div>
+      <div class="card-logo">diario.png</div>
+      <div class="card-title">diario</div>
+      <div class="card-desc">Coleta e parsing do Diário Oficial do Estado.</div>
+      <div class="card-btn">Abrir documentação</div>
+      <div class="card-update">github.com/milkway/diario</div>
+    </div>
+    <div class="app-card">
+      <div class="card-top">
+        <span class="card-tag" style="background:#26547C;color:#fff">PCT</span>
+        <i class="ti ti-lock-open card-lock lock-open"></i>
+      </div>
+      <div class="card-logo">pikchr.png</div>
+      <div class="card-title">pikchr</div>
+      <div class="card-desc">Renderização de diagramas Pikchr direto do R.</div>
+      <div class="card-btn">Abrir documentação</div>
+      <div class="card-update">github.com/milkway/pikchr</div>
+    </div>
+  </div>
+
+  <div class="landing-footer">
+    © 2024 Governo de Pernambuco · SEPE | SEMOBI<br>
+    Secretaria Executiva do Programa de Parcerias do Estado
+  </div>
+
+</div>
+
+</div>
+
+<div style="font-size:11px;color:var(--color-text-tertiary);margin-top:14px;line-height:1.55">
+  Mockup mostra a landing page renderizada no estilo atual da SEPE: fonte <strong>Jost</strong>, header com dois logos e título central,
+  hero com texto introdutório, barra de legendas, filtros, grid em 3 colunas com cards finos
+  (gradiente roxo→magenta no CTA), grupos por tipo, rodapé minimal.
+</div>
+
+</div>
+</div>
+</body>
+</html>

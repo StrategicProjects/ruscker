@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker · Filtros e cards refinados</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Jost:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.canvas{font-family:'Jost', sans-serif;background:#f8f9fa;padding:24px;color:#1a1a1a;border-radius:var(--border-radius-md)}
+
+.filter-section{background:#fff;border:0.5px solid #e0e0e0;border-radius:8px;padding:14px 18px;margin-bottom:18px}
+.filter-row-1{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.search-box{position:relative;flex:1;max-width:340px}
+.search-box input{width:100%;padding:8px 10px 8px 32px;border:0.5px solid #d0d0d0;border-radius:6px;font-size:13px;font-family:inherit}
+.search-box i{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#888;font-size:15px}
+.access-toggle{display:flex;align-items:center;gap:4px;margin-left:auto;background:#f4f4f4;border-radius:18px;padding:3px;font-size:11px}
+.access-btn{padding:3px 10px;border-radius:14px;cursor:pointer;display:flex;align-items:center;gap:4px;color:#555;font-weight:500}
+.access-btn.active{background:#fff;color:#1a1a1a;box-shadow:0 1px 2px rgba(0,0,0,.08)}
+
+.filter-row-2{display:flex;flex-wrap:wrap;gap:6px}
+.type-chip{padding:4px 10px;border:0.5px solid;border-radius:14px;font-size:11px;font-weight:500;display:flex;align-items:center;gap:5px;cursor:pointer;font-family:inherit}
+.type-chip.all{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+.type-chip.app{border-color:#06D6A0;color:#04553f}
+.type-chip.app .count{background:#06D6A0;color:#04553f}
+.type-chip.apt{border-color:#FFD166;color:#5a4500}
+.type-chip.apt .count{background:#FFD166;color:#5a4500}
+.type-chip.rlt{border-color:#EF476F;color:#a31239}
+.type-chip.rlt .count{background:#EF476F;color:#fff}
+.type-chip.pct{border-color:#26547C;color:#26547C}
+.type-chip.pct .count{background:#26547C;color:#fff}
+.type-chip.api{border-color:#06B6D4;color:#055b6c}
+.type-chip.api .count{background:#06B6D4;color:#fff}
+.type-chip .count{padding:0 6px;border-radius:8px;font-size:10px;font-weight:600;margin-left:2px}
+.type-chip.clear{border-color:transparent;color:#888;font-weight:400;text-decoration:underline;cursor:pointer;background:transparent}
+
+.cards-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:8px}
+.app-card{background:#fff;border-radius:8px;padding:12px;box-shadow:0 1px 2px rgba(0,0,0,.04);display:flex;flex-direction:column;gap:8px;position:relative}
+.card-top{display:flex;justify-content:space-between;align-items:center}
+.card-tag{font-size:10px;font-weight:600;padding:2px 8px;border-radius:6px;letter-spacing:0.3px}
+.card-lock{font-size:14px}
+.lock{color:#d9534f}.lock-open{color:#5cb85c}
+.card-logo{background:#f4f4f0;border-radius:6px;height:64px;display:flex;align-items:center;justify-content:center;font-size:9px;color:#888;text-align:center}
+.card-title{font-size:13px;font-weight:600;color:#1a1a1a;line-height:1.2}
+.card-desc{font-size:10.5px;color:#555;line-height:1.4;flex:1}
+.card-btn{background:linear-gradient(135deg,#7c3aed 0%,#c026d3 100%);color:#fff;font-size:10.5px;font-weight:500;padding:5px;border-radius:6px;text-align:center;letter-spacing:0.2px}
+.card-btn.api{background:linear-gradient(135deg,#06B6D4 0%,#0891B2 100%)}
+.card-update{font-size:9px;color:#888;text-align:center}
+
+.callout{margin-top:14px;padding:10px 14px;background:#E6F1FB;border-left:3px solid #378ADD;border-radius:4px;font-size:11px;color:#185fa5}
+</style>
+</head>
+<body>
+<div class="page-wrap">
+<div class="mockup-meta"><a href="index.html">← todos os mockups</a><span>landing / filtros e cards (refinado)</span></div>
+<div class="mockup-frame" style="padding:0">
+
+<div class="canvas">
+
+<div class="filter-section">
+
+<div class="filter-row-1">
+  <div class="search-box">
+    <i class="ti ti-search"></i>
+    <input type="text" placeholder="Buscar por nome ou descrição…" />
+  </div>
+  <div class="access-toggle">
+    <div class="access-btn active"><i class="ti ti-asterisk" style="font-size:11px"></i>Todos</div>
+    <div class="access-btn"><i class="ti ti-lock" style="font-size:11px;color:#d9534f"></i>Restrito</div>
+    <div class="access-btn"><i class="ti ti-lock-open" style="font-size:11px;color:#5cb85c"></i>Livre</div>
+  </div>
+</div>
+
+<div class="filter-row-2">
+  <span class="type-chip all">Todos<span class="count" style="background:#fff;color:#1a1a1a">31</span></span>
+  <span class="type-chip app">APP<span class="count">10</span></span>
+  <span class="type-chip apt">APT<span class="count">5</span></span>
+  <span class="type-chip rlt">RLT<span class="count">2</span></span>
+  <span class="type-chip pct">PCT<span class="count">11</span></span>
+  <span class="type-chip api">API<span class="count">3</span></span>
+  <span class="type-chip clear">limpar filtros</span>
+</div>
+
+</div>
+
+<div class="cards-grid">
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#06D6A0;color:#0a4d3a">APP</span>
+      <i class="ti ti-lock card-lock lock"></i>
+    </div>
+    <div class="card-logo">auroraprime.png</div>
+    <div class="card-title">Aurora Prime</div>
+    <div class="card-desc">Painel das iniciativas estratégicas do Governo de Pernambuco.</div>
+    <div class="card-btn">Abrir aplicativo</div>
+    <div class="card-update">Atualizado em 18/05/2025</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#FFD166;color:#5a4500">APT</span>
+      <i class="ti ti-lock card-lock lock"></i>
+    </div>
+    <div class="card-logo">maternidades_talk.png</div>
+    <div class="card-title">Maternidades</div>
+    <div class="card-desc">Apresentação executiva da rede materno-infantil do estado.</div>
+    <div class="card-btn">Abrir apresentação</div>
+    <div class="card-update">Atualizado em 02/05/2025</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#EF476F;color:#fff">RLT</span>
+      <i class="ti ti-lock card-lock lock"></i>
+    </div>
+    <div class="card-logo">creches_report.png</div>
+    <div class="card-title">Creches — Relatório</div>
+    <div class="card-desc">Relatório consolidado da iniciativa de construção de creches.</div>
+    <div class="card-btn">Abrir relatório</div>
+    <div class="card-update">Atualizado em 28/04/2025</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#26547C;color:#fff">PCT</span>
+      <i class="ti ti-lock-open card-lock lock-open"></i>
+    </div>
+    <div class="card-logo">bigdatape.png</div>
+    <div class="card-title">bigdatape</div>
+    <div class="card-desc">Cliente R para acesso ao Big Data Pernambuco.</div>
+    <div class="card-btn">Abrir documentação</div>
+    <div class="card-update">github.com/milkway/bigdatape</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#06B6D4;color:#fff">API</span>
+      <i class="ti ti-lock-open card-lock lock-open"></i>
+    </div>
+    <div class="card-logo">bigdata_api.png</div>
+    <div class="card-title">Big Data API</div>
+    <div class="card-desc">Endpoint Plumber2 para consultar indicadores socioeconômicos.</div>
+    <div class="card-btn api">Ver Swagger UI</div>
+    <div class="card-update">GET /v1/indicadores · 47 req/min</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#06B6D4;color:#fff">API</span>
+      <i class="ti ti-lock card-lock lock"></i>
+    </div>
+    <div class="card-logo">creches_api.png</div>
+    <div class="card-title">Creches API</div>
+    <div class="card-desc">Status das obras das creches em construção (Plumber2).</div>
+    <div class="card-btn api">Ver documentação</div>
+    <div class="card-update">3 endpoints · v1.2.0</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#26547C;color:#fff">PCT</span>
+      <i class="ti ti-lock-open card-lock lock-open"></i>
+    </div>
+    <div class="card-logo">diario.png</div>
+    <div class="card-title">diario</div>
+    <div class="card-desc">Coleta e parsing do Diário Oficial do Estado.</div>
+    <div class="card-btn">Abrir documentação</div>
+    <div class="card-update">github.com/milkway/diario</div>
+  </div>
+
+  <div class="app-card">
+    <div class="card-top">
+      <span class="card-tag" style="background:#06D6A0;color:#0a4d3a">APP</span>
+      <i class="ti ti-lock card-lock lock"></i>
+    </div>
+    <div class="card-logo">peabiru.png</div>
+    <div class="card-title">Peabiru</div>
+    <div class="card-desc">Painel territorial multissetorial de Pernambuco.</div>
+    <div class="card-btn">Abrir aplicativo</div>
+    <div class="card-update">Atualizado em 10/05/2025</div>
+  </div>
+
+</div>
+
+<div class="callout">
+  <strong>Refinamentos versus o mockup anterior:</strong> filtros agrupados em uma única seção visualmente coesa,
+  toggle de acesso bem posicionado no canto, contadores coloridos por tipo, novo chip <strong>API</strong> em ciano,
+  link "limpar filtros" discreto, e dois exemplos de cards do tipo API (Plumber2) com gradiente próprio no CTA.
+</div>
+
+</div>
+
+</div>
+</div>
+</body>
+</html>

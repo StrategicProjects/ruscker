@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker · Editor de landing page</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+.section-row{display:flex;align-items:center;gap:10px;padding:10px 12px;border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);background:var(--color-background-primary);margin-bottom:6px}
+.section-grip{color:var(--color-text-tertiary);cursor:grab;font-size:16px}
+.section-icon{width:28px;height:28px;background:var(--color-background-secondary);border-radius:var(--border-radius-md);display:flex;align-items:center;justify-content:center;color:var(--color-text-secondary);flex-shrink:0}
+.section-meta{flex:1;min-width:0}
+.section-title{font-size:13px;font-weight:500;margin-bottom:2px}
+.section-preview{font-size:11px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.section-actions{display:flex;gap:4px;color:var(--color-text-tertiary)}
+.section-actions button{padding:4px 8px;font-size:12px;min-width:auto;background:transparent;border:none;color:inherit}
+</style>
+</head>
+<body>
+<div class="page-wrap">
+<div class="mockup-meta"><a href="index.html">← todos os mockups</a><span>admin / landing-editor</span></div>
+<div class="mockup-frame">
+
+<div style="padding: 1rem 0;">
+
+<div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 0.5px solid var(--color-border-tertiary);">
+  <div>
+    <div style="font-size: 12px; color: var(--color-text-tertiary); margin-bottom: 2px;">Configurações · Landing page</div>
+    <div style="font-size: 18px; font-weight: 500;">Estrutura da página inicial</div>
+  </div>
+  <div style="display: flex; gap: 8px; align-items: center;">
+    <button style="font-size: 12px;"><i class="ti ti-eye" style="font-size:13px;margin-right:4px" aria-hidden="true"></i>Pré-visualizar</button>
+    <button style="font-size: 13px; background: var(--color-text-primary); color: var(--color-background-primary); border-color: var(--color-text-primary);">Publicar</button>
+  </div>
+</div>
+
+<div style="font-size: 11px; color: var(--color-text-tertiary); margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+  <i class="ti ti-info-circle" aria-hidden="true"></i>Arraste para reordenar · clique no olho para mostrar/ocultar
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-palette" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Marca e identidade visual</div>
+    <div class="section-preview">Título: "Monitoramento Estratégico" · Fonte: Jost · Cor primária: roxo gradiente</div>
+  </div>
+  <div class="section-actions">
+    <button aria-label="Editar"><i class="ti ti-edit" aria-hidden="true"></i></button>
+    <button aria-label="Ocultar"><i class="ti ti-eye" aria-hidden="true"></i></button>
+  </div>
+</div>
+
+<div style="border: 2px solid var(--color-border-info); border-radius: var(--border-radius-md); background: var(--color-background-primary); margin-bottom: 6px; overflow: hidden;">
+  <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--color-background-info);">
+    <i class="ti ti-grip-vertical" style="color: var(--color-text-info); font-size: 16px;" aria-hidden="true"></i>
+    <div class="section-icon" style="background: var(--color-background-primary); color: var(--color-text-info);"><i class="ti ti-layout-navbar" aria-hidden="true"></i></div>
+    <div style="flex: 1;">
+      <div style="font-size: 13px; font-weight: 500; color: var(--color-text-info);">Cabeçalho</div>
+      <div style="font-size: 11px; color: var(--color-text-info); opacity: 0.8;">Editando agora</div>
+    </div>
+    <button style="font-size: 12px;"><i class="ti ti-chevron-up" aria-hidden="true"></i></button>
+  </div>
+
+  <div style="padding: 8px 12px; background: var(--color-background-secondary); border-bottom: 0.5px solid var(--color-border-tertiary);">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; background: var(--color-background-primary); border-radius: var(--border-radius-md);">
+      <div style="width: 56px; height: 28px; background: var(--color-background-secondary); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--color-text-tertiary);">logo_pe</div>
+      <div style="font-size: 13px; font-weight: 500;">Monitoramento Estratégico</div>
+      <div style="width: 32px; height: 32px; background: var(--color-background-secondary); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--color-text-tertiary);">sepe</div>
+    </div>
+    <div style="font-size: 10px; color: var(--color-text-tertiary); margin-top: 4px; text-align: center;">↑ prévia ao vivo</div>
+  </div>
+
+  <div style="padding: 14px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+      <div>
+        <label style="font-size: 12px; display: block; margin-bottom: 4px;">Logo esquerdo</label>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <div style="width: 44px; height: 30px; background: var(--color-background-secondary); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--color-text-tertiary); flex-shrink: 0;">logo_pe.svg</div>
+          <button style="font-size: 11px; padding: 4px 8px; flex: 1;">Trocar</button>
+        </div>
+        <input type="text" placeholder="URL de destino" value="/" style="width: 100%; font-size: 11px; margin-top: 4px;" />
+      </div>
+      <div>
+        <label style="font-size: 12px; display: block; margin-bottom: 4px;">Logo direito</label>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <div style="width: 44px; height: 30px; background: var(--color-background-secondary); border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--color-text-tertiary); flex-shrink: 0;">logo_sepe.svg</div>
+          <button style="font-size: 11px; padding: 4px 8px; flex: 1;">Trocar</button>
+        </div>
+        <input type="text" placeholder="URL de destino" value="/" style="width: 100%; font-size: 11px; margin-top: 4px;" />
+      </div>
+    </div>
+
+    <div style="margin-bottom: 12px;">
+      <label style="font-size: 12px; display: block; margin-bottom: 4px;">Título central</label>
+      <input type="text" value="Monitoramento Estratégico" style="width: 100%; font-size: 13px;" />
+    </div>
+
+    <div style="display: flex; gap: 16px; font-size: 12px; align-items: center; padding-top: 8px; border-top: 0.5px solid var(--color-border-tertiary);">
+      <label style="display: flex; align-items: center; gap: 5px;"><input type="checkbox" checked /> Sticky no scroll</label>
+      <label style="display: flex; align-items: center; gap: 5px;"><input type="checkbox" /> Mostrar barra de busca</label>
+      <span style="color: var(--color-text-tertiary); margin-left: auto;">Cor de fundo: <span style="display:inline-block;width:14px;height:14px;background:#f8f9fa;border:0.5px solid var(--color-border-secondary);border-radius:3px;vertical-align:middle;margin-left:4px;"></span></span>
+    </div>
+  </div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-align-left" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Texto de boas-vindas</div>
+    <div class="section-preview">"Bem-vindo ao Portal de Monitoramento Estratégico da Secretaria Executiva…"</div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-tags" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Legendas de tipos e acesso</div>
+    <div class="section-preview">
+      <span style="background:#06D6A0;color:#0a4d3a;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:500">APP</span>
+      <span style="background:#FFD166;color:#5a4500;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:500;margin-left:3px">APT</span>
+      <span style="background:#EF476F;color:white;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:500;margin-left:3px">RLT</span>
+      <span style="background:#26547C;color:white;padding:1px 6px;border-radius:6px;font-size:9px;font-weight:500;margin-left:3px">PCT</span>
+      <span style="margin-left:8px">·  🔒 restrito  ·  🔓 livre</span>
+    </div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-filter" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Barra de filtros</div>
+    <div class="section-preview">Busca · Tipo · Acesso · Limpar — todos visíveis</div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-layout-grid" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Grid de cards</div>
+    <div class="section-preview">Agrupado por tipo · 4 colunas em telas grandes · 17 ativos, 3 inativos ocultos</div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-layout-bottombar" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">Rodapé</div>
+    <div class="section-preview">"© 2024 Governo de Pernambuco. SEPE | SEMOBI. Secretaria Executiva…"</div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<div class="section-row">
+  <i class="ti ti-grip-vertical section-grip" aria-hidden="true"></i>
+  <div class="section-icon"><i class="ti ti-code" aria-hidden="true"></i></div>
+  <div class="section-meta">
+    <div class="section-title">SEO, analytics e scripts</div>
+    <div class="section-preview">GA: G-PSHXEBBXB7 · GTM: GTM-T8V3LMQT · favicon definido · OG tags ok</div>
+  </div>
+  <div class="section-actions"><button><i class="ti ti-edit"></i></button><button><i class="ti ti-eye"></i></button></div>
+</div>
+
+<button style="width: 100%; padding: 10px; font-size: 12px; border-style: dashed; color: var(--color-text-secondary); margin-top: 4px;"><i class="ti ti-plus" style="font-size: 13px; margin-right: 4px;" aria-hidden="true"></i>Adicionar seção customizada (HTML)</button>
+
+</div>
+
+</div>
+</div>
+</body>
+</html>

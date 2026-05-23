@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ruscker · Balanceamento de carga</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.1.0/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="_shared.css">
+<style>
+:root{
+  --c-proxy:#7c3aed;
+  --c-replica:#0d9488;
+  --c-line:rgba(0,0,0,0.18);
+  --c-line-active:#0d9488;
+  --c-warn:#d97706;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --c-line:rgba(255,255,255,0.18); }
+}
+.tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:10px;font-weight:500;text-transform:uppercase;letter-spacing:0.4px}
+.tag.proxy{background:rgba(124,58,237,0.15);color:var(--c-proxy)}
+.tag.replica{background:rgba(13,148,136,0.15);color:var(--c-replica)}
+.metric{font-family:var(--font-mono);font-size:11px}
+.col{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:14px}
+.col h3{margin:0 0 10px;font-size:13px;font-weight:500}
+.col p{margin:0;font-size:12px;color:var(--color-text-secondary);line-height:1.55}
+.col p + p{margin-top:8px}
+.bar{height:4px;border-radius:2px;background:var(--color-background-primary);overflow:hidden;margin:6px 0 2px}
+.bar > div{height:100%;border-radius:2px}
+</style>
+</head>
+<body>
+<div class="page-wrap" style="max-width:920px">
+<div class="mockup-meta"><a href="index.html">← todos os mockups</a><span>arquitetura / balanceamento</span></div>
+<div class="mockup-frame">
+
+<div style="padding: 4px 0;">
+
+<div style="margin-bottom:18px">
+  <div style="font-size:18px;font-weight:500;margin-bottom:4px">Balanceamento de carga (nível 1)</div>
+  <div style="font-size:12px;color:var(--color-text-secondary)">
+    Como o proxy decide para qual réplica enviar uma nova sessão. Para apps Shiny, a sessão fica
+    presa nessa réplica até expirar (sticky session). Para APIs, cada requisição é roteada
+    independentemente (round-robin).
+  </div>
+</div>
+
+<svg viewBox="0 0 820 420" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto;background:transparent">
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--c-line)"/>
+    </marker>
+    <marker id="arrow-active" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--c-replica)"/>
+    </marker>
+  </defs>
+
+  <!-- 3 visitors on the left -->
+  <g font-family="-apple-system,system-ui,sans-serif">
+    <circle cx="60" cy="80" r="22" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.7"/>
+    <text x="60" y="86" text-anchor="middle" font-size="20" fill="currentColor" opacity="0.7">👤</text>
+    <text x="60" y="124" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">visitante A</text>
+
+    <circle cx="60" cy="200" r="22" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.7"/>
+    <text x="60" y="206" text-anchor="middle" font-size="20" fill="currentColor" opacity="0.7">👤</text>
+    <text x="60" y="244" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">visitante B</text>
+
+    <circle cx="60" cy="320" r="22" fill="none" stroke="currentColor" stroke-width="1.4" opacity="0.7"/>
+    <text x="60" y="326" text-anchor="middle" font-size="20" fill="currentColor" opacity="0.7">👤</text>
+    <text x="60" y="364" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.6">visitante C (novo)</text>
+  </g>
+
+  <!-- Lines from visitors to proxy -->
+  <line x1="82" y1="80"  x2="280" y2="180" stroke="var(--c-line)" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="82" y1="200" x2="280" y2="200" stroke="var(--c-line)" stroke-width="1" stroke-dasharray="4,3"/>
+  <line x1="82" y1="320" x2="280" y2="220" stroke="var(--c-line-active)" stroke-width="2" marker-end="url(#arrow-active)"/>
+
+  <!-- Proxy box in the middle -->
+  <g>
+    <rect x="280" y="150" width="200" height="100" rx="10" fill="var(--color-background-secondary)" stroke="var(--c-proxy)" stroke-width="1.5"/>
+    <text x="380" y="178" text-anchor="middle" font-size="13" font-weight="500" font-family="-apple-system,system-ui,sans-serif" fill="currentColor">ruscker-proxy</text>
+    <text x="380" y="200" text-anchor="middle" font-size="10" font-family="-apple-system,system-ui,sans-serif" fill="currentColor" opacity="0.7">
+      <tspan x="380">Router.pick()</tspan>
+      <tspan x="380" dy="14">least-connections</tspan>
+    </text>
+    <text x="380" y="235" text-anchor="middle" font-size="9" font-family="ui-monospace,monospace" fill="currentColor" opacity="0.55">spec: auroraprime</text>
+  </g>
+
+  <!-- Decision label -->
+  <g>
+    <rect x="500" y="172" width="138" height="56" rx="6" fill="var(--color-background-primary)" stroke="var(--c-replica)" stroke-width="1" stroke-dasharray="3,3"/>
+    <text x="569" y="190" text-anchor="middle" font-size="10" font-family="ui-monospace,monospace" fill="var(--c-replica)">
+      <tspan>R1: 8 de 10 ocupada</tspan>
+      <tspan x="569" dy="11">R2: 3 de 10 ← escolhida</tspan>
+      <tspan x="569" dy="11">R3: 5 de 10 ocupada</tspan>
+    </text>
+  </g>
+
+  <!-- Lines from proxy to replicas -->
+  <line x1="480" y1="180" x2="660" y2="60"  stroke="var(--c-line)" stroke-width="1"/>
+  <line x1="480" y1="200" x2="660" y2="200" stroke="var(--c-line-active)" stroke-width="2.5" marker-end="url(#arrow-active)"/>
+  <line x1="480" y1="220" x2="660" y2="340" stroke="var(--c-line)" stroke-width="1"/>
+
+  <!-- Replicas on the right -->
+  <g font-family="-apple-system,system-ui,sans-serif">
+    <rect x="660" y="35" width="140" height="50" rx="8" fill="var(--color-background-secondary)" stroke="var(--c-replica)" stroke-width="1.2"/>
+    <text x="730" y="56" text-anchor="middle" font-size="12" font-weight="500" fill="currentColor">Réplica 1</text>
+    <text x="730" y="73" text-anchor="middle" font-size="10" font-family="ui-monospace,monospace" fill="currentColor" opacity="0.6">8/10 sessões</text>
+    <rect x="678" y="78" width="104" height="3" rx="1.5" fill="var(--color-background-primary)"/>
+    <rect x="678" y="78" width="83.2" height="3" rx="1.5" fill="var(--c-warn)"/>
+
+    <rect x="660" y="175" width="140" height="50" rx="8" fill="var(--color-background-secondary)" stroke="var(--c-replica)" stroke-width="2.5"/>
+    <text x="730" y="196" text-anchor="middle" font-size="12" font-weight="500" fill="var(--c-replica)">Réplica 2 ✓</text>
+    <text x="730" y="213" text-anchor="middle" font-size="10" font-family="ui-monospace,monospace" fill="var(--c-replica)" opacity="0.8">3/10 sessões</text>
+    <rect x="678" y="218" width="104" height="3" rx="1.5" fill="var(--color-background-primary)"/>
+    <rect x="678" y="218" width="31.2" height="3" rx="1.5" fill="var(--c-replica)"/>
+
+    <rect x="660" y="315" width="140" height="50" rx="8" fill="var(--color-background-secondary)" stroke="var(--c-replica)" stroke-width="1.2"/>
+    <text x="730" y="336" text-anchor="middle" font-size="12" font-weight="500" fill="currentColor">Réplica 3</text>
+    <text x="730" y="353" text-anchor="middle" font-size="10" font-family="ui-monospace,monospace" fill="currentColor" opacity="0.6">5/10 sessões</text>
+    <rect x="678" y="358" width="104" height="3" rx="1.5" fill="var(--color-background-primary)"/>
+    <rect x="678" y="358" width="52" height="3" rx="1.5" fill="var(--c-replica)"/>
+  </g>
+
+</svg>
+
+<div style="margin-top:16px;padding:10px 14px;background:var(--color-background-info);border-left:3px solid var(--color-border-info);border-radius:4px;font-size:12px;color:var(--color-text-info);line-height:1.55">
+  <strong>O que aconteceu:</strong> Visitante C abriu a Aurora Prime sem cookie de sessão. O proxy
+  consultou o estado das 3 réplicas, escolheu a R2 (menor utilização), criou uma sessão e gravou um
+  cookie <code style="font-family:var(--font-mono);font-size:11px">__ruscker_session</code> assinado.
+  As próximas requisições do visitante C vão direto para R2 sem reconsultar o roteador.
+</div>
+
+<div style="margin-top:20px;font-size:14px;font-weight:500;margin-bottom:10px">As três camadas</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+
+  <div class="col">
+    <span class="tag replica">implementado</span>
+    <h3 style="margin-top:8px">1. Pool de réplicas por spec</h3>
+    <p>
+      Cada spec containerizada tem um pool de réplicas (containers idênticos) controlado por
+      <code class="metric">min-replicas</code> / <code class="metric">max-replicas</code>.
+      O auto-scaler liga novas réplicas quando a utilização passa de <code class="metric">scale-up-threshold</code>
+      e desliga após <code class="metric">scale-down-grace</code> segundos sob o limite inferior.
+    </p>
+    <p>Drenagem espera sessões acabarem antes de matar o container.</p>
+  </div>
+
+  <div class="col">
+    <span class="tag proxy">fase 6</span>
+    <h3 style="margin-top:8px">2. Multi-host (opcional)</h3>
+    <p>
+      Para deploys maiores: um <code class="metric">MultiHostDockerBackend</code> distribui
+      containers entre vários servidores Docker. Suporta as estratégias <strong>bin-pack</strong>
+      (preencher um host antes do próximo) ou <strong>spread</strong> (espalhar para tolerância a falhas).
+    </p>
+    <p>O proxy escolhe a réplica como sempre — o host onde ela vive é transparente.</p>
+  </div>
+
+  <div class="col">
+    <span class="tag proxy">fase 7</span>
+    <h3 style="margin-top:8px">3. HA do próprio Ruscker</h3>
+    <p>
+      Dois ou mais processos Ruscker atrás de um balanceador L4 (HAProxy, nginx, ELB), com estado
+      compartilhado em Postgres.
+    </p>
+    <p>
+      Qualquer instância serve qualquer sessão. Failover transparente quando uma cai. Indicado
+      para deploys críticos onde reiniciar Ruscker não pode pausar o portal.
+    </p>
+  </div>
+
+</div>
+
+</div>
+
+</div>
+</div>
+</body>
+</html>

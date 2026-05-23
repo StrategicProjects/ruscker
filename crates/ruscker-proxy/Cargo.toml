@@ -1,0 +1,16 @@
+[package]
+name = "ruscker-proxy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "HTTP and WebSocket reverse proxy for Ruscker"
+
+# NOTE: this crate is a STUB. The real implementation (phase 3) will
+# add axum, tower, tower-http, hyper, tracing, etc. See CLAUDE.md in
+# this crate for the full dependency list.
+
+[dependencies]
+ruscker-config = { path = "../ruscker-config" }
+ruscker-core = { path = "../ruscker-core" }
+anyhow = { workspace = true }

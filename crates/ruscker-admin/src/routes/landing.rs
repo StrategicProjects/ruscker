@@ -12,10 +12,11 @@ use axum::{
     routing::get,
     Router,
 };
+use fluent_bundle::{FluentArgs, FluentValue};
 
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
-use crate::view_model::{build_type_chips, CardCounts, CardCtx, TypeChip};
+use crate::view_model::{build_type_chips, sort_by_recent, CardCounts, CardCtx, TypeChip};
 use crate::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -41,16 +42,26 @@ impl<'a> LandingPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
+
+    /// Translation with a single Fluent variable (most common case
+    /// is `{ $date }`). Avoids dragging the `FluentArgs` builder
+    /// into templates.
+    fn t_with(&self, key: &str, arg_name: &str, value: &str) -> String {
+        let mut args = FluentArgs::new();
+        args.set(arg_name.to_string(), FluentValue::from(value.to_string()));
+        self.locales.t(self.locale, key, Some(&args))
+    }
 }
 
 async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Response {
-    let cards: Vec<CardCtx<'_>> = state
+    let mut cards: Vec<CardCtx<'_>> = state
         .config
         .proxy
         .specs
         .iter()
         .map(CardCtx::from_spec)
         .collect();
+    sort_by_recent(&mut cards);
     let type_chips = build_type_chips(&cards);
     let counts = CardCounts {
         total: cards.len(),

@@ -4,13 +4,11 @@
  * The output ships embedded in the binary and is served at
  * /assets/styles.css (see routes::assets::routes).
  *
- * Visual reference: docs/mockups/landing-filters-cards-refined.html
- * and docs/mockups/_shared.css.
+ * Visual reference: docs/mockups/landing-v2-cards-cover.html
  */
 
 @import "tailwindcss";
 
-/* Tell Tailwind where class names live so it can tree-shake. */
 @source "../../src/**/*.rs";
 @source "../../templates/**/*.html";
 
@@ -38,36 +36,25 @@
   src: url("/assets/fonts/jost-latin-600-normal.woff2") format("woff2");
 }
 
-/* ─── Design tokens ─────────────────────────────────────────────────
- *
- * Dual-theme via CSS custom properties. The render layer emits one
- * of three states on <html>:
- *   - data-theme="light" → explicit user choice (cookie)
- *   - data-theme="dark"  → explicit user choice (cookie)
- *   - no attribute       → follow @media (prefers-color-scheme)
- *
- * Both selectors below resolve to the same dark vars when the user
- * either explicitly picks dark or the OS reports dark.
- */
+/* ─── Design tokens ────────────────────────────────────────────── */
 @theme {
   --font-display: "Jost", ui-sans-serif, system-ui, sans-serif;
 
-  /* Type-chip palette mirrors landing-filters-cards-refined.html */
-  --color-kind-app: #06d6a0;
-  --color-kind-app-ink: #04553f;
-  --color-kind-talk: #ffd166;
-  --color-kind-talk-ink: #5a4500;
-  --color-kind-report: #ef476f;
-  --color-kind-report-ink: #ffffff;
-  --color-kind-package: #26547c;
-  --color-kind-package-ink: #ffffff;
-  --color-kind-api: #06b6d4;
-  --color-kind-api-ink: #ffffff;
+  /* Card tint palette (mockup-v2 cover backgrounds + badges) */
+  --color-kind-app: #06d6a0;     --color-kind-app-ink: #04553f;
+  --color-kind-talk: #ffd166;    --color-kind-talk-ink: #5a4400;
+  --color-kind-report: #ef476f;  --color-kind-report-ink: #ffffff;
+  --color-kind-package: #26547c; --color-kind-package-ink: #ffffff;
+  --color-kind-api: #06b6d4;     --color-kind-api-ink: #083344;
 
-  --color-lock: #d9534f;
-  --color-lock-open: #5cb85c;
+  --color-lock: #ef4444;
+  --color-lock-open: #10b981;
+  --color-status-new: #3b82f6;
+  --color-status-updated: #10b981;
+  --color-status-unknown: #9ca3af;
 }
 
+/* Light theme (default) */
 :root {
   color-scheme: light;
   --bg: #fafaf7;
@@ -78,35 +65,40 @@
   --text-faint: #888888;
   --border: #e8e6df;
   --border-soft: #f0eee8;
+  --border-strong: #c0c0bb;
 }
 
+/* OS-driven dark (no explicit cookie) */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #1a1a1a;
-    --surface: #242424;
-    --surface-soft: #1f1f1f;
+    --bg: #161616;
+    --surface: #1f1f1f;
+    --surface-soft: #1a1a1a;
     --text: #f0f0f0;
-    --text-muted: #999999;
-    --text-faint: #666666;
-    --border: #333333;
-    --border-soft: #2a2a2a;
+    --text-muted: #b0b0b0;
+    --text-faint: #707070;
+    --border: #2a2a2a;
+    --border-soft: #232323;
+    --border-strong: #404040;
   }
 }
 
+/* Explicit dark cookie wins over OS pref */
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #1a1a1a;
-  --surface: #242424;
-  --surface-soft: #1f1f1f;
+  --bg: #161616;
+  --surface: #1f1f1f;
+  --surface-soft: #1a1a1a;
   --text: #f0f0f0;
-  --text-muted: #999999;
-  --text-faint: #666666;
-  --border: #333333;
-  --border-soft: #2a2a2a;
+  --text-muted: #b0b0b0;
+  --text-faint: #707070;
+  --border: #2a2a2a;
+  --border-soft: #232323;
+  --border-strong: #404040;
 }
 
-/* ─── Base typography ─────────────────────────────────────────────── */
+/* ─── Base typography ─────────────────────────────────────────── */
 html, body { background: var(--bg); color: var(--text); }
 body {
   font-family: var(--font-display);
@@ -114,50 +106,174 @@ body {
   font-feature-settings: "cv02", "cv11";
 }
 
-/* ─── Type-chip palette (mockup parity) ──────────────────────────── */
-.kind-app     { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
-.kind-talk    { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
-.kind-report  { background: var(--color-kind-report);  color: var(--color-kind-report-ink); }
-.kind-package { background: var(--color-kind-package); color: var(--color-kind-package-ink); }
-.kind-api     { background: var(--color-kind-api);     color: var(--color-kind-api-ink); }
-
-/* Filter chips: outlined version with colored border + count pill. */
-.chip-app     { border-color: var(--color-kind-app);     color: var(--color-kind-app-ink); }
-.chip-talk    { border-color: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
-.chip-report  { border-color: var(--color-kind-report);  color: #a31239; }
-.chip-package { border-color: var(--color-kind-package); color: var(--color-kind-package); }
-.chip-api     { border-color: var(--color-kind-api);     color: var(--color-kind-api-ink); }
-
-.chip-app     .chip-count { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
-.chip-talk    .chip-count { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
-.chip-report  .chip-count { background: var(--color-kind-report);  color: #ffffff; }
-.chip-package .chip-count { background: var(--color-kind-package); color: #ffffff; }
-.chip-api     .chip-count { background: var(--color-kind-api);     color: #ffffff; }
-
-/* Active chip state — chip background fills with kind color too. */
-.chip-active.chip-app     { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
-.chip-active.chip-talk    { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
-.chip-active.chip-report  { background: var(--color-kind-report);  color: #ffffff; }
-.chip-active.chip-package { background: var(--color-kind-package); color: #ffffff; }
-.chip-active.chip-api     { background: var(--color-kind-api);     color: #ffffff; }
-
-/* Lock icon colors */
-.icon-lock      { color: var(--color-lock); }
-.icon-lock-open { color: var(--color-lock-open); }
-
-/* ─── Card surface ───────────────────────────────────────────────── */
-.card-surface {
+/* ─── Filter row: search pill + sort button ───────────────────── */
+.search-pill {
+  display: flex; align-items: center; gap: 8px;
   background: var(--surface);
   border: 0.5px solid var(--border);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  border-radius: 999px;
+  padding: 9px 16px;
+  transition: border-color 0.15s;
 }
-.card-logo-slot {
-  background: var(--surface-soft);
+.search-pill:focus-within { border-color: var(--text); }
+.search-pill input {
+  border: none; outline: none; background: transparent;
+  font-size: 13px; flex: 1; font-family: inherit; color: var(--text);
+}
+.search-pill input::placeholder { color: var(--text-faint); }
+
+.sort-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 12px; color: var(--text-muted);
+  font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.sort-btn:hover { border-color: var(--border-strong); color: var(--text); }
+
+.kbd-hint {
+  font-size: 10px; color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-soft); padding: 2px 6px; border-radius: 4px;
 }
 
-/* CTA gradient — distinct for API vs app/link */
-.cta-app  { background: linear-gradient(135deg, #7c3aed 0%, #c026d3 100%); }
-.cta-api  { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
+/* ─── Chips (type + access) ────────────────────────────────────── */
+.chip, .access-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px; font-size: 12px;
+  border: 0.5px solid var(--border);
+  background: var(--surface); color: var(--text-muted);
+  cursor: pointer; transition: all 0.15s;
+  font-family: inherit; line-height: 1;
+}
+.chip:hover, .access-chip:hover {
+  border-color: var(--border-strong); color: var(--text);
+}
+.chip-count {
+  font-size: 10px; opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
 
-/* ─── Hide cards filtered out by Alpine without layout shift ─────── */
+/* "Todos" chip — fills with text color when on */
+.chip.on-all {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+
+/* Per-type fill when chip is active */
+.chip.on-app     { background: #06d6a0; color: #04553f; border-color: #06d6a0; }
+.chip.on-talk    { background: #ffd166; color: #5a4400; border-color: #ffd166; }
+.chip.on-report  { background: #ef476f; color: #ffffff; border-color: #ef476f; }
+.chip.on-package { background: #26547c; color: #ffffff; border-color: #26547c; }
+.chip.on-api     { background: #06b6d4; color: #083344; border-color: #06b6d4; }
+.chip.on-link    { background: #26547c; color: #ffffff; border-color: #26547c; }
+
+.chip-divider {
+  width: 0.5px; height: 18px;
+  background: var(--border); margin: 0 4px;
+}
+
+/* Access chips: lock color inherits from icon */
+.access-chip.on {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+
+/* ─── Cards (v2: cover + body, no CTA) ────────────────────────── */
+.rcard {
+  position: relative;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  cursor: pointer; text-decoration: none; color: inherit;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.rcard:hover {
+  transform: translateY(-3px);
+  border-color: var(--text);
+}
+.rcard:hover .arrow-go { transform: translateX(3px); color: var(--text); }
+.rcard.inactive { opacity: 0.45; cursor: not-allowed; }
+.rcard.inactive:hover { transform: none; }
+
+.rcover {
+  position: relative;
+  height: 108px;
+  margin: 10px 10px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+.rcover-bg { position: absolute; inset: 0; opacity: 0.6; }
+.rcover-img { font-size: 10px; z-index: 1; color: rgba(255,255,255,0.95); }
+
+.tint-app     { background: #06d6a0; }
+.tint-talk    { background: #ffd166; }
+.tint-report  { background: #ef476f; }
+.tint-package { background: #26547c; }
+.tint-api     { background: #06b6d4; }
+.tint-link    { background: #26547c; }
+
+.rbadge {
+  position: absolute; top: 8px; left: 8px;
+  font-size: 9px; font-weight: 500;
+  padding: 3px 9px; border-radius: 999px;
+  letter-spacing: 0.4px; z-index: 2;
+}
+.b-app     { background: #06d6a0; color: #04553f; }
+.b-talk    { background: #ffd166; color: #5a4400; }
+.b-report  { background: #ef476f; color: #ffffff; }
+.b-package { background: #26547c; color: #ffffff; }
+.b-api     { background: #06b6d4; color: #083344; }
+.b-link    { background: #26547c; color: #ffffff; }
+
+.rlock {
+  position: absolute; top: 8px; right: 8px;
+  z-index: 2;
+  width: 22px; height: 22px;
+  background: rgba(255,255,255,0.92);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.rbody { padding: 14px; flex: 1; display: flex; flex-direction: column; }
+.rtitle {
+  font-size: 14px; font-weight: 500;
+  letter-spacing: -0.15px;
+  margin-bottom: 5px;
+}
+.rdesc {
+  font-size: 11.5px; line-height: 1.5;
+  color: var(--text-muted);
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.rmeta {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; color: var(--text-faint);
+}
+.rmeta-left { display: flex; align-items: center; gap: 6px; }
+
+.status-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  display: inline-block; flex-shrink: 0;
+}
+.status-dot-new     { background: var(--color-status-new); }
+.status-dot-updated { background: var(--color-status-updated); }
+.status-dot-unknown { background: var(--color-status-unknown); }
+
+.arrow-go {
+  transition: transform 0.2s ease, color 0.2s ease;
+  font-size: 14px; color: var(--text-muted);
+}
+
+/* Hide cards filtered out by Alpine without layout shift */
 [x-cloak] { display: none !important; }

@@ -19,6 +19,7 @@
 //! consolidated reports — both are technically Shiny containers but
 //! the landing should still tell them apart.
 
+use chrono::{Duration, NaiveDate, Utc};
 use ruscker_config::{Spec, SpecKind};
 use std::collections::BTreeMap;
 
@@ -122,6 +123,45 @@ impl DisplayType {
     }
 }
 
+/// Coarse status indicator rendered as a small dot next to the
+/// updated date. Computed from `template-properties.updated`.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum StatusKind {
+    /// Updated within the last [`NEW_THRESHOLD_DAYS`] days. Blue dot.
+    New,
+    /// Has an updated date, older than "new". Green dot.
+    Updated,
+    /// No date or unparseable. No dot rendered.
+    Unknown,
+}
+
+impl StatusKind {
+    /// Fluent key for the meta-row text. Returns `None` when the
+    /// status is [`Unknown`] (template skips the meta row entirely).
+    pub fn label_key(self) -> Option<&'static str> {
+        match self {
+            StatusKind::New => Some("status-new"),
+            StatusKind::Updated => Some("status-updated"),
+            StatusKind::Unknown => None,
+        }
+    }
+
+    /// CSS class fragment for the dot. Tokens defined in input.css.
+    pub fn dot_class(self) -> &'static str {
+        match self {
+            StatusKind::New => "status-dot-new",
+            StatusKind::Updated => "status-dot-updated",
+            StatusKind::Unknown => "status-dot-unknown",
+        }
+    }
+}
+
+/// Threshold below which an updated card is labelled "new" instead
+/// of "updated". 60 days is a soft choice; long enough to survive a
+/// quarter, short enough that monthly batch releases still get the
+/// blue dot.
+pub const NEW_THRESHOLD_DAYS: i64 = 60;
+
 /// What the landing card needs. One per spec, built once per render.
 #[derive(Debug, Clone)]
 pub struct CardCtx<'a> {
@@ -132,7 +172,12 @@ pub struct CardCtx<'a> {
     pub access_open: bool,
     pub active: bool,
     pub logo: Option<&'a str>,
-    pub updated: Option<&'a str>,
+    pub updated_raw: Option<&'a str>,
+    /// "DD/MM" — short form used in the meta row.
+    pub updated_short: Option<String>,
+    pub status: StatusKind,
+    /// Parsed updated date (for sorting). `None` sorts last.
+    pub updated_date: Option<NaiveDate>,
     /// Target href: external link for `External`, `/app/<id>/` for
     /// containerized specs (still 404 in Phase 1 — no proxy yet).
     pub href: String,
@@ -149,7 +194,10 @@ impl<'a> CardCtx<'a> {
             .unwrap_or(false);
         let active = tp.is_active();
         let logo = tp.get_str("logo");
-        let updated = tp.get_str("updated");
+        let updated_raw = tp.get_str("updated");
+        let updated_date = updated_raw.and_then(parse_dmy);
+        let updated_short = updated_date.map(|d| d.format("%d/%m").to_string());
+        let status = compute_status(updated_date, Utc::now().date_naive());
         let href = match kind {
             SpecKind::External => tp.get_str("link").unwrap_or("#").to_string(),
             _ => format!("/app/{}/", spec.id),
@@ -162,22 +210,34 @@ impl<'a> CardCtx<'a> {
             access_open,
             active,
             logo,
-            updated,
+            updated_raw,
+            updated_short,
+            status,
+            updated_date,
             href,
         }
     }
+}
 
-    /// Fluent key for the CTA button. Per-type so the label matches
-    /// what the card actually opens (a relatório, apresentação,
-    /// documentação, etc.).
-    pub fn cta_key(&self) -> &'static str {
-        match self.display_type {
-            DisplayType::App => "card-cta-open-app",
-            DisplayType::Talk => "card-cta-open-talk",
-            DisplayType::Report => "card-cta-open-report",
-            DisplayType::Package => "card-cta-open-package",
-            DisplayType::Api => "card-cta-open-api",
-            DisplayType::Link => "card-cta-link",
+/// Parse the operator-authored `DD/MM/YYYY` form used in the SEPE
+/// YAML. Tolerates leading/trailing whitespace. Returns `None` for
+/// any unrecognized format.
+fn parse_dmy(s: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(s.trim(), "%d/%m/%Y").ok()
+}
+
+/// Classify how recently the card was updated. Pure function so it
+/// can be unit-tested with a fixed `today`.
+fn compute_status(updated: Option<NaiveDate>, today: NaiveDate) -> StatusKind {
+    match updated {
+        None => StatusKind::Unknown,
+        Some(d) => {
+            let age = today.signed_duration_since(d);
+            if age <= Duration::days(NEW_THRESHOLD_DAYS) {
+                StatusKind::New
+            } else {
+                StatusKind::Updated
+            }
         }
     }
 }
@@ -194,6 +254,48 @@ pub struct TypeChip {
 #[derive(Debug, Clone, Default)]
 pub struct CardCounts {
     pub total: usize,
+}
+
+/// Sort cards by recency (newest first). Cards without a parseable
+/// `updated` date sink to the end, preserving their relative
+/// declaration order. This matches the "Recentes" sort the mockup
+/// shows as the default option.
+pub fn sort_by_recent(cards: &mut [CardCtx<'_>]) {
+    cards.sort_by(|a, b| b.updated_date.cmp(&a.updated_date));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_brazilian_dates() {
+        assert_eq!(
+            parse_dmy("18/05/2026"),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 18).unwrap())
+        );
+        assert_eq!(parse_dmy("  01/01/2025  "), parse_dmy("01/01/2025"));
+        assert_eq!(parse_dmy("nope"), None);
+        assert_eq!(parse_dmy(""), None);
+        assert_eq!(parse_dmy("2026-05-18"), None, "ISO form is not the operator format");
+    }
+
+    #[test]
+    fn status_buckets() {
+        let today = NaiveDate::from_ymd_opt(2026, 5, 23).unwrap();
+        // within 60 days → New
+        assert_eq!(
+            compute_status(NaiveDate::from_ymd_opt(2026, 5, 1), today),
+            StatusKind::New
+        );
+        // older than 60 days → Updated
+        assert_eq!(
+            compute_status(NaiveDate::from_ymd_opt(2025, 1, 1), today),
+            StatusKind::Updated
+        );
+        // missing → Unknown
+        assert_eq!(compute_status(None, today), StatusKind::Unknown);
+    }
 }
 
 /// Build the chip bar with live counts. Only chips that have at

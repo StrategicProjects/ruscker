@@ -15,105 +15,112 @@
 <main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full"
       x-data="ruscker.landing()" x-cloak>
 
-  {# ── Filter section ────────────────────────────────────────── #}
-  <section class="card-surface rounded-lg px-4 py-3 mb-5">
+  {# ── Filter row 1: search pill + sort dropdown ──────────────── #}
+  <div class="flex gap-2.5 items-center mb-3.5">
+    <label class="search-pill flex-1 min-w-0">
+      <i class="ti ti-search text-[14px] text-[color:var(--text-faint)]" aria-hidden="true"></i>
+      <input type="search"
+             x-model.debounce.150ms="search"
+             x-ref="search"
+             placeholder="{{ self.t("filter-search-placeholder") }}">
+      <span class="kbd-hint hidden md:inline">{{ self.t("search-shortcut") }}</span>
+    </label>
+    <button class="sort-btn">
+      <i class="ti ti-arrows-sort text-[13px]" aria-hidden="true"></i>
+      <span>{{ self.t("sort-recent") }}</span>
+      <i class="ti ti-chevron-down text-[12px]" aria-hidden="true"></i>
+    </button>
+  </div>
 
-    {# Search + access toggle #}
-    <div class="flex flex-wrap items-center gap-3 mb-3">
-      <label class="relative flex-1 min-w-[200px] max-w-md">
-        <i class="ti ti-search absolute left-2.5 top-1/2 -translate-y-1/2 text-[color:var(--text-faint)]"></i>
-        <input type="search"
-               x-model.debounce.150ms="search"
-               placeholder="{{ self.t("filter-search-placeholder") }}"
-               class="w-full pl-8 pr-3 py-1.5 text-sm rounded border border-[color:var(--border)] bg-[color:var(--bg)] focus:outline-none focus:border-[color:var(--text)]">
-      </label>
+  {# ── Filter row 2: type + access chips on one line ──────────── #}
+  <div class="flex flex-wrap items-center gap-1.5 mb-2">
+    <button class="chip"
+            :class="type_ === 'all' ? 'on-all' : ''"
+            @click="type_ = 'all'">
+      {{ self.t("type-all") }} <span class="chip-count">{{ counts.total }}</span>
+    </button>
 
-      <div class="ml-auto inline-flex items-center gap-0.5 bg-[color:var(--border-soft)] rounded-full p-0.5 text-[11px]">
-        <button @click="access = 'all'"
-                :class="access === 'all' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
-                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
-          <i class="ti ti-asterisk text-[10px]"></i>{{ self.t("filter-access-all") }}
-        </button>
-        <button @click="access = 'closed'"
-                :class="access === 'closed' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
-                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
-          <i class="ti ti-lock text-[10px] icon-lock"></i>{{ self.t("filter-access-restricted") }}
-        </button>
-        <button @click="access = 'open'"
-                :class="access === 'open' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
-                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
-          <i class="ti ti-lock-open text-[10px] icon-lock-open"></i>{{ self.t("filter-access-public") }}
-        </button>
-      </div>
-    </div>
-
-    {# Type chips #}
-    <div class="flex flex-wrap gap-1.5 items-center">
-      <button @click="type_ = 'all'"
-              :class="type_ === 'all' ? 'bg-[color:var(--text)] text-[color:var(--bg)] border-[color:var(--text)]' : 'border-[color:var(--border)] text-[color:var(--text-muted)]'"
-              class="px-2.5 py-0.5 rounded-full text-[11px] font-medium border inline-flex items-center gap-1.5 transition-colors">
-        {{ self.t("type-all") }}
-        <span class="text-[10px] px-1.5 rounded-md"
-              :class="type_ === 'all' ? 'bg-[color:var(--bg)] text-[color:var(--text)]' : 'bg-[color:var(--border)] text-[color:var(--text)]'">{{ counts.total }}</span>
+    {% for chip in type_chips %}
+      <button class="chip"
+              :class="type_ === '{{ chip.display_type.key() }}' ? 'on-{{ chip.display_type.key() }}' : ''"
+              @click="type_ = (type_ === '{{ chip.display_type.key() }}' ? 'all' : '{{ chip.display_type.key() }}')">
+        {{ chip.display_type.short_label() }}
+        <span class="chip-count">{{ chip.count }}</span>
       </button>
+    {% endfor %}
 
-      {% for chip in type_chips %}
-        <button @click="type_ = (type_ === '{{ chip.display_type.key() }}' ? 'all' : '{{ chip.display_type.key() }}')"
-                :class="type_ === '{{ chip.display_type.key() }}' ? 'chip-active' : ''"
-                class="chip-{{ chip.display_type.key() }} px-2.5 py-0.5 rounded-full text-[11px] font-medium border inline-flex items-center gap-1.5 transition-colors">
-          {{ chip.display_type.short_label() }}
-          <span class="chip-count text-[10px] px-1.5 rounded-md font-semibold">{{ chip.count }}</span>
-        </button>
-      {% endfor %}
+    <span class="chip-divider"></span>
 
-      <button x-show="type_ !== 'all' || access !== 'all' || search !== ''"
-              @click="type_ = 'all'; access = 'all'; search = ''"
-              class="ml-1 text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] transition-colors">
-        {{ self.t("filter-clear") }}
-      </button>
+    <button class="access-chip"
+            :class="access === 'open' ? 'on' : ''"
+            @click="access = (access === 'open' ? 'all' : 'open')">
+      <i class="ti ti-lock-open text-[12px] text-[color:var(--color-lock-open)]" aria-hidden="true"></i>
+      <span>{{ self.t("filter-access-public") }}</span>
+    </button>
+    <button class="access-chip"
+            :class="access === 'closed' ? 'on' : ''"
+            @click="access = (access === 'closed' ? 'all' : 'closed')">
+      <i class="ti ti-lock text-[12px] text-[color:var(--color-lock)]" aria-hidden="true"></i>
+      <span>{{ self.t("filter-access-restricted") }}</span>
+    </button>
+  </div>
 
-      <span class="ml-auto text-[11px] text-[color:var(--text-faint)]"
-            x-text="visible + ' / {{ counts.total }}'"></span>
-    </div>
-  </section>
+  {# ── Meta row: count + clear filters ───────────────────────── #}
+  <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
+    <span><span x-text="visible"></span> / {{ counts.total }}</span>
+    <button x-show="type_ !== 'all' || access !== 'all' || search !== ''"
+            @click="type_ = 'all'; access = 'all'; search = ''"
+            class="text-[10px] px-2 py-0.5 text-[color:var(--text-faint)] underline hover:text-[color:var(--text)]">
+      {{ self.t("filter-clear") }}
+    </button>
+  </div>
 
-  {# ── Card grid ─────────────────────────────────────────────── #}
-  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+  {# ── Card grid (3 columns at desktop) ──────────────────────── #}
+  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5"
            x-ref="grid">
     {% for card in cards %}
-      <article class="card-surface rounded-lg p-3 flex flex-col gap-2 {% if !card.active %}opacity-50 grayscale{% endif %}"
-               data-type="{{ card.display_type.key() }}"
-               data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
-               data-name="{{ card.display_name|lower }}"
-               data-desc="{{ card.description|lower }}"
-               x-show="match($el)" x-transition.opacity>
+      <a class="rcard {% if !card.active %}inactive{% endif %}"
+         href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
+         data-type="{{ card.display_type.key() }}"
+         data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
+         data-name="{{ card.display_name|lower }}"
+         data-desc="{{ card.description|lower }}"
+         x-show="match($el)"
+         x-transition.opacity>
 
-        <div class="flex justify-between items-center">
-          <span class="text-[10px] font-semibold tracking-[0.3px] px-2 py-0.5 rounded {{ card.display_type.css_class() }}">{{ card.display_type.short_label() }}</span>
-          <i class="ti ti-{% if card.access_open %}lock-open icon-lock-open{% else %}lock icon-lock{% endif %} text-[14px]"
-             title="{% if card.access_open %}{{ self.t("card-access-public") }}{% else %}{{ self.t("card-access-restricted") }}{% endif %}"></i>
-        </div>
-
-        <div class="card-logo-slot rounded h-16 flex items-center justify-center text-[10px] text-[color:var(--text-faint)] overflow-hidden">
+        <div class="rcover">
+          <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+          <span class="rbadge b-{{ card.display_type.key() }}">{{ card.display_type.short_label() }}</span>
+          <span class="rlock">
+            <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
+          </span>
           {% match card.logo %}{% when Some with (logo) %}
-            <img src="{{ logo }}" alt="" class="max-h-full max-w-full">
+            <img src="{{ logo }}" alt="" class="rcover-img max-h-full max-w-full">
           {% when None %}
-            <span class="opacity-50">{{ card.id }}</span>
+            <span class="rcover-img">{{ card.id }}</span>
           {% endmatch %}
         </div>
 
-        <h3 class="text-sm font-semibold leading-tight">{{ card.display_name }}</h3>
-        <p class="text-[11px] text-[color:var(--text-muted)] leading-relaxed line-clamp-3 flex-1">{{ card.description|safe }}</p>
-
-        <a href="{{ card.href }}"
-           class="block text-[11px] font-medium tracking-[0.2px] text-center text-white py-1.5 rounded {% if card.display_type.key() == "api" %}cta-api{% else %}cta-app{% endif %}">
-          {{ self.t(card.cta_key()) }}
-        </a>
-
-        {% match card.updated %}{% when Some with (d) %}
-          <div class="text-[9px] text-[color:var(--text-faint)] text-center">{{ d }}</div>
-        {% when None %}{% endmatch %}
-      </article>
+        <div class="rbody">
+          <div class="rtitle">{{ card.display_name }}</div>
+          <div class="rdesc">{{ card.description|safe }}</div>
+          <div class="rmeta">
+            <span class="rmeta-left">
+              <span class="status-dot {{ card.status.dot_class() }}"></span>
+              {% match card.status.label_key() %}
+                {% when Some with (key) %}
+                  {% match card.updated_short.as_deref() %}
+                    {% when Some with (d) %}{{ self.t_with(key, "date", d) }}
+                    {% when None %}{{ self.t(key) }}
+                  {% endmatch %}
+                {% when None %}
+                  <span class="text-[color:var(--text-faint)]">—</span>
+              {% endmatch %}
+            </span>
+            <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+          </div>
+        </div>
+      </a>
     {% endfor %}
   </section>
 
@@ -127,8 +134,6 @@
 
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>
-// Alpine.js component for the filter state. Tiny — most of the work
-// is just a predicate over the card's data-* attributes.
 window.ruscker = window.ruscker || {};
 window.ruscker.landing = () => ({
   search: '',
@@ -137,12 +142,18 @@ window.ruscker.landing = () => ({
   visible: 0,
 
   init() {
-    // Re-count after each Alpine tick because x-show toggles inline
-    // styles that we read here.
     this.$watch('search', () => this.recount());
     this.$watch('type_',  () => this.recount());
     this.$watch('access', () => this.recount());
     this.$nextTick(() => this.recount());
+
+    // ⌘K / Ctrl+K focuses the search box, matching the kbd-hint.
+    addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.$refs.search.focus();
+      }
+    });
   },
 
   recount() {

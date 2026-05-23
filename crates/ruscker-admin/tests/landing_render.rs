@@ -48,7 +48,8 @@ async fn landing_renders_default_locale() {
     assert!(body.contains(r#"<html lang="pt""#), "default locale is pt-BR");
     assert!(body.contains("Monitoramento Estratégico"));
     // 31 specs in examples/application.yml → 31 cards rendered.
-    assert_eq!(body.matches("<article ").count(), 31);
+    // Cards are <a class="rcard"> in the v2 layout.
+    assert_eq!(body.matches(r#"class="rcard"#).count(), 31);
 }
 
 #[tokio::test]

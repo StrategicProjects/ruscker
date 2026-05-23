@@ -1288,6 +1288,7 @@ dependencies = [
  "askama",
  "axum",
  "axum-extra",
+ "chrono",
  "fluent-bundle",
  "fluent-templates",
  "hyper",

@@ -4,13 +4,45 @@ version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-description = "Admin panel for Ruscker (HTMX + Tailwind + Askama)"
-
-# NOTE: this crate is a STUB. The real implementation (phase 2) will
-# add axum, askama, sqlx, tower-http, etc. See CLAUDE.md in this
-# crate for the full dependency list.
+description = "Admin panel and public landing for Ruscker (Askama + HTMX + Tailwind 4)"
 
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
 ruscker-core = { path = "../ruscker-core" }
+
+# Web stack
+axum = { workspace = true }
+axum-extra = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+tower-cookies = { workspace = true }
+hyper = { workspace = true }
+
+# Async
+tokio = { workspace = true }
+
+# Templating + i18n
+askama = { workspace = true }
+fluent-templates = { workspace = true }
+fluent-bundle = { workspace = true }
+unic-langid = { workspace = true }
+
+# Embedded assets
+include_dir = { workspace = true }
+
+# Errors / logging
 anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# Misc
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+insta = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tokio = { workspace = true }

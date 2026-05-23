@@ -332,7 +332,50 @@ Decisões pendentes:
 
 ---
 
-## 7. Tracking
+## 7. Identidade visual
+
+A marca Ruscker é uma **pilha isométrica de containers** em três
+camadas (verde-teal escalonado), evocando réplicas balanceadas —
+exatamente o que o produto faz. Detalhamento completo em
+[`docs/BRAND.md`](docs/BRAND.md).
+
+**Paleta primária:**
+
+| Token | Hex | Uso |
+|---|---|---|
+| teal 200 | `#5DCAA5` | Camada superior, hover, acentos |
+| teal 400 | `#1D9E75` | Camada do meio, links primários |
+| **teal 600** | **`#0F6E56`** | **Primária da marca, CTAs, app icon, theme-color** |
+| teal 800 | `#085041` | Hover de CTAs |
+
+**Wordmark:** Jost Medium, **sempre em caixa baixa** (`ruscker`),
+nunca `Ruscker` nem `RUSCKER`.
+
+**Assets embutidos no binário** e servidos em:
+
+- `/favicon.svg` → marca plana (3 barras) para tabs do browser
+- `/apple-touch-icon.png` → app icon (fundo teal 600, marca branca)
+- `/assets/brand/{mark,mark-flat,mark-mono-black,mark-knockout,lockup-horizontal,lockup-vertical,wordmark,app-icon}.svg`
+
+**Onde aparece no produto:**
+
+| Fase | Aplicação |
+|---|---|
+| **1 (agora)** | Favicon, apple-touch-icon, `<meta name="theme-color">`, lockup no footer "powered by ruscker" |
+| **2** | Login screen do admin, navbar do painel, telas de erro |
+| **3** | Mensagens de "container starting", páginas de 503/504 |
+| **5** | Splash screen do binário (CLI banner), boletim de release, deb maintainer scripts |
+
+**Pontos importantes (não fazer):**
+
+- Não trocar as cores fora da paleta teal. Não usar roxo, azul, laranja.
+- Não rotacionar, distorcer, inclinar a marca.
+- Não inverter a ordem das camadas (escuro embaixo é a regra).
+- Não recortar a marca para compor outra coisa.
+
+---
+
+## 8. Tracking
 
 - **GitHub Issues** — 1 issue principal por fase (1 a 5), com a
   checklist acima como sub-tasks. Labels: `phase:1`...`phase:5`,
@@ -346,7 +389,7 @@ Decisões pendentes:
 
 ---
 
-## 8. Riscos conhecidos e mitigações
+## 9. Riscos conhecidos e mitigações
 
 | Risco | Impacto | Mitigação |
 |---|---|---|
@@ -361,7 +404,7 @@ Decisões pendentes:
 
 ---
 
-## 9. Política de versões (regra firme)
+## 10. Política de versões (regra firme)
 
 **Sempre use a versão estável mais recente. Nunca confie em memória —
 consulte na hora.**
@@ -403,7 +446,7 @@ workspace, com comentários explicando bumps majors.
 
 ---
 
-## 10. Como continuar
+## 11. Como continuar
 
 ```bash
 # Setup

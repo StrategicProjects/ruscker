@@ -1,0 +1,287 @@
+{% extends "_layout.html" %}
+
+{% block content %}
+
+<header class="border-b border-[color:var(--border)]"
+        {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
+  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
+      <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
+    </div>
+    <div class="text-xs opacity-70">{{ counts.total }}</div>
+  </div>
+</header>
+
+<main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full"
+      x-data="ruscker.landing()" x-cloak>
+
+  {% if !intro.is_empty() %}
+    {# Operator-authored intro (per landing-customization.intro). #}
+    <p class="text-sm text-[color:var(--text-muted)] leading-relaxed mb-5 max-w-3xl">
+      {{ intro }}
+    </p>
+  {% endif %}
+
+  {# ── Filter row 1: search + theme select + sort + status ───── #}
+  <div class="flex flex-wrap gap-2.5 items-center mb-3.5">
+    <label class="search-pill flex-1 min-w-[180px]">
+      <i class="ti ti-search text-[14px] text-[color:var(--text-faint)]" aria-hidden="true"></i>
+      <input type="search"
+             x-model.debounce.150ms="search"
+             x-ref="search"
+             placeholder="{{ self.t("filter-search-placeholder") }}">
+      <span class="kbd-hint hidden md:inline">{{ self.t("search-shortcut") }}</span>
+    </label>
+
+    <div class="select-wrap" :class="tema !== 'all' ? 'is-active' : ''">
+      <select x-model="tema"
+              class="theme-select"
+              aria-label="{{ self.t("filter-theme-label") }}">
+        <option value="all">{{ self.t("filter-theme-all") }}</option>
+        {% for t in temas %}
+          <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+
+    <div class="select-wrap" :class="status_ !== 'active' ? 'is-active' : ''">
+      <select x-model="status_"
+              class="theme-select"
+              aria-label="status">
+        <option value="active">{{ self.t("filter-status-active") }}</option>
+        <option value="all">{{ self.t("filter-status-all") }}</option>
+        <option value="inactive">{{ self.t("filter-status-inactive-only") }}</option>
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+
+    <div class="select-wrap" :class="sort !== 'recent' ? 'is-active' : ''">
+      <select x-model="sort"
+              class="theme-select"
+              aria-label="{{ self.t("sort-label") }}">
+        <option value="recent">{{ self.t("sort-recent") }}</option>
+        <option value="name">{{ self.t("sort-name") }}</option>
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+  </div>
+
+  {# ── Filter row 2: type chips with long labels + access ───── #}
+  <div class="flex flex-wrap items-center gap-1.5 mb-2">
+    <button class="chip"
+            :class="type_ === 'all' ? 'on-all' : ''"
+            @click="type_ = 'all'">
+      {{ self.t("type-all") }} <span class="chip-count" x-text="counts.all"></span>
+    </button>
+
+    {% for chip in type_chips %}
+      <button class="chip"
+              :class="type_ === '{{ chip.display_type.key() }}' ? 'on-{{ chip.display_type.key() }}' : ''"
+              @click="type_ = (type_ === '{{ chip.display_type.key() }}' ? 'all' : '{{ chip.display_type.key() }}')">
+        {{ self.t(chip.display_type.label_key()) }}
+        <span class="chip-count" x-text="counts['{{ chip.display_type.key() }}']"></span>
+      </button>
+    {% endfor %}
+
+    <span class="chip-divider"></span>
+
+    <button class="access-chip"
+            :class="access === 'open' ? 'on' : ''"
+            @click="access = (access === 'open' ? 'all' : 'open')">
+      <i class="ti ti-lock-open text-[12px] text-[color:var(--color-lock-open)]" aria-hidden="true"></i>
+      <span>{{ self.t("filter-access-public") }}</span>
+    </button>
+    <button class="access-chip"
+            :class="access === 'closed' ? 'on' : ''"
+            @click="access = (access === 'closed' ? 'all' : 'closed')">
+      <i class="ti ti-lock text-[12px] text-[color:var(--color-lock)]" aria-hidden="true"></i>
+      <span>{{ self.t("filter-access-restricted") }}</span>
+    </button>
+  </div>
+
+  {# ── Meta row: count + clear filters ───────────────────────── #}
+  <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
+    <span><span x-text="visible"></span> / <span x-text="counts.all"></span></span>
+    <button x-show="type_ !== 'all' || access !== 'all' || search !== '' || tema !== 'all' || status_ !== 'active' || sort !== 'recent'"
+            @click="type_ = 'all'; access = 'all'; search = ''; tema = 'all'; status_ = 'active'; sort = 'recent'"
+            class="text-[10px] px-2 py-0.5 text-[color:var(--text-faint)] underline hover:text-[color:var(--text)]">
+      {{ self.t("filter-clear") }}
+    </button>
+  </div>
+
+  {# ── Card grid (fixed-width cards, columns auto-fill) ──────── #}
+  <section class="cards-grid" x-ref="grid">
+    {% for card in cards %}
+      <a class="rcard {% if !card.active %}inactive{% endif %}"
+         href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
+         data-type="{{ card.display_type.key() }}"
+         data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
+         data-active="{% if card.active %}active{% else %}inactive{% endif %}"
+         data-tema="{% if let Some(t) = card.tema %}{{ t }}{% endif %}"
+         data-name="{{ card.display_name|lower }}"
+         data-desc="{{ card.description|lower }}"
+         data-date="{% if let Some(d) = card.updated_date %}{{ d }}{% endif %}"
+         x-show="match($el)"
+         :style="'order: ' + sortOrder($el)"
+         x-transition.opacity>
+
+        <div class="rcover">
+          <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+          {% match card.logo %}{% when Some with (logo) %}
+            <img src="{{ logo }}"
+                 alt=""
+                 loading="lazy"
+                 class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
+          {% when None %}
+            <span class="rcover-fallback">{{ card.id }}</span>
+          {% endmatch %}
+
+          <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
+          <span class="rlock">
+            <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
+          </span>
+        </div>
+
+        <div class="rbody">
+          <div class="rtitle">{{ card.display_name }}</div>
+          <div class="rdesc">{{ card.description }}</div>
+          <div class="rmeta">
+            <span class="rmeta-left">
+              <span class="status-dot {{ card.status.dot_class() }}"></span>
+              {% match card.status.label_key() %}
+                {% when Some with (key) %}
+                  {% match card.updated_short.as_deref() %}
+                    {% when Some with (d) %}{{ self.t_with(key, "date", d) }}
+                    {% when None %}{{ self.t(key) }}
+                  {% endmatch %}
+                {% when None %}
+                  <span class="text-[color:var(--text-faint)]">—</span>
+              {% endmatch %}
+            </span>
+            <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+          </div>
+        </div>
+      </a>
+    {% endfor %}
+  </section>
+
+  {# ── Empty state ───────────────────────────────────────────── #}
+  <p x-show="visible === 0"
+     class="text-center text-sm text-[color:var(--text-muted)] py-12">
+    Nada por aqui.
+  </p>
+
+</main>
+
+<script src="/assets/js/alpine.min.js" defer></script>
+<script>
+window.ruscker = window.ruscker || {};
+window.ruscker.landing = () => ({
+  search: '',
+  type_: 'all',
+  access: 'all',
+  tema: 'all',
+  // status filter: 'active' (default), 'all', or 'inactive'.
+  // Inactive items are hidden by default so the landing only shows
+  // things you can actually open.
+  status_: 'active',
+  // Sort key: 'recent' (default, by updated date desc) or 'name'
+  // (alphabetical by display name). Server already returns recent-
+  // first; switching to 'name' reorders via CSS `order`.
+  sort: 'recent',
+  visible: 0,
+  counts: { all: 0 },
+
+  init() {
+    this.$watch('search', () => this.recount());
+    this.$watch('type_',  () => this.recount());
+    this.$watch('access', () => this.recount());
+    this.$watch('tema',   () => this.recount());
+    this.$watch('status_',() => this.recount());
+    this.$nextTick(() => this.recount());
+
+    // ⌘K / Ctrl+K focuses the search box, matching the kbd-hint.
+    addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        this.$refs.search.focus();
+      }
+    });
+  },
+
+  recount() {
+    const counts = { all: 0 };
+    let visible = 0;
+    for (const el of this.$refs.grid.children) {
+      const passesType = this.matchType(el);
+      const passesRest = this.matchExceptType(el);
+      if (passesRest) {
+        counts.all += 1;
+        const t = el.dataset.type;
+        counts[t] = (counts[t] || 0) + 1;
+      }
+      if (passesType && passesRest) visible += 1;
+    }
+    this.counts = counts;
+    this.visible = visible;
+  },
+
+  match(el) {
+    return this.matchType(el) && this.matchExceptType(el);
+  },
+
+  matchType(el) {
+    return this.type_ === 'all' || el.dataset.type === this.type_;
+  },
+
+  matchExceptType(el) {
+    const status = el.dataset.active;
+    const okStatus =
+      this.status_ === 'all' ||
+      (this.status_ === 'active' && status === 'active') ||
+      (this.status_ === 'inactive' && status === 'inactive');
+    if (!okStatus) return false;
+
+    const okAccess = this.access === 'all' || el.dataset.access === this.access;
+    if (!okAccess) return false;
+
+    const okTema = this.tema === 'all' || el.dataset.tema === this.tema;
+    if (!okTema) return false;
+
+    if (!this.search) return true;
+    const q = this.search.toLowerCase();
+    return el.dataset.name.includes(q) || (el.dataset.desc || '').includes(q);
+  },
+
+  // Compute the CSS `order` value for a card. Server pre-sorts by
+  // recent (insertion order = recent-desc), so:
+  //   - 'recent' → use insertion index (0, 1, 2, ...)
+  //   - 'name'   → derive from data-name lexically
+  // We pre-compute name rank once and cache it on the element.
+  sortOrder(el) {
+    if (this.sort === 'recent') {
+      // No custom order — DOM order is already recent-desc.
+      return 0;
+    }
+    if (this.sort === 'name') {
+      if (el._nameRank === undefined) {
+        if (!this._nameRanks) this._computeNameRanks();
+        el._nameRank = this._nameRanks.get(el) ?? 0;
+      }
+      return el._nameRank;
+    }
+    return 0;
+  },
+
+  _computeNameRanks() {
+    const list = Array.from(this.$refs.grid.children);
+    list.sort((a, b) =>
+      (a.dataset.name || '').localeCompare(b.dataset.name || ''));
+    this._nameRanks = new Map(list.map((el, i) => [el, i]));
+  },
+});
+</script>
+
+{% endblock %}

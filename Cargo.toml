@@ -21,7 +21,7 @@ description = "A lightweight Rust alternative to ShinyProxy and Shiny Server Fre
 # Workspace dependencies pinned to latest stable as of repo bring-up.
 # Policy: when adding or bumping a dep, ALWAYS verify the latest stable
 # release on crates.io / GitHub releases — never rely on memory.
-# See PLAN.md §10.
+# See PLAN.md §10 (policy of latest stable).
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1.52", features = ["full"] }

@@ -40,6 +40,14 @@
 @theme {
   --font-display: "Jost", ui-sans-serif, system-ui, sans-serif;
 
+  /* Ruscker brand palette — see docs/BRAND.md.
+   * teal-600 is the primary; the others exist for the isometric
+   * gradient of the mark and for UI accents derived from it. */
+  --color-teal-200: #5dcaa5;
+  --color-teal-400: #1d9e75;
+  --color-teal-600: #0f6e56;
+  --color-teal-800: #085041;
+
   /* Card tint palette (mockup-v2 cover backgrounds + badges) */
   --color-kind-app: #06d6a0;     --color-kind-app-ink: #04553f;
   --color-kind-talk: #ffd166;    --color-kind-talk-ink: #5a4400;
@@ -394,3 +402,21 @@ body {
 
 /* Hide cards filtered out by Alpine without layout shift */
 [x-cloak] { display: none !important; }
+
+/* ─── Brand lockup (footer) ──────────────────────────────────────
+ *
+ * Inline mark + wordmark text. Wordmark is always lowercase,
+ * Jost Medium, slightly tighter tracking — see docs/BRAND.md.
+ * Don't apply a `text-transform: uppercase` anywhere on this class. */
+.brand-wordmark {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-transform: none;
+}
+.brand-mark-inline {
+  flex-shrink: 0;
+  display: block;
+}

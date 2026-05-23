@@ -34,7 +34,19 @@ const JOST_600: &[u8] = include_bytes!("../../assets/fonts/jost-latin-600-normal
 
 const ALPINE_JS: &[u8] = include_bytes!("../../assets/js/alpine.min.js");
 
+// Ruscker brand kit — see docs/BRAND.md for usage rules.
+const BRAND_MARK: &[u8] = include_bytes!("../../assets/brand/ruscker-mark.svg");
+const BRAND_MARK_FLAT: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-flat.svg");
+const BRAND_MARK_MONO: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-mono-black.svg");
+const BRAND_MARK_KNOCKOUT: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-knockout.svg");
+const BRAND_LOCKUP_H: &[u8] = include_bytes!("../../assets/brand/ruscker-lockup-horizontal.svg");
+const BRAND_LOCKUP_V: &[u8] = include_bytes!("../../assets/brand/ruscker-lockup-vertical.svg");
+const BRAND_WORDMARK: &[u8] = include_bytes!("../../assets/brand/ruscker-wordmark.svg");
+const BRAND_APP_ICON: &[u8] = include_bytes!("../../assets/brand/ruscker-app-icon.svg");
+
 // ── Router ────────────────────────────────────────────────────────
+
+const SVG: &str = "image/svg+xml";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -66,6 +78,18 @@ pub fn routes() -> Router<AppState> {
             "/assets/js/alpine.min.js",
             get(|| serve(ALPINE_JS, "application/javascript; charset=utf-8")),
         )
+        // Brand kit. URLs match docs/BRAND.md.
+        .route("/assets/brand/mark.svg", get(|| serve(BRAND_MARK, SVG)))
+        .route("/assets/brand/mark-flat.svg", get(|| serve(BRAND_MARK_FLAT, SVG)))
+        .route("/assets/brand/mark-mono-black.svg", get(|| serve(BRAND_MARK_MONO, SVG)))
+        .route("/assets/brand/mark-knockout.svg", get(|| serve(BRAND_MARK_KNOCKOUT, SVG)))
+        .route("/assets/brand/lockup-horizontal.svg", get(|| serve(BRAND_LOCKUP_H, SVG)))
+        .route("/assets/brand/lockup-vertical.svg", get(|| serve(BRAND_LOCKUP_V, SVG)))
+        .route("/assets/brand/wordmark.svg", get(|| serve(BRAND_WORDMARK, SVG)))
+        .route("/assets/brand/app-icon.svg", get(|| serve(BRAND_APP_ICON, SVG)))
+        // Conventional well-known browser hooks.
+        .route("/favicon.svg", get(|| serve(BRAND_MARK_FLAT, SVG)))
+        .route("/apple-touch-icon.png", get(|| serve(BRAND_APP_ICON, SVG)))
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

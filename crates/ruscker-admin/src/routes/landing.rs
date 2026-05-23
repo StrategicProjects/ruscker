@@ -16,7 +16,9 @@ use fluent_bundle::{FluentArgs, FluentValue};
 
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
-use crate::view_model::{build_type_chips, sort_by_recent, CardCounts, CardCtx, TypeChip};
+use crate::view_model::{
+    build_type_chips, sort_by_recent, unique_temas, CardCounts, CardCtx, TypeChip,
+};
 use crate::AppState;
 
 pub fn routes() -> Router<AppState> {
@@ -32,6 +34,9 @@ struct LandingPage<'a> {
     locales_all: &'static [Locale],
     cards: Vec<CardCtx<'a>>,
     type_chips: Vec<TypeChip>,
+    /// Unique themes present in this config, alphabetically. Drives
+    /// the `<select>` filter at the top of the landing.
+    temas: Vec<&'a str>,
     counts: CardCounts,
 }
 
@@ -63,8 +68,11 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         .collect();
     sort_by_recent(&mut cards);
     let type_chips = build_type_chips(&cards);
+    let temas = unique_temas(&cards);
+    // Counter shows ACTIVE specs by default (matches the
+    // Active-only filter applied client-side on first render).
     let counts = CardCounts {
-        total: cards.len(),
+        total: cards.iter().filter(|c| c.active).count(),
     };
     let page = LandingPage {
         locale: loc,
@@ -73,6 +81,7 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         locales_all: &Locale::ALL,
         cards,
         type_chips,
+        temas,
         counts,
     };
     render(&page)

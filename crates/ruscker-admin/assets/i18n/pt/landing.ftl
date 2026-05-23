@@ -13,7 +13,7 @@ filter-clear = Limpar filtros
 type-all = Todos
 type-app = Aplicações
 type-package = Pacotes
-type-talk = Talks
+type-talk = Apresentações
 type-report = Relatórios
 type-api = APIs
 
@@ -30,6 +30,12 @@ status-updated = atualizado { $date }
 sort-recent = Recentes
 sort-name = Nome
 search-shortcut = ⌘ K
+
+filter-theme-label = Tema
+filter-theme-all = Todos os temas
+filter-status-active = Apenas ativos
+filter-status-all = Ativos e inativos
+filter-status-inactive-only = Apenas inativos
 card-state-active = Disponível
 card-state-inactive = Indisponível
 card-access-public = Acesso público

@@ -12,7 +12,7 @@ filter-clear = Clear filters
 type-all = All
 type-app = Applications
 type-package = Packages
-type-talk = Talks
+type-talk = Presentations
 type-report = Reports
 type-api = APIs
 
@@ -29,6 +29,12 @@ status-updated = updated { $date }
 sort-recent = Recent
 sort-name = Name
 search-shortcut = ⌘ K
+
+filter-theme-label = Theme
+filter-theme-all = All themes
+filter-status-active = Active only
+filter-status-all = Active and inactive
+filter-status-inactive-only = Inactive only
 card-state-active = Available
 card-state-inactive = Unavailable
 card-access-public = Public access

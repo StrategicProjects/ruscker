@@ -15,9 +15,9 @@
 <main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full"
       x-data="ruscker.landing()" x-cloak>
 
-  {# ── Filter row 1: search pill + sort dropdown ──────────────── #}
-  <div class="flex gap-2.5 items-center mb-3.5">
-    <label class="search-pill flex-1 min-w-0">
+  {# ── Filter row 1: search + theme select + sort + active toggle #}
+  <div class="flex flex-wrap gap-2.5 items-center mb-3.5">
+    <label class="search-pill flex-1 min-w-[180px]">
       <i class="ti ti-search text-[14px] text-[color:var(--text-faint)]" aria-hidden="true"></i>
       <input type="search"
              x-model.debounce.150ms="search"
@@ -25,6 +25,26 @@
              placeholder="{{ self.t("filter-search-placeholder") }}">
       <span class="kbd-hint hidden md:inline">{{ self.t("search-shortcut") }}</span>
     </label>
+
+    <select x-model="tema"
+            class="theme-select"
+            :class="tema !== 'all' ? 'is-active' : ''"
+            aria-label="{{ self.t("filter-theme-label") }}">
+      <option value="all">{{ self.t("filter-theme-all") }}</option>
+      {% for t in temas %}
+        <option value="{{ t }}">{{ t }}</option>
+      {% endfor %}
+    </select>
+
+    <select x-model="status_"
+            class="theme-select"
+            :class="status_ !== 'active' ? 'is-active' : ''"
+            aria-label="status">
+      <option value="active">{{ self.t("filter-status-active") }}</option>
+      <option value="all">{{ self.t("filter-status-all") }}</option>
+      <option value="inactive">{{ self.t("filter-status-inactive-only") }}</option>
+    </select>
+
     <button class="sort-btn">
       <i class="ti ti-arrows-sort text-[13px]" aria-hidden="true"></i>
       <span>{{ self.t("sort-recent") }}</span>
@@ -32,20 +52,20 @@
     </button>
   </div>
 
-  {# ── Filter row 2: type + access chips on one line ──────────── #}
+  {# ── Filter row 2: type chips with long labels + access ───── #}
   <div class="flex flex-wrap items-center gap-1.5 mb-2">
     <button class="chip"
             :class="type_ === 'all' ? 'on-all' : ''"
             @click="type_ = 'all'">
-      {{ self.t("type-all") }} <span class="chip-count">{{ counts.total }}</span>
+      {{ self.t("type-all") }} <span class="chip-count" x-text="counts.all"></span>
     </button>
 
     {% for chip in type_chips %}
       <button class="chip"
               :class="type_ === '{{ chip.display_type.key() }}' ? 'on-{{ chip.display_type.key() }}' : ''"
               @click="type_ = (type_ === '{{ chip.display_type.key() }}' ? 'all' : '{{ chip.display_type.key() }}')">
-        {{ chip.display_type.short_label() }}
-        <span class="chip-count">{{ chip.count }}</span>
+        {{ self.t(chip.display_type.label_key()) }}
+        <span class="chip-count" x-text="counts['{{ chip.display_type.key() }}']"></span>
       </button>
     {% endfor %}
 
@@ -67,9 +87,9 @@
 
   {# ── Meta row: count + clear filters ───────────────────────── #}
   <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
-    <span><span x-text="visible"></span> / {{ counts.total }}</span>
-    <button x-show="type_ !== 'all' || access !== 'all' || search !== ''"
-            @click="type_ = 'all'; access = 'all'; search = ''"
+    <span><span x-text="visible"></span> / <span x-text="counts.all"></span></span>
+    <button x-show="type_ !== 'all' || access !== 'all' || search !== '' || tema !== 'all' || status_ !== 'active'"
+            @click="type_ = 'all'; access = 'all'; search = ''; tema = 'all'; status_ = 'active'"
             class="text-[10px] px-2 py-0.5 text-[color:var(--text-faint)] underline hover:text-[color:var(--text)]">
       {{ self.t("filter-clear") }}
     </button>
@@ -82,16 +102,15 @@
          href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
          data-type="{{ card.display_type.key() }}"
          data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
+         data-active="{% if card.active %}active{% else %}inactive{% endif %}"
+         data-tema="{% if let Some(t) = card.tema %}{{ t }}{% endif %}"
          data-name="{{ card.display_name|lower }}"
          data-desc="{{ card.description|lower }}"
          x-show="match($el)"
          x-transition.opacity>
 
         <div class="rcover">
-          {# Tint always present (shows through when image is contained or
-             when the image fails to load). Behind the image via z-index. #}
           <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
-
           {% match card.logo %}{% when Some with (logo) %}
             <img src="{{ logo }}"
                  alt=""
@@ -145,12 +164,20 @@ window.ruscker.landing = () => ({
   search: '',
   type_: 'all',
   access: 'all',
+  tema: 'all',
+  // status filter: 'active' (default), 'all', or 'inactive'.
+  // Inactive items are hidden by default so the landing only shows
+  // things you can actually open.
+  status_: 'active',
   visible: 0,
+  counts: { all: 0 },
 
   init() {
     this.$watch('search', () => this.recount());
     this.$watch('type_',  () => this.recount());
     this.$watch('access', () => this.recount());
+    this.$watch('tema',   () => this.recount());
+    this.$watch('status_',() => this.recount());
     this.$nextTick(() => this.recount());
 
     // ⌘K / Ctrl+K focuses the search box, matching the kbd-hint.
@@ -163,18 +190,48 @@ window.ruscker.landing = () => ({
   },
 
   recount() {
-    let n = 0;
+    // visible = matches current filter; counts[type] = matches with
+    // current filter BUT ignoring the type chip (so chip counts
+    // reflect what each chip would show, not what's already on screen).
+    const counts = { all: 0 };
+    let visible = 0;
     for (const el of this.$refs.grid.children) {
-      if (this.match(el)) n++;
+      const passesType = this.matchType(el);
+      const passesRest = this.matchExceptType(el);
+      if (passesRest) {
+        counts.all += 1;
+        const t = el.dataset.type;
+        counts[t] = (counts[t] || 0) + 1;
+      }
+      if (passesType && passesRest) visible += 1;
     }
-    this.visible = n;
+    this.counts = counts;
+    this.visible = visible;
   },
 
+  // Each card runs this through x-show to decide visibility.
   match(el) {
-    const t = el.dataset.type, a = el.dataset.access;
-    const okT = this.type_ === 'all' || t === this.type_;
-    const okA = this.access === 'all' || a === this.access;
-    if (!okT || !okA) return false;
+    return this.matchType(el) && this.matchExceptType(el);
+  },
+
+  matchType(el) {
+    return this.type_ === 'all' || el.dataset.type === this.type_;
+  },
+
+  matchExceptType(el) {
+    const status = el.dataset.active; // 'active' | 'inactive'
+    const okStatus =
+      this.status_ === 'all' ||
+      (this.status_ === 'active' && status === 'active') ||
+      (this.status_ === 'inactive' && status === 'inactive');
+    if (!okStatus) return false;
+
+    const okAccess = this.access === 'all' || el.dataset.access === this.access;
+    if (!okAccess) return false;
+
+    const okTema = this.tema === 'all' || el.dataset.tema === this.tema;
+    if (!okTema) return false;
+
     if (!this.search) return true;
     const q = this.search.toLowerCase();
     return el.dataset.name.includes(q) || (el.dataset.desc || '').includes(q);

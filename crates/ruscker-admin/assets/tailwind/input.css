@@ -408,6 +408,179 @@ body {
 /* Hide cards filtered out by Alpine without layout shift */
 [x-cloak] { display: none !important; }
 
+/* ─── Admin shell ─────────────────────────────────────────────── */
+.admin-navbar {
+  display: flex; align-items: center; gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+.admin-brand {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-display);
+  font-weight: 500; font-size: 14px;
+  color: var(--text); text-decoration: none;
+  letter-spacing: -0.01em;
+  margin-right: 8px;
+}
+.admin-nav-links { display: flex; align-items: center; gap: 2px; }
+.admin-nav-actions {
+  margin-left: auto;
+  display: flex; align-items: center; gap: 2px;
+}
+.admin-nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px; color: var(--text-muted);
+  border-radius: 6px;
+  text-decoration: none;
+  border: none; background: transparent;
+  font-family: inherit; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.admin-nav-link:hover {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+.admin-nav-link.is-active {
+  background: var(--text);
+  color: var(--bg);
+}
+.admin-nav-link i { font-size: 14px; }
+.admin-nav-link--logout { color: var(--color-lock); }
+.admin-nav-link--logout:hover { background: var(--color-lock); color: #fff; }
+
+/* ─── Admin login card ───────────────────────────────────────── */
+.admin-login-card {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 32px;
+  width: 100%;
+  max-width: 360px;
+  display: flex; flex-direction: column; gap: 14px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+}
+.admin-login-brand {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.admin-login-field {
+  display: flex; flex-direction: column; gap: 4px;
+  margin-top: 4px;
+}
+.admin-login-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.admin-login-field input {
+  appearance: none;
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+}
+.admin-login-field input:focus {
+  outline: none;
+  border-color: var(--color-teal-600);
+  box-shadow: 0 0 0 2px rgba(15, 110, 86, 0.15);
+}
+.admin-login-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  background: var(--color-teal-600);
+  color: #fff;
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  border: none; border-radius: 6px;
+  padding: 10px 12px; cursor: pointer;
+  transition: background 0.15s;
+}
+.admin-login-btn:hover { background: var(--color-teal-800); }
+.admin-login-btn i { font-size: 14px; }
+.admin-login-error {
+  display: flex; align-items: center; gap: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 0.5px solid rgba(239, 68, 68, 0.3);
+  color: #b91c1c;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.admin-login-error i { font-size: 14px; }
+.admin-login-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.admin-login-footer a { color: var(--text-muted); text-decoration: none; }
+.admin-login-footer a:hover { color: var(--text); }
+.admin-login-locale {
+  background: transparent; border: none;
+  font-family: inherit; font-size: 10px;
+  color: var(--text-muted);
+  padding: 2px 5px; border-radius: 4px;
+  cursor: pointer; letter-spacing: 0.05em;
+}
+.admin-login-locale.is-active {
+  background: var(--text); color: var(--bg);
+}
+
+/* ─── Admin apps table ───────────────────────────────────────── */
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  font-size: 12px;
+}
+.admin-table th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--border);
+  background: var(--surface-soft);
+}
+.admin-table td {
+  padding: 10px 12px;
+  border-bottom: 0.5px solid var(--border-soft);
+  vertical-align: middle;
+}
+.admin-table tr:last-child td { border-bottom: none; }
+.admin-table tr:hover td { background: var(--surface-soft); }
+.admin-table .id-cell {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+}
+.admin-table .actions-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+.pill {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px;
+  font-size: 10px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pill-state-active   { background: rgba(16, 185, 129, 0.12); color: #047857; }
+.pill-state-inactive { background: rgba(156, 163, 175, 0.18); color: #4b5563; }
+.pill-kind-shiny       { background: rgba(6, 214, 160, 0.18); color: #04553f; }
+.pill-kind-interactive { background: rgba(6, 214, 160, 0.18); color: #04553f; }
+.pill-kind-api         { background: rgba(6, 182, 212, 0.18); color: #083344; }
+.pill-kind-external    { background: rgba(38, 84, 124, 0.15); color: #26547c; }
+
 /* ─── Brand lockup (footer) ──────────────────────────────────────
  *
  * Inline mark + wordmark text. Wordmark is always lowercase,

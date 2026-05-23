@@ -24,6 +24,8 @@ fn app_state() -> AppState {
     AppState {
         config: Arc::new(config),
         locales: Arc::new(locales),
+        admin_auth: Default::default(),
+        db: None,
     }
 }
 

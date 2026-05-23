@@ -23,6 +23,42 @@ type-package-abbr = PKG
 type-api-abbr = API
 type-link-abbr = LNK
 
+# Admin shell
+admin-nav-apps = Apps
+admin-nav-images = Images
+admin-nav-credentials = Credentials
+admin-nav-landing = Portal
+admin-nav-audit = Audit log
+admin-nav-portal = Back to portal
+admin-nav-logout = Sign out
+
+# Admin login
+admin-login-title = Admin sign in
+admin-login-help = Enter the admin token defined in RUSCKER_ADMIN_TOKEN.
+admin-login-token-label = Token
+admin-login-token-placeholder = Paste the token here
+admin-login-submit = Sign in
+admin-login-error-wrong = Wrong token. Please try again.
+admin-login-back-portal = ← public portal
+
+# Apps list
+admin-specs-title = Apps
+admin-specs-subtitle = Spec catalog stored in the database
+admin-specs-empty = No apps yet. Use { $cmd } to import from a YAML.
+admin-specs-add = Add app
+admin-specs-col-id = ID
+admin-specs-col-name = Name
+admin-specs-col-kind = Kind
+admin-specs-col-state = State
+admin-specs-col-updated = Updated
+admin-specs-col-version = Version
+admin-specs-col-actions = Actions
+admin-specs-filter-search = Search by id or name…
+admin-specs-filter-kind-all = All kinds
+admin-specs-filter-state-all = Active and inactive
+admin-specs-edit = Edit
+admin-specs-delete = Delete
+
 card-cta-open = Open
 card-cta-link = Visit
 card-cta-open-app = Open app

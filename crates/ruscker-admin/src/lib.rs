@@ -24,17 +24,24 @@ use tower_cookies::CookieManagerLayer;
 use tower_http::services::ServeDir;
 use tracing::info;
 
+pub mod auth;
 pub mod db;
 pub mod i18n;
 pub mod routes;
 pub mod theme;
 pub mod view_model;
 
+use sqlx::SqlitePool;
+
 /// Shared state injected into every request.
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<Config>,
     pub locales: Arc<i18n::Locales>,
+    pub admin_auth: auth::AdminAuth,
+    /// Optional SQLite pool. `None` ⇒ admin CRUD routes 503
+    /// because they have no source of truth to read or write.
+    pub db: Option<SqlitePool>,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -60,6 +67,8 @@ impl AdminServer {
         let state = AppState {
             config: Arc::new(config),
             locales: Arc::new(locales),
+            admin_auth: auth::AdminAuth::from_env(),
+            db: None,
         };
         Ok(Self {
             addr,
@@ -73,6 +82,23 @@ impl AdminServer {
     /// responds 404 for missing files, never directory-lists.
     pub fn with_images_dir(mut self, dir: impl AsRef<Path>) -> Self {
         self.images_dir = Some(dir.as_ref().to_path_buf());
+        self
+    }
+
+    /// Override the admin token (default: pulled from
+    /// `RUSCKER_ADMIN_TOKEN` env var). Useful for tests that need
+    /// a known token without touching the process environment.
+    pub fn with_admin_token(mut self, token: impl Into<String>) -> Self {
+        self.state.admin_auth = auth::AdminAuth::with_token(token);
+        self
+    }
+
+    /// Attach a SQLite pool. Required for the `/admin/*` routes
+    /// that read or write the spec catalog. The pool is shared
+    /// across all requests — sqlx handles the connection
+    /// multiplexing.
+    pub fn with_db(mut self, pool: SqlitePool) -> Self {
+        self.state.db = Some(pool);
         self
     }
 
@@ -102,7 +128,8 @@ pub fn router_with_images(state: AppState, images_dir: Option<&Path>) -> Router 
     let mut r = Router::new()
         .merge(routes::landing::routes())
         .merge(routes::assets::routes())
-        .merge(routes::prefs::routes());
+        .merge(routes::prefs::routes())
+        .merge(routes::admin::routes());
     if let Some(dir) = images_dir {
         // ServeDir handles 404, content-type sniffing, and range
         // requests. Specific routes in routes::assets (e.g.

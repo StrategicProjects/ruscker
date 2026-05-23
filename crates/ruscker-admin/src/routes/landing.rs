@@ -1,24 +1,49 @@
 //! Public landing page (`GET /`).
 //!
-//! Phase 1: minimal text response proving the i18n/state pipeline is
-//! wired. The full Tailwind/Askama template lands in a follow-up
-//! commit on this same branch.
+//! Renders `templates/landing.html` with the parsed `Config`, the
+//! resolved locale (cookie → Accept-Language → pt-BR), and the
+//! user's theme choice (cookie → auto).
 
-use crate::i18n::Locale;
-use crate::view_model::CardCtx;
+use askama::Template;
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{Html, IntoResponse, Response},
+    routing::get,
+    Router,
+};
+
+use crate::i18n::{Locale, Locales};
+use crate::theme::Theme;
+use crate::view_model::{build_type_chips, CardCounts, CardCtx, TypeChip};
 use crate::AppState;
-use axum::{extract::State, response::Html, routing::get, Router};
 
 pub fn routes() -> Router<AppState> {
     Router::new().route("/", get(index))
 }
 
-async fn index(State(state): State<AppState>) -> Html<String> {
-    // Locale negotiation will read cookie + Accept-Language in the
-    // next commit. For the bring-up we render in the default locale.
-    let loc = Locale::Pt;
-    let title = state.locales.t(loc, "landing-title", None);
+#[derive(Template)]
+#[template(path = "landing.html")]
+struct LandingPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    cards: Vec<CardCtx<'a>>,
+    type_chips: Vec<TypeChip>,
+    counts: CardCounts,
+}
 
+impl<'a> LandingPage<'a> {
+    /// Translation helper used by the template as `self.t("key")`.
+    /// Centralizing here keeps templates clean of explicit
+    /// bundle/locale handling.
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Response {
     let cards: Vec<CardCtx<'_>> = state
         .config
         .proxy
@@ -26,46 +51,30 @@ async fn index(State(state): State<AppState>) -> Html<String> {
         .iter()
         .map(CardCtx::from_spec)
         .collect();
-
-    // Stand-in HTML until the Askama template is added. Listing the
-    // specs proves both Config and view_model are wired correctly.
-    let items = cards
-        .iter()
-        .map(|c| {
-            format!(
-                "<li><strong>{}</strong> [{}] — {} <em>(active={}, href={})</em></li>",
-                escape(c.display_name),
-                c.kind_label,
-                escape(c.description),
-                c.active,
-                escape(&c.href),
-            )
-        })
-        .collect::<String>();
-
-    Html(format!(
-        "<!doctype html><meta charset=utf-8><title>{title}</title>\
-         <h1>{title}</h1>\
-         <p>Ruscker phase 1 bring-up. {count} specs loaded.</p>\
-         <ul>{items}</ul>",
-        title = escape(&title),
-        count = cards.len(),
-    ))
+    let type_chips = build_type_chips(&cards);
+    let counts = CardCounts {
+        total: cards.len(),
+    };
+    let page = LandingPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        cards,
+        type_chips,
+        counts,
+    };
+    render(&page)
 }
 
-/// Tiny HTML escape until the Askama templates take over. Escapes
-/// the five characters that matter for text/attribute contexts.
-fn escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(ch),
+/// Centralized `askama::Template` → axum `Response`. Replaces the
+/// deprecated `askama_axum` crate.
+fn render<T: Template>(t: &T) -> Response {
+    match t.render() {
+        Ok(html) => Html(html).into_response(),
+        Err(err) => {
+            tracing::error!(error = ?err, "template render failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "template error").into_response()
         }
     }
-    out
 }

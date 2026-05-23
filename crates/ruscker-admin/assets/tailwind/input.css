@@ -1,0 +1,90 @@
+/*
+ * Tailwind 4 entry point. Compiled at build time by build.rs.
+ *
+ * The output ships embedded in the binary and is served at
+ * /assets/styles.css (see routes::assets::styles_css).
+ *
+ * Visual direction comes from docs/mockups/_shared.css and the four
+ * .html mockups under docs/mockups/.
+ */
+
+@import "tailwindcss";
+
+/* Sources: tell Tailwind where class names live so it can tree-shake. */
+@source "../../src/**/*.rs";
+@source "../../templates/**/*.html";
+
+/* ─── Design tokens ───────────────────────────────────────────────
+ *
+ * Dual-theme via CSS custom properties. The render layer emits one
+ * of three states on <html>:
+ *   - data-theme="light" → explicit user choice (cookie)
+ *   - data-theme="dark"  → explicit user choice (cookie)
+ *   - no attribute       → follow @media (prefers-color-scheme)
+ *
+ * Both selectors below resolve to the same dark vars when the user
+ * either explicitly picks dark or the OS reports dark.
+ */
+@theme {
+  --font-display: "Jost", ui-sans-serif, system-ui, sans-serif;
+  --color-brand: #185fa5;
+  --color-brand-strong: #0e4a83;
+
+  /* Type-chip palette mirrors landing-filters-cards-refined.html */
+  --color-kind-app: #06d6a0;
+  --color-kind-app-ink: #04553f;
+  --color-kind-api: #06b6d4;
+  --color-kind-api-ink: #055b6c;
+  --color-kind-link: #26547c;
+  --color-kind-link-ink: #ffffff;
+  --color-kind-report: #ef476f;
+  --color-kind-report-ink: #ffffff;
+  --color-kind-package: #ffd166;
+  --color-kind-package-ink: #5a4500;
+}
+
+:root {
+  color-scheme: light;
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --text: #1a1a1a;
+  --text-muted: #6b6b66;
+  --border: #e8e6df;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #1a1a1a;
+    --surface: #242424;
+    --text: #f0f0f0;
+    --text-muted: #999999;
+    --border: #333333;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #1a1a1a;
+  --surface: #242424;
+  --text: #f0f0f0;
+  --text-muted: #999999;
+  --border: #333333;
+}
+
+/* Base */
+html, body { background: var(--bg); color: var(--text); }
+body { font-family: var(--font-display); }
+
+/* Kind chip / card-tag classes referenced from view_model.rs */
+.kind-app   { background: var(--color-kind-app);   color: var(--color-kind-app-ink); }
+.kind-api   { background: var(--color-kind-api);   color: var(--color-kind-api-ink); }
+.kind-link  { background: var(--color-kind-link);  color: var(--color-kind-link-ink); }
+.kind-report  { background: var(--color-kind-report);  color: var(--color-kind-report-ink); }
+.kind-package { background: var(--color-kind-package); color: var(--color-kind-package-ink); }
+
+/* Card surface */
+.card-surface {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+}

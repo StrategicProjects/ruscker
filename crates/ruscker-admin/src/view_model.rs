@@ -5,6 +5,7 @@
 //! consume [`CardCtx`].
 
 use ruscker_config::{Spec, SpecKind};
+use std::collections::BTreeMap;
 
 /// What the landing card needs. One per spec, built once per render.
 #[derive(Debug, Clone)]
@@ -64,4 +65,53 @@ fn kind_visuals(kind: SpecKind) -> (&'static str, &'static str) {
         SpecKind::Api => ("API", "kind-api"),
         SpecKind::External => ("LINK", "kind-link"),
     }
+}
+
+/// One row of the filter-chip bar at the top of the landing.
+#[derive(Debug, Clone)]
+pub struct TypeChip {
+    /// Stable filter key matched against [`CardCtx::kind_color_class`].
+    pub key: &'static str,
+    /// Fluent translation key for the chip label.
+    pub label_key: &'static str,
+    /// Tailwind class fragment for the chip's color.
+    pub css_class: &'static str,
+    /// How many cards belong to this type.
+    pub count: usize,
+}
+
+/// Counts to display alongside filter chips.
+#[derive(Debug, Clone, Default)]
+pub struct CardCounts {
+    pub total: usize,
+}
+
+/// Build the chip bar with live counts. Only chips that have at
+/// least one matching card are emitted, so the UI never shows
+/// "Reports (0)" — that signal is more useful than the chip itself.
+pub fn build_type_chips(cards: &[CardCtx<'_>]) -> Vec<TypeChip> {
+    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    for c in cards {
+        *counts.entry(c.kind_color_class).or_default() += 1;
+    }
+    [
+        ("kind-app", "type-app", "kind-app"),
+        ("kind-api", "type-api", "kind-api"),
+        ("kind-link", "type-package", "kind-link"),
+    ]
+    .into_iter()
+    .filter_map(|(key, label_key, css_class)| {
+        let count = *counts.get(key).unwrap_or(&0);
+        if count == 0 {
+            None
+        } else {
+            Some(TypeChip {
+                key,
+                label_key,
+                css_class,
+                count,
+            })
+        }
+    })
+    .collect()
 }

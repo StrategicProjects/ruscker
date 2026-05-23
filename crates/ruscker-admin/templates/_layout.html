@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{% block title %}{{ self.t("landing-title") }}{% endblock %}</title>
+<link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body class="min-h-screen flex flex-col">
+
+{% block content %}{% endblock %}
+
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex flex-wrap items-center gap-6">
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-language") }}:</span>
+    <form method="post" action="/__set/locale" class="contents">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="px-2 py-0.5 rounded {% if *loc == locale %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}"
+                aria-current="{% if *loc == locale %}true{% else %}false{% endif %}">
+          {{ loc.native_name() }}
+        </button>
+      {% endfor %}
+    </form>
+  </div>
+
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-theme") }}:</span>
+    <form method="post" action="/__set/theme" class="contents">
+      <button type="submit" name="theme" value="light"
+              class="px-2 py-0.5 rounded {% if theme.is_light() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-light") }}</button>
+      <button type="submit" name="theme" value="dark"
+              class="px-2 py-0.5 rounded {% if theme.is_dark() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-dark") }}</button>
+      <button type="submit" name="theme" value="auto"
+              class="px-2 py-0.5 rounded {% if theme.is_auto() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-auto") }}</button>
+    </form>
+  </div>
+
+  <div class="ml-auto opacity-60">Ruscker</div>
+</footer>
+
+</body>
+</html>

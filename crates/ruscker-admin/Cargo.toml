@@ -42,3 +42,5 @@ serde_json = { workspace = true }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 insta = { workspace = true }
+tower = { workspace = true, features = ["util"] }
+tokio = { workspace = true }

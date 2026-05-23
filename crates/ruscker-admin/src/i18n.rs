@@ -10,11 +10,15 @@
 //! filesystem dependencies.
 
 use anyhow::{Context, Result};
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
 use fluent_bundle::{concurrent::FluentBundle, FluentArgs, FluentResource};
 use include_dir::{include_dir, Dir};
 use std::collections::HashMap;
+use std::convert::Infallible;
 use std::fmt;
 use std::sync::Arc;
+use tower_cookies::Cookies;
 use unic_langid::LanguageIdentifier;
 
 /// Embedded translation files. Anything under `assets/i18n/` ships
@@ -24,6 +28,10 @@ static I18N_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/assets/i18n");
 /// Fallback locale when the user has not chosen one and
 /// `Accept-Language` does not match any supported locale.
 pub const DEFAULT: Locale = Locale::Pt;
+
+/// Cookie key set by the language picker. Value is the short ISO
+/// code (`pt`, `en`, `es`, `fr`).
+pub const COOKIE_NAME: &str = "ruscker_locale";
 
 /// Locales the UI exposes in the language selector. Add a variant
 /// here AND a directory under `assets/i18n/<code>/` to ship a new
@@ -86,6 +94,48 @@ impl Locale {
 impl fmt::Display for Locale {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.code())
+    }
+}
+
+/// Axum extractor that resolves the active locale from the request.
+///
+/// Order of precedence:
+/// 1. Cookie [`COOKIE_NAME`] (user's explicit pick via the UI)
+/// 2. `Accept-Language` header (browser-supplied preference list)
+/// 3. [`DEFAULT`] (pt-BR)
+///
+/// This is infallible — every request resolves to *some* locale.
+impl<S: Send + Sync> FromRequestParts<S> for Locale {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        // 1. cookie
+        if let Ok(cookies) = Cookies::from_request_parts(parts, state).await {
+            if let Some(c) = cookies.get(COOKIE_NAME) {
+                if let Some(loc) = Locale::parse(c.value()) {
+                    return Ok(loc);
+                }
+            }
+        }
+
+        // 2. Accept-Language. Naive parsing: split on `,`, strip
+        //    `;q=` weights, try each token. Good enough for the four
+        //    locales we support; if we ever need full RFC 9110
+        //    negotiation, swap in a crate.
+        if let Some(header) = parts
+            .headers
+            .get(axum::http::header::ACCEPT_LANGUAGE)
+            .and_then(|v| v.to_str().ok())
+        {
+            for token in header.split(',') {
+                let lang = token.split(';').next().unwrap_or("").trim();
+                if let Some(loc) = Locale::parse(lang) {
+                    return Ok(loc);
+                }
+            }
+        }
+
+        Ok(DEFAULT)
     }
 }
 

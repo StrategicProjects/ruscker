@@ -1,0 +1,108 @@
+{% extends "_layout.html" %}
+
+{% block content %}
+
+<header class="px-6 py-5 border-b border-[color:var(--border)]">
+  <div class="max-w-6xl mx-auto flex items-center justify-between">
+    <div>
+      <h1 class="text-xl font-medium">{{ self.t("landing-title") }}</h1>
+      <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("landing-subtitle") }}</p>
+    </div>
+    <div class="text-xs text-[color:var(--text-muted)]">{{ cards.len() }} apps</div>
+  </div>
+</header>
+
+<main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full">
+
+  <section class="card-surface rounded-lg p-4 mb-6">
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <input id="q" type="search"
+             placeholder="{{ self.t("filter-search-placeholder") }}"
+             class="flex-1 min-w-[200px] max-w-md px-3 py-1.5 text-sm rounded border border-[color:var(--border)] bg-[color:var(--bg)]">
+      <div class="ml-auto inline-flex items-center gap-1 bg-[color:var(--border)] rounded-full p-0.5 text-[11px]">
+        <button data-access="all"    class="access-btn px-3 py-1 rounded-full font-medium bg-[color:var(--surface)]">{{ self.t("filter-access-all") }}</button>
+        <button data-access="open"   class="access-btn px-3 py-1 rounded-full font-medium">{{ self.t("filter-access-public") }}</button>
+        <button data-access="closed" class="access-btn px-3 py-1 rounded-full font-medium">{{ self.t("filter-access-restricted") }}</button>
+      </div>
+    </div>
+    <div class="flex flex-wrap gap-1.5">
+      <button data-type="all" class="type-chip px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[color:var(--text)] text-[color:var(--bg)]">
+        {{ self.t("type-all") }} <span class="ml-1 opacity-70">{{ counts.total }}</span>
+      </button>
+      {% for chip in type_chips %}
+        <button data-type="{{ chip.key }}" class="type-chip px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-[color:var(--border)] {{ chip.css_class }}">
+          {{ self.t(chip.label_key) }} <span class="ml-1 opacity-70">{{ chip.count }}</span>
+        </button>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+    {% for card in cards %}
+      <article class="card-surface rounded-lg p-3 flex flex-col gap-2 {% if !card.active %}opacity-50{% endif %}"
+               data-type="{{ card.kind_color_class }}"
+               data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
+               data-name="{{ card.display_name|lower }}">
+        <div class="flex justify-between items-center">
+          <span class="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded {{ card.kind_color_class }}">{{ card.kind_label }}</span>
+          <span class="text-sm" title="{% if card.access_open %}{{ self.t("card-access-public") }}{% else %}{{ self.t("card-access-restricted") }}{% endif %}">
+            {% if card.access_open %}🔓{% else %}🔒{% endif %}
+          </span>
+        </div>
+        <div class="h-16 bg-[color:var(--border)] rounded flex items-center justify-center text-[10px] text-[color:var(--text-muted)]">
+          {% if let Some(logo) = card.logo %}<img src="{{ logo }}" alt="" class="max-h-full max-w-full">{% else %}logo{% endif %}
+        </div>
+        <h3 class="text-sm font-semibold leading-tight">{{ card.display_name }}</h3>
+        <p class="text-[11px] text-[color:var(--text-muted)] line-clamp-3 flex-1">{{ card.description|safe }}</p>
+        <a href="{{ card.href }}"
+           class="block text-[11px] font-medium text-center text-white py-1.5 rounded
+                  {% if card.kind_color_class == "kind-api" %}bg-gradient-to-br from-cyan-500 to-cyan-700{% else %}bg-gradient-to-br from-violet-600 to-fuchsia-600{% endif %}">
+          {% if card.kind_color_class == "kind-link" %}{{ self.t("card-cta-link") }}{% else %}{{ self.t("card-cta-open") }}{% endif %}
+        </a>
+        {% if let Some(date) = card.updated %}
+          <div class="text-[10px] text-[color:var(--text-muted)] text-center">{{ date }}</div>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+
+</main>
+
+<script>
+// Client-side filter: search + type chip + access toggle. Pure DOM,
+// no framework. Alpine.js for richer state lands in a later commit.
+(() => {
+  const q = document.getElementById('q');
+  const cards = document.querySelectorAll('article.card-surface');
+  let typeFilter = 'all', accessFilter = 'all', textFilter = '';
+
+  function apply() {
+    for (const c of cards) {
+      const t = c.dataset.type, a = c.dataset.access, n = c.dataset.name;
+      const okT = typeFilter === 'all' || t === typeFilter;
+      const okA = accessFilter === 'all' || a === accessFilter;
+      const okQ = !textFilter || n.includes(textFilter);
+      c.style.display = (okT && okA && okQ) ? '' : 'none';
+    }
+  }
+  q?.addEventListener('input', e => { textFilter = e.target.value.toLowerCase(); apply(); });
+  for (const b of document.querySelectorAll('.type-chip')) {
+    b.addEventListener('click', () => {
+      typeFilter = b.dataset.type;
+      for (const x of document.querySelectorAll('.type-chip')) x.classList.toggle('ring-2', x === b);
+      apply();
+    });
+  }
+  for (const b of document.querySelectorAll('.access-btn')) {
+    b.addEventListener('click', () => {
+      accessFilter = b.dataset.access;
+      for (const x of document.querySelectorAll('.access-btn')) {
+        x.classList.toggle('bg-[color:var(--surface)]', x === b);
+      }
+      apply();
+    });
+  }
+})();
+</script>
+
+{% endblock %}

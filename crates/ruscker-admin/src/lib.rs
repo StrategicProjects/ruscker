@@ -74,6 +74,8 @@ impl AdminServer {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .merge(routes::landing::routes())
+        .merge(routes::assets::routes())
+        .merge(routes::prefs::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

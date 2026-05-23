@@ -1748,6 +1748,7 @@ dependencies = [
  "ruscker-core",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "tokio",
  "tracing",
  "tracing-subscriber",

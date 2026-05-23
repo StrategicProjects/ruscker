@@ -13,7 +13,7 @@
 //! ## Reproducibility
 //!
 //! Tailwind version is pinned in [`TAILWIND_VERSION`]. To bump it,
-//! consult the latest stable release (PLAN.md §9 — never rely on
+//! consult the latest stable release (PLAN.md §10 — never rely on
 //! memory; check
 //! <https://github.com/tailwindlabs/tailwindcss/releases>).
 //!

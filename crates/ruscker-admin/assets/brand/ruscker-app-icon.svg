@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="1024" height="1024" role="img" aria-label="Ruscker">
+  <title>Ruscker — App icon</title>
+  <rect x="0" y="0" width="80" height="80" rx="18" fill="#0F6E56"/>
+  <polygon points="20,54 40,44 60,54 40,64" fill="#FFFFFF" opacity="0.35"/>
+  <polygon points="20,44 40,34 60,44 40,54" fill="#FFFFFF" opacity="0.65"/>
+  <polygon points="20,34 40,24 60,34 40,44" fill="#FFFFFF"/>
+</svg>

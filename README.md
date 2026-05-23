@@ -1,4 +1,9 @@
-# Ruscker
+<picture>
+  <source media="(prefers-color-scheme: dark)"
+          srcset="crates/ruscker-admin/assets/brand/ruscker-mark-knockout.svg">
+  <img src="crates/ruscker-admin/assets/brand/ruscker-lockup-horizontal.svg"
+       alt="Ruscker" height="56">
+</picture>
 
 A lightweight Rust alternative to **ShinyProxy** and **Shiny Server
 Free**. Serves and load-balances containerized interactive web apps
@@ -168,6 +173,8 @@ mockup first.
 | [`docs/adr/0002-sqlite-source-of-truth.md`](docs/adr/0002-sqlite-source-of-truth.md) | Why SQLite over YAML at runtime |
 | [`docs/adr/0003-sticky-sessions.md`](docs/adr/0003-sticky-sessions.md) | Session affinity rationale |
 | [`docs/adr/0004-ui-stack.md`](docs/adr/0004-ui-stack.md) | Askama + HTMX + Tailwind 4 |
+| [`docs/BRAND.md`](docs/BRAND.md) | Marca, paleta teal, lockups e regras de uso |
+| [`docs/IMAGES.md`](docs/IMAGES.md) | Regras para imagens de cards |
 
 ## Continuing development
 

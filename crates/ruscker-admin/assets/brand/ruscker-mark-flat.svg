@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="32" height="32" role="img" aria-label="Ruscker">
+  <title>Ruscker — Variante plana para favicons</title>
+  <rect x="20" y="22" width="40" height="12" fill="#5DCAA5"/>
+  <rect x="20" y="38" width="40" height="12" fill="#1D9E75"/>
+  <rect x="20" y="54" width="40" height="12" fill="#0F6E56"/>
+</svg>

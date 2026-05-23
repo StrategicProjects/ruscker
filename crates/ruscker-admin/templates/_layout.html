@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="application-name" content="Ruscker">
 <title>{% block title %}{{ self.t("landing-title") }}{% endblock %}</title>
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="mask-icon" href="/assets/brand/mark.svg" color="#0f6e56">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
 <link rel="preload" href="/assets/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="preload" href="/assets/fonts/jost-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/assets/styles.css">
@@ -39,7 +46,20 @@
     </form>
   </div>
 
-  <div class="ml-auto opacity-60">Ruscker</div>
+  {# "Powered by" lockup — uses the inline mark + wordmark text so
+     the typography matches whatever Jost variant the page already
+     loaded; doesn't require a second HTTP request for the SVG
+     lockup file. #}
+  <a class="ml-auto inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
+     href="https://github.com/StrategicProjects/ruscker"
+     aria-label="Ruscker">
+    <svg class="brand-mark-inline" viewBox="0 0 80 80" width="20" height="20" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <span class="brand-wordmark">ruscker</span>
+  </a>
 </footer>
 
 </body>

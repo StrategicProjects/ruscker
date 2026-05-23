@@ -3,9 +3,124 @@
 //!
 //! Templates should never call `Spec::kind()` or guess colors — they
 //! consume [`CardCtx`].
+//!
+//! ## Why two type concepts
+//!
+//! [`SpecKind`] (from `ruscker-config`) describes *how to run* the
+//! spec — Shiny, API, External — and drives sticky-session and
+//! routing decisions in the proxy.
+//!
+//! [`DisplayType`] describes *how to badge it on the landing card*
+//! — `app`/`talk`/`report`/`package`/`api`/`link`. It is read from
+//! `template-properties.type` in the YAML and is purely visual.
+//!
+//! These are orthogonal because the SEPE portal uses (e.g.) `talk`
+//! and `report` to distinguish executive presentations from
+//! consolidated reports — both are technically Shiny containers but
+//! the landing should still tell them apart.
 
 use ruscker_config::{Spec, SpecKind};
 use std::collections::BTreeMap;
+
+/// Visual badge category for landing cards. Read from the
+/// `template-properties.type` field. Fallbacks computed via
+/// [`DisplayType::from_spec`].
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum DisplayType {
+    /// `app` — interactive Shiny/Streamlit/Dash dashboard.
+    App,
+    /// `talk` — executive presentation rendered as a Shiny app.
+    Talk,
+    /// `report` — consolidated written report.
+    Report,
+    /// `package` — an R/Python package, usually external link to docs.
+    Package,
+    /// `api` — REST/Plumber/FastAPI endpoint.
+    Api,
+    /// Fallback when neither `template-properties.type` is set nor
+    /// can it be inferred from `SpecKind`.
+    Link,
+}
+
+impl DisplayType {
+    pub fn from_spec(spec: &Spec) -> Self {
+        // 1. Explicit template-properties.type wins.
+        if let Some(t) = spec.template_properties.type_field() {
+            if let Some(dt) = DisplayType::parse(t) {
+                return dt;
+            }
+        }
+        // 2. Otherwise infer from SpecKind.
+        match spec.kind() {
+            SpecKind::Api => DisplayType::Api,
+            SpecKind::External => DisplayType::Link,
+            SpecKind::Shiny | SpecKind::InteractiveApp => DisplayType::App,
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "app" => DisplayType::App,
+            "talk" => DisplayType::Talk,
+            "report" => DisplayType::Report,
+            "package" => DisplayType::Package,
+            "api" => DisplayType::Api,
+            "link" => DisplayType::Link,
+            _ => return None,
+        })
+    }
+
+    /// Stable kebab-case key used for `data-type=` filtering.
+    pub fn key(self) -> &'static str {
+        match self {
+            DisplayType::App => "app",
+            DisplayType::Talk => "talk",
+            DisplayType::Report => "report",
+            DisplayType::Package => "package",
+            DisplayType::Api => "api",
+            DisplayType::Link => "link",
+        }
+    }
+
+    /// Short 3-letter abbreviation shown on the card badge —
+    /// preserves the mockup's visual rhythm where every tag has the
+    /// same width.
+    pub fn short_label(self) -> &'static str {
+        match self {
+            DisplayType::App => "APP",
+            DisplayType::Talk => "APT",
+            DisplayType::Report => "RLT",
+            DisplayType::Package => "PCT",
+            DisplayType::Api => "API",
+            DisplayType::Link => "LNK",
+        }
+    }
+
+    /// Fluent key for the long-form chip label (Applications,
+    /// Apresentações, etc.).
+    pub fn label_key(self) -> &'static str {
+        match self {
+            DisplayType::App => "type-app",
+            DisplayType::Talk => "type-talk",
+            DisplayType::Report => "type-report",
+            DisplayType::Package => "type-package",
+            DisplayType::Api => "type-api",
+            DisplayType::Link => "type-package",
+        }
+    }
+
+    /// CSS class fragment mapped to design tokens in input.css.
+    pub fn css_class(self) -> &'static str {
+        match self {
+            DisplayType::App => "kind-app",
+            DisplayType::Talk => "kind-talk",
+            DisplayType::Report => "kind-report",
+            DisplayType::Package => "kind-package",
+            DisplayType::Api => "kind-api",
+            DisplayType::Link => "kind-package",
+        }
+    }
+}
 
 /// What the landing card needs. One per spec, built once per render.
 #[derive(Debug, Clone)]
@@ -13,8 +128,7 @@ pub struct CardCtx<'a> {
     pub id: &'a str,
     pub display_name: &'a str,
     pub description: &'a str,
-    pub kind_label: &'static str,
-    pub kind_color_class: &'static str,
+    pub display_type: DisplayType,
     pub access_open: bool,
     pub active: bool,
     pub logo: Option<&'a str>,
@@ -27,7 +141,7 @@ pub struct CardCtx<'a> {
 impl<'a> CardCtx<'a> {
     pub fn from_spec(spec: &'a Spec) -> Self {
         let kind = spec.kind();
-        let (kind_label, color) = kind_visuals(kind);
+        let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
         let access_open = tp
             .get_str("icon")
@@ -44,8 +158,7 @@ impl<'a> CardCtx<'a> {
             id: &spec.id,
             display_name: spec.display_name.as_deref().unwrap_or(&spec.id),
             description: spec.description.as_deref().unwrap_or(""),
-            kind_label,
-            kind_color_class: color,
+            display_type,
             access_open,
             active,
             logo,
@@ -53,29 +166,26 @@ impl<'a> CardCtx<'a> {
             href,
         }
     }
-}
 
-/// Tailwind class fragments for each spec kind. Kept in code (not
-/// CSS) so adding a new kind requires touching exactly this match —
-/// the compiler tells you when you've forgotten one.
-fn kind_visuals(kind: SpecKind) -> (&'static str, &'static str) {
-    match kind {
-        SpecKind::Shiny => ("APP", "kind-app"),
-        SpecKind::InteractiveApp => ("APP", "kind-app"),
-        SpecKind::Api => ("API", "kind-api"),
-        SpecKind::External => ("LINK", "kind-link"),
+    /// Fluent key for the CTA button. Per-type so the label matches
+    /// what the card actually opens (a relatório, apresentação,
+    /// documentação, etc.).
+    pub fn cta_key(&self) -> &'static str {
+        match self.display_type {
+            DisplayType::App => "card-cta-open-app",
+            DisplayType::Talk => "card-cta-open-talk",
+            DisplayType::Report => "card-cta-open-report",
+            DisplayType::Package => "card-cta-open-package",
+            DisplayType::Api => "card-cta-open-api",
+            DisplayType::Link => "card-cta-link",
+        }
     }
 }
 
 /// One row of the filter-chip bar at the top of the landing.
 #[derive(Debug, Clone)]
 pub struct TypeChip {
-    /// Stable filter key matched against [`CardCtx::kind_color_class`].
-    pub key: &'static str,
-    /// Fluent translation key for the chip label.
-    pub label_key: &'static str,
-    /// Tailwind class fragment for the chip's color.
-    pub css_class: &'static str,
+    pub display_type: DisplayType,
     /// How many cards belong to this type.
     pub count: usize,
 }
@@ -89,26 +199,29 @@ pub struct CardCounts {
 /// Build the chip bar with live counts. Only chips that have at
 /// least one matching card are emitted, so the UI never shows
 /// "Reports (0)" — that signal is more useful than the chip itself.
+/// Order matches the mockup's visual order: app, talk, report,
+/// package, api, link.
 pub fn build_type_chips(cards: &[CardCtx<'_>]) -> Vec<TypeChip> {
-    let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
+    let mut counts: BTreeMap<DisplayType, usize> = BTreeMap::new();
     for c in cards {
-        *counts.entry(c.kind_color_class).or_default() += 1;
+        *counts.entry(c.display_type).or_default() += 1;
     }
     [
-        ("kind-app", "type-app", "kind-app"),
-        ("kind-api", "type-api", "kind-api"),
-        ("kind-link", "type-package", "kind-link"),
+        DisplayType::App,
+        DisplayType::Talk,
+        DisplayType::Report,
+        DisplayType::Package,
+        DisplayType::Api,
+        DisplayType::Link,
     ]
     .into_iter()
-    .filter_map(|(key, label_key, css_class)| {
-        let count = *counts.get(key).unwrap_or(&0);
+    .filter_map(|dt| {
+        let count = *counts.get(&dt).unwrap_or(&0);
         if count == 0 {
             None
         } else {
             Some(TypeChip {
-                key,
-                label_key,
-                css_class,
+                display_type: dt,
                 count,
             })
         }

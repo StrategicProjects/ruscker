@@ -2,107 +2,167 @@
 
 {% block content %}
 
-<header class="px-6 py-5 border-b border-[color:var(--border)]">
-  <div class="max-w-6xl mx-auto flex items-center justify-between">
+<header class="border-b border-[color:var(--border)]">
+  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
     <div>
-      <h1 class="text-xl font-medium">{{ self.t("landing-title") }}</h1>
+      <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
       <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("landing-subtitle") }}</p>
     </div>
-    <div class="text-xs text-[color:var(--text-muted)]">{{ cards.len() }} apps</div>
+    <div class="text-xs text-[color:var(--text-muted)]">{{ counts.total }}</div>
   </div>
 </header>
 
-<main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full">
+<main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full"
+      x-data="ruscker.landing()" x-cloak>
 
-  <section class="card-surface rounded-lg p-4 mb-6">
+  {# ── Filter section ────────────────────────────────────────── #}
+  <section class="card-surface rounded-lg px-4 py-3 mb-5">
+
+    {# Search + access toggle #}
     <div class="flex flex-wrap items-center gap-3 mb-3">
-      <input id="q" type="search"
-             placeholder="{{ self.t("filter-search-placeholder") }}"
-             class="flex-1 min-w-[200px] max-w-md px-3 py-1.5 text-sm rounded border border-[color:var(--border)] bg-[color:var(--bg)]">
-      <div class="ml-auto inline-flex items-center gap-1 bg-[color:var(--border)] rounded-full p-0.5 text-[11px]">
-        <button data-access="all"    class="access-btn px-3 py-1 rounded-full font-medium bg-[color:var(--surface)]">{{ self.t("filter-access-all") }}</button>
-        <button data-access="open"   class="access-btn px-3 py-1 rounded-full font-medium">{{ self.t("filter-access-public") }}</button>
-        <button data-access="closed" class="access-btn px-3 py-1 rounded-full font-medium">{{ self.t("filter-access-restricted") }}</button>
+      <label class="relative flex-1 min-w-[200px] max-w-md">
+        <i class="ti ti-search absolute left-2.5 top-1/2 -translate-y-1/2 text-[color:var(--text-faint)]"></i>
+        <input type="search"
+               x-model.debounce.150ms="search"
+               placeholder="{{ self.t("filter-search-placeholder") }}"
+               class="w-full pl-8 pr-3 py-1.5 text-sm rounded border border-[color:var(--border)] bg-[color:var(--bg)] focus:outline-none focus:border-[color:var(--text)]">
+      </label>
+
+      <div class="ml-auto inline-flex items-center gap-0.5 bg-[color:var(--border-soft)] rounded-full p-0.5 text-[11px]">
+        <button @click="access = 'all'"
+                :class="access === 'all' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
+                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
+          <i class="ti ti-asterisk text-[10px]"></i>{{ self.t("filter-access-all") }}
+        </button>
+        <button @click="access = 'closed'"
+                :class="access === 'closed' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
+                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
+          <i class="ti ti-lock text-[10px] icon-lock"></i>{{ self.t("filter-access-restricted") }}
+        </button>
+        <button @click="access = 'open'"
+                :class="access === 'open' ? 'bg-[color:var(--surface)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-muted)]'"
+                class="px-3 py-1 rounded-full font-medium flex items-center gap-1 transition-colors">
+          <i class="ti ti-lock-open text-[10px] icon-lock-open"></i>{{ self.t("filter-access-public") }}
+        </button>
       </div>
     </div>
-    <div class="flex flex-wrap gap-1.5">
-      <button data-type="all" class="type-chip px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[color:var(--text)] text-[color:var(--bg)]">
-        {{ self.t("type-all") }} <span class="ml-1 opacity-70">{{ counts.total }}</span>
+
+    {# Type chips #}
+    <div class="flex flex-wrap gap-1.5 items-center">
+      <button @click="type_ = 'all'"
+              :class="type_ === 'all' ? 'bg-[color:var(--text)] text-[color:var(--bg)] border-[color:var(--text)]' : 'border-[color:var(--border)] text-[color:var(--text-muted)]'"
+              class="px-2.5 py-0.5 rounded-full text-[11px] font-medium border inline-flex items-center gap-1.5 transition-colors">
+        {{ self.t("type-all") }}
+        <span class="text-[10px] px-1.5 rounded-md"
+              :class="type_ === 'all' ? 'bg-[color:var(--bg)] text-[color:var(--text)]' : 'bg-[color:var(--border)] text-[color:var(--text)]'">{{ counts.total }}</span>
       </button>
+
       {% for chip in type_chips %}
-        <button data-type="{{ chip.key }}" class="type-chip px-2.5 py-0.5 rounded-full text-[11px] font-medium border border-[color:var(--border)] {{ chip.css_class }}">
-          {{ self.t(chip.label_key) }} <span class="ml-1 opacity-70">{{ chip.count }}</span>
+        <button @click="type_ = (type_ === '{{ chip.display_type.key() }}' ? 'all' : '{{ chip.display_type.key() }}')"
+                :class="type_ === '{{ chip.display_type.key() }}' ? 'chip-active' : ''"
+                class="chip-{{ chip.display_type.key() }} px-2.5 py-0.5 rounded-full text-[11px] font-medium border inline-flex items-center gap-1.5 transition-colors">
+          {{ chip.display_type.short_label() }}
+          <span class="chip-count text-[10px] px-1.5 rounded-md font-semibold">{{ chip.count }}</span>
         </button>
       {% endfor %}
+
+      <button x-show="type_ !== 'all' || access !== 'all' || search !== ''"
+              @click="type_ = 'all'; access = 'all'; search = ''"
+              class="ml-1 text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] transition-colors">
+        {{ self.t("filter-clear") }}
+      </button>
+
+      <span class="ml-auto text-[11px] text-[color:var(--text-faint)]"
+            x-text="visible + ' / {{ counts.total }}'"></span>
     </div>
   </section>
 
-  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+  {# ── Card grid ─────────────────────────────────────────────── #}
+  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3"
+           x-ref="grid">
     {% for card in cards %}
-      <article class="card-surface rounded-lg p-3 flex flex-col gap-2 {% if !card.active %}opacity-50{% endif %}"
-               data-type="{{ card.kind_color_class }}"
+      <article class="card-surface rounded-lg p-3 flex flex-col gap-2 {% if !card.active %}opacity-50 grayscale{% endif %}"
+               data-type="{{ card.display_type.key() }}"
                data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
-               data-name="{{ card.display_name|lower }}">
+               data-name="{{ card.display_name|lower }}"
+               data-desc="{{ card.description|lower }}"
+               x-show="match($el)" x-transition.opacity>
+
         <div class="flex justify-between items-center">
-          <span class="text-[10px] font-semibold tracking-wider px-2 py-0.5 rounded {{ card.kind_color_class }}">{{ card.kind_label }}</span>
-          <span class="text-sm" title="{% if card.access_open %}{{ self.t("card-access-public") }}{% else %}{{ self.t("card-access-restricted") }}{% endif %}">
-            {% if card.access_open %}🔓{% else %}🔒{% endif %}
-          </span>
+          <span class="text-[10px] font-semibold tracking-[0.3px] px-2 py-0.5 rounded {{ card.display_type.css_class() }}">{{ card.display_type.short_label() }}</span>
+          <i class="ti ti-{% if card.access_open %}lock-open icon-lock-open{% else %}lock icon-lock{% endif %} text-[14px]"
+             title="{% if card.access_open %}{{ self.t("card-access-public") }}{% else %}{{ self.t("card-access-restricted") }}{% endif %}"></i>
         </div>
-        <div class="h-16 bg-[color:var(--border)] rounded flex items-center justify-center text-[10px] text-[color:var(--text-muted)]">
-          {% if let Some(logo) = card.logo %}<img src="{{ logo }}" alt="" class="max-h-full max-w-full">{% else %}logo{% endif %}
+
+        <div class="card-logo-slot rounded h-16 flex items-center justify-center text-[10px] text-[color:var(--text-faint)] overflow-hidden">
+          {% match card.logo %}{% when Some with (logo) %}
+            <img src="{{ logo }}" alt="" class="max-h-full max-w-full">
+          {% when None %}
+            <span class="opacity-50">{{ card.id }}</span>
+          {% endmatch %}
         </div>
+
         <h3 class="text-sm font-semibold leading-tight">{{ card.display_name }}</h3>
-        <p class="text-[11px] text-[color:var(--text-muted)] line-clamp-3 flex-1">{{ card.description|safe }}</p>
+        <p class="text-[11px] text-[color:var(--text-muted)] leading-relaxed line-clamp-3 flex-1">{{ card.description|safe }}</p>
+
         <a href="{{ card.href }}"
-           class="block text-[11px] font-medium text-center text-white py-1.5 rounded
-                  {% if card.kind_color_class == "kind-api" %}bg-gradient-to-br from-cyan-500 to-cyan-700{% else %}bg-gradient-to-br from-violet-600 to-fuchsia-600{% endif %}">
-          {% if card.kind_color_class == "kind-link" %}{{ self.t("card-cta-link") }}{% else %}{{ self.t("card-cta-open") }}{% endif %}
+           class="block text-[11px] font-medium tracking-[0.2px] text-center text-white py-1.5 rounded {% if card.display_type.key() == "api" %}cta-api{% else %}cta-app{% endif %}">
+          {{ self.t(card.cta_key()) }}
         </a>
-        {% if let Some(date) = card.updated %}
-          <div class="text-[10px] text-[color:var(--text-muted)] text-center">{{ date }}</div>
-        {% endif %}
+
+        {% match card.updated %}{% when Some with (d) %}
+          <div class="text-[9px] text-[color:var(--text-faint)] text-center">{{ d }}</div>
+        {% when None %}{% endmatch %}
       </article>
     {% endfor %}
   </section>
 
+  {# ── Empty state ───────────────────────────────────────────── #}
+  <p x-show="visible === 0"
+     class="text-center text-sm text-[color:var(--text-muted)] py-12">
+    Nada por aqui.
+  </p>
+
 </main>
 
+<script src="/assets/js/alpine.min.js" defer></script>
 <script>
-// Client-side filter: search + type chip + access toggle. Pure DOM,
-// no framework. Alpine.js for richer state lands in a later commit.
-(() => {
-  const q = document.getElementById('q');
-  const cards = document.querySelectorAll('article.card-surface');
-  let typeFilter = 'all', accessFilter = 'all', textFilter = '';
+// Alpine.js component for the filter state. Tiny — most of the work
+// is just a predicate over the card's data-* attributes.
+window.ruscker = window.ruscker || {};
+window.ruscker.landing = () => ({
+  search: '',
+  type_: 'all',
+  access: 'all',
+  visible: 0,
 
-  function apply() {
-    for (const c of cards) {
-      const t = c.dataset.type, a = c.dataset.access, n = c.dataset.name;
-      const okT = typeFilter === 'all' || t === typeFilter;
-      const okA = accessFilter === 'all' || a === accessFilter;
-      const okQ = !textFilter || n.includes(textFilter);
-      c.style.display = (okT && okA && okQ) ? '' : 'none';
+  init() {
+    // Re-count after each Alpine tick because x-show toggles inline
+    // styles that we read here.
+    this.$watch('search', () => this.recount());
+    this.$watch('type_',  () => this.recount());
+    this.$watch('access', () => this.recount());
+    this.$nextTick(() => this.recount());
+  },
+
+  recount() {
+    let n = 0;
+    for (const el of this.$refs.grid.children) {
+      if (this.match(el)) n++;
     }
-  }
-  q?.addEventListener('input', e => { textFilter = e.target.value.toLowerCase(); apply(); });
-  for (const b of document.querySelectorAll('.type-chip')) {
-    b.addEventListener('click', () => {
-      typeFilter = b.dataset.type;
-      for (const x of document.querySelectorAll('.type-chip')) x.classList.toggle('ring-2', x === b);
-      apply();
-    });
-  }
-  for (const b of document.querySelectorAll('.access-btn')) {
-    b.addEventListener('click', () => {
-      accessFilter = b.dataset.access;
-      for (const x of document.querySelectorAll('.access-btn')) {
-        x.classList.toggle('bg-[color:var(--surface)]', x === b);
-      }
-      apply();
-    });
-  }
-})();
+    this.visible = n;
+  },
+
+  match(el) {
+    const t = el.dataset.type, a = el.dataset.access;
+    const okT = this.type_ === 'all' || t === this.type_;
+    const okA = this.access === 'all' || a === this.access;
+    if (!okT || !okA) return false;
+    if (!this.search) return true;
+    const q = this.search.toLowerCase();
+    return el.dataset.name.includes(q) || (el.dataset.desc || '').includes(q);
+  },
+});
 </script>
 
 {% endblock %}

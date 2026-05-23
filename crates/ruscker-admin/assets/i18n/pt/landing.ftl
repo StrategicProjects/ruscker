@@ -19,6 +19,11 @@ type-api = APIs
 
 card-cta-open = Abrir
 card-cta-link = Acessar
+card-cta-open-app = Abrir aplicativo
+card-cta-open-talk = Abrir apresentação
+card-cta-open-report = Abrir relatório
+card-cta-open-package = Abrir documentação
+card-cta-open-api = Ver documentação
 card-updated = Atualizado em { $date }
 card-state-active = Disponível
 card-state-inactive = Indisponível

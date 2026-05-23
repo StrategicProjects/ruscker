@@ -2,19 +2,43 @@
  * Tailwind 4 entry point. Compiled at build time by build.rs.
  *
  * The output ships embedded in the binary and is served at
- * /assets/styles.css (see routes::assets::styles_css).
+ * /assets/styles.css (see routes::assets::routes).
  *
- * Visual direction comes from docs/mockups/_shared.css and the four
- * .html mockups under docs/mockups/.
+ * Visual reference: docs/mockups/landing-filters-cards-refined.html
+ * and docs/mockups/_shared.css.
  */
 
 @import "tailwindcss";
 
-/* Sources: tell Tailwind where class names live so it can tree-shake. */
+/* Tell Tailwind where class names live so it can tree-shake. */
 @source "../../src/**/*.rs";
 @source "../../templates/**/*.html";
 
-/* ─── Design tokens ───────────────────────────────────────────────
+/* ─── Self-hosted Jost (3 weights, latin subset) ────────────────── */
+
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-600-normal.woff2") format("woff2");
+}
+
+/* ─── Design tokens ─────────────────────────────────────────────────
  *
  * Dual-theme via CSS custom properties. The render layer emits one
  * of three states on <html>:
@@ -27,29 +51,33 @@
  */
 @theme {
   --font-display: "Jost", ui-sans-serif, system-ui, sans-serif;
-  --color-brand: #185fa5;
-  --color-brand-strong: #0e4a83;
 
   /* Type-chip palette mirrors landing-filters-cards-refined.html */
   --color-kind-app: #06d6a0;
   --color-kind-app-ink: #04553f;
-  --color-kind-api: #06b6d4;
-  --color-kind-api-ink: #055b6c;
-  --color-kind-link: #26547c;
-  --color-kind-link-ink: #ffffff;
+  --color-kind-talk: #ffd166;
+  --color-kind-talk-ink: #5a4500;
   --color-kind-report: #ef476f;
   --color-kind-report-ink: #ffffff;
-  --color-kind-package: #ffd166;
-  --color-kind-package-ink: #5a4500;
+  --color-kind-package: #26547c;
+  --color-kind-package-ink: #ffffff;
+  --color-kind-api: #06b6d4;
+  --color-kind-api-ink: #ffffff;
+
+  --color-lock: #d9534f;
+  --color-lock-open: #5cb85c;
 }
 
 :root {
   color-scheme: light;
   --bg: #fafaf7;
   --surface: #ffffff;
+  --surface-soft: #f4f4f0;
   --text: #1a1a1a;
   --text-muted: #6b6b66;
+  --text-faint: #888888;
   --border: #e8e6df;
+  --border-soft: #f0eee8;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -57,9 +85,12 @@
     color-scheme: dark;
     --bg: #1a1a1a;
     --surface: #242424;
+    --surface-soft: #1f1f1f;
     --text: #f0f0f0;
     --text-muted: #999999;
+    --text-faint: #666666;
     --border: #333333;
+    --border-soft: #2a2a2a;
   }
 }
 
@@ -67,24 +98,66 @@
   color-scheme: dark;
   --bg: #1a1a1a;
   --surface: #242424;
+  --surface-soft: #1f1f1f;
   --text: #f0f0f0;
   --text-muted: #999999;
+  --text-faint: #666666;
   --border: #333333;
+  --border-soft: #2a2a2a;
 }
 
-/* Base */
+/* ─── Base typography ─────────────────────────────────────────────── */
 html, body { background: var(--bg); color: var(--text); }
-body { font-family: var(--font-display); }
+body {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-feature-settings: "cv02", "cv11";
+}
 
-/* Kind chip / card-tag classes referenced from view_model.rs */
-.kind-app   { background: var(--color-kind-app);   color: var(--color-kind-app-ink); }
-.kind-api   { background: var(--color-kind-api);   color: var(--color-kind-api-ink); }
-.kind-link  { background: var(--color-kind-link);  color: var(--color-kind-link-ink); }
+/* ─── Type-chip palette (mockup parity) ──────────────────────────── */
+.kind-app     { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
+.kind-talk    { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
 .kind-report  { background: var(--color-kind-report);  color: var(--color-kind-report-ink); }
 .kind-package { background: var(--color-kind-package); color: var(--color-kind-package-ink); }
+.kind-api     { background: var(--color-kind-api);     color: var(--color-kind-api-ink); }
 
-/* Card surface */
+/* Filter chips: outlined version with colored border + count pill. */
+.chip-app     { border-color: var(--color-kind-app);     color: var(--color-kind-app-ink); }
+.chip-talk    { border-color: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
+.chip-report  { border-color: var(--color-kind-report);  color: #a31239; }
+.chip-package { border-color: var(--color-kind-package); color: var(--color-kind-package); }
+.chip-api     { border-color: var(--color-kind-api);     color: var(--color-kind-api-ink); }
+
+.chip-app     .chip-count { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
+.chip-talk    .chip-count { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
+.chip-report  .chip-count { background: var(--color-kind-report);  color: #ffffff; }
+.chip-package .chip-count { background: var(--color-kind-package); color: #ffffff; }
+.chip-api     .chip-count { background: var(--color-kind-api);     color: #ffffff; }
+
+/* Active chip state — chip background fills with kind color too. */
+.chip-active.chip-app     { background: var(--color-kind-app);     color: var(--color-kind-app-ink); }
+.chip-active.chip-talk    { background: var(--color-kind-talk);    color: var(--color-kind-talk-ink); }
+.chip-active.chip-report  { background: var(--color-kind-report);  color: #ffffff; }
+.chip-active.chip-package { background: var(--color-kind-package); color: #ffffff; }
+.chip-active.chip-api     { background: var(--color-kind-api);     color: #ffffff; }
+
+/* Lock icon colors */
+.icon-lock      { color: var(--color-lock); }
+.icon-lock-open { color: var(--color-lock-open); }
+
+/* ─── Card surface ───────────────────────────────────────────────── */
 .card-surface {
   background: var(--surface);
   border: 0.5px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
+.card-logo-slot {
+  background: var(--surface-soft);
+}
+
+/* CTA gradient — distinct for API vs app/link */
+.cta-app  { background: linear-gradient(135deg, #7c3aed 0%, #c026d3 100%); }
+.cta-api  { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
+
+/* ─── Hide cards filtered out by Alpine without layout shift ─────── */
+[x-cloak] { display: none !important; }

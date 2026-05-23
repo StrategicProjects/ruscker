@@ -64,6 +64,16 @@ pub async fn import_all(pool: &SqlitePool, config: &Config) -> Result<ImportRepo
     .await
     .context("update landing_customization")?;
 
+    // Persist the rest of `proxy` (everything except specs and
+    // landing-customization) + the top-level server / logging
+    // blocks as JSON blobs in config_meta. Lets export reconstruct
+    // a byte-equivalent (mod whitespace) YAML without inventing
+    // schema for every field the admin UI doesn't expose yet.
+    let proxy_meta = proxy_meta_value(&config.proxy)?;
+    upsert_meta(&mut tx, "proxy", &proxy_meta, now).await?;
+    upsert_meta(&mut tx, "server", &serde_json::to_value(&config.server)?, now).await?;
+    upsert_meta(&mut tx, "logging", &serde_json::to_value(&config.logging)?, now).await?;
+
     // System-level audit entry for the import.
     sqlx::query(
         "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -200,6 +210,41 @@ async fn upsert_in_tx(
 fn canonical_json(spec: &Spec) -> Result<String> {
     let v = serde_json::to_value(spec)?;
     Ok(serde_json::to_string(&v)?)
+}
+
+/// Strip specs + landing-customization from a serialized Proxy so
+/// what lands in `config_meta` is just the "settings" parts. Those
+/// two fields have their own tables and would otherwise be stored
+/// twice with risk of drift.
+fn proxy_meta_value(proxy: &ruscker_config::Proxy) -> Result<serde_json::Value> {
+    let mut v = serde_json::to_value(proxy).context("serialize proxy")?;
+    if let Some(obj) = v.as_object_mut() {
+        obj.remove("specs");
+        obj.remove("landing-customization");
+    }
+    Ok(v)
+}
+
+/// INSERT-or-REPLACE a row in `config_meta`. Helper so the import
+/// flow reads cleanly.
+async fn upsert_meta(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key: &str,
+    value: &serde_json::Value,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let json = serde_json::to_string(value)?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO config_meta (key, value_json, updated_at)
+         VALUES (?, ?, ?)",
+    )
+    .bind(key)
+    .bind(&json)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("upsert config_meta[{key}]"))?;
+    Ok(())
 }
 
 fn kind_str(spec: &Spec) -> &'static str {

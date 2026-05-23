@@ -77,6 +77,15 @@ enum Command {
         db: PathBuf,
     },
 
+    /// Reconstruct an application.yml from a SQLite admin database
+    /// and write it to stdout. Pipes naturally into `> backup.yml`
+    /// or `| diff -u current.yml -` for change auditing.
+    Export {
+        /// Path to the SQLite file.
+        #[arg(long)]
+        db: PathBuf,
+    },
+
     /// Start the HTTP server (public landing in Phase 1; admin + proxy
     /// land in Phase 2+).
     Serve {
@@ -105,10 +114,30 @@ fn main() -> Result<()> {
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
+        Command::Export { db } => cmd_export(&db),
         Command::Serve { config, bind, images_dir } => {
             cmd_serve(&config, bind, images_dir)
         }
     }
+}
+
+fn cmd_export(db_path: &PathBuf) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let config = rt.block_on(async {
+        let pool = ruscker_admin::db::open(db_path).await?;
+        let c = ruscker_admin::db::export::reconstruct_config(&pool).await?;
+        pool.close().await;
+        anyhow::Ok(c)
+    })?;
+
+    // serde_yaml_ng's `to_string` emits a leading "---" document
+    // separator and trailing newline — both expected for YAML.
+    let yaml = serde_yaml_ng::to_string(&config).context("serialize Config to YAML")?;
+    print!("{yaml}");
+    Ok(())
 }
 
 fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {

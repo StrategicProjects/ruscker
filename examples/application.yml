@@ -33,6 +33,7 @@ proxy:
         type: app
         updated: "18/05/2025"
         state: active
+        tema: "Gestão"
         link: https://resultados.seplag.pe.gov.br/app/aurora  
           
     - id: creches
@@ -53,6 +54,7 @@ proxy:
         updated: "01/12/2024"  
         link: https://apps.sepe.pe.gov.br/cl/creches
         state: active  
+        tema: "Políticas Públicas"
 
           #    - id: epti
           # display-name: EPTI
@@ -88,6 +90,7 @@ proxy:
         type: app
         updated: "29/01/2025"
         state: active  
+        tema: "Gestão"
 
     - id: mulungu
       display-name: Mulungu
@@ -103,6 +106,7 @@ proxy:
         type: app
         updated: "18/05/2025"
         state: active          
+        tema: "Infraestrutura e Mobilidade"
         link: https://resultados.seplag.pe.gov.br/app/mulungu  
 
     - id: nassau
@@ -123,6 +127,7 @@ proxy:
         type: app
         updated: "29/01/2025"
         state: active  
+        tema: "Gestão"
 
     - id: peabiru
       display-name: Peabiru
@@ -142,6 +147,7 @@ proxy:
         type: app
         updated: "17/03/2025"
         state: active  
+        tema: "Infraestrutura e Mobilidade"
 
 
     - id: pikup
@@ -162,6 +168,7 @@ proxy:
         type: app
         updated: "19/02/2025"
         state: active
+        tema: "Gestão"
 
     # ======== PACKAGES ========
     - id: bigdatape
@@ -174,6 +181,7 @@ proxy:
         updated: "14/12/2024"
         link: https://monitoramento.sepe.pe.gov.br/bigdatape
         state: active          
+        tema: "Gestão"
 
     - id: diario
       display-name: "diario"
@@ -185,6 +193,7 @@ proxy:
         updated: "30/12/2024"
         link: https://monitoramento.sepe.pe.gov.br/diario
         state: active
+        tema: "Gestão"
     
     - id: cardargus
       display-name: "cardargus"
@@ -196,6 +205,7 @@ proxy:
         updated: "03/02/2026"
         link: https://monitoramento.sepe.pe.gov.br/cardargus
         state: active
+        tema: "Gestão"
 
     - id: evolution
       display-name: "evolution"
@@ -207,6 +217,7 @@ proxy:
         updated: "12/11/2025"
         link: https://monitoramento.sepe.pe.gov.br/evolution
         state: active
+        tema: "Gestão"
 
     - id: ibger
       display-name: "ibger"
@@ -218,6 +229,7 @@ proxy:
         updated: "20/02/2026"
         link: https://monitoramento.sepe.pe.gov.br/ibger
         state: active       
+        tema: "Gestão"
 
     - id: pikchr
       display-name: Pikchr
@@ -229,6 +241,7 @@ proxy:
         updated: "30/11/2024"
         link: https://monitoramento.sepe.pe.gov.br/pikchr
         state: active          
+        tema: "Gestão"
 
     - id: pixr
       display-name: "pixr"
@@ -240,6 +253,7 @@ proxy:
         updated: "03/02/2026"
         link: https://monitoramento.sepe.pe.gov.br/pixr
         state: active
+        tema: "Gestão"
 
 
     - id: plug
@@ -252,6 +266,7 @@ proxy:
         updated: "26/12/2024"
         link: https://monitoramento.sepe.pe.gov.br/plug
         state: active      
+        tema: "Gestão"
 
     - id: rapidfuzz
       display-name: RapidFuzz
@@ -263,6 +278,7 @@ proxy:
         updated: "01/12/2023"  
         link: https://monitoramento.sepe.pe.gov.br/rapidfuzz
         state: active  
+        tema: "Gestão"
 
     - id: signer
       display-name: SigneR
@@ -274,6 +290,7 @@ proxy:
         updated: "01/09/2024"  
         link: https://monitoramento.sepe.pe.gov.br/signer
         state: active  
+        tema: "Gestão"
 
     - id: vialactea
       display-name: "Vialáctea"
@@ -285,6 +302,7 @@ proxy:
         updated: "01/12/2024"  
         link: https://monitoramento.sepe.pe.gov.br/vialactea
         state: active  
+        tema: "Gestão"
 
     - id: webdav
       display-name: WebDAV
@@ -296,6 +314,7 @@ proxy:
         updated: "30/11/2024"  
         link: https://monitoramento.sepe.pe.gov.br/webdav
         state: active
+        tema: "Gestão"
 
     - id: whapi
       display-name: whapi
@@ -307,6 +326,7 @@ proxy:
         updated: "11/09/2025"
         link: https://monitoramento.sepe.pe.gov.br/whapi
         state: active
+        tema: "Gestão"
 
     # ======== TALKS ========
     - id: contratos_sers_talk
@@ -324,6 +344,7 @@ proxy:
         type: talk
         updated: "18/02/2025"
         state: active  
+        tema: "Saúde Pública"
 
     - id: hortensias_conseplan
       display-name: Hortensias – CONSEPLAN
@@ -340,6 +361,7 @@ proxy:
         updated: "15/05/2025"
         link: https://monitoramento.sepe.pe.gov.br/talks/hortensias/
         state: active  
+        tema: "Gestão"
 
     - id: maternidades_talk
       display-name: Localização de Maternidades
@@ -356,6 +378,7 @@ proxy:
         type: talk
         updated: "01/11/2023"
         state: active
+        tema: "Saúde Pública"
 
     - id: produtividade_talk
       display-name: Produtividade Médica
@@ -372,6 +395,7 @@ proxy:
         type: talk
         updated: "23/12/2024"
         state: active      
+        tema: "Saúde Pública"
 
     - id: redipe_talk
       display-name: REDIPPE
@@ -388,6 +412,7 @@ proxy:
         type: talk
         updated: "18/03/2025"
         state: active
+        tema: "Gestão"
 
     - id: tarifa_talk
       display-name: Tarifa Única
@@ -404,6 +429,7 @@ proxy:
         type: talk
         updated: "01/11/2023"
         state: active      
+        tema: "Infraestrutura e Mobilidade"
 
     # ======== REPORTS ========
     - id: creches_report
@@ -421,6 +447,7 @@ proxy:
         type: report
         updated: "10/12/2023"
         state: active        
+        tema: "Políticas Públicas"
 
     - id: maternidades_report
       display-name: "Localização de Maternidades"
@@ -437,6 +464,7 @@ proxy:
         type: report
         updated: "01/11/2023"
         state: active
+        tema: "Saúde Pública"
 
     # ======== INACTIVES ========
 
@@ -457,6 +485,7 @@ proxy:
         type: app
         updated: "27/01/2025"
         state: inactive
+        tema: "Infraestrutura e Mobilidade"
 
     - id: aurora
       display-name: Aurora
@@ -475,6 +504,7 @@ proxy:
         type: app
         updated: "01/04/2025"
         state: inactive   
+        tema: "Gestão"
       
     - id: epti
       display-name: EPTI
@@ -493,6 +523,7 @@ proxy:
         type: app
         updated: "03/12/2024"
         state: inactive
+        tema: "Infraestrutura e Mobilidade"
 
 
 logging:

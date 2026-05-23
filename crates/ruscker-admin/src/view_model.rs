@@ -180,6 +180,10 @@ pub struct CardCtx<'a> {
     pub display_type: DisplayType,
     pub access_open: bool,
     pub active: bool,
+    /// Sector/theme classification (e.g. "Saúde Pública"). Read
+    /// verbatim from `template-properties.tema` and rendered as-is
+    /// in the UI — operators choose their own taxonomy.
+    pub tema: Option<&'a str>,
     pub logo: Option<&'a str>,
     pub updated_raw: Option<&'a str>,
     /// "DD/MM" — short form used in the meta row.
@@ -202,6 +206,7 @@ impl<'a> CardCtx<'a> {
             .map(|s| s == "lock_open")
             .unwrap_or(false);
         let active = tp.is_active();
+        let tema = tp.get_str("tema");
         let logo = tp.get_str("logo");
         let updated_raw = tp.get_str("updated");
         let updated_date = updated_raw.and_then(parse_dmy);
@@ -218,6 +223,7 @@ impl<'a> CardCtx<'a> {
             display_type,
             access_open,
             active,
+            tema,
             logo,
             updated_raw,
             updated_short,
@@ -297,6 +303,20 @@ pub struct CardCounts {
 /// shows as the default option.
 pub fn sort_by_recent(cards: &mut [CardCtx<'_>]) {
     cards.sort_by(|a, b| b.updated_date.cmp(&a.updated_date));
+}
+
+/// Unique `tema` values across all cards, alphabetically sorted.
+/// Powers the "Filtrar por tema" `<select>` on the landing. Cards
+/// with no tema contribute nothing — only the "Todos os temas"
+/// option (always present) matches them.
+pub fn unique_temas<'a>(cards: &[CardCtx<'a>]) -> Vec<&'a str> {
+    let mut set: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    for c in cards {
+        if let Some(t) = c.tema {
+            set.insert(t);
+        }
+    }
+    set.into_iter().collect()
 }
 
 #[cfg(test)]

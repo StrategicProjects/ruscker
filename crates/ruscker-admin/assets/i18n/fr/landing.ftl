@@ -29,6 +29,12 @@ status-updated = mis à jour { $date }
 sort-recent = Récents
 sort-name = Nom
 search-shortcut = ⌘ K
+
+filter-theme-label = Thème
+filter-theme-all = Tous les thèmes
+filter-status-active = Actifs uniquement
+filter-status-all = Actifs et inactifs
+filter-status-inactive-only = Inactifs uniquement
 card-state-active = Disponible
 card-state-inactive = Indisponible
 card-access-public = Accès public

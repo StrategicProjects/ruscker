@@ -41,7 +41,10 @@ pub mod schema;
 pub mod validate;
 
 pub use error::{Error, Result};
-pub use schema::{Config, Proxy, RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties};
+pub use schema::{
+    Config, LandingCustomization, Proxy, RoutingStrategy, Server, Spec, SpecKind,
+    SpecKindOverride, TemplateProperties,
+};
 pub use validate::{ValidationReport, Warning};
 
 use std::path::Path;

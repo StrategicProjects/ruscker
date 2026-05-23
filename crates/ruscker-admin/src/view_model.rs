@@ -85,17 +85,31 @@ impl DisplayType {
         }
     }
 
-    /// Short 3-letter abbreviation shown on the card badge —
-    /// preserves the mockup's visual rhythm where every tag has the
-    /// same width.
+    /// Fallback 3-letter abbreviation, used only when no Fluent
+    /// translation key is available (e.g. doc generation). The UI
+    /// always renders the localized form via [`abbr_key`].
     pub fn short_label(self) -> &'static str {
         match self {
             DisplayType::App => "APP",
-            DisplayType::Talk => "APT",
+            DisplayType::Talk => "APR",
             DisplayType::Report => "RLT",
             DisplayType::Package => "PCT",
             DisplayType::Api => "API",
             DisplayType::Link => "LNK",
+        }
+    }
+
+    /// Fluent key for the localized 3-letter abbreviation rendered
+    /// inside the card badge. Translations live in
+    /// `assets/i18n/<lang>/landing.ftl` as `type-<kind>-abbr`.
+    pub fn abbr_key(self) -> &'static str {
+        match self {
+            DisplayType::App => "type-app-abbr",
+            DisplayType::Talk => "type-talk-abbr",
+            DisplayType::Report => "type-report-abbr",
+            DisplayType::Package => "type-package-abbr",
+            DisplayType::Api => "type-api-abbr",
+            DisplayType::Link => "type-link-abbr",
         }
     }
 

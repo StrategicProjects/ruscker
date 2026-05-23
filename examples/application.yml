@@ -17,6 +17,18 @@ proxy:
   bind-address: 127.0.0.1 # Add this under the proxy entry  
   authentication: none  # use openid auth framework
 
+  # Ruscker extension — visual customization of the public landing.
+  # The same knobs are exposed in the admin landing-page editor in
+  # Phase 2 (docs/mockups/admin-landing-editor.html).
+  landing-customization:
+    header-bg: "#0f6e56"
+    header-fg: "#ffffff"
+    intro-locales:
+      pt: "Portal oficial das aplicações, painéis, relatórios, apresentações e APIs do Monitoramento Estratégico do Governo de Pernambuco. Use os filtros abaixo para encontrar o que precisa."
+      en: "Official portal for applications, dashboards, reports, presentations and APIs of the Pernambuco State Government's Strategic Monitoring. Use the filters below to find what you need."
+      es: "Portal oficial de las aplicaciones, paneles, informes, presentaciones y APIs del Monitoreo Estratégico del Gobierno de Pernambuco. Use los filtros abajo para encontrar lo que necesita."
+      fr: "Portail officiel des applications, tableaux de bord, rapports, présentations et APIs de la Surveillance Stratégique du Gouvernement de Pernambouc. Utilisez les filtres ci-dessous pour trouver ce dont vous avez besoin."
+
   specs:
 
     - id: auroraprime

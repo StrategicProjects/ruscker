@@ -261,10 +261,10 @@ body {
  * overflow:hidden absolutely required — without it large source
  * images leak past the rounded corners.
  *
- * Stronger frame (per user feedback): 1px solid border in the
- * panel-border color + inset shadow that delineates the image
- * region from the card surface, especially helpful when the image
- * has light edges that would otherwise blend into the surface. */
+ * Subtle frame: 0.5px hairline border in the panel-border color +
+ * a faint shadow. Visible enough to delineate the image region
+ * from the card surface, quiet enough to not compete with the
+ * artwork. */
 .rcover {
   position: relative;
   height: 180px;
@@ -272,22 +272,8 @@ body {
   border-radius: 8px;
   overflow: hidden;
   background: var(--surface-soft);
-  border: 1px solid var(--border-strong);
-  box-shadow:
-    inset 0 0 0 1px rgba(0, 0, 0, 0.04),
-    0 1px 2px rgba(0, 0, 0, 0.06);
-}
-:root[data-theme="dark"] .rcover {
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-    0 1px 2px rgba(0, 0, 0, 0.4);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .rcover {
-    box-shadow:
-      inset 0 0 0 1px rgba(255, 255, 255, 0.06),
-      0 1px 2px rgba(0, 0, 0, 0.4);
-  }
+  border: 0.5px solid var(--border);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
 }
 .rcover-bg {
   position: absolute; inset: 0;

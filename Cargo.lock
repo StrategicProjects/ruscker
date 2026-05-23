@@ -1295,6 +1295,7 @@ dependencies = [
  "include_dir",
  "insta",
  "pretty_assertions",
+ "regex",
  "ruscker-config",
  "ruscker-core",
  "serde",

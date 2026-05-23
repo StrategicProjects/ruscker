@@ -20,8 +20,10 @@
 //! the landing should still tell them apart.
 
 use chrono::{Duration, NaiveDate, Utc};
+use regex::Regex;
 use ruscker_config::{Spec, SpecKind};
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 /// Visual badge category for landing cards. Read from the
 /// `template-properties.type` field. Fallbacks computed via
@@ -163,11 +165,18 @@ impl StatusKind {
 pub const NEW_THRESHOLD_DAYS: i64 = 60;
 
 /// What the landing card needs. One per spec, built once per render.
+///
+/// `description` is **always plain text**, with any HTML in the
+/// source YAML stripped. The card itself is an `<a>` element and
+/// nested anchors are illegal in HTML — a `<a href>` inside the
+/// description would force the browser to auto-close the outer
+/// card-link and fragment the DOM (visible bug: cards appear "torn
+/// in half"). See [`strip_html`].
 #[derive(Debug, Clone)]
 pub struct CardCtx<'a> {
     pub id: &'a str,
     pub display_name: &'a str,
-    pub description: &'a str,
+    pub description: String,
     pub display_type: DisplayType,
     pub access_open: bool,
     pub active: bool,
@@ -205,7 +214,7 @@ impl<'a> CardCtx<'a> {
         Self {
             id: &spec.id,
             display_name: spec.display_name.as_deref().unwrap_or(&spec.id),
-            description: spec.description.as_deref().unwrap_or(""),
+            description: strip_html(spec.description.as_deref().unwrap_or("")),
             display_type,
             access_open,
             active,
@@ -224,6 +233,32 @@ impl<'a> CardCtx<'a> {
 /// any unrecognized format.
 fn parse_dmy(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s.trim(), "%d/%m/%Y").ok()
+}
+
+/// Strip every HTML tag and decode the four entities that matter
+/// for plain-text display. Run on operator-authored YAML
+/// descriptions so they render cleanly inside the card link
+/// without nested-anchor bugs or stray formatting.
+///
+/// Not a security boundary — Askama still auto-escapes the output
+/// at template render time. The purpose is *cosmetic*: descriptions
+/// in the SEPE YAML occasionally include `<a href="...">` tags,
+/// which break the outer `<a class="rcard">` if rendered with
+/// `|safe`. Stripping yields readable two-line summaries.
+fn strip_html(s: &str) -> String {
+    static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]*>").unwrap());
+    static WS_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").unwrap());
+    // Replace tags with a single space so `a<br/>b` becomes `a b`,
+    // not `ab`. WS_RE collapses runs of whitespace below.
+    let no_tags = TAG_RE.replace_all(s, " ");
+    let decoded = no_tags
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&nbsp;", " ");
+    WS_RE.replace_all(decoded.trim(), " ").to_string()
 }
 
 /// Classify how recently the card was updated. Pure function so it
@@ -278,6 +313,20 @@ mod tests {
         assert_eq!(parse_dmy("nope"), None);
         assert_eq!(parse_dmy(""), None);
         assert_eq!(parse_dmy("2026-05-18"), None, "ISO form is not the operator format");
+    }
+
+    #[test]
+    fn strip_html_keeps_text_only() {
+        assert_eq!(
+            strip_html("Painel <a href='x' style='color:red'>SEGPR</a>"),
+            "Painel SEGPR"
+        );
+        // Self-closing and entities
+        assert_eq!(strip_html("a<br/>b &amp; c"), "a b & c");
+        // Multiple whitespace collapses
+        assert_eq!(strip_html("  hello   world  "), "hello world");
+        // Plain text untouched
+        assert_eq!(strip_html("just text"), "just text");
     }
 
     #[test]

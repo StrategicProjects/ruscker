@@ -181,9 +181,32 @@ body {
   background: var(--text); color: var(--bg); border-color: var(--text);
 }
 
-/* ─── Cards (v2: cover + body, no CTA) ────────────────────────── */
+/* ─── Card grid: auto-fill of FIXED-WIDTH cards ──────────────────
+ *
+ * The cards never change size; the column count grows with the
+ * viewport. `justify-content: center` keeps short rows centered so
+ * we don't get awkward left-aligned gaps on wide screens.
+ *
+ * Below 320px (narrowest practical phones) the card collapses to
+ * the viewport width minus the page padding — necessary so the
+ * card doesn't horizontally overflow the body.
+ */
+:root { --card-w: 256px; }
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--card-w));
+  gap: 14px;
+  justify-content: center;
+}
+@media (max-width: 320px) {
+  :root { --card-w: 100%; }
+}
+
+/* ─── Card geometry (fixed width, fixed cover) ───────────────── */
 .rcard {
   position: relative;
+  width: var(--card-w);
   background: var(--surface);
   border: 0.5px solid var(--border);
   border-radius: 12px;
@@ -198,18 +221,49 @@ body {
 }
 .rcard:hover .arrow-go { transform: translateX(3px); color: var(--text); }
 .rcard.inactive { opacity: 0.45; cursor: not-allowed; }
-.rcard.inactive:hover { transform: none; }
+.rcard.inactive:hover { transform: none; border-color: var(--border); }
 
+/* Cover: fixed 180px tall, full card width inside the padded slot.
+ * overflow:hidden absolutely required — without it large source
+ * images leak past the rounded corners. */
 .rcover {
   position: relative;
-  height: 108px;
+  height: 180px;
   margin: 10px 10px 0;
   border-radius: 8px;
   overflow: hidden;
-  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-soft);
 }
-.rcover-bg { position: absolute; inset: 0; opacity: 0.6; }
-.rcover-img { font-size: 10px; z-index: 1; color: rgba(255,255,255,0.95); }
+.rcover-bg {
+  position: absolute; inset: 0;
+  opacity: 0.6;
+  z-index: 0;
+}
+
+/* Real images: fill the cover, crop to fit. SVG and PNG logos with
+ * intentional whitespace prefer `contain` so the artwork breathes;
+ * see .rcover-img--contain below. */
+.rcover-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  z-index: 1;
+}
+.rcover-img--contain {
+  object-fit: contain;
+  padding: 8px;
+}
+
+/* Fallback text when no logo is set — sits over the tinted bg. */
+.rcover-fallback {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: rgba(255, 255, 255, 0.92);
+  z-index: 1; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
 
 .tint-app     { background: #06d6a0; }
 .tint-talk    { background: #ffd166; }
@@ -235,30 +289,46 @@ body {
   position: absolute; top: 8px; right: 8px;
   z-index: 2;
   width: 22px; height: 22px;
-  background: rgba(255,255,255,0.92);
+  background: rgba(255, 255, 255, 0.92);
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
 }
 
-.rbody { padding: 14px; flex: 1; display: flex; flex-direction: column; }
+/* Body: fixed-height layout so card heights match across the grid.
+ * Title can take 1-2 lines; desc clamps to 2; meta is pinned to
+ * the bottom via mt-auto. */
+.rbody {
+  padding: 12px 14px 12px;
+  flex: 1;
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
 .rtitle {
   font-size: 14px; font-weight: 500;
   letter-spacing: -0.15px;
-  margin-bottom: 5px;
-}
-.rdesc {
-  font-size: 11.5px; line-height: 1.5;
-  color: var(--text-muted);
-  flex: 1;
+  line-height: 1.25;
+  margin-bottom: 6px;
+  /* Clamp title to 2 lines so cards don't stretch on long names. */
   display: -webkit-box;
   -webkit-line-clamp: 2; line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
-  margin-bottom: 14px;
+  min-height: calc(1.25em * 2);
+}
+.rdesc {
+  font-size: 11.5px; line-height: 1.5;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(1.5em * 2);
+  margin-bottom: 12px;
 }
 .rmeta {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 10.5px; color: var(--text-faint);
+  margin-top: auto;
 }
 .rmeta-left { display: flex; align-items: center; gap: 6px; }
 

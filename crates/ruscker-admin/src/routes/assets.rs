@@ -73,9 +73,15 @@ pub fn routes() -> Router<AppState> {
 async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    // We DO want browser caching, but `immutable` makes Chrome never
+    // revalidate — even on a hard reload — which surprises users when
+    // the binary ships a new asset under the same URL. `no-cache` here
+    // means "always revalidate", not "never cache". A proper fix
+    // (Phase 5) is hash-bearing URLs (`/assets/styles-<hash>.css`)
+    // served back with the immutable header.
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=31536000, immutable"),
+        HeaderValue::from_static("public, max-age=0, must-revalidate"),
     );
     (StatusCode::OK, headers, body).into_response()
 }

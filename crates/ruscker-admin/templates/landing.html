@@ -75,9 +75,8 @@
     </button>
   </div>
 
-  {# ── Card grid (3 columns at desktop) ──────────────────────── #}
-  <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5"
-           x-ref="grid">
+  {# ── Card grid (fixed-width cards, columns auto-fill) ──────── #}
+  <section class="cards-grid" x-ref="grid">
     {% for card in cards %}
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
@@ -89,21 +88,28 @@
          x-transition.opacity>
 
         <div class="rcover">
+          {# Tint always present (shows through when image is contained or
+             when the image fails to load). Behind the image via z-index. #}
           <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+
+          {% match card.logo %}{% when Some with (logo) %}
+            <img src="{{ logo }}"
+                 alt=""
+                 loading="lazy"
+                 class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
+          {% when None %}
+            <span class="rcover-fallback">{{ card.id }}</span>
+          {% endmatch %}
+
           <span class="rbadge b-{{ card.display_type.key() }}">{{ card.display_type.short_label() }}</span>
           <span class="rlock">
             <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
           </span>
-          {% match card.logo %}{% when Some with (logo) %}
-            <img src="{{ logo }}" alt="" class="rcover-img max-h-full max-w-full">
-          {% when None %}
-            <span class="rcover-img">{{ card.id }}</span>
-          {% endmatch %}
         </div>
 
         <div class="rbody">
           <div class="rtitle">{{ card.display_name }}</div>
-          <div class="rdesc">{{ card.description|safe }}</div>
+          <div class="rdesc">{{ card.description }}</div>
           <div class="rmeta">
             <span class="rmeta-left">
               <span class="status-dot {{ card.status.dot_class() }}"></span>

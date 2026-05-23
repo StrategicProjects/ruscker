@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="application-name" content="Ruscker">
+<title>{% block title %}{{ self.t("landing-title") }}{% endblock %}</title>
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="mask-icon" href="/assets/brand/mark.svg" color="#0f6e56">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<link rel="preload" href="/assets/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/jost-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css">
+</head>
+<body class="min-h-screen flex flex-col">
+
+{% block content %}{% endblock %}
+
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex flex-wrap items-center gap-6">
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-language") }}:</span>
+    <form method="post" action="/__set/locale" class="contents">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="px-2 py-0.5 rounded {% if *loc == locale %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}"
+                aria-current="{% if *loc == locale %}true{% else %}false{% endif %}">
+          {{ loc.native_name() }}
+        </button>
+      {% endfor %}
+    </form>
+  </div>
+
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-theme") }}:</span>
+    <form method="post" action="/__set/theme" class="contents">
+      <button type="submit" name="theme" value="light"
+              class="px-2 py-0.5 rounded {% if theme.is_light() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-light") }}</button>
+      <button type="submit" name="theme" value="dark"
+              class="px-2 py-0.5 rounded {% if theme.is_dark() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-dark") }}</button>
+      <button type="submit" name="theme" value="auto"
+              class="px-2 py-0.5 rounded {% if theme.is_auto() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-auto") }}</button>
+    </form>
+  </div>
+
+  {# "Powered by" lockup — uses the inline mark + wordmark text so
+     the typography matches whatever Jost variant the page already
+     loaded; doesn't require a second HTTP request for the SVG
+     lockup file. #}
+  <a class="ml-auto inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
+     href="https://github.com/StrategicProjects/ruscker"
+     aria-label="Ruscker">
+    <svg class="brand-mark-inline" viewBox="0 0 80 80" width="20" height="20" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <span class="brand-wordmark">ruscker</span>
+  </a>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,184 @@
+<h2 class="sr-only">Versão corrigida dos filtros da landing com posicionamento melhor do seletor de acesso, e inclusão do novo tipo API para suporte a Plumber2.</h2>
+<style>
+.fp{font-family:"Jost",var(--font-sans);padding:0 6px}
+.search-pill{display:flex;align-items:center;gap:8px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:999px;padding:9px 16px;flex:1;transition:border-color .15s}
+.search-pill:focus-within{border-color:var(--color-text-primary)}
+.search-pill input{border:none;outline:none;background:transparent;font-size:13px;flex:1;font-family:inherit;color:var(--color-text-primary)}
+.search-pill input::placeholder{color:var(--color-text-tertiary)}
+.sort-btn{display:flex;align-items:center;gap:6px;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:999px;padding:9px 14px;font-size:12px;color:var(--color-text-secondary)}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;font-size:12px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:all .15s;font-family:inherit;line-height:1}
+.chip:hover{border-color:var(--color-border-secondary);color:var(--color-text-primary)}
+.chip.on{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary)}
+.chip.on-app{background:#06D6A0;color:#04553f;border-color:#06D6A0}
+.chip.on-api{background:#06B6D4;color:#083344;border-color:#06B6D4}
+.chip-count{font-size:10px;opacity:.55;font-variant-numeric:tabular-nums}
+.chip-divider{width:0.5px;height:18px;background:var(--color-border-tertiary);margin:0 4px}
+.access-chip{display:inline-flex;align-items:center;gap:5px;padding:6px 12px;border-radius:999px;font-size:12px;border:0.5px solid var(--color-border-tertiary);background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;font-family:inherit;line-height:1}
+.access-chip:hover{border-color:var(--color-border-secondary);color:var(--color-text-primary)}
+
+.rcard{position:relative;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);overflow:hidden;display:flex;flex-direction:column;cursor:pointer;transition:transform .2s ease,border-color .2s ease}
+.rcard:hover{transform:translateY(-3px);border-color:var(--color-text-primary)}
+.rcard:hover .arrow-go{transform:translateX(3px);color:var(--color-text-primary)}
+.rcover{position:relative;height:108px;margin:10px 10px 0;border-radius:var(--border-radius-md);overflow:hidden;display:flex;align-items:center;justify-content:center}
+.rcover-img{font-size:10px;z-index:1}
+.rcover-bg{position:absolute;inset:0;opacity:.6}
+.rbadge{position:absolute;top:8px;left:8px;font-size:9px;font-weight:500;padding:3px 9px;border-radius:999px;letter-spacing:0.4px;z-index:2}
+.rlock{position:absolute;top:8px;right:8px;z-index:2;width:22px;height:22px;background:rgba(255,255,255,0.92);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.rbody{padding:14px;flex:1;display:flex;flex-direction:column}
+.rtitle{font-size:14px;font-weight:500;letter-spacing:-0.15px;margin-bottom:5px}
+.rdesc{font-size:11.5px;line-height:1.5;color:var(--color-text-secondary);flex:1;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;margin-bottom:14px}
+.rmeta{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;color:var(--color-text-tertiary)}
+.rmeta-left{display:flex;align-items:center;gap:6px}
+.status-dot{width:5px;height:5px;border-radius:50%;background:#10b981}
+.arrow-go{transition:transform .2s ease,color .2s ease;font-size:14px;color:var(--color-text-secondary)}
+
+.tint-app{background:#06D6A0}
+.tint-apt{background:#FFD166}
+.tint-rlt{background:#EF476F}
+.tint-pct{background:#26547C}
+.tint-api{background:#06B6D4}
+.b-app{background:#06D6A0;color:#04553f}
+.b-apt{background:#FFD166;color:#5a4400}
+.b-rlt{background:#EF476F;color:#fff}
+.b-pct{background:#26547C;color:#fff}
+.b-api{background:#06B6D4;color:#083344}
+</style>
+<div class="fp" style="padding-top:1rem;padding-bottom:1rem">
+
+<div style="display:flex;gap:10px;align-items:center;margin-bottom:14px">
+  <div class="search-pill">
+    <i class="ti ti-search" style="font-size:14px;color:var(--color-text-tertiary)" aria-hidden="true"></i>
+    <input placeholder="Buscar por nome, descrição, autor…" />
+    <span style="font-size:10px;color:var(--color-text-tertiary);font-family:var(--font-mono);background:var(--color-background-secondary);padding:2px 6px;border-radius:4px">⌘ K</span>
+  </div>
+  <button class="sort-btn">
+    <i class="ti ti-arrows-sort" style="font-size:13px" aria-hidden="true"></i>
+    Recentes
+    <i class="ti ti-chevron-down" style="font-size:12px" aria-hidden="true"></i>
+  </button>
+</div>
+
+<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px">
+  <button class="chip on">Todos <span class="chip-count">33</span></button>
+  <button class="chip on-app">APP <span class="chip-count" style="opacity:.7">7</span></button>
+  <button class="chip">APT <span class="chip-count">6</span></button>
+  <button class="chip">RLT <span class="chip-count">2</span></button>
+  <button class="chip">PCT <span class="chip-count">13</span></button>
+  <button class="chip on-api">API <span class="chip-count" style="opacity:.7">5</span></button>
+  <span class="chip-divider"></span>
+  <button class="access-chip"><i class="ti ti-lock-open" style="font-size:12px;color:#10b981" aria-hidden="true"></i>livres</button>
+  <button class="access-chip"><i class="ti ti-lock" style="font-size:12px;color:#ef4444" aria-hidden="true"></i>restritos</button>
+</div>
+
+<div style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;display:flex;align-items:center;gap:5px">
+  <span>33 itens · APP e API ativos</span>
+  <button style="font-size:10px;padding:2px 8px;color:var(--color-text-info);background:transparent;border:none;cursor:pointer;text-decoration:underline">limpar filtros</button>
+</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px">
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-app"></div>
+      <span class="rbadge b-app">APP</span>
+      <span class="rlock"><i class="ti ti-lock" style="font-size:12px;color:#ef4444" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95)">auroraprime.png</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">Aurora Prime</div>
+      <div class="rdesc">Painel de monitoramento das iniciativas estratégicas do Governo de Pernambuco.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot"></span>atualizado 18/05</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-app"></div>
+      <span class="rbadge b-app">APP</span>
+      <span class="rlock"><i class="ti ti-lock" style="font-size:12px;color:#ef4444" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95)">mulungu.png</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">Mulungu</div>
+      <div class="rdesc">Monitoramento das obras do DER-PE em tempo real, com progresso, custos e status das intervenções.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot"></span>atualizado 18/05</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-api"></div>
+      <span class="rbadge b-api">API</span>
+      <span class="rlock"><i class="ti ti-lock-open" style="font-size:12px;color:#10b981" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95);font-family:var(--font-mono)">bigdatape_api.svg</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">BigDataPE API</div>
+      <div class="rdesc">API REST em Plumber2 para consulta dos indicadores do portal BigDataPE. 32 endpoints documentados via OpenAPI.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot" style="background:#3b82f6"></span>novo 15/02</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-pct"></div>
+      <span class="rbadge b-pct">PCT</span>
+      <span class="rlock"><i class="ti ti-lock-open" style="font-size:12px;color:#10b981" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95)">cardargus.png</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">cardargus</div>
+      <div class="rdesc">Pacote R para criação de cards visuais em SVG e PNG, com integração ao knitr e R Markdown.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot"></span>atualizado 03/02</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-api"></div>
+      <span class="rbadge b-api">API</span>
+      <span class="rlock"><i class="ti ti-lock" style="font-size:12px;color:#ef4444" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95);font-family:var(--font-mono)">cnpj_api.svg</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">Consulta CNPJ</div>
+      <div class="rdesc">API de enriquecimento de dados de empresas a partir do CNPJ, com cache integrado e rate limiting.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot"></span>atualizada 22/01</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+  <div class="rcard">
+    <div class="rcover">
+      <div class="rcover-bg tint-rlt"></div>
+      <span class="rbadge b-rlt">RLT</span>
+      <span class="rlock"><i class="ti ti-lock" style="font-size:12px;color:#ef4444" aria-hidden="true"></i></span>
+      <span class="rcover-img" style="color:rgba(255,255,255,0.95)">maternidades_2.png</span>
+    </div>
+    <div class="rbody">
+      <div class="rtitle">Localização de Maternidades</div>
+      <div class="rdesc">Relatório sobre o problema de localização de maternidades no Estado de Pernambuco.</div>
+      <div class="rmeta">
+        <span class="rmeta-left"><span class="status-dot"></span>atualizado 01/11</span>
+        <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+</div>

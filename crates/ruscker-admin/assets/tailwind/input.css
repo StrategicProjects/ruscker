@@ -1,0 +1,427 @@
+/*
+ * Tailwind 4 entry point. Compiled at build time by build.rs.
+ *
+ * The output ships embedded in the binary and is served at
+ * /assets/styles.css (see routes::assets::routes).
+ *
+ * Visual reference: docs/mockups/landing-v2-cards-cover.html
+ */
+
+@import "tailwindcss";
+
+@source "../../src/**/*.rs";
+@source "../../templates/**/*.html";
+
+/* ─── Self-hosted Jost (3 weights, latin subset) ────────────────── */
+
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/assets/fonts/jost-latin-600-normal.woff2") format("woff2");
+}
+
+/* ─── Design tokens ────────────────────────────────────────────── */
+@theme {
+  --font-display: "Jost", ui-sans-serif, system-ui, sans-serif;
+
+  /* Ruscker brand palette — see docs/BRAND.md.
+   * teal-600 is the primary; the others exist for the isometric
+   * gradient of the mark and for UI accents derived from it. */
+  --color-teal-200: #5dcaa5;
+  --color-teal-400: #1d9e75;
+  --color-teal-600: #0f6e56;
+  --color-teal-800: #085041;
+
+  /* Card tint palette (mockup-v2 cover backgrounds + badges) */
+  --color-kind-app: #06d6a0;     --color-kind-app-ink: #04553f;
+  --color-kind-talk: #ffd166;    --color-kind-talk-ink: #5a4400;
+  --color-kind-report: #ef476f;  --color-kind-report-ink: #ffffff;
+  --color-kind-package: #26547c; --color-kind-package-ink: #ffffff;
+  --color-kind-api: #06b6d4;     --color-kind-api-ink: #083344;
+
+  --color-lock: #ef4444;
+  --color-lock-open: #10b981;
+  --color-status-new: #3b82f6;
+  --color-status-updated: #10b981;
+  --color-status-unknown: #9ca3af;
+}
+
+/* Light theme (default) */
+:root {
+  color-scheme: light;
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --surface-soft: #f4f4f0;
+  --text: #1a1a1a;
+  --text-muted: #6b6b66;
+  --text-faint: #888888;
+  --border: #e8e6df;
+  --border-soft: #f0eee8;
+  --border-strong: #c0c0bb;
+}
+
+/* OS-driven dark (no explicit cookie) */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161616;
+    --surface: #1f1f1f;
+    --surface-soft: #1a1a1a;
+    --text: #f0f0f0;
+    --text-muted: #b0b0b0;
+    --text-faint: #707070;
+    --border: #2a2a2a;
+    --border-soft: #232323;
+    --border-strong: #404040;
+  }
+}
+
+/* Explicit dark cookie wins over OS pref */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161616;
+  --surface: #1f1f1f;
+  --surface-soft: #1a1a1a;
+  --text: #f0f0f0;
+  --text-muted: #b0b0b0;
+  --text-faint: #707070;
+  --border: #2a2a2a;
+  --border-soft: #232323;
+  --border-strong: #404040;
+}
+
+/* ─── Base typography ─────────────────────────────────────────── */
+html, body { background: var(--bg); color: var(--text); }
+body {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-feature-settings: "cv02", "cv11";
+}
+
+/* ─── Filter row: search pill + sort button ───────────────────── */
+.search-pill {
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  padding: 9px 16px;
+  transition: border-color 0.15s;
+}
+.search-pill:focus-within { border-color: var(--text); }
+.search-pill input {
+  border: none; outline: none; background: transparent;
+  font-size: 13px; flex: 1; font-family: inherit; color: var(--text);
+}
+.search-pill input::placeholder { color: var(--text-faint); }
+
+.sort-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  padding: 9px 14px;
+  font-size: 12px; color: var(--text-muted);
+  font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.sort-btn:hover { border-color: var(--border-strong); color: var(--text); }
+
+.kbd-hint {
+  font-size: 10px; color: var(--text-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-soft); padding: 2px 6px; border-radius: 4px;
+}
+
+/* Select wrapper: holds the <select> + an absolutely-positioned
+ * Tabler chevron. The chevron is a sibling rather than a CSS
+ * background-image because background-image SVGs render in an
+ * isolated context where `currentColor` always resolves to black —
+ * so the chevron stays dark even when the select text turns light
+ * in the active state. Using a real <i> lets the icon inherit
+ * `color` from the wrapper through normal CSS cascade. */
+.select-wrap {
+  position: relative;
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.select-wrap:hover { color: var(--text); }
+.select-chevron {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+  font-size: 12px;
+  color: inherit;
+  line-height: 1;
+}
+.select-wrap.is-active { color: var(--bg); }
+.select-wrap.is-active .theme-select {
+  background: var(--text);
+  border-color: var(--text);
+}
+
+.theme-select {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+  padding: 9px 28px 9px 14px;
+  font-size: 12px;
+  color: inherit;
+  font-family: inherit; cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.theme-select:hover { border-color: var(--border-strong); }
+.theme-select:focus { outline: none; border-color: var(--text); }
+
+/* ─── Chips (type + access) ────────────────────────────────────── */
+.chip, .access-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px; font-size: 12px;
+  border: 0.5px solid var(--border);
+  background: var(--surface); color: var(--text-muted);
+  cursor: pointer; transition: all 0.15s;
+  font-family: inherit; line-height: 1;
+}
+.chip:hover, .access-chip:hover {
+  border-color: var(--border-strong); color: var(--text);
+}
+.chip-count {
+  font-size: 10px; opacity: 0.55;
+  font-variant-numeric: tabular-nums;
+}
+
+/* "Todos" chip — fills with text color when on */
+.chip.on-all {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+
+/* Per-type fill when chip is active */
+.chip.on-app     { background: #06d6a0; color: #04553f; border-color: #06d6a0; }
+.chip.on-talk    { background: #ffd166; color: #5a4400; border-color: #ffd166; }
+.chip.on-report  { background: #ef476f; color: #ffffff; border-color: #ef476f; }
+.chip.on-package { background: #26547c; color: #ffffff; border-color: #26547c; }
+.chip.on-api     { background: #06b6d4; color: #083344; border-color: #06b6d4; }
+.chip.on-link    { background: #26547c; color: #ffffff; border-color: #26547c; }
+
+.chip-divider {
+  width: 0.5px; height: 18px;
+  background: var(--border); margin: 0 4px;
+}
+
+/* Access chips: lock color inherits from icon */
+.access-chip.on {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+
+/* ─── Card grid: auto-fill of FIXED-WIDTH cards ──────────────────
+ *
+ * The cards never change size; the column count grows with the
+ * viewport. `justify-content: center` keeps short rows centered so
+ * we don't get awkward left-aligned gaps on wide screens.
+ *
+ * Below 320px (narrowest practical phones) the card collapses to
+ * the viewport width minus the page padding — necessary so the
+ * card doesn't horizontally overflow the body.
+ */
+:root { --card-w: 256px; }
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, var(--card-w));
+  gap: 14px;
+  justify-content: center;
+}
+@media (max-width: 320px) {
+  :root { --card-w: 100%; }
+}
+
+/* ─── Card geometry (fixed width, fixed cover) ───────────────── */
+.rcard {
+  position: relative;
+  width: var(--card-w);
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  cursor: pointer; text-decoration: none; color: inherit;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+.rcard:hover {
+  transform: translateY(-3px);
+  border-color: var(--text);
+}
+.rcard:hover .arrow-go { transform: translateX(3px); color: var(--text); }
+.rcard.inactive { opacity: 0.45; cursor: not-allowed; }
+.rcard.inactive:hover { transform: none; border-color: var(--border); }
+
+/* Cover: fixed 180px tall, full card width inside the padded slot.
+ * overflow:hidden absolutely required — without it large source
+ * images leak past the rounded corners.
+ *
+ * Subtle frame: 0.5px hairline border in the panel-border color +
+ * a faint shadow. Visible enough to delineate the image region
+ * from the card surface, quiet enough to not compete with the
+ * artwork. */
+.rcover {
+  position: relative;
+  height: 180px;
+  margin: 10px 10px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-soft);
+  border: 0.5px solid var(--border);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.03);
+}
+.rcover-bg {
+  position: absolute; inset: 0;
+  opacity: 0.6;
+  z-index: 0;
+}
+
+/* Real images: fill the cover, crop to fit. SVG and PNG logos with
+ * intentional whitespace prefer `contain` so the artwork breathes;
+ * see .rcover-img--contain below. */
+.rcover-img {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: center;
+  display: block;
+  z-index: 1;
+}
+.rcover-img--contain {
+  object-fit: contain;
+  padding: 8px;
+}
+
+/* Fallback text when no logo is set — sits over the tinted bg. */
+.rcover-fallback {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: rgba(255, 255, 255, 0.92);
+  z-index: 1; pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+}
+
+.tint-app     { background: #06d6a0; }
+.tint-talk    { background: #ffd166; }
+.tint-report  { background: #ef476f; }
+.tint-package { background: #26547c; }
+.tint-api     { background: #06b6d4; }
+.tint-link    { background: #26547c; }
+
+.rbadge {
+  position: absolute; top: 8px; left: 8px;
+  font-size: 9px; font-weight: 500;
+  padding: 3px 9px; border-radius: 999px;
+  letter-spacing: 0.4px; z-index: 2;
+}
+.b-app     { background: #06d6a0; color: #04553f; }
+.b-talk    { background: #ffd166; color: #5a4400; }
+.b-report  { background: #ef476f; color: #ffffff; }
+.b-package { background: #26547c; color: #ffffff; }
+.b-api     { background: #06b6d4; color: #083344; }
+.b-link    { background: #26547c; color: #ffffff; }
+
+.rlock {
+  position: absolute; top: 8px; right: 8px;
+  z-index: 2;
+  width: 22px; height: 22px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Body: fixed-height layout so card heights match across the grid.
+ * Title can take 1-2 lines; desc clamps to 2; meta is pinned to
+ * the bottom via mt-auto. */
+.rbody {
+  padding: 12px 14px 12px;
+  flex: 1;
+  display: flex; flex-direction: column;
+  min-height: 0;
+}
+.rtitle {
+  font-size: 14px; font-weight: 500;
+  letter-spacing: -0.15px;
+  line-height: 1.25;
+  margin-bottom: 6px;
+  /* Clamp title to 2 lines so cards don't stretch on long names. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(1.25em * 2);
+}
+.rdesc {
+  font-size: 11.5px; line-height: 1.5;
+  color: var(--text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2; line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: calc(1.5em * 2);
+  margin-bottom: 12px;
+}
+.rmeta {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 10.5px; color: var(--text-faint);
+  margin-top: auto;
+}
+.rmeta-left { display: flex; align-items: center; gap: 6px; }
+
+.status-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  display: inline-block; flex-shrink: 0;
+}
+.status-dot-new     { background: var(--color-status-new); }
+.status-dot-updated { background: var(--color-status-updated); }
+.status-dot-unknown { background: var(--color-status-unknown); }
+
+.arrow-go {
+  transition: transform 0.2s ease, color 0.2s ease;
+  font-size: 14px; color: var(--text-muted);
+}
+
+/* Hide cards filtered out by Alpine without layout shift */
+[x-cloak] { display: none !important; }
+
+/* ─── Brand lockup (footer) ──────────────────────────────────────
+ *
+ * Inline mark + wordmark text. Wordmark is always lowercase,
+ * Jost Medium, slightly tighter tracking — see docs/BRAND.md.
+ * Don't apply a `text-transform: uppercase` anywhere on this class. */
+.brand-wordmark {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  text-transform: none;
+}
+.brand-mark-inline {
+  flex-shrink: 0;
+  display: block;
+}

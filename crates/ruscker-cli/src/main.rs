@@ -62,6 +62,18 @@ enum Command {
     Inspect {
         path: PathBuf,
     },
+
+    /// Start the HTTP server (public landing in Phase 1; admin + proxy
+    /// land in Phase 2+).
+    Serve {
+        /// Path to application.yml
+        #[arg(long, default_value = "application.yml")]
+        config: PathBuf,
+
+        /// Bind address override. Defaults to the value in the YAML.
+        #[arg(long)]
+        bind: Option<std::net::SocketAddr>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -72,7 +84,30 @@ fn main() -> Result<()> {
         Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
+        Command::Serve { config, bind } => cmd_serve(&config, bind),
     }
+}
+
+fn cmd_serve(config_path: &PathBuf, bind_override: Option<std::net::SocketAddr>) -> Result<()> {
+    let config = Config::from_file(config_path).with_context(|| {
+        format!("failed to load config from {}", config_path.display())
+    })?;
+
+    let addr = match bind_override {
+        Some(a) => a,
+        None => {
+            let ip: std::net::IpAddr = config.proxy.bind_address.parse().with_context(|| {
+                format!("invalid bind-address `{}`", config.proxy.bind_address)
+            })?;
+            std::net::SocketAddr::new(ip, config.proxy.port)
+        }
+    };
+
+    let server = ruscker_admin::AdminServer::new(addr, config)?;
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(server.run())
 }
 
 fn init_tracing(verbosity: u8) {

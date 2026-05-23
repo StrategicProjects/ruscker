@@ -62,8 +62,9 @@ ordered-float = { version = "5.3", features = ["serde"] }
 
 # Templating + i18n
 askama = { version = "0.16", features = ["serde_json"] }
-fluent-templates = { version = "0.14", features = ["tera"] }
+fluent-templates = "0.14"
 fluent-bundle = "0.16"
+unic-langid = "0.9"
 include_dir = "0.7"
 
 # Database (SQLite via sqlx)

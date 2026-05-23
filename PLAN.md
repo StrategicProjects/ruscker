@@ -146,6 +146,9 @@ crates/ruscker-admin/
       por tipo) e seletor de acesso.
 - [ ] Filtro/busca client-side via Alpine (sem rota servidor).
 - [ ] Toggle de tema dark/light: cookie + `prefers-color-scheme`.
+- [ ] **i18n scaffolding** (ver §5): `fluent-templates`, arquivos
+      `.ftl` em `assets/i18n/{en,pt,es,fr}/`, seletor de idioma na UI
+      (cookie + `Accept-Language`), strings da landing já externalizadas.
 - [ ] Servir `/assets/*` (fonts Jost self-hosted, ícones Tabler,
       imagens da biblioteca).
 - [ ] Rota `GET /` que carrega `application.yml` via
@@ -169,10 +172,167 @@ com os 31 specs reais. Cards ainda navegam para `#` (ou para
 - Nada de admin (`/admin`). Só a portal pública.
 - Nada de proxy. Cards de container apenas mostram, não abrem sessão.
 - Nada de login. `authentication: none` é o único modo suportado.
+- Tradução completa das 4 línguas. A Fase 1 entrega **só PT-BR
+  100%** e o *andaime* para EN/ES/FR (chaves existem, fallback para
+  PT enquanto não há tradução).
 
 ---
 
-## 5. Tracking
+## 5. Internacionalização (i18n) do painel
+
+**Decisão:** painel admin e landing públicos suportam
+**pt-BR · en · es · fr**, com seleção por usuário. O idioma escolhido
+sobrescreve o do navegador.
+
+### 5.1. Stack
+
+- **`fluent-templates` + `fluent-bundle`** (Mozilla Fluent) — suporta
+  bem pluralização e variantes; sintaxe `.ftl` legível por tradutor
+  não-técnico.
+- Integração com Askama via filter custom: `{{ "landing.title"|t(loc) }}`.
+- Locale ativa flui pelo request via `tower` extension layer.
+
+### 5.2. Ordem de precedência da seleção de idioma
+
+1. Cookie `ruscker_locale=<code>` (set pelo seletor da UI).
+2. Header `Accept-Language` (negociação padrão HTTP).
+3. Fallback **pt-BR** (default — público primário é o SEPE).
+
+Idiomas suportados: `pt-BR`, `en-US`, `es-ES`, `fr-FR`. Códigos
+expostos sempre como ISO (`pt`, `en`, `es`, `fr`) na UI.
+
+### 5.3. Layout dos arquivos de tradução
+
+```
+crates/ruscker-admin/assets/i18n/
+├── pt/
+│   ├── landing.ftl
+│   ├── admin.ftl
+│   └── errors.ftl
+├── en/  (mesma estrutura)
+├── es/  (mesma estrutura)
+└── fr/  (mesma estrutura)
+```
+
+Embutidos no binário via `include_dir!` (zero arquivos no disco em
+produção). Tradução faltante → fallback para `pt` e log em `tracing`
+(uma vez por chave, não por request).
+
+### 5.4. Convenções de chaves
+
+- Hierárquicas com ponto: `landing.title`, `admin.specs.add-button`.
+- Sem HTML embutido. Quando precisa de formatação, usar variáveis
+  Fluent: `{ $count } aplicações`.
+- Pluralização sempre via `{ $n ->`, mesmo para EN (consistência).
+
+### 5.5. Onde aparece nas fases
+
+| Fase | i18n entregue |
+|---|---|
+| **1** | Scaffolding completo + landing 100% em PT, chaves espelhadas para EN/ES/FR (texto = inglês placeholder ou idêntico ao PT). Seletor de idioma já visível. |
+| **2** | Strings do painel admin externalizadas. Tradução EN completa. |
+| **3** | Mensagens de erro do proxy externalizadas (visíveis em telas de "container starting", "503 saturated"). |
+| **4** | Dashboard externalizado. Tradução ES completa. |
+| **5** | Tradução FR completa. Auditoria final de strings hard-coded via lint custom. |
+
+### 5.6. Tooling
+
+- Script `scripts/i18n-check.sh` que compara chaves entre as 4
+  línguas e falha o CI se a chave existe em PT mas não em EN.
+- README de tradutor em `crates/ruscker-admin/assets/i18n/README.md`
+  (escrito na Fase 1) com instruções para receber PRs de não-devs.
+
+---
+
+## 6. Distribuição e instalação
+
+**Princípio:** instalar o Ruscker tem que ser **uma linha**. Quanto
+mais fricção, menor a adoção. Alvo primário: Ubuntu 22.04/24.04
+(é o que o SEPE roda); alvos secundários: outras distros Linux
+amd64/arm64, macOS para dev.
+
+### 6.1. Matriz de artefatos por release
+
+| Artefato | Plataforma | Ferramenta de build | Prioridade |
+|---|---|---|---|
+| `.deb` amd64 | Ubuntu 22.04+, Debian 12+ | `cargo-deb` | **P0** (alvo primário) |
+| `.deb` arm64 | mesmas, em ARM | `cargo-deb` + cross | P1 |
+| Tarball estático amd64 | Qualquer Linux glibc 2.31+ | `cross` ou `cargo-zigbuild` (musl) | **P0** |
+| Tarball estático arm64 | mesma | `cargo-zigbuild` | P1 |
+| Imagem Docker multi-arch | qualquer host com Docker | `docker buildx` (amd64 + arm64) | **P0** |
+| Homebrew formula (`brew install ruscker`) | macOS (dev) | tap próprio em `StrategicProjects/homebrew-tap` | P1 |
+| `.rpm` | RHEL/Rocky/Fedora/openSUSE | `cargo-generate-rpm` | P2 (deferred) |
+| Pacote Arch (AUR) | Arch/Manjaro | PKGBUILD manual | P3 (community) |
+| Snap / Flatpak | desktop Linux | snapcraft | **fora de escopo** |
+| Instalador Windows | Windows Server | nada — sem suporte oficial | **fora de escopo** |
+
+### 6.2. Conteúdo do `.deb`
+
+- `/usr/bin/ruscker` — binário principal
+- `/etc/ruscker/application.yml` — config de exemplo
+- `/var/lib/ruscker/` — diretório do SQLite (criado vazio)
+- `/var/log/ruscker/` — logs
+- `/lib/systemd/system/ruscker.service` — unit file
+- `postinst`: cria usuário `ruscker`, faz `chown` dos diretórios,
+  registra o serviço (sem habilitar — operador decide).
+- `prerm`/`postrm`: para o serviço, opcionalmente preserva dados.
+
+### 6.3. Linha de instalação por plataforma
+
+```bash
+# Ubuntu/Debian (alvo primário)
+curl -fsSL https://ruscker.app/install.sh | sudo bash
+# ou direto:
+curl -L https://github.com/StrategicProjects/ruscker/releases/latest/download/ruscker_amd64.deb \
+  -o /tmp/r.deb && sudo dpkg -i /tmp/r.deb
+
+# Qualquer Linux
+curl -L https://github.com/StrategicProjects/ruscker/releases/latest/download/ruscker-linux-amd64.tar.gz \
+  | sudo tar -xz -C /usr/local/bin/
+
+# Docker
+docker run -d --name ruscker \
+  -p 8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /etc/ruscker:/etc/ruscker \
+  ghcr.io/strategicprojects/ruscker:latest
+
+# macOS (dev)
+brew install StrategicProjects/tap/ruscker
+```
+
+### 6.4. CI/CD para releases
+
+GitHub Actions workflow `.github/workflows/release.yml` que, em tag
+`v*.*.*`:
+
+1. Build matrix: linux-amd64 + linux-arm64 + macos-amd64 + macos-arm64.
+2. `cargo-deb` para os dois Linux.
+3. `docker buildx` para imagem multi-arch publicada em GHCR.
+4. `gh release create` com todos os artefatos anexados + checksums
+   SHA256 + assinatura `cosign` (P1).
+5. Atualizar tap Homebrew automaticamente (P1).
+
+Decisões pendentes:
+
+- **APT repository próprio** (`apt.ruscker.app`) — facilita
+  `apt update` ao invés de baixar `.deb` toda vez. Custo: 1 dia de
+  setup + manutenção contínua. Decisão: **fazer só após primeiros 3
+  releases** quando o fluxo estiver estável.
+- **Assinatura `cosign`** dos binários — boa prática mas opcional
+  para MVP. Decisão: incluir desde o release v0.1.0 (custo baixo).
+
+### 6.5. Onde aparece nas fases
+
+| Fase | Distribuição entregue |
+|---|---|
+| **1–4** | Apenas `cargo build` local. Nenhum artefato publicado. |
+| **5** | Workflow de release completo, `.deb` amd64, tarballs amd64/arm64, imagem Docker multi-arch, Homebrew tap. Documentação de instalação no README. v0.1.0 publicado. |
+| **pós-5** | arm64 `.deb`, APT repo, assinatura, RPM (se houver demanda). |
+
+---
+
+## 7. Tracking
 
 - **GitHub Issues** — 1 issue principal por fase (1 a 5), com a
   checklist acima como sub-tasks. Labels: `phase:1`...`phase:5`,
@@ -186,7 +346,7 @@ com os 31 specs reais. Cards ainda navegam para `#` (ou para
 
 ---
 
-## 6. Riscos conhecidos e mitigações
+## 8. Riscos conhecidos e mitigações
 
 | Risco | Impacto | Mitigação |
 |---|---|---|
@@ -195,10 +355,13 @@ com os 31 specs reais. Cards ainda navegam para `#` (ou para
 | `serde_yaml` deprecated quebrar em update transitivo | Parse falha | Pin estrito no workspace; migrar para `serde_yml` (fork ativo) se rolar incidente. |
 | Migração ShinyProxy → Ruscker dar diff inesperado em campos raros | Operador descobre tarde | `ruscker validate --strict-compat` na Fase 5 lista incompatibilidades antes de subir em prod. |
 | Mock visual ≠ implementação real (Jost, ícones Tabler, gradientes) | Retrabalho | Self-hostar Jost na Fase 1; revisar lado-a-lado mockup vs renderizado **antes** de fechar a Fase 1. |
+| Strings hard-coded começam a aparecer depois da Fase 1 | Re-traduzir custa caro | Lint custom em CI (`scripts/i18n-check.sh`) rejeita strings literais em templates a partir da Fase 2. |
+| `cargo-deb` ter quirks com `include_dir!` (assets grandes embutidos) | `.deb` quebrado na Fase 5 | Spike de 1 dia na **Fase 4** já gerando um `.deb` de teste com os assets embutidos. |
+| Cross-compile glibc vs musl quebrar runtime do Docker socket | Tarball Linux não conecta no Docker | Testar imagem `bookworm-slim` e `alpine` no CI; documentar mínimo glibc. |
 
 ---
 
-## 7. Como continuar
+## 9. Como continuar
 
 ```bash
 # Setup

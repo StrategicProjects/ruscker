@@ -24,6 +24,7 @@ use tower_cookies::CookieManagerLayer;
 use tower_http::services::ServeDir;
 use tracing::info;
 
+pub mod db;
 pub mod i18n;
 pub mod routes;
 pub mod theme;

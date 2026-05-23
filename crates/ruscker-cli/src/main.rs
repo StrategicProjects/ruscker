@@ -63,6 +63,20 @@ enum Command {
         path: PathBuf,
     },
 
+    /// Import a YAML configuration into a SQLite admin database.
+    /// Idempotent — re-running with unchanged YAML produces zero
+    /// writes. Specs in the DB but absent from the YAML are NOT
+    /// deleted (separate operator action).
+    Import {
+        /// Path to the source YAML.
+        path: PathBuf,
+
+        /// Path to the SQLite file. Created with the schema if
+        /// missing.
+        #[arg(long)]
+        db: PathBuf,
+    },
+
     /// Start the HTTP server (public landing in Phase 1; admin + proxy
     /// land in Phase 2+).
     Serve {
@@ -90,10 +104,43 @@ fn main() -> Result<()> {
         Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
+        Command::Import { path, db } => cmd_import(&path, &db),
         Command::Serve { config, bind, images_dir } => {
             cmd_serve(&config, bind, images_dir)
         }
     }
+}
+
+fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
+    let config = Config::from_file(yaml_path).with_context(|| {
+        format!("failed to load config from {}", yaml_path.display())
+    })?;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let report = rt.block_on(async {
+        let pool = ruscker_admin::db::open(db_path).await?;
+        let r = ruscker_admin::db::specs::import_all(&pool, &config).await?;
+        pool.close().await;
+        anyhow::Ok(r)
+    })?;
+
+    println!();
+    println!("  Ruscker import");
+    println!("  ──────────────");
+    println!("  from:  {}", yaml_path.display());
+    println!("  into:  {}", db_path.display());
+    println!();
+    println!("  specs:");
+    println!("    created    {:>4}", report.created);
+    println!("    updated    {:>4}", report.updated);
+    println!("    unchanged  {:>4}", report.unchanged);
+    println!();
+    println!("  ✓ done. {} specs in the DB.",
+        report.created + report.updated + report.unchanged);
+    Ok(())
 }
 
 fn cmd_serve(

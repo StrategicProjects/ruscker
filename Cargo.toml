@@ -12,64 +12,73 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.85"
 license = "Apache-2.0"
 authors = ["Ruscker contributors"]
 repository = "https://github.com/StrategicProjects/ruscker"
 description = "A lightweight Rust alternative to ShinyProxy and Shiny Server Free"
 
+# Workspace dependencies pinned to latest stable as of repo bring-up.
+# Policy: when adding or bumping a dep, ALWAYS verify the latest stable
+# release on crates.io / GitHub releases — never rely on memory.
+# See PLAN.md §10.
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1.35", features = ["full"] }
-async-trait = "0.1"
+tokio = { version = "1.52", features = ["full"] }
+async-trait = "0.1.89"
 
-# Web framework (axum 0.7 is the latest compatible with Rust 1.75)
-axum = { version = "0.7", features = ["ws", "macros"] }
-tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "fs", "cors"] }
-hyper = "1"
+# Web framework
+axum = { version = "0.8", features = ["ws", "macros"] }
+axum-extra = { version = "0.12", features = ["cookie"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "fs", "cors"] }
+tower-cookies = "0.11"
+hyper = "1.9"
 
 # Serialization
-serde = { version = "1.0", features = ["derive"] }
-serde_yaml = "0.9"
-serde_json = "1.0"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_yaml_ng = "0.10"
+serde_json = "1.0.150"
 
 # Error handling
-thiserror = "1.0"
-anyhow = "1.0"
+thiserror = "2.0"
+anyhow = "1.0.102"
 
 # Logging / tracing
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 
 # CLI
-clap = { version = "4.4", features = ["derive", "env"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 
 # Misc utilities
-regex = "1.10"
-once_cell = "1.19"
-url = "2.5"
-uuid = { version = "1.6", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-dashmap = "5.5"
-ordered-float = { version = "4.0", features = ["serde"] }
+regex = "1.12"
+# once_cell removed — Rust 1.95 std::sync::LazyLock is used instead
+url = "2.5.8"
+uuid = { version = "1.23", features = ["v4", "serde"] }
+chrono = { version = "0.4.44", features = ["serde"] }
+dashmap = "6.2"
+ordered-float = { version = "5.3", features = ["serde"] }
 
-# Templating (Askama for compile-time templates)
-askama = "0.12"
+# Templating + i18n
+askama = { version = "0.16", features = ["serde_json"] }
+fluent-templates = { version = "0.14", features = ["tera"] }
+fluent-bundle = "0.16"
+include_dir = "0.7"
 
 # Database (SQLite via sqlx)
-sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
 
 # Docker client
-bollard = "0.15"
+bollard = "0.21"
 
 # Cryptography
-ring = "0.17"
-base64 = "0.21"
+ring = "0.17.14"
+base64 = "0.22"
 
 # Testing
 pretty_assertions = "1.4"
-insta = { version = "1.34", features = ["yaml"] }
+insta = { version = "1.47", features = ["yaml"] }
 
 [profile.release]
 opt-level = 3

@@ -104,8 +104,8 @@ and how to extend it. Read those before touching code in that crate.
 
 ### Requirements
 
-- Rust **1.75** or newer (Ubuntu 24.04 ships this via `apt install
-  rustc cargo`)
+- Rust **1.95** stable or newer (install via [rustup](https://rustup.rs/);
+  the repo's `rust-toolchain.toml` pins the exact version)
 - For phase 3+: Docker daemon access
 
 ### First build
@@ -114,10 +114,7 @@ and how to extend it. Read those before touching code in that crate.
 git clone <this-repo> ruscker
 cd ruscker
 
-# One-time dep pinning (Rust 1.75 doesn't support edition2024)
-./scripts/pin-deps.sh
-
-# Build everything
+# Build everything (rustup will fetch the pinned toolchain on first run)
 cargo build
 
 # Run tests (24 unit + 9 integration against real YAML)

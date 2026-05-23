@@ -24,7 +24,7 @@
 //! parsed model. [`Config::validate`] merges results from both.
 
 use crate::schema::{Config, Spec, SpecKind};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
 use std::collections::HashMap;
@@ -95,7 +95,7 @@ const SENSITIVE_FIELDS: &[&str] = &[
     "secret",
 ];
 
-static SENSITIVE_LINE: Lazy<Regex> = Lazy::new(|| {
+static SENSITIVE_LINE: LazyLock<Regex> = LazyLock::new(|| {
     let pattern = format!(
         r"^\s*({})\s*:\s*(.+)$",
         SENSITIVE_FIELDS

@@ -361,7 +361,49 @@ Decisões pendentes:
 
 ---
 
-## 9. Como continuar
+## 9. Política de versões (regra firme)
+
+**Sempre use a versão estável mais recente. Nunca confie em memória —
+consulte na hora.**
+
+Antes de adicionar ou bumpar uma dependência:
+
+```bash
+# Crate Rust:
+curl -s https://crates.io/api/v1/crates/<name> \
+  | jq -r '.crate.max_stable_version'
+
+# Toolchain Rust:
+curl -s https://static.rust-lang.org/dist/channel-rust-stable.toml \
+  | grep -A1 '^\[pkg\.rust\]' | grep version
+
+# Asset front-end (Tailwind, HTMX, Alpine, Tabler):
+curl -s https://api.github.com/repos/<org>/<repo>/releases/latest \
+  | jq -r '.tag_name'
+```
+
+Regras:
+
+- **Estável** = não-prerelease. HTMX 4.0-beta** está fora; usar HTMX
+  2.x estável até o 4.0 sair como GA.
+- Pin no `Cargo.toml` é por linha **major.minor**, não `major.minor.patch`
+  (`tokio = "1.52"` em vez de `"1.52.3"`) — patches entram automático.
+- Exceção: cripto e auth pinam mais estrito (`ring = "0.17.14"`)
+  porque qualquer mudança importa.
+- `serde_yaml` (do dtolnay) está deprecated e em manutenção zero —
+  usamos `serde_yaml_ng 0.10` (fork ativo, drop-in compat).
+- `once_cell::sync::Lazy` foi substituído por `std::sync::LazyLock`
+  (estável desde Rust 1.80). Não adicionar `once_cell` por preguiça.
+- Quando um major novo aparece (`thiserror 1→2`, `askama 0.12→0.16`),
+  abrir issue separada `kind:chore` para avaliar custo do bump — não
+  bumpar dentro de um PR de feature.
+
+A versão atual de cada dep relevante está no `Cargo.toml` do
+workspace, com comentários explicando bumps majors.
+
+---
+
+## 10. Como continuar
 
 ```bash
 # Setup

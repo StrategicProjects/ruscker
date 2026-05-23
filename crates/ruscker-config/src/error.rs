@@ -14,7 +14,7 @@ pub enum Error {
     },
 
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yaml::Error),
+    Yaml(#[from] serde_yaml_ng::Error),
 
     #[error("environment variable {name} referenced in config but not set")]
     MissingEnvVar { name: String },

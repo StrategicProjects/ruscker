@@ -311,7 +311,7 @@ pub struct Spec {
 /// described in `docs/YAML_SCHEMA.md`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct TemplateProperties(pub HashMap<String, serde_yaml::Value>);
+pub struct TemplateProperties(pub HashMap<String, serde_yaml_ng::Value>);
 
 impl TemplateProperties {
     pub fn get_str(&self, key: &str) -> Option<&str> {
@@ -490,7 +490,7 @@ proxy:
     - id: hello
       display-name: Hello
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
         assert_eq!(config.proxy.title, "Test");
         assert_eq!(config.proxy.specs.len(), 1);
         assert_eq!(config.proxy.specs[0].id, "hello");

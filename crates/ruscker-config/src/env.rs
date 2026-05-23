@@ -23,11 +23,11 @@
 //! values (e.g. blank Docker passwords) impossible.
 
 use crate::error::{Error, Result};
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use regex::Regex;
 use std::env;
 
-static ENV_VAR_PATTERN: Lazy<Regex> = Lazy::new(|| {
+static ENV_VAR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}").expect("env var regex is valid")
 });
 

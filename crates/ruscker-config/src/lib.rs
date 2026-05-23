@@ -68,7 +68,7 @@ impl Config {
     pub fn from_yaml(raw: &str) -> Result<Self> {
         let pre_warnings = validate::scan_raw_text(raw);
         let interpolated = env::interpolate(raw)?;
-        let mut config: Config = serde_yaml::from_str(&interpolated)?;
+        let mut config: Config = serde_yaml_ng::from_str(&interpolated)?;
         config.raw_warnings = pre_warnings;
         Ok(config)
     }

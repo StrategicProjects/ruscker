@@ -34,32 +34,38 @@
       <span class="kbd-hint hidden md:inline">{{ self.t("search-shortcut") }}</span>
     </label>
 
-    <select x-model="tema"
-            class="theme-select"
-            :class="tema !== 'all' ? 'is-active' : ''"
-            aria-label="{{ self.t("filter-theme-label") }}">
-      <option value="all">{{ self.t("filter-theme-all") }}</option>
-      {% for t in temas %}
-        <option value="{{ t }}">{{ t }}</option>
-      {% endfor %}
-    </select>
+    <div class="select-wrap" :class="tema !== 'all' ? 'is-active' : ''">
+      <select x-model="tema"
+              class="theme-select"
+              aria-label="{{ self.t("filter-theme-label") }}">
+        <option value="all">{{ self.t("filter-theme-all") }}</option>
+        {% for t in temas %}
+          <option value="{{ t }}">{{ t }}</option>
+        {% endfor %}
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
 
-    <select x-model="status_"
-            class="theme-select"
-            :class="status_ !== 'active' ? 'is-active' : ''"
-            aria-label="status">
-      <option value="active">{{ self.t("filter-status-active") }}</option>
-      <option value="all">{{ self.t("filter-status-all") }}</option>
-      <option value="inactive">{{ self.t("filter-status-inactive-only") }}</option>
-    </select>
+    <div class="select-wrap" :class="status_ !== 'active' ? 'is-active' : ''">
+      <select x-model="status_"
+              class="theme-select"
+              aria-label="status">
+        <option value="active">{{ self.t("filter-status-active") }}</option>
+        <option value="all">{{ self.t("filter-status-all") }}</option>
+        <option value="inactive">{{ self.t("filter-status-inactive-only") }}</option>
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
 
-    <select x-model="sort"
-            class="theme-select"
-            :class="sort !== 'recent' ? 'is-active' : ''"
-            aria-label="{{ self.t("sort-label") }}">
-      <option value="recent">{{ self.t("sort-recent") }}</option>
-      <option value="name">{{ self.t("sort-name") }}</option>
-    </select>
+    <div class="select-wrap" :class="sort !== 'recent' ? 'is-active' : ''">
+      <select x-model="sort"
+              class="theme-select"
+              aria-label="{{ self.t("sort-label") }}">
+        <option value="recent">{{ self.t("sort-recent") }}</option>
+        <option value="name">{{ self.t("sort-name") }}</option>
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
   </div>
 
   {# ── Filter row 2: type chips with long labels + access ───── #}

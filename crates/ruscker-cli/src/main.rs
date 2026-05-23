@@ -102,6 +102,16 @@ enum Command {
         /// no image route is mounted (cards fall back to tint-only).
         #[arg(long)]
         images_dir: Option<PathBuf>,
+
+        /// Path to the SQLite admin database. Required for `/admin/*`
+        /// routes to function. Without it, those routes return 503.
+        #[arg(long)]
+        db: Option<PathBuf>,
+
+        /// Admin auth token. Overrides `RUSCKER_ADMIN_TOKEN` env var
+        /// when set. Without either, /admin/* routes return 503.
+        #[arg(long, env = "RUSCKER_ADMIN_TOKEN")]
+        admin_token: Option<String>,
     },
 }
 
@@ -115,8 +125,8 @@ fn main() -> Result<()> {
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
         Command::Export { db } => cmd_export(&db),
-        Command::Serve { config, bind, images_dir } => {
-            cmd_serve(&config, bind, images_dir)
+        Command::Serve { config, bind, images_dir, db, admin_token } => {
+            cmd_serve(&config, bind, images_dir, db, admin_token)
         }
     }
 }
@@ -176,6 +186,8 @@ fn cmd_serve(
     config_path: &PathBuf,
     bind_override: Option<std::net::SocketAddr>,
     images_dir_override: Option<PathBuf>,
+    db_path: Option<PathBuf>,
+    admin_token: Option<String>,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
@@ -202,14 +214,24 @@ fn cmd_serve(
         candidate.is_dir().then_some(candidate)
     });
 
-    let mut server = ruscker_admin::AdminServer::new(addr, config)?;
-    if let Some(dir) = images_dir {
-        server = server.with_images_dir(dir);
-    }
-    tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(server.run())
+        .build()?;
+
+    rt.block_on(async {
+        let mut server = ruscker_admin::AdminServer::new(addr, config)?;
+        if let Some(dir) = images_dir {
+            server = server.with_images_dir(dir);
+        }
+        if let Some(token) = admin_token {
+            server = server.with_admin_token(token);
+        }
+        if let Some(path) = db_path {
+            let pool = ruscker_admin::db::open(&path).await?;
+            server = server.with_db(pool);
+        }
+        server.run().await
+    })
 }
 
 fn init_tracing(verbosity: u8) {

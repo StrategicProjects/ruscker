@@ -27,6 +27,42 @@ type-package-abbr = PCT
 type-api-abbr = API
 type-link-abbr = LNK
 
+# Admin shell
+admin-nav-apps = Aplicações
+admin-nav-images = Imagens
+admin-nav-credentials = Credenciais
+admin-nav-landing = Portal
+admin-nav-audit = Auditoria
+admin-nav-portal = Voltar ao portal
+admin-nav-logout = Sair
+
+# Admin login
+admin-login-title = Acesso ao admin
+admin-login-help = Digite o token de admin definido em RUSCKER_ADMIN_TOKEN.
+admin-login-token-label = Token
+admin-login-token-placeholder = Cole o token aqui
+admin-login-submit = Entrar
+admin-login-error-wrong = Token incorreto. Tente de novo.
+admin-login-back-portal = ← portal público
+
+# Apps list
+admin-specs-title = Aplicações
+admin-specs-subtitle = Catálogo de specs no banco
+admin-specs-empty = Nenhuma aplicação ainda. Use { $cmd } para importar de um YAML.
+admin-specs-add = Adicionar aplicação
+admin-specs-col-id = ID
+admin-specs-col-name = Nome
+admin-specs-col-kind = Tipo
+admin-specs-col-state = Estado
+admin-specs-col-updated = Atualizado
+admin-specs-col-version = Versão
+admin-specs-col-actions = Ações
+admin-specs-filter-search = Buscar por id ou nome…
+admin-specs-filter-kind-all = Todos os tipos
+admin-specs-filter-state-all = Ativos e inativos
+admin-specs-edit = Editar
+admin-specs-delete = Apagar
+
 card-cta-open = Abrir
 card-cta-link = Acessar
 card-cta-open-app = Abrir aplicativo

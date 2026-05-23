@@ -23,6 +23,42 @@ type-package-abbr = PKG
 type-api-abbr = API
 type-link-abbr = LNK
 
+# Admin shell
+admin-nav-apps = Applications
+admin-nav-images = Images
+admin-nav-credentials = Identifiants
+admin-nav-landing = Portail
+admin-nav-audit = Journal
+admin-nav-portal = Retour au portail
+admin-nav-logout = Déconnexion
+
+# Admin login
+admin-login-title = Accès admin
+admin-login-help = Saisissez le jeton admin défini dans RUSCKER_ADMIN_TOKEN.
+admin-login-token-label = Jeton
+admin-login-token-placeholder = Collez le jeton ici
+admin-login-submit = Se connecter
+admin-login-error-wrong = Jeton incorrect. Réessayez.
+admin-login-back-portal = ← portail public
+
+# Apps list
+admin-specs-title = Applications
+admin-specs-subtitle = Catalogue de specs dans la base
+admin-specs-empty = Aucune application. Utilisez { $cmd } pour importer un YAML.
+admin-specs-add = Ajouter une application
+admin-specs-col-id = ID
+admin-specs-col-name = Nom
+admin-specs-col-kind = Type
+admin-specs-col-state = État
+admin-specs-col-updated = Mis à jour
+admin-specs-col-version = Version
+admin-specs-col-actions = Actions
+admin-specs-filter-search = Rechercher par id ou nom…
+admin-specs-filter-kind-all = Tous les types
+admin-specs-filter-state-all = Actifs et inactifs
+admin-specs-edit = Modifier
+admin-specs-delete = Supprimer
+
 card-cta-open = Ouvrir
 card-cta-link = Accéder
 card-cta-open-app = Ouvrir l'application

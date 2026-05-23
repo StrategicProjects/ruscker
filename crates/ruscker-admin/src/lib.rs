@@ -17,9 +17,11 @@ use anyhow::{Context, Result};
 use axum::Router;
 use ruscker_config::Config;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_cookies::CookieManagerLayer;
+use tower_http::services::ServeDir;
 use tracing::info;
 
 pub mod i18n;
@@ -38,6 +40,12 @@ pub struct AppState {
 pub struct AdminServer {
     addr: SocketAddr,
     state: AppState,
+    /// Operator-provided directory served at `/assets/img/`. Cards
+    /// reference logos via `template-properties.logo:
+    /// "/assets/img/<file>"` (the ShinyProxy convention). `None`
+    /// means no `/assets/img/` route is mounted — cards fall back
+    /// to tint-only covers.
+    images_dir: Option<PathBuf>,
 }
 
 impl AdminServer {
@@ -52,16 +60,28 @@ impl AdminServer {
             config: Arc::new(config),
             locales: Arc::new(locales),
         };
-        Ok(Self { addr, state })
+        Ok(Self {
+            addr,
+            state,
+            images_dir: None,
+        })
+    }
+
+    /// Set the on-disk directory served at `/assets/img/`. Files
+    /// must already exist when the server starts — `ServeDir`
+    /// responds 404 for missing files, never directory-lists.
+    pub fn with_images_dir(mut self, dir: impl AsRef<Path>) -> Self {
+        self.images_dir = Some(dir.as_ref().to_path_buf());
+        self
     }
 
     /// Start listening. Blocks until the process is shut down.
     pub async fn run(self) -> Result<()> {
-        let app = router(self.state.clone());
+        let app = router_with_images(self.state.clone(), self.images_dir.as_deref());
         let listener = TcpListener::bind(self.addr)
             .await
             .with_context(|| format!("bind {}", self.addr))?;
-        info!(addr = %self.addr, "ruscker-admin listening");
+        info!(addr = %self.addr, images_dir = ?self.images_dir, "ruscker-admin listening");
         axum::serve(listener, app)
             .await
             .context("axum serve")?;
@@ -72,10 +92,22 @@ impl AdminServer {
 /// Compose the axum router. Pulled out so tests can hit it via
 /// `Router::oneshot` without a real socket.
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    router_with_images(state, None)
+}
+
+/// Same as [`router`], but also mounts `images_dir` at
+/// `/assets/img/` via [`ServeDir`]. `None` skips the mount entirely.
+pub fn router_with_images(state: AppState, images_dir: Option<&Path>) -> Router {
+    let mut r = Router::new()
         .merge(routes::landing::routes())
         .merge(routes::assets::routes())
-        .merge(routes::prefs::routes())
-        .layer(CookieManagerLayer::new())
-        .with_state(state)
+        .merge(routes::prefs::routes());
+    if let Some(dir) = images_dir {
+        // ServeDir handles 404, content-type sniffing, and range
+        // requests. Specific routes in routes::assets (e.g.
+        // /assets/styles.css) take precedence — only the `img`
+        // subtree is delegated to disk.
+        r = r.nest_service("/assets/img", ServeDir::new(dir));
+    }
+    r.layer(CookieManagerLayer::new()).with_state(state)
 }

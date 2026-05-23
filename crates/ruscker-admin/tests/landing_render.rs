@@ -111,10 +111,13 @@ async fn assets_styles_css_served_with_cache_headers() {
         headers.get(header::CONTENT_TYPE).unwrap(),
         "text/css; charset=utf-8"
     );
-    assert!(headers
+    // Cache directives must NOT include `immutable` — otherwise
+    // browsers skip revalidation even on user-initiated reload.
+    let cache = headers
         .get(header::CACHE_CONTROL)
         .unwrap()
         .to_str()
-        .unwrap()
-        .contains("immutable"));
+        .unwrap();
+    assert!(cache.contains("must-revalidate"));
+    assert!(!cache.contains("immutable"));
 }

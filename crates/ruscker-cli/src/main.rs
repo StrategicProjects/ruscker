@@ -73,6 +73,12 @@ enum Command {
         /// Bind address override. Defaults to the value in the YAML.
         #[arg(long)]
         bind: Option<std::net::SocketAddr>,
+
+        /// Directory served at /assets/img/. Defaults to
+        /// `<config-dir>/assets/img/` if that path exists, otherwise
+        /// no image route is mounted (cards fall back to tint-only).
+        #[arg(long)]
+        images_dir: Option<PathBuf>,
     },
 }
 
@@ -84,11 +90,17 @@ fn main() -> Result<()> {
         Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
-        Command::Serve { config, bind } => cmd_serve(&config, bind),
+        Command::Serve { config, bind, images_dir } => {
+            cmd_serve(&config, bind, images_dir)
+        }
     }
 }
 
-fn cmd_serve(config_path: &PathBuf, bind_override: Option<std::net::SocketAddr>) -> Result<()> {
+fn cmd_serve(
+    config_path: &PathBuf,
+    bind_override: Option<std::net::SocketAddr>,
+    images_dir_override: Option<PathBuf>,
+) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
     })?;
@@ -103,7 +115,21 @@ fn cmd_serve(config_path: &PathBuf, bind_override: Option<std::net::SocketAddr>)
         }
     };
 
-    let server = ruscker_admin::AdminServer::new(addr, config)?;
+    // Default-discover images: look next to the config under
+    // `assets/img/`. Matches the ShinyProxy templates/mlk/assets/img
+    // layout, just relative to the YAML location.
+    let images_dir = images_dir_override.or_else(|| {
+        let candidate = config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("assets/img");
+        candidate.is_dir().then_some(candidate)
+    });
+
+    let mut server = ruscker_admin::AdminServer::new(addr, config)?;
+    if let Some(dir) = images_dir {
+        server = server.with_images_dir(dir);
+    }
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?

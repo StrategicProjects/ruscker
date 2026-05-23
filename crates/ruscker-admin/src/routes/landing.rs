@@ -38,6 +38,13 @@ struct LandingPage<'a> {
     /// the `<select>` filter at the top of the landing.
     temas: Vec<&'a str>,
     counts: CardCounts,
+    /// Resolved per-locale intro text, or empty string when no
+    /// `landing-customization.intro` is configured.
+    intro: String,
+    /// Inline `style="..."` value for the `<header>` element when
+    /// the operator set a custom background color. Empty string ⇒
+    /// no override.
+    header_style: String,
 }
 
 impl<'a> LandingPage<'a> {
@@ -69,11 +76,25 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
     sort_by_recent(&mut cards);
     let type_chips = build_type_chips(&cards);
     let temas = unique_temas(&cards);
-    // Counter shows ACTIVE specs by default (matches the
-    // Active-only filter applied client-side on first render).
     let counts = CardCounts {
         total: cards.iter().filter(|c| c.active).count(),
     };
+
+    // Landing customization: header background + per-locale intro.
+    let lc = &state.config.proxy.landing_customization;
+    let header_style = match (&lc.header_bg, &lc.header_fg) {
+        (Some(bg), Some(fg)) => format!("background: {}; color: {};", bg, fg),
+        (Some(bg), None) => format!("background: {};", bg),
+        (None, Some(fg)) => format!("color: {};", fg),
+        (None, None) => String::new(),
+    };
+    let intro = lc
+        .intro_locales
+        .get(loc.code())
+        .cloned()
+        .or_else(|| lc.intro.clone())
+        .unwrap_or_default();
+
     let page = LandingPage {
         locale: loc,
         theme,
@@ -83,6 +104,8 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         type_chips,
         temas,
         counts,
+        intro,
+        header_style,
     };
     render(&page)
 }

@@ -16,6 +16,13 @@ type-talk = Presentaciones
 type-report = Informes
 type-api = APIs
 
+type-app-abbr = APP
+type-talk-abbr = PRS
+type-report-abbr = INF
+type-package-abbr = PKG
+type-api-abbr = API
+type-link-abbr = LNK
+
 card-cta-open = Abrir
 card-cta-link = Visitar
 card-cta-open-app = Abrir aplicación
@@ -26,6 +33,7 @@ card-cta-open-api = Ver documentación
 card-updated = Actualizado el { $date }
 status-new = nuevo { $date }
 status-updated = actualizado { $date }
+sort-label = Ordenar
 sort-recent = Recientes
 sort-name = Nombre
 search-shortcut = ⌘ K

@@ -17,6 +17,16 @@ type-talk = Apresentações
 type-report = Relatórios
 type-api = APIs
 
+# 3-letter badge labels rendered inside each card. Operators see
+# these in tight contexts (badges, dense tables) — keep them short
+# enough to fit a 32px-wide pill.
+type-app-abbr = APP
+type-talk-abbr = APR
+type-report-abbr = RLT
+type-package-abbr = PCT
+type-api-abbr = API
+type-link-abbr = LNK
+
 card-cta-open = Abrir
 card-cta-link = Acessar
 card-cta-open-app = Abrir aplicativo
@@ -27,6 +37,7 @@ card-cta-open-api = Ver documentação
 card-updated = Atualizado em { $date }
 status-new = novo { $date }
 status-updated = atualizado { $date }
+sort-label = Ordenar
 sort-recent = Recentes
 sort-name = Nome
 search-shortcut = ⌘ K

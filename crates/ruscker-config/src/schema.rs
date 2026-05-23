@@ -146,6 +146,15 @@ pub struct Proxy {
 
     /// The list of app/link/api specs available in this Ruscker instance.
     pub specs: Vec<Spec>,
+
+    /// Optional visual customization of the public landing page.
+    /// Ruscker extension — not present in ShinyProxy YAML.
+    ///
+    /// In Phase 1 these fields are operator-edited in the YAML. The
+    /// admin landing-page editor in Phase 2 exposes the same knobs
+    /// through a UI (see `docs/mockups/admin-landing-editor.html`).
+    #[serde(default, rename = "landing-customization")]
+    pub landing_customization: LandingCustomization,
 }
 
 impl Default for Proxy {
@@ -163,8 +172,49 @@ impl Default for Proxy {
             bind_address: "0.0.0.0".to_string(),
             authentication: AuthScheme::None,
             specs: Vec::new(),
+            landing_customization: LandingCustomization::default(),
         }
     }
+}
+
+/// Visual knobs the operator can twist on the public landing page
+/// without writing a custom template. Everything optional — empty
+/// values fall back to the built-in design.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LandingCustomization {
+    /// CSS color (any form `#rrggbb`, `rgb(...)`, named color)
+    /// applied to the header background. Useful for branding to
+    /// match an organization's primary color.
+    #[serde(default, rename = "header-bg")]
+    pub header_bg: Option<String>,
+
+    /// CSS color for header text. Override when `header-bg` is
+    /// dark and the default `--text` no longer contrasts.
+    #[serde(default, rename = "header-fg")]
+    pub header_fg: Option<String>,
+
+    /// Free-form intro paragraph rendered between the header and
+    /// the filter section. Operator-authored, plain text (no HTML).
+    ///
+    /// For multilingual portals, prefer [`Self::intro_locales`]
+    /// which lets you provide per-language strings.
+    #[serde(default)]
+    pub intro: Option<String>,
+
+    /// Map of locale short code → intro text. When the resolved
+    /// request locale matches a key here, its value wins over
+    /// [`Self::intro`]. Locales not present fall back to `intro`.
+    ///
+    /// Example:
+    /// ```yaml
+    /// landing-customization:
+    ///   intro-locales:
+    ///     pt: "Bem-vindo ao Monitoramento Estratégico..."
+    ///     en: "Welcome to Strategic Monitoring..."
+    /// ```
+    #[serde(default, rename = "intro-locales")]
+    pub intro_locales: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

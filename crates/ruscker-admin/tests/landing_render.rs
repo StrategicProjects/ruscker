@@ -26,6 +26,7 @@ fn app_state() -> AppState {
         locales: Arc::new(locales),
         admin_auth: Default::default(),
         db: None,
+        images_dir: None,
     }
 }
 

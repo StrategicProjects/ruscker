@@ -252,3 +252,5 @@ admin-dashboard-action-stop = Detener
 admin-dashboard-action-restart = Reiniciar
 admin-dashboard-confirm-stop = ¿Detener esta réplica? El auto-scaler puede recrearla si el mínimo configurado lo exige.
 admin-dashboard-confirm-restart = ¿Reiniciar esta réplica? Se perderá la sesión activa.
+admin-logs-follow = En vivo
+admin-logs-follow-stop = Detener

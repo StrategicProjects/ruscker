@@ -43,25 +43,80 @@
     </p>
     <p class="logs-mono mt-1">{{ self.t("admin-logs-replica") }}: {{ replica_id }}</p>
   </div>
-  <a href="/admin/dashboard" class="admin-nav-link">
-    <i class="ti ti-arrow-left" aria-hidden="true"></i>
-    <span>{{ self.t("admin-logs-back") }}</span>
-  </a>
+  <div style="display:flex; gap:8px; align-items:center;">
+    <button type="button" id="logs-follow-btn" class="admin-nav-link"
+            data-follow-label="{{ self.t("admin-logs-follow") }}"
+            data-stop-label="{{ self.t("admin-logs-follow-stop") }}"
+            data-replica-id="{{ replica_id }}">
+      <i class="ti ti-player-play" aria-hidden="true"></i>
+      <span id="logs-follow-text">{{ self.t("admin-logs-follow") }}</span>
+    </button>
+    <a href="/admin/dashboard" class="admin-nav-link">
+      <i class="ti ti-arrow-left" aria-hidden="true"></i>
+      <span>{{ self.t("admin-logs-back") }}</span>
+    </a>
+  </div>
 </div>
 
-{% if lines.is_empty() %}
-  <div class="logs-empty">{{ self.t("admin-logs-empty") }}</div>
-{% else %}
-  <p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-logs-tail-note") }}</p>
-  <pre class="logs-pre" id="logs-pre">{% for line in lines %}{{ line }}
+<div id="logs-empty" class="logs-empty"{% if !lines.is_empty() %} style="display:none"{% endif %}>{{ self.t("admin-logs-empty") }}</div>
+<p id="logs-note" class="text-xs text-[color:var(--text-faint)] mb-2"{% if lines.is_empty() %} style="display:none"{% endif %}>{{ self.t("admin-logs-tail-note") }}</p>
+<pre class="logs-pre" id="logs-pre"{% if lines.is_empty() %} style="display:none"{% endif %}>{% for line in lines %}{{ line }}
 {% endfor %}</pre>
-  <script>
-    // Scroll to the newest line on load.
-    (function () {
-      var pre = document.getElementById('logs-pre');
-      if (pre) pre.scrollTop = pre.scrollHeight;
-    })();
-  </script>
-{% endif %}
+
+<script>
+(function () {
+  var pre = document.getElementById('logs-pre');
+  var empty = document.getElementById('logs-empty');
+  var note = document.getElementById('logs-note');
+  var btn = document.getElementById('logs-follow-btn');
+  var btnText = document.getElementById('logs-follow-text');
+  var btnIcon = btn ? btn.querySelector('i') : null;
+
+  // Scroll to newest on load.
+  if (pre) pre.scrollTop = pre.scrollHeight;
+
+  var es = null;
+  var followLabel = btn ? btn.dataset.followLabel : 'Live';
+  var stopLabel = btn ? btn.dataset.stopLabel : 'Stop';
+  var replicaId = btn ? btn.dataset.replicaId : '';
+
+  function appendLine(text) {
+    if (!pre) return;
+    // Reveal the pre / hide the empty hint on first line.
+    if (empty) empty.style.display = 'none';
+    if (note) note.style.display = '';
+    pre.style.display = '';
+    var atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    pre.textContent += text + '\n';
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+
+  function startFollow() {
+    if (!window.EventSource || es) return;
+    es = new EventSource('/admin/dashboard/logs/' + encodeURIComponent(replicaId) + '/stream');
+    es.onmessage = function (e) { appendLine(e.data); };
+    es.onerror = function () {
+      // The stream closed (container stopped, or network).
+      // Leave the button in "following" state so the browser's
+      // own auto-reconnect can resume; the user can also click
+      // to stop.
+    };
+    if (btnText) btnText.textContent = stopLabel;
+    if (btnIcon) { btnIcon.classList.remove('ti-player-play'); btnIcon.classList.add('ti-player-pause'); }
+  }
+
+  function stopFollow() {
+    if (es) { es.close(); es = null; }
+    if (btnText) btnText.textContent = followLabel;
+    if (btnIcon) { btnIcon.classList.remove('ti-player-pause'); btnIcon.classList.add('ti-player-play'); }
+  }
+
+  if (btn) {
+    btn.addEventListener('click', function () {
+      if (es) stopFollow(); else startFollow();
+    });
+  }
+})();
+</script>
 
 {% endblock %}

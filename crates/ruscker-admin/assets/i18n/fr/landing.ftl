@@ -252,3 +252,5 @@ admin-dashboard-action-stop = Arrêter
 admin-dashboard-action-restart = Redémarrer
 admin-dashboard-confirm-stop = Arrêter cette réplique ? L auto-scaler peut la recréer si le minimum configuré l exige.
 admin-dashboard-confirm-restart = Redémarrer cette réplique ? La session active sera perdue.
+admin-logs-follow = En direct
+admin-logs-follow-stop = Arrêter

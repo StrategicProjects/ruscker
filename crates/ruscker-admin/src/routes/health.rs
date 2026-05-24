@@ -58,6 +58,18 @@ async fn healthz() -> Response {
 /// `200` with `{"status":"ready", ...}` when all checks pass, or
 /// `503` with `{"status":"not_ready", ...}` when any fails.
 async fn readyz(State(state): State<AppState>) -> Response {
+    // Shutting down: report `not ready` immediately so the load
+    // balancer deregisters this instance before the listener
+    // closes. Skip the dependency probes — we're going away
+    // regardless of their state.
+    if state.draining.load(std::sync::atomic::Ordering::SeqCst) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(json!({ "status": "draining" })),
+        )
+            .into_response();
+    }
+
     let mut checks = serde_json::Map::new();
     let mut ready = true;
 

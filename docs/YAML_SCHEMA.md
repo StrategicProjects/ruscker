@@ -48,6 +48,7 @@ ignored by Ruscker.
 | `heartbeat-rate` | ms | `10000` | Client heartbeat interval |
 | `heartbeat-timeout` | ms | `3600000` | Session expiry; `-1` = never |
 | `container-wait-time` | ms | `60000` | Max wait for container Ready |
+| `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `container-log-path` | path | none | Directory for per-container logs |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |

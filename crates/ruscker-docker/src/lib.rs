@@ -234,7 +234,20 @@ impl LocalDockerBackend {
 #[async_trait]
 impl ContainerBackend for LocalDockerBackend {
     async fn spawn(&self, spec_id: &str, image: &str) -> CoreResult<Replica> {
-        self.spawn_with_port(spec_id, image, DEFAULT_INNER_PORT).await
+        // Inherent method shadowed by the trait method below — call
+        // the inherent one explicitly via Self::.
+        Self::spawn_with_port(self, spec_id, image, DEFAULT_INNER_PORT).await
+    }
+
+    /// Trait override: routes through the inherent method that
+    /// already does the bollard work.
+    async fn spawn_with_port(
+        &self,
+        spec_id: &str,
+        image: &str,
+        inner_port: u16,
+    ) -> CoreResult<Replica> {
+        Self::spawn_with_port(self, spec_id, image, inner_port).await
     }
 
     async fn stop(&self, replica_id: &ReplicaId) -> CoreResult<()> {
@@ -344,21 +357,64 @@ impl ContainerBackend for LocalDockerBackend {
     }
 }
 
-/// Poll a TCP connect against `addr` until success or
-/// [`READINESS_TIMEOUT`]. Doesn't issue an HTTP health-check —
-/// that's a per-spec concern (some Shiny apps take a few seconds
-/// to render the first response after the TCP socket is up).
+/// Two-phase readiness:
+///
+/// 1. **TCP connect** — wait until Docker is forwarding the port.
+///    This succeeds the moment Docker creates the binding, often
+///    before the containerized app has called `accept()`.
+/// 2. **HTTP HEAD `/`** — wait until the app actually answers any
+///    HTTP request. ANY response (200, 404, 500) means the
+///    process is alive and serving; we just need the connection
+///    not to be closed mid-handshake. Without this second phase,
+///    proxied requests immediately after spawn race the app's
+///    own readiness and get `connection closed before message
+///    completed`.
+///
+/// Per-spec health-check overrides (e.g. `api.health_path`) are a
+/// Phase 3.5 refinement. For now we settle for "any HTTP response
+/// means ready".
 async fn wait_for_ready(addr: SocketAddr) -> CoreResult<()> {
     let deadline = std::time::Instant::now() + READINESS_TIMEOUT;
+
+    // Phase 1: TCP connect.
     loop {
         match TcpStream::connect(addr).await {
-            Ok(_) => return Ok(()),
+            Ok(_) => break,
             Err(_) if std::time::Instant::now() < deadline => {
                 sleep(READINESS_INTERVAL).await;
             }
             Err(e) => {
                 return Err(CoreError::Backend(format!(
                     "container at {addr} never accepted TCP within {:?}: {e}",
+                    READINESS_TIMEOUT
+                )));
+            }
+        }
+    }
+
+    // Phase 2: HTTP HEAD / with a tiny budget. The app might
+    // still be initializing its router. Tiny manual HTTP/1.1
+    // request — no need to pull a client just for this.
+    let req = b"HEAD / HTTP/1.1\r\nHost: ruscker-readiness\r\nConnection: close\r\n\r\n";
+    loop {
+        let attempt = async {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut s = TcpStream::connect(addr).await?;
+            s.write_all(req).await?;
+            // Read up to 64 bytes — enough to know the app sent
+            // *something* back (status line). We don't parse it.
+            let mut buf = [0u8; 64];
+            let n = s.read(&mut buf).await?;
+            std::io::Result::Ok(n)
+        };
+        match tokio::time::timeout(Duration::from_secs(2), attempt).await {
+            Ok(Ok(n)) if n > 0 => return Ok(()),
+            _ if std::time::Instant::now() < deadline => {
+                sleep(READINESS_INTERVAL).await;
+            }
+            _ => {
+                return Err(CoreError::Backend(format!(
+                    "container at {addr} accepted TCP but never answered HTTP within {:?}",
                     READINESS_TIMEOUT
                 )));
             }

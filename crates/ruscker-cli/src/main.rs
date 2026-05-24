@@ -119,6 +119,12 @@ enum Command {
         /// /admin/credentials shows a hint instead of the form.
         #[arg(long, env = "RUSCKER_MASTER_KEY")]
         master_key: Option<String>,
+
+        /// Enable the local Docker backend. Required for the
+        /// proxy routes (`/app/*`, `/api/*`) to actually spawn
+        /// containers. Without it those routes return 503.
+        #[arg(long)]
+        docker: bool,
     },
 }
 
@@ -132,8 +138,8 @@ fn main() -> Result<()> {
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
         Command::Export { db } => cmd_export(&db),
-        Command::Serve { config, bind, images_dir, db, admin_token, master_key } => {
-            cmd_serve(&config, bind, images_dir, db, admin_token, master_key)
+        Command::Serve { config, bind, images_dir, db, admin_token, master_key, docker } => {
+            cmd_serve(&config, bind, images_dir, db, admin_token, master_key, docker)
         }
     }
 }
@@ -196,6 +202,7 @@ fn cmd_serve(
     db_path: Option<PathBuf>,
     admin_token: Option<String>,
     master_key: Option<String>,
+    docker: bool,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
@@ -236,6 +243,11 @@ fn cmd_serve(
         }
         if let Some(k) = master_key {
             server = server.with_master_key(k).context("invalid --master-key")?;
+        }
+        if docker {
+            let backend = ruscker_docker::LocalDockerBackend::local()
+                .context("connect to Docker daemon")?;
+            server = server.with_backend(std::sync::Arc::new(backend));
         }
         if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;

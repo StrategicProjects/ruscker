@@ -28,6 +28,8 @@ fn app_state() -> AppState {
         db: None,
         images_dir: None,
         master_key: Default::default(),
+        backend: None,
+        replicas: std::sync::Arc::new(tokio::sync::RwLock::new(Default::default())),
     }
 }
 

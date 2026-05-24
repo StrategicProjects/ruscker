@@ -21,10 +21,15 @@
 //! - **Noise tolerance**: a brief saturation spike or an idle
 //!   blip doesn't ping-pong the replica count.
 //! - **Flap dampening**: the worst-case flap (one user, one
-//!   seat, long sticky session) is now `saturation_grace +
-//!   idle_grace` ticks instead of `1 + idle_grace`. Doesn't
-//!   eliminate the flap, but stretches it from ~40s to ~50s+
-//!   per cycle so it's less wasteful and more legible in logs.
+//!   seat, long sticky session) is stretched by both the
+//!   hysteresis windows AND a post-drop cooldown
+//!   ([`DEFAULT_SCALE_DOWN_COOLDOWN_TICKS`]) that suppresses
+//!   saturation scale-up of a spec right after it was scaled
+//!   down. A spec we just dropped a replica from is almost
+//!   certainly still saturated (the session that pinned it
+//!   didn't leave), so without the cooldown we'd respawn
+//!   immediately. With it, the cycle is at least
+//!   `idle_grace + cooldown + saturation_grace` ticks.
 //!
 //! Spawns are funneled through the same per-spec coalescer as
 //! on-demand spawns, so a cold-start request that arrives at
@@ -64,6 +69,22 @@ pub const DEFAULT_IDLE_GRACE_TICKS: u32 = 3;
 /// "spawn on first saturated observation" behavior.
 pub const DEFAULT_SATURATION_GRACE_TICKS: u32 = 2;
 
+/// After scale-down stops a replica for a spec, suppress
+/// saturation-driven scale-up of that spec for this many ticks.
+/// With the default 10s interval that's ~60s. This breaks the
+/// residual spawn↔drop flap that the two-counter hysteresis
+/// only dampens: with `seats-per-container: 1` and one
+/// long-lived sticky session, replica A is permanently
+/// saturated, so right after we drop the idle replica B the
+/// saturation branch would want to spawn B again. The cooldown
+/// holds that off, so the flap (if load truly stays this shape)
+/// happens at most once per `idle_grace + cooldown + saturation_grace`
+/// window instead of once per `idle_grace + saturation_grace`.
+///
+/// Below-min and genuinely-growing load are unaffected — the
+/// cooldown only gates the *saturation* scale-up path.
+pub const DEFAULT_SCALE_DOWN_COOLDOWN_TICKS: u32 = 6;
+
 /// Spawn the scaler loop as a detached tokio task. The returned
 /// handle is dropped at shutdown — there's no graceful stop
 /// because the loop only does idempotent work; an abrupt drop
@@ -74,14 +95,16 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
             ?interval,
             idle_grace_ticks = DEFAULT_IDLE_GRACE_TICKS,
             saturation_grace_ticks = DEFAULT_SATURATION_GRACE_TICKS,
+            scale_down_cooldown_ticks = DEFAULT_SCALE_DOWN_COOLDOWN_TICKS,
             "auto-scaler started"
         );
-        // Per-replica idle-tick counter and per-spec saturated-
-        // tick counter, kept inside the task so no locking is
-        // needed. Both reset to zero when their underlying
-        // condition stops holding.
+        // Per-replica idle-tick counter, per-spec saturated-tick
+        // counter, and per-spec post-drop cooldown — all kept
+        // inside the task so no locking is needed. Each resets
+        // when its underlying condition stops holding.
         let mut idle_ticks: HashMap<ReplicaId, u32> = HashMap::new();
         let mut saturation_ticks: HashMap<String, u32> = HashMap::new();
+        let mut cooldown: HashMap<String, u32> = HashMap::new();
         let mut ticker = tokio::time::interval(interval);
         // `MissedTickBehavior::Skip` so a long pull doesn't leave
         // a backlog of ticks queued — we just resume on the next
@@ -93,8 +116,10 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
                 &state,
                 &mut idle_ticks,
                 &mut saturation_ticks,
+                &mut cooldown,
                 DEFAULT_IDLE_GRACE_TICKS,
                 DEFAULT_SATURATION_GRACE_TICKS,
+                DEFAULT_SCALE_DOWN_COOLDOWN_TICKS,
             )
             .await;
         }
@@ -107,21 +132,27 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
 ///
 /// - `idle_ticks` — per-replica observed-idle counter.
 /// - `saturation_ticks` — per-spec observed-saturated counter.
+/// - `cooldown` — per-spec remaining post-drop cooldown ticks.
 /// - `drop_after_ticks` — hysteresis threshold for scale-down.
 /// - `spawn_after_saturated_ticks` — hysteresis threshold for
 ///   scale-up on saturation. Below-min spawns never use this;
 ///   they're baseline capacity, not load-driven.
+/// - `cooldown_ticks` — how long to suppress saturation
+///   scale-up after a scale-down (per spec).
 ///
 /// Scale-up and scale-down are mutually exclusive for a single
 /// spec on a single tick: a saturated spec by definition has no
 /// idle replicas, and an over-min spec with idle replicas isn't
 /// saturated.
+#[allow(clippy::too_many_arguments)]
 async fn tick(
     state: &AppState,
     idle_ticks: &mut HashMap<ReplicaId, u32>,
     saturation_ticks: &mut HashMap<String, u32>,
+    cooldown: &mut HashMap<String, u32>,
     drop_after_ticks: u32,
     spawn_after_saturated_ticks: u32,
+    cooldown_ticks: u32,
 ) {
     let Some(backend) = state.backend.clone() else {
         return;
@@ -145,10 +176,11 @@ async fn tick(
     update_idle_ticks(idle_ticks, &registry_snap);
 
     // Spec ids present in this tick's config — used to GC
-    // stale saturation counters for deleted/renamed specs.
+    // stale per-spec counters for deleted/renamed specs.
     let known_spec_ids: std::collections::HashSet<&str> =
         specs.iter().map(|s| s.id.as_str()).collect();
     saturation_ticks.retain(|id, _| known_spec_ids.contains(id.as_str()));
+    cooldown.retain(|id, _| known_spec_ids.contains(id.as_str()));
 
     for spec in &specs {
         let kind = spec.kind();
@@ -161,6 +193,18 @@ async fn tick(
 
         let min = spec.effective_min_replicas() as usize;
         let max = spec.effective_max_replicas() as usize;
+
+        // Read the post-drop cooldown for this spec, then
+        // decrement it (creating no entry if absent). `cooling`
+        // reflects the pre-decrement value so a cooldown of N
+        // suppresses exactly N ticks.
+        let cooling = cooldown.get(&spec.id).copied().unwrap_or(0) > 0;
+        if let Some(c) = cooldown.get_mut(&spec.id) {
+            *c = c.saturating_sub(1);
+            if *c == 0 {
+                cooldown.remove(&spec.id);
+            }
+        }
 
         // Per-spec snapshot — small Vec; not worth threading
         // through the registry-wide snapshot above.
@@ -190,6 +234,17 @@ async fn tick(
         //     ticks. Only spawn once the counter crosses the
         //     threshold; reset on any non-saturated observation.
         if count < max && all_saturated(&snap) {
+            // Post-drop cooldown: a spec we just scaled down is
+            // very likely still saturated (the long-lived
+            // session that pinned it never left). Holding off
+            // the saturation spawn here is what actually breaks
+            // the flap. Keep the counter at zero so when the
+            // cooldown lifts we still require a fresh saturation
+            // streak rather than spawning instantly.
+            if cooling {
+                saturation_ticks.remove(&spec.id);
+                continue;
+            }
             let n = saturation_ticks
                 .entry(spec.id.clone())
                 .and_modify(|n| *n += 1)
@@ -256,6 +311,13 @@ async fn tick(
                     // somehow returns (it can't — uuids — but
                     // belt-and-braces).
                     idle_ticks.remove(&r.id);
+                }
+                // Arm the post-drop cooldown so the next saturation
+                // spawn for this spec waits — breaks the flap.
+                // Set after this tick's decrement so it lasts the
+                // full window. `0` disables (tests).
+                if cooldown_ticks > 0 {
+                    cooldown.insert(spec.id.clone(), cooldown_ticks);
                 }
             }
         }
@@ -480,7 +542,7 @@ proxy:
             backend.clone(),
         );
 
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 3, "spawned to min");
         assert_eq!(
             state.replicas.read().await.replicas_of("warmpool").len(),
@@ -488,7 +550,7 @@ proxy:
         );
 
         // Second tick: already at min, no more spawns.
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 3, "no extra spawns");
     }
 
@@ -509,7 +571,7 @@ proxy:
 "#,
             backend.clone(),
         );
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -530,7 +592,7 @@ proxy:
 "#,
             backend.clone(),
         );
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -571,7 +633,7 @@ proxy:
             reg.add(pre2);
         }
 
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             0,
@@ -619,7 +681,7 @@ proxy:
             .await
             .add(replica_with_sessions("hot", 1, 1));
 
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             1,
@@ -653,7 +715,7 @@ proxy:
             reg.add(r1);
             reg.add(r2);
         }
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -679,7 +741,7 @@ proxy:
             .write()
             .await
             .add(replica_with_sessions("gradual", 1, 1));
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             1,
@@ -715,7 +777,7 @@ proxy:
             reg.add(idle1);
             reg.add(idle2);
         }
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         let remaining = state.replicas.read().await.replicas_of("shrink").to_vec();
         assert_eq!(remaining.len(), 1, "two idle stopped, busy stays");
         assert_eq!(remaining[0].sessions_active, 1);
@@ -744,7 +806,7 @@ proxy:
             reg.add(replica_with_sessions("floor", 0, 5));
             reg.add(replica_with_sessions("floor", 0, 5));
         }
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(
             state.replicas.read().await.replicas_of("floor").len(),
             2,
@@ -776,7 +838,7 @@ proxy:
             reg.add(replica_with_sessions("half", 1, 5));
             reg.add(replica_with_sessions("half", 1, 5));
         }
-        tick(&state, &mut HashMap::new(), &mut HashMap::new(), 1, 1).await;
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(state.replicas.read().await.replicas_of("half").len(), 2);
     }
 
@@ -792,6 +854,114 @@ proxy:
             replica_with_sessions("a", 5, 5),
             replica_with_sessions("a", 3, 3),
         ]));
+    }
+
+    // -------------------------------------------------------------
+    // Post-drop cooldown — suppress saturation respawn after a drop
+    // -------------------------------------------------------------
+
+    #[tokio::test]
+    async fn cooldown_suppresses_saturation_respawn_after_drop() {
+        // The flap scenario: seats=1, one pinned session keeps
+        // replica A saturated forever; replica B is idle. With a
+        // cooldown armed, after B is dropped the next ticks must
+        // NOT respawn despite A staying saturated — until the
+        // cooldown expires.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: flappy
+    display-name: Flappy
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 3
+"#,
+            backend.clone(),
+        );
+        // A: saturated (1/1). B: idle (0/1). count=2, min=1.
+        let busy = replica_with_sessions("flappy", 1, 1);
+        let idle = replica_with_sessions("flappy", 0, 1);
+        let idle_id = idle.id.clone();
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(busy);
+            reg.add(idle);
+        }
+
+        let mut idle_ticks = HashMap::new();
+        let mut sat = HashMap::new();
+        let mut cooldown = HashMap::new();
+        // idle grace = 1 (drop immediately), saturation grace = 1
+        // (would respawn immediately if not for cooldown),
+        // cooldown = 3 ticks.
+        let (drop_after, sat_after, cd) = (1u32, 1u32, 3u32);
+
+        // Tick 1: B is idle past grace → drop B → count=1, cooldown armed.
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+        assert_eq!(state.replicas.read().await.replicas_of("flappy").len(), 1);
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 0, "drop only, no spawn yet");
+        assert!(cooldown.contains_key("flappy"), "cooldown armed after drop");
+
+        // Ticks 2-4: A still saturated (1/1), count=1<max, but
+        // cooldown suppresses the saturation spawn.
+        for t in 0..3 {
+            tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+            assert_eq!(
+                backend.spawns.load(Ordering::SeqCst),
+                0,
+                "no respawn during cooldown (sub-tick {t})"
+            );
+        }
+
+        // Cooldown now expired → saturation spawn allowed again.
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "saturation respawn resumes after cooldown lifts"
+        );
+    }
+
+    #[tokio::test]
+    async fn cooldown_zero_disables_suppression() {
+        // With cooldown=0, the old behavior holds: saturated
+        // spec respawns right after a drop.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: nocd
+    display-name: NoCooldown
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 3
+"#,
+            backend.clone(),
+        );
+        let busy = replica_with_sessions("nocd", 1, 1);
+        let idle = replica_with_sessions("nocd", 0, 1);
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(busy);
+            reg.add(idle);
+        }
+        let mut idle_ticks = HashMap::new();
+        let mut sat = HashMap::new();
+        let mut cooldown = HashMap::new();
+
+        // Tick 1: drop the idle one (count 2→1). cooldown=0 → not armed.
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 0).await;
+        assert!(!cooldown.contains_key("nocd"));
+        // Tick 2: A saturated, count=1<max → respawn immediately.
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 0).await;
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
     }
 
     // -------------------------------------------------------------
@@ -865,16 +1035,16 @@ proxy:
 
         // Tick 1 + 2: idle counter is 1, then 2 — both under
         // threshold, replica stays.
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 2);
         assert_eq!(counts.get(&idle_id), Some(&1));
 
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 2);
         assert_eq!(counts.get(&idle_id), Some(&2));
 
         // Tick 3: counter reaches 3 = threshold → drop.
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 1);
         assert!(counts.get(&idle_id).is_none(), "dropped replica's counter GC'd");
     }
@@ -911,17 +1081,17 @@ proxy:
         let sat_threshold = 3;
 
         // Tick 1: saturated, counter=1, no spawn yet.
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, sat_threshold).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, sat_threshold, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
         assert_eq!(sat_counts.get("hot"), Some(&1));
 
         // Tick 2: saturated, counter=2, still no spawn.
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, sat_threshold).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, sat_threshold, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
         assert_eq!(sat_counts.get("hot"), Some(&2));
 
         // Tick 3: counter reaches 3 → spawn → counter resets.
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, sat_threshold).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, sat_threshold, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
         assert!(sat_counts.get("hot").is_none(), "counter resets after spawn");
         assert_eq!(state.replicas.read().await.replicas_of("hot").len(), 2);
@@ -951,15 +1121,15 @@ proxy:
         let mut sat_counts = HashMap::new();
 
         // Two saturated ticks (counter goes to 2).
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, 3).await;
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, 3).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 3, 0).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 3, 0).await;
         assert_eq!(sat_counts.get("bursty"), Some(&2));
 
         // Session drops — replica no longer saturated.
         state.replicas.write().await.dec_sessions(&rid);
 
         // Next tick: not saturated → counter cleared.
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, 3).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 3, 0).await;
         assert!(
             sat_counts.get("bursty").is_none(),
             "counter clears the instant saturation lifts"
@@ -972,7 +1142,7 @@ proxy:
 
         // Session comes back — must wait the full grace again.
         state.replicas.write().await.inc_sessions(&rid);
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, 3).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 3, 0).await;
         assert_eq!(sat_counts.get("bursty"), Some(&1));
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
@@ -1003,7 +1173,7 @@ proxy:
         let mut idle_counts = HashMap::new();
         let mut sat_counts = HashMap::new();
 
-        tick(&state, &mut idle_counts, &mut sat_counts, 1, 1).await;
+        tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
     }
 
@@ -1043,8 +1213,8 @@ proxy:
         let threshold = 3;
 
         // Two idle ticks accumulate grace=2.
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(counts.get(&idle_id), Some(&2));
 
         // Replica gets a session — reset to active.
@@ -1052,7 +1222,7 @@ proxy:
             let mut reg = state.replicas.write().await;
             reg.inc_sessions(&idle_id);
         }
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert!(counts.get(&idle_id).is_none(), "active replica's grace resets");
         assert_eq!(
             state.replicas.read().await.replicas_of("bouncy").len(),
@@ -1065,7 +1235,7 @@ proxy:
             let mut reg = state.replicas.write().await;
             reg.dec_sessions(&idle_id);
         }
-        tick(&state, &mut counts, &mut HashMap::new(), threshold, 1).await;
+        tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(
             counts.get(&idle_id),
             Some(&1),

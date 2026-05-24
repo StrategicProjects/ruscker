@@ -50,6 +50,23 @@ pub enum CoreError {
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
+/// Backend-neutral registry credentials. Lives in `ruscker-core`
+/// so the trait surface doesn't drag a bollard dependency into
+/// callers. Each backend converts to its own native type at the
+/// pull boundary.
+///
+/// `server_address` is the registry hostname (`registry.example.com`,
+/// `ghcr.io`, etc.) — leave it `None` for Docker Hub. The username
+/// and password are required when present; partial credentials
+/// (just a username, just a password) make no sense and the
+/// resolver should produce `None` instead.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegistryCredentials {
+    pub username: String,
+    pub password: String,
+    pub server_address: Option<String>,
+}
+
 /// Abstract container backend. The default implementation is Docker
 /// (via bollard) in `ruscker-docker`. Future backends could include
 /// Kubernetes, Docker Swarm, or a multi-host scheduler.
@@ -77,6 +94,22 @@ pub trait ContainerBackend: Send + Sync {
         _inner_port: u16,
     ) -> CoreResult<Replica> {
         self.spawn(spec_id, image).await
+    }
+
+    /// Start a container with an explicit inner port AND optional
+    /// registry credentials for pulling private images. Default
+    /// impl drops the credentials and falls back to
+    /// [`Self::spawn_with_port`] so backends that don't support
+    /// private registries (or haven't been updated yet) keep
+    /// working for public images.
+    async fn spawn_with_port_and_creds(
+        &self,
+        spec_id: &str,
+        image: &str,
+        inner_port: u16,
+        _creds: Option<&RegistryCredentials>,
+    ) -> CoreResult<Replica> {
+        self.spawn_with_port(spec_id, image, inner_port).await
     }
 
     /// Gracefully stop a replica. The implementation should:

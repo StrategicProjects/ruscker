@@ -337,8 +337,13 @@ async fn spawn_one(
         .and_then(|a| a.port)
         .or_else(|| infer_inner_port(spec));
 
+    let creds = crate::routes::proxy::creds_from_spec(spec);
     let mut replica = match inner_port {
-        Some(port) => backend.spawn_with_port(&spec.id, image, port).await,
+        Some(port) => {
+            backend
+                .spawn_with_port_and_creds(&spec.id, image, port, creds.as_ref())
+                .await
+        }
         None => backend.spawn(&spec.id, image).await,
     }
     .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;

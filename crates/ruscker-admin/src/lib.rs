@@ -245,7 +245,7 @@ impl AdminServer {
             let _ = sessions::spawn(
                 self.state.sessions.clone(),
                 self.state.replicas.clone(),
-                self.state.config.proxy.heartbeat_timeout,
+                self.state.config.clone(),
             );
             // Dashboard metrics: keep `state.metrics` fresh in
             // the background so dashboard renders are read-only

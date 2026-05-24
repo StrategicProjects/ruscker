@@ -30,6 +30,9 @@ fn parses_full_sepe_config() {
     assert!(config.proxy.hide_navbar);
     assert_eq!(config.proxy.heartbeat_rate, 10_000);
     assert_eq!(config.proxy.heartbeat_timeout, 3_600_000);
+    // `shutdown-grace-ms` is a Ruscker extension absent from the
+    // SEPE config — it must fall back to the 30s default.
+    assert_eq!(config.proxy.shutdown_grace_ms, 30_000);
     assert_eq!(config.proxy.port, 8080);
     assert_eq!(config.proxy.bind_address, "127.0.0.1");
 }

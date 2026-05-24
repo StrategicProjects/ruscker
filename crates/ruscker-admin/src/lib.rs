@@ -100,6 +100,13 @@ pub struct AppState {
     /// [`metrics_cache::REFRESH_INTERVAL`]; the dashboard reads
     /// straight from here without ever waiting on Docker.
     pub metrics: metrics_cache::MetricsCache,
+
+    /// Set to `true` when a graceful shutdown begins (SIGTERM /
+    /// Ctrl-C). While set, `/readyz` reports `draining` (503) so
+    /// load balancers stop routing new traffic before the listener
+    /// closes. Shared (Arc) so the signal handler and every request
+    /// handler observe the same flag.
+    pub draining: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -139,6 +146,7 @@ impl AdminServer {
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
             sessions: std::sync::Arc::new(sessions::SessionTracker::new()),
             metrics: metrics_cache::MetricsCache::new(),
+            draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
         Ok(Self {
             addr,
@@ -269,10 +277,92 @@ impl AdminServer {
             .with_context(|| format!("bind {}", self.addr))?;
         info!(addr = %self.addr, images_dir = ?self.images_dir, "ruscker-admin listening");
         axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal(self.state.clone()))
             .await
             .context("axum serve")?;
+        info!("shutdown complete");
         Ok(())
     }
+}
+
+/// Resolves when the process receives a termination signal, then
+/// runs the graceful-drain sequence. Returning from this future is
+/// what tells `axum::serve` to stop accepting new connections and
+/// finish the in-flight ones.
+///
+/// Sequence on signal:
+/// 1. Flip [`AppState::draining`] so `/readyz` starts replying
+///    `503 draining` — load balancers deregister this instance.
+/// 2. Arm a hard-deadline watchdog that force-exits the process if
+///    draining overruns. Long-lived WebSocket sessions (Shiny,
+///    Streamlit) never close on their own, so without this the
+///    in-flight wait would hang forever.
+/// 3. Wait for active sessions to drain, polling
+///    [`sessions::SessionTracker::len`], up to
+///    `proxy.shutdown-grace-ms`. Exits the wait early the moment
+///    the last session ends.
+async fn shutdown_signal(state: AppState) {
+    use std::sync::atomic::Ordering;
+    use tokio::time::{sleep, Duration, Instant};
+
+    // SIGINT (Ctrl-C) on every platform; SIGTERM too on Unix
+    // (what `systemctl stop` / `docker stop` / k8s send).
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            // If we can't install the handler, never resolve this
+            // arm — Ctrl-C still works.
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+
+    let grace = Duration::from_millis(state.config.proxy.shutdown_grace_ms);
+    let active = state.sessions.len();
+    info!(
+        grace_ms = state.config.proxy.shutdown_grace_ms,
+        active_sessions = active,
+        "shutdown signal received; draining"
+    );
+    state.draining.store(true, Ordering::SeqCst);
+
+    // Watchdog: guarantee the process exits even if in-flight
+    // connections (notably long-lived WebSockets) never close. The
+    // extra slack covers the time axum spends finishing in-flight
+    // HTTP requests after this future resolves.
+    let watchdog = grace + Duration::from_secs(5);
+    tokio::spawn(async move {
+        sleep(watchdog).await;
+        tracing::warn!(
+            deadline_ms = watchdog.as_millis() as u64,
+            "graceful-shutdown deadline exceeded; forcing exit"
+        );
+        std::process::exit(0);
+    });
+
+    // Drain loop: wait for sessions to wind down, but never longer
+    // than the grace window. Idle instances (no sessions) fall
+    // through immediately.
+    let deadline = Instant::now() + grace;
+    while !state.sessions.is_empty() && Instant::now() < deadline {
+        sleep(Duration::from_millis(250)).await;
+    }
+    info!(
+        remaining_sessions = state.sessions.len(),
+        "drain window elapsed; closing listener"
+    );
 }
 
 /// Compose the axum router. Pulled out so tests can hit it via

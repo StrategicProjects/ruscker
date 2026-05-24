@@ -128,6 +128,16 @@ pub struct Proxy {
     #[serde(rename = "container-wait-time")]
     pub container_wait_time: u64,
 
+    /// How long to wait for active sessions to drain on graceful
+    /// shutdown (SIGTERM / Ctrl-C) before forcing exit, in
+    /// milliseconds. During the drain window `/readyz` reports
+    /// `draining` so load balancers stop routing new traffic; the
+    /// process exits early once the last session ends. `0` exits
+    /// as soon as in-flight HTTP requests finish. Ruscker
+    /// extension — not present in ShinyProxy YAML.
+    #[serde(rename = "shutdown-grace-ms")]
+    pub shutdown_grace_ms: u64,
+
     /// Directory to write per-container logs to.
     #[serde(rename = "container-log-path")]
     pub container_log_path: Option<PathBuf>,
@@ -167,6 +177,7 @@ impl Default for Proxy {
             heartbeat_rate: 10_000,
             heartbeat_timeout: 3_600_000,
             container_wait_time: 60_000,
+            shutdown_grace_ms: 30_000,
             container_log_path: None,
             port: 8080,
             bind_address: "0.0.0.0".to_string(),

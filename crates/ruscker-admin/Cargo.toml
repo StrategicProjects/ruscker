@@ -38,8 +38,23 @@ tracing = { workspace = true }
 # Misc
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+uuid = { workspace = true }
+
+# Persistence (Phase 2)
+sqlx = { workspace = true }
+
+# Image library (Phase 2)
+image = { workspace = true }
+infer = { workspace = true }
+
+# Credentials store (Phase 2)
+aes-gcm = { workspace = true }
+zeroize = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

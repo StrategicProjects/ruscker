@@ -28,7 +28,7 @@ tokio = { version = "1.52", features = ["full"] }
 async-trait = "0.1.89"
 
 # Web framework
-axum = { version = "0.8", features = ["ws", "macros"] }
+axum = { version = "0.8", features = ["ws", "macros", "multipart"] }
 axum-extra = { version = "0.12", features = ["cookie"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "fs", "cors"] }
@@ -67,6 +67,12 @@ fluent-bundle = "0.16"
 unic-langid = "0.9"
 include_dir = "0.7"
 
+# Image processing (Phase 2 image library). default-features=false so
+# we avoid pulling AVIF/EXR/HDR/TIFF/...  we only need PNG/JPEG/WebP.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "rayon"] }
+# Sniff MIME from magic bytes; client Content-Type can lie.
+infer = "0.19"
+
 # Database (SQLite via sqlx)
 sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
 
@@ -76,6 +82,9 @@ bollard = "0.21"
 # Cryptography
 ring = "0.17.14"
 base64 = "0.22"
+aes-gcm = "0.10"
+zeroize = "1.8"
+hex = "0.4"
 
 # Testing
 pretty_assertions = "1.4"

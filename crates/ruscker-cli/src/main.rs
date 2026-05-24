@@ -63,6 +63,29 @@ enum Command {
         path: PathBuf,
     },
 
+    /// Import a YAML configuration into a SQLite admin database.
+    /// Idempotent — re-running with unchanged YAML produces zero
+    /// writes. Specs in the DB but absent from the YAML are NOT
+    /// deleted (separate operator action).
+    Import {
+        /// Path to the source YAML.
+        path: PathBuf,
+
+        /// Path to the SQLite file. Created with the schema if
+        /// missing.
+        #[arg(long)]
+        db: PathBuf,
+    },
+
+    /// Reconstruct an application.yml from a SQLite admin database
+    /// and write it to stdout. Pipes naturally into `> backup.yml`
+    /// or `| diff -u current.yml -` for change auditing.
+    Export {
+        /// Path to the SQLite file.
+        #[arg(long)]
+        db: PathBuf,
+    },
+
     /// Start the HTTP server (public landing in Phase 1; admin + proxy
     /// land in Phase 2+).
     Serve {
@@ -79,6 +102,23 @@ enum Command {
         /// no image route is mounted (cards fall back to tint-only).
         #[arg(long)]
         images_dir: Option<PathBuf>,
+
+        /// Path to the SQLite admin database. Required for `/admin/*`
+        /// routes to function. Without it, those routes return 503.
+        #[arg(long)]
+        db: Option<PathBuf>,
+
+        /// Admin auth token. Overrides `RUSCKER_ADMIN_TOKEN` env var
+        /// when set. Without either, /admin/* routes return 503.
+        #[arg(long, env = "RUSCKER_ADMIN_TOKEN")]
+        admin_token: Option<String>,
+
+        /// 32-byte master key for the credentials store. Accepts
+        /// hex (64 chars) or base64 (44 chars). Generate with
+        /// `openssl rand -hex 32`. Without this set,
+        /// /admin/credentials shows a hint instead of the form.
+        #[arg(long, env = "RUSCKER_MASTER_KEY")]
+        master_key: Option<String>,
     },
 }
 
@@ -90,16 +130,72 @@ fn main() -> Result<()> {
         Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
-        Command::Serve { config, bind, images_dir } => {
-            cmd_serve(&config, bind, images_dir)
+        Command::Import { path, db } => cmd_import(&path, &db),
+        Command::Export { db } => cmd_export(&db),
+        Command::Serve { config, bind, images_dir, db, admin_token, master_key } => {
+            cmd_serve(&config, bind, images_dir, db, admin_token, master_key)
         }
     }
+}
+
+fn cmd_export(db_path: &PathBuf) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let config = rt.block_on(async {
+        let pool = ruscker_admin::db::open(db_path).await?;
+        let c = ruscker_admin::db::export::reconstruct_config(&pool).await?;
+        pool.close().await;
+        anyhow::Ok(c)
+    })?;
+
+    // serde_yaml_ng's `to_string` emits a leading "---" document
+    // separator and trailing newline — both expected for YAML.
+    let yaml = serde_yaml_ng::to_string(&config).context("serialize Config to YAML")?;
+    print!("{yaml}");
+    Ok(())
+}
+
+fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
+    let config = Config::from_file(yaml_path).with_context(|| {
+        format!("failed to load config from {}", yaml_path.display())
+    })?;
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+
+    let report = rt.block_on(async {
+        let pool = ruscker_admin::db::open(db_path).await?;
+        let r = ruscker_admin::db::specs::import_all(&pool, &config).await?;
+        pool.close().await;
+        anyhow::Ok(r)
+    })?;
+
+    println!();
+    println!("  Ruscker import");
+    println!("  ──────────────");
+    println!("  from:  {}", yaml_path.display());
+    println!("  into:  {}", db_path.display());
+    println!();
+    println!("  specs:");
+    println!("    created    {:>4}", report.created);
+    println!("    updated    {:>4}", report.updated);
+    println!("    unchanged  {:>4}", report.unchanged);
+    println!();
+    println!("  ✓ done. {} specs in the DB.",
+        report.created + report.updated + report.unchanged);
+    Ok(())
 }
 
 fn cmd_serve(
     config_path: &PathBuf,
     bind_override: Option<std::net::SocketAddr>,
     images_dir_override: Option<PathBuf>,
+    db_path: Option<PathBuf>,
+    admin_token: Option<String>,
+    master_key: Option<String>,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
@@ -126,14 +222,27 @@ fn cmd_serve(
         candidate.is_dir().then_some(candidate)
     });
 
-    let mut server = ruscker_admin::AdminServer::new(addr, config)?;
-    if let Some(dir) = images_dir {
-        server = server.with_images_dir(dir);
-    }
-    tokio::runtime::Builder::new_multi_thread()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()?
-        .block_on(server.run())
+        .build()?;
+
+    rt.block_on(async {
+        let mut server = ruscker_admin::AdminServer::new(addr, config)?;
+        if let Some(dir) = images_dir {
+            server = server.with_images_dir(dir);
+        }
+        if let Some(token) = admin_token {
+            server = server.with_admin_token(token);
+        }
+        if let Some(k) = master_key {
+            server = server.with_master_key(k).context("invalid --master-key")?;
+        }
+        if let Some(path) = db_path {
+            let pool = ruscker_admin::db::open(&path).await?;
+            server = server.with_db(pool);
+        }
+        server.run().await
+    })
 }
 
 fn init_tracing(verbosity: u8) {

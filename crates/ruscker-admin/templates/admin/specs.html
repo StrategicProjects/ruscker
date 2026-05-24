@@ -1,0 +1,66 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-specs-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-specs-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-specs-subtitle") }}</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="text-xs text-[color:var(--text-faint)]">{{ specs.len() }}</span>
+    <a href="/admin/specs/new" class="admin-login-btn" style="padding:6px 10px;font-size:12px">
+      <i class="ti ti-plus" aria-hidden="true"></i>
+      {{ self.t("admin-specs-add") }}
+    </a>
+  </div>
+</div>
+
+{% if specs.is_empty() %}
+  <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)]">
+    <p>{{ self.t("admin-specs-empty") }}</p>
+    <pre class="mt-3 inline-block text-[11px] text-left bg-[color:var(--surface-soft)] px-3 py-2 rounded">ruscker import application.yml --db &lt;path&gt;</pre>
+  </div>
+{% else %}
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th>{{ self.t("admin-specs-col-id") }}</th>
+        <th>{{ self.t("admin-specs-col-name") }}</th>
+        <th>{{ self.t("admin-specs-col-kind") }}</th>
+        <th>{{ self.t("admin-specs-col-state") }}</th>
+        <th>{{ self.t("admin-specs-col-updated") }}</th>
+        <th>{{ self.t("admin-specs-col-version") }}</th>
+        <th class="actions-cell">{{ self.t("admin-specs-col-actions") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for spec in specs %}
+        <tr>
+          <td class="id-cell">{{ spec.id }}</td>
+          <td>
+            {% match spec.display_name %}
+              {% when Some with (n) %}{{ n }}
+              {% when None %}<span class="text-[color:var(--text-faint)]">—</span>
+            {% endmatch %}
+          </td>
+          <td><span class="pill pill-kind-{{ spec.kind }}">{{ spec.kind }}</span></td>
+          <td><span class="pill pill-state-{{ spec.state }}">{{ spec.state }}</span></td>
+          <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
+          <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
+          <td class="actions-cell">
+            <a href="/admin/specs/{{ spec.id }}/edit"
+               class="admin-nav-link"
+               title="{{ self.t("admin-specs-edit") }}">
+              <i class="ti ti-edit" aria-hidden="true"></i>
+            </a>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+
+{% endblock %}

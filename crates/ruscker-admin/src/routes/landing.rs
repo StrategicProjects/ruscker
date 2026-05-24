@@ -80,8 +80,18 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         total: cards.iter().filter(|c| c.active).count(),
     };
 
-    // Landing customization: header background + per-locale intro.
-    let lc = &state.config.proxy.landing_customization;
+    // Landing customization: read from DB when available
+    // (admin-editable), fall back to the YAML-derived value
+    // otherwise (Phase 1 / no-DB deployments).
+    let lc = match state.db.as_ref() {
+        Some(pool) => crate::db::landing::fetch(pool)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::warn!(error = ?err, "landing customization fetch failed; using YAML");
+                state.config.proxy.landing_customization.clone()
+            }),
+        None => state.config.proxy.landing_customization.clone(),
+    };
     let header_style = match (&lc.header_bg, &lc.header_fg) {
         (Some(bg), Some(fg)) => format!("background: {}; color: {};", bg, fg),
         (Some(bg), None) => format!("background: {};", bg),

@@ -45,6 +45,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/dashboard", get(index))
         .route("/admin/dashboard/events", get(events))
         .route("/admin/dashboard/logs/{replica_id}", get(logs))
+        .route("/admin/dashboard/logs/{replica_id}/stream", get(logs_stream))
         .route("/admin/dashboard/replicas/{replica_id}/stop", post(stop_replica))
         .route(
             "/admin/dashboard/replicas/{replica_id}/restart",
@@ -471,6 +472,43 @@ async fn logs(
     super::render(&page)
 }
 
+/// SSE stream of live log lines for a replica. The logs page's
+/// "Live" toggle opens an `EventSource` against this; each new
+/// line from the container becomes one SSE `data:` event. The
+/// stream ends when the container stops (bollard's follow
+/// stream completes), which the browser sees as the source
+/// closing.
+///
+/// Seeded with the last 100 lines so turning Live on shows
+/// recent context, not just lines that arrive after connect.
+async fn logs_stream(
+    _: AdminSession,
+    State(state): State<AppState>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    let rid = match parse_replica_id(&replica_id) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(backend) = state.backend.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
+    };
+
+    let line_stream = match backend.logs_follow(&rid, 100).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(replica = %replica_id, error = ?e, "logs_follow failed");
+            return (StatusCode::NOT_FOUND, format!("could not follow logs: {e}")).into_response();
+        }
+    };
+
+    use futures_util::StreamExt;
+    let event_stream = line_stream.map(|line| Ok::<_, Infallible>(Event::default().data(line)));
+    Sse::new(event_stream)
+        .keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL))
+        .into_response()
+}
+
 /// Resolve a `{replica_id}` path param to a `ReplicaId`,
 /// 400ing on a malformed UUID. Shared by the action handlers.
 fn parse_replica_id(s: &str) -> Result<ReplicaId, Response> {
@@ -723,15 +761,26 @@ mod tests {
         assert!(html.contains("11111111-2222-3333-4444-555555555555"));
         assert!(html.contains("starting nginx"));
         assert!(html.contains("worker process 1 started"));
-        // Tail note present, empty hint absent.
         assert!(html.contains("últimas linhas"));
-        assert!(!html.contains("Sem saída de log"));
+        // The empty hint div is always in the DOM now (the
+        // follow-mode JS toggles it), but with lines present it
+        // must be hidden with `display:none`.
+        assert!(
+            html.contains(r#"id="logs-empty" class="logs-empty" style="display:none""#),
+            "empty hint should be present-but-hidden when lines exist"
+        );
+        // The <pre> is visible (no inline display:none on it).
+        assert!(html.contains(r#"id="logs-pre">"#));
     }
 
     #[test]
     fn logs_page_renders_empty_hint() {
         let html = render_logs(vec![]);
+        // With no lines the empty hint is visible (no display:none).
+        assert!(html.contains(r#"id="logs-empty" class="logs-empty">"#));
         assert!(html.contains("Sem saída de log"));
+        // ...and the <pre> + note are hidden.
+        assert!(html.contains(r#"id="logs-pre" style="display:none""#));
     }
 
     #[test]

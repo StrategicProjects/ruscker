@@ -48,6 +48,23 @@ async def ws_handler(request):
                 await ws.close()
     return ws
 
+async def heartbeat():
+    # Emit a flushed line every 2s so the live-logs follow path
+    # has a steady stream to forward. stdout is unbuffered via
+    # PYTHONUNBUFFERED in the Dockerfile, so each line reaches
+    # `docker logs` immediately.
+    n = 0
+    while True:
+        print(f"heartbeat {n}", flush=True)
+        n += 1
+        await asyncio.sleep(2)
+
+async def on_startup(app):
+    app["hb"] = asyncio.create_task(heartbeat())
+
+async def on_cleanup(app):
+    app["hb"].cancel()
+
 app = web.Application()
 app.add_routes([
     web.get('/', index),
@@ -56,6 +73,8 @@ app.add_routes([
     web.get('/api/ping', ping),
     web.get('/ws', ws_handler),
 ])
+app.on_startup.append(on_startup)
+app.on_cleanup.append(on_cleanup)
 
 if __name__ == '__main__':
     web.run_app(app, host='0.0.0.0', port=8080)

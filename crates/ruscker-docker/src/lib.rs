@@ -458,6 +458,44 @@ impl ContainerBackend for LocalDockerBackend {
         let container_id = self.container_id_for_replica(replica_id).await?;
         self.logs_for_container(&container_id, tail).await
     }
+
+    async fn logs_follow(
+        &self,
+        replica_id: &ReplicaId,
+        tail: usize,
+    ) -> CoreResult<ruscker_core::LogStream> {
+        let container_id = self.container_id_for_replica(replica_id).await?;
+        // Clone the bollard handle (cheap — Arc inside) so the
+        // returned stream owns everything it needs and is
+        // `'static`. The `follow: true` stream stays open until
+        // the container exits.
+        let docker = self.docker.clone();
+        let opts = LogsOptionsBuilder::default()
+            .stdout(true)
+            .stderr(true)
+            .follow(true)
+            .tail(&tail.min(5_000).to_string())
+            .build();
+        let stream = async_stream::stream! {
+            let mut inner = docker.logs(&container_id, Some(opts));
+            while let Some(item) = inner.next().await {
+                match item {
+                    Ok(chunk) => {
+                        let text = chunk.to_string();
+                        for line in text.split_inclusive('\n') {
+                            yield line.trim_end_matches(['\r', '\n']).to_string();
+                        }
+                    }
+                    // A read error ends the follow — the
+                    // container likely went away. The SSE layer
+                    // turns stream-end into a closed event source,
+                    // which the browser may auto-reconnect.
+                    Err(_) => break,
+                }
+            }
+        };
+        Ok(Box::pin(stream))
+    }
 }
 
 impl LocalDockerBackend {

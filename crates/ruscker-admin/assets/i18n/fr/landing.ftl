@@ -273,3 +273,8 @@ admin-grad-linear = Linéaire
 admin-grad-radial = Radial
 admin-grad-add-stop = Ajouter une couleur
 admin-grad-remove-stop = Retirer la couleur
+
+# Spec form — card cover
+spec-form-cover = Couverture de la carte
+spec-form-cover-auto = Auto (teinte du type)
+spec-form-cover-auto-help = Utilise la teinte par défaut du type. Choisissez Uni ou Dégradé pour personnaliser.

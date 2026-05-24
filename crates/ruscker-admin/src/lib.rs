@@ -43,6 +43,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub locales: Arc<i18n::Locales>,
     pub admin_auth: auth::AdminAuth,
+    /// Global rate limiter for `/admin/login` — bounds brute
+    /// force against the admin token. Shared (Arc) so every
+    /// cloned `AppState` sees the same window.
+    pub login_limiter: Arc<auth::LoginRateLimiter>,
     /// Optional SQLite pool. `None` ⇒ admin CRUD routes 503
     /// because they have no source of truth to read or write.
     pub db: Option<SqlitePool>,
@@ -122,6 +126,7 @@ impl AdminServer {
             config: Arc::new(config),
             locales: Arc::new(locales),
             admin_auth: auth::AdminAuth::from_env(),
+            login_limiter: Arc::new(auth::LoginRateLimiter::default_policy()),
             db: None,
             images_dir: None,
             master_key: crypto::MasterKey::from_env().context("load master key")?,

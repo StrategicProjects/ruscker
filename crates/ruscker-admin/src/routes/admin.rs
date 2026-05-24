@@ -105,7 +105,22 @@ async fn login_submit(
             .into_response();
     }
 
+    // Rate limit: bound brute force against the token. Saturated
+    // window → 429 with Retry-After, before we even compare.
+    if !state.login_limiter.allow() {
+        let mut resp = (
+            StatusCode::TOO_MANY_REQUESTS,
+            "too many login attempts — try again shortly",
+        )
+            .into_response();
+        resp.headers_mut()
+            .insert(axum::http::header::RETRY_AFTER, "60".parse().unwrap());
+        return resp;
+    }
+
     if !state.admin_auth.matches(&form.token) {
+        // Count the failure toward the rate-limit window.
+        state.login_limiter.record_failure();
         // Re-render the form with the error banner. 401 status so
         // CLI clients / tests can distinguish.
         let page = LoginPage {
@@ -128,14 +143,20 @@ async fn login_submit(
         return resp;
     }
 
-    // Success — set the cookie. 24h lifetime; re-login required
-    // after that. Long enough that operators don't have to log in
-    // multiple times per day, short enough that a left-open tab on
-    // a shared device expires within a workday.
+    // Success — clear the failure window so a few fat-fingered
+    // attempts before getting it right don't linger.
+    state.login_limiter.record_success();
+
+    // Set the cookie. 24h lifetime; re-login required after that.
+    // `Secure` is set only when the original request came over
+    // HTTPS (signalled by the reverse proxy via X-Forwarded-Proto)
+    // — setting it unconditionally would make the browser drop the
+    // cookie on the plain-HTTP dev server.
     let mut c = Cookie::new(COOKIE_NAME, form.token);
     c.set_path("/");
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Strict);
+    c.set_secure(crate::auth::request_is_https(&headers));
     c.set_max_age(Duration::hours(24));
     cookies.add(c);
 

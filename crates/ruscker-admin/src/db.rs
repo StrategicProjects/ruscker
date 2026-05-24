@@ -76,4 +76,5 @@ pub async fn open_memory() -> Result<SqlitePool> {
 pub mod credentials;
 pub mod export;
 pub mod images;
+pub mod landing;
 pub mod specs;

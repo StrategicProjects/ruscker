@@ -4,3 +4,4 @@ pub mod admin;
 pub mod assets;
 pub mod landing;
 pub mod prefs;
+pub mod proxy;

@@ -25,6 +25,7 @@ fn app_state() -> AppState {
         config: Arc::new(config),
         locales: Arc::new(locales),
         admin_auth: Default::default(),
+        login_limiter: std::sync::Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         db: None,
         images_dir: None,
         master_key: Default::default(),

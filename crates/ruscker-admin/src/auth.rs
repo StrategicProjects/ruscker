@@ -80,6 +80,95 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+/// Global sliding-window rate limiter for login attempts.
+///
+/// Brute-forcing the admin token is the threat. This bounds how
+/// many failed attempts the server will entertain in a window,
+/// regardless of source — deliberately **global** (not per-IP)
+/// because Ruscker runs behind a reverse proxy where the peer
+/// IP is always the proxy, and a per-IP key would trust a
+/// spoofable `X-Forwarded-For`. A global cap can't be evaded by
+/// rotating source addresses.
+///
+/// Trade-off: a flood of bad attempts can lock out the
+/// legitimate operator for up to `window`. Acceptable for a
+/// single-operator install and documented in SECURITY.md; the
+/// window is short (60s) so lockout self-heals quickly.
+///
+/// Successful logins clear the window so an operator who
+/// fat-fingered a few times isn't blocked once they get it right.
+#[derive(Debug)]
+pub struct LoginRateLimiter {
+    failures: std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>,
+    max: usize,
+    window: std::time::Duration,
+}
+
+impl LoginRateLimiter {
+    pub fn new(max: usize, window: std::time::Duration) -> Self {
+        Self {
+            failures: std::sync::Mutex::new(std::collections::VecDeque::new()),
+            max,
+            window,
+        }
+    }
+
+    /// Default policy: 10 failed attempts per 60s. Generous for
+    /// human retries, far below anything that threatens a
+    /// high-entropy token.
+    pub fn default_policy() -> Self {
+        Self::new(10, std::time::Duration::from_secs(60))
+    }
+
+    /// Returns `true` if a login attempt is allowed right now
+    /// (i.e. the failure window isn't saturated). Prunes expired
+    /// failures as a side effect.
+    pub fn allow(&self) -> bool {
+        let now = std::time::Instant::now();
+        let mut q = self.failures.lock().unwrap();
+        while q.front().is_some_and(|t| now.duration_since(*t) > self.window) {
+            q.pop_front();
+        }
+        q.len() < self.max
+    }
+
+    pub fn record_failure(&self) {
+        let mut q = self.failures.lock().unwrap();
+        q.push_back(std::time::Instant::now());
+    }
+
+    pub fn record_success(&self) {
+        self.failures.lock().unwrap().clear();
+    }
+}
+
+impl Default for LoginRateLimiter {
+    fn default() -> Self {
+        Self::default_policy()
+    }
+}
+
+/// Whether the original client request reached us over HTTPS.
+/// Ruscker terminates TLS at a reverse proxy, which signals the
+/// original scheme via `X-Forwarded-Proto`. Used to decide
+/// whether to set the `Secure` flag on cookies — we can't just
+/// always set it because the dev server runs plain HTTP and the
+/// browser would then drop the cookie.
+pub fn request_is_https(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        // XFP can be a comma list ("https, http") when chained;
+        // the leftmost is the original client scheme.
+        .map(|s| {
+            s.split(',')
+                .next()
+                .map(|p| p.trim().eq_ignore_ascii_case("https"))
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
+
 /// Marker extracted by admin routes to assert that the request is
 /// authenticated. Absence of a valid session redirects to the
 /// login form (303 See Other so re-POST isn't suggested by
@@ -136,5 +225,71 @@ impl FromRequestParts<crate::AppState> for MaybeAdminSession {
             Ok(_) => Ok(MaybeAdminSession(true)),
             Err(_) => Ok(MaybeAdminSession(false)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+    use std::time::Duration;
+
+    #[test]
+    fn ct_eq_basics() {
+        assert!(ct_eq(b"abc", b"abc"));
+        assert!(!ct_eq(b"abc", b"abd"));
+        assert!(!ct_eq(b"abc", b"ab")); // length mismatch
+    }
+
+    #[test]
+    fn rate_limiter_allows_until_saturated() {
+        let rl = LoginRateLimiter::new(3, Duration::from_secs(60));
+        assert!(rl.allow());
+        rl.record_failure();
+        rl.record_failure();
+        assert!(rl.allow(), "2 < 3 still allowed");
+        rl.record_failure();
+        assert!(!rl.allow(), "3 failures saturate the window");
+    }
+
+    #[test]
+    fn rate_limiter_success_clears_window() {
+        let rl = LoginRateLimiter::new(2, Duration::from_secs(60));
+        rl.record_failure();
+        rl.record_failure();
+        assert!(!rl.allow());
+        rl.record_success();
+        assert!(rl.allow(), "success clears the failure window");
+    }
+
+    #[test]
+    fn rate_limiter_prunes_expired_failures() {
+        // Zero-length window → every failure is immediately
+        // expired, so allow() always trims back to empty.
+        let rl = LoginRateLimiter::new(1, Duration::from_secs(0));
+        rl.record_failure();
+        rl.record_failure();
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(rl.allow(), "expired failures pruned");
+    }
+
+    #[test]
+    fn request_is_https_reads_x_forwarded_proto() {
+        let mut h = HeaderMap::new();
+        assert!(!request_is_https(&h), "no header → not https");
+        h.insert("x-forwarded-proto", "http".parse().unwrap());
+        assert!(!request_is_https(&h));
+        h.insert("x-forwarded-proto", "https".parse().unwrap());
+        assert!(request_is_https(&h));
+    }
+
+    #[test]
+    fn request_is_https_handles_chained_proto_list() {
+        let mut h = HeaderMap::new();
+        // Chained proxies: leftmost is the original client scheme.
+        h.insert("x-forwarded-proto", "https, http".parse().unwrap());
+        assert!(request_is_https(&h));
+        h.insert("x-forwarded-proto", "HTTPS".parse().unwrap());
+        assert!(request_is_https(&h), "case-insensitive");
     }
 }

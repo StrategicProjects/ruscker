@@ -512,6 +512,7 @@ mod tests {
             config: Arc::new(cfg),
             locales: Arc::new(crate::i18n::Locales::load().expect("load locales")),
             admin_auth: Default::default(),
+            login_limiter: Arc::new(crate::auth::LoginRateLimiter::default_policy()),
             db: None,
             images_dir: None,
             master_key: Default::default(),

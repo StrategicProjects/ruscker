@@ -24,9 +24,9 @@ use axum::{
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
-        IntoResponse, Response,
+        IntoResponse, Redirect, Response,
     },
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use chrono::Utc;
@@ -45,6 +45,11 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/dashboard", get(index))
         .route("/admin/dashboard/events", get(events))
         .route("/admin/dashboard/logs/{replica_id}", get(logs))
+        .route("/admin/dashboard/replicas/{replica_id}/stop", post(stop_replica))
+        .route(
+            "/admin/dashboard/replicas/{replica_id}/restart",
+            post(restart_replica),
+        )
 }
 
 /// How many trailing log lines the logs page requests. Enough
@@ -464,6 +469,108 @@ async fn logs(
         lines,
     };
     super::render(&page)
+}
+
+/// Resolve a `{replica_id}` path param to a `ReplicaId`,
+/// 400ing on a malformed UUID. Shared by the action handlers.
+fn parse_replica_id(s: &str) -> Result<ReplicaId, Response> {
+    uuid::Uuid::parse_str(s)
+        .map(ReplicaId)
+        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid replica id").into_response())
+}
+
+/// POST `/admin/dashboard/replicas/{id}/stop` — stop a replica
+/// and drop it from the registry. The auto-scaler will respawn
+/// it to `min-replicas` on its next tick if the spec demands a
+/// baseline, so for a `min-replicas: 1` spec this reads as
+/// "recycle this container".
+///
+/// Safe against CSRF by the admin cookie being SameSite=Strict.
+/// Redirects back to the dashboard so the browser lands on a
+/// fresh render.
+async fn stop_replica(
+    _: AdminSession,
+    State(state): State<AppState>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    let rid = match parse_replica_id(&replica_id) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(backend) = state.backend.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
+    };
+
+    if let Err(e) = backend.stop(&rid).await {
+        tracing::warn!(replica = %replica_id, error = ?e, "stop replica failed");
+        // Fall through to remove it from the registry anyway —
+        // a stop that errored usually means the container is
+        // already gone, and we don't want a phantom row.
+    }
+    state.replicas.write().await.remove(&rid);
+    tracing::info!(replica = %replica_id, "replica stopped via dashboard");
+    Redirect::to("/admin/dashboard").into_response()
+}
+
+/// POST `/admin/dashboard/replicas/{id}/restart` — stop the
+/// replica, then immediately spawn a fresh one for the same
+/// spec. Unlike plain stop (which leans on the scaler to
+/// respawn ~one tick later), restart brings capacity back
+/// right away.
+async fn restart_replica(
+    _: AdminSession,
+    State(state): State<AppState>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    let rid = match parse_replica_id(&replica_id) {
+        Ok(r) => r,
+        Err(resp) => return resp,
+    };
+    let Some(backend) = state.backend.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
+    };
+
+    // Resolve the spec before stopping so a restart of a
+    // since-deleted spec fails cleanly without first killing
+    // the running container.
+    let spec_id = {
+        let reg = state.replicas.read().await;
+        let found = reg.all().find(|r| r.id == rid).map(|r| r.spec_id.clone());
+        found
+    };
+    let Some(spec_id) = spec_id else {
+        return (StatusCode::NOT_FOUND, "replica not found").into_response();
+    };
+    let spec = state
+        .config
+        .proxy
+        .specs
+        .iter()
+        .find(|s| s.id == spec_id)
+        .cloned();
+    let Some(spec) = spec else {
+        return (
+            StatusCode::CONFLICT,
+            format!("spec `{spec_id}` no longer in config; cannot restart"),
+        )
+            .into_response();
+    };
+
+    if let Err(e) = backend.stop(&rid).await {
+        tracing::warn!(replica = %replica_id, error = ?e, "restart: stop phase failed");
+    }
+    state.replicas.write().await.remove(&rid);
+
+    if let Err(e) = crate::scaler::spawn_replica(&state, &spec).await {
+        tracing::error!(spec = %spec.id, error = ?e, "restart: spawn phase failed");
+        return (
+            StatusCode::BAD_GATEWAY,
+            format!("stopped old replica but failed to spawn a new one: {e}"),
+        )
+            .into_response();
+    }
+    tracing::info!(replica = %replica_id, spec = %spec.id, "replica restarted via dashboard");
+    Redirect::to("/admin/dashboard").into_response()
 }
 
 /// Format a chrono `Duration` as a short uptime: "45s", "12m",

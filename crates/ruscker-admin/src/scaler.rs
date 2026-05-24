@@ -306,6 +306,22 @@ async fn stop_one(
     Ok(())
 }
 
+/// Spawn one replica for `spec` using the configured backend.
+/// Public entry point for callers outside the scaler loop
+/// (e.g. the dashboard's "restart" action). Resolves the
+/// backend off `state`; errors if none is wired.
+///
+/// Same coalescer semantics as the internal scale-up path —
+/// concurrent spawns for the same spec serialize on the
+/// per-spec mutex.
+pub(crate) async fn spawn_replica(state: &AppState, spec: &Spec) -> anyhow::Result<()> {
+    let backend = state
+        .backend
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no container backend wired"))?;
+    spawn_one(state, spec, backend.as_ref()).await
+}
+
 /// Spawn one additional replica for `spec`. Used by every
 /// scale-up branch (to-min and on-saturation). Goes through the
 /// per-spec mutex so a concurrent on-demand spawn coalesces

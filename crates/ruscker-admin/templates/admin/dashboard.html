@@ -86,6 +86,22 @@
     border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.2));
     border-radius: 10px;
   }
+  .dash-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 14px;
+    vertical-align: middle;
+  }
+  .dash-action:hover { background: var(--color-background-secondary, rgba(120,120,120,0.12)); }
+  .dash-action--danger:hover { color: #ef4444; }
 </style>
 
 <div class="flex items-end justify-between mb-5">
@@ -140,10 +156,16 @@
         <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
         <th>{{ self.t("admin-dashboard-col-memory") }}</th>
         <th>{{ self.t("admin-dashboard-col-container") }}</th>
-        <th style="width: 32px;"></th>
+        <th style="width: 84px;"></th>
       </tr>
     </thead>
-    <tbody id="dash-rows" data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}" data-logs-title="{{ self.t("admin-logs-title") }}">
+    <tbody id="dash-rows"
+           data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}"
+           data-logs-title="{{ self.t("admin-logs-title") }}"
+           data-stop-label="{{ self.t("admin-dashboard-action-stop") }}"
+           data-restart-label="{{ self.t("admin-dashboard-action-restart") }}"
+           data-confirm-stop="{{ self.t("admin-dashboard-confirm-stop") }}"
+           data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}">
       {% for row in rows %}
         <tr data-replica-id="{{ row.replica_id }}">
           <td><span class="dash-dot {{ row.state_dot }}"></span></td>
@@ -167,9 +189,17 @@
             {% endmatch %}
           </td>
           <td class="dash-mono">{{ row.container_short }}</td>
-          <td>
+          <td style="white-space: nowrap;">
             <a href="/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
-               style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
+               class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
+            <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/restart"
+                  style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
+              <button type="submit" class="dash-action" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh"></i></button>
+            </form>
+            <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/stop"
+                  style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
+              <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop"></i></button>
+            </form>
           </td>
         </tr>
       {% endfor %}
@@ -184,8 +214,13 @@
 <script>
 (function () {
   var tbodyEl = document.getElementById('dash-rows');
-  var pendingLabel = (tbodyEl && tbodyEl.dataset.pendingLabel) || 'awaiting first reading';
-  var logsTitle = (tbodyEl && tbodyEl.dataset.logsTitle) || 'Logs';
+  var ds = (tbodyEl && tbodyEl.dataset) || {};
+  var pendingLabel = ds.pendingLabel || 'awaiting first reading';
+  var logsTitle = ds.logsTitle || 'Logs';
+  var stopLabel = ds.stopLabel || 'Stop';
+  var restartLabel = ds.restartLabel || 'Restart';
+  var confirmStop = ds.confirmStop || 'Stop this replica?';
+  var confirmRestart = ds.confirmRestart || 'Restart this replica?';
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -217,9 +252,19 @@
       + '<td>' + cpu + '</td>'
       + '<td>' + mem + '</td>'
       + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
-      + '<td><a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
-        + '" title="' + escapeHtml(logsTitle)
-        + '" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a></td>';
+      + '<td style="white-space: nowrap;">'
+        + '<a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
+          + '" title="' + escapeHtml(logsTitle)
+          + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
+        + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+          + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
+          + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
+        + '</form>'
+        + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+          + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
+          + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
+        + '</form>'
+      + '</td>';
   }
 
   function apply(snap) {

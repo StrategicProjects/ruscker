@@ -5,3 +5,4 @@ pub mod assets;
 pub mod landing;
 pub mod prefs;
 pub mod proxy;
+pub mod rewrite;

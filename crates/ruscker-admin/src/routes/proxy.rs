@@ -158,11 +158,12 @@ async fn forward(
     }
 
     // 4. Resolve the replica: sticky-first, fall back to
-    //    pick/spawn. Capture whether the cookie was honored so we
-    //    only Set-Cookie when we just minted a new session.
-    let (replica, cookie_used) =
+    //    pick/spawn. Also pin down the session_id we'll track
+    //    this visitor under so the cookie and the tracker share
+    //    the same identity.
+    let (replica, session_id, cookie_used) =
         match resolve_replica(&state, &spec, &cookies).await {
-            Ok(pair) => pair,
+            Ok(triple) => triple,
             Err(err) => {
                 tracing::error!(spec = %spec.id, error = ?err, "resolve replica failed");
                 return (
@@ -172,6 +173,17 @@ async fn forward(
                     .into_response();
             }
         };
+
+    // 4b. Heartbeat: record activity on the visitor's session.
+    //     Only matters for sticky-needed specs — API requests are
+    //     per-request, not per-session, so inflating
+    //     `sessions_active` for them would mislead the scaler.
+    if spec_kind_needs_sticky(spec.kind()) {
+        let _outcome = state
+            .sessions
+            .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id)
+            .await;
+    }
 
     // 5. WebSocket branch hijacks the upgrade and pumps frames;
     //    after the upgrade response is sent, the rest of axum's
@@ -210,8 +222,16 @@ async fn forward(
 
     // 7. Issue sticky cookie when we just bound the visitor to a
     //    replica and the spec actually benefits from stickiness.
+    //    The cookie carries the exact session_id we registered
+    //    in the tracker, so subsequent requests touch the same
+    //    entry instead of registering a duplicate.
     if !cookie_used && spec_kind_needs_sticky(spec.kind()) {
-        set_sticky_cookie(&cookies, &state.cookie_key, &spec.id, &replica);
+        let session = StickySession {
+            session_id,
+            spec_id: spec.id.clone(),
+            replica_id: replica.id.clone(),
+        };
+        set_sticky_cookie(&cookies, &state.cookie_key, &session);
     }
 
     resp
@@ -225,13 +245,15 @@ fn find_spec<'a>(config: &'a ruscker_config::Config, id: &str) -> Option<&'a Spe
     config.proxy.specs.iter().find(|s| s.id == id)
 }
 
-/// Returns the chosen `Replica` and whether the sticky cookie was
-/// honored (so the caller knows whether to set a fresh one).
+/// Returns the chosen `Replica`, the session_id we'll track this
+/// visitor under (either decoded from a valid cookie or freshly
+/// minted), and whether the cookie was honored (so the caller
+/// only sets a Set-Cookie header on fresh sessions).
 async fn resolve_replica(
     state: &AppState,
     spec: &Spec,
     cookies: &Cookies,
-) -> anyhow::Result<(Replica, bool)> {
+) -> anyhow::Result<(Replica, uuid::Uuid, bool)> {
     if let Some(raw) = cookies.get(COOKIE_NAME) {
         if let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) {
             // Defense in depth: a cookie for spec A must not
@@ -244,23 +266,21 @@ async fn resolve_replica(
                     .find(|r| r.id == session.replica_id)
                     .cloned();
                 if let Some(r) = alive {
-                    return Ok((r, true));
+                    return Ok((r, session.session_id, true));
                 }
             }
         }
     }
     let r = pick_or_spawn(state, spec).await?;
-    Ok((r, false))
+    Ok((r, uuid::Uuid::new_v4(), false))
 }
 
-fn set_sticky_cookie(
-    cookies: &Cookies,
-    key: &CookieKey,
-    spec_id: &str,
-    replica: &Replica,
-) {
-    let session = StickySession::new(spec_id.to_string(), replica.id.clone());
-    let value = match sticky::encode(key, &session) {
+/// Build + set the sticky cookie from an explicit `StickySession`
+/// — keeps the session_id consistent with what we tracked in the
+/// `SessionTracker` rather than minting a fresh, untracked id
+/// inside the cookie helper.
+fn set_sticky_cookie(cookies: &Cookies, key: &CookieKey, session: &StickySession) {
+    let value = match sticky::encode(key, session) {
         Ok(v) => v,
         Err(err) => {
             tracing::error!(error = ?err, "encode sticky cookie failed");
@@ -539,6 +559,7 @@ mod tests {
             replicas: StdArc::new(RwLock::new(ReplicaRegistry::new())),
             cookie_key: CookieKey::random(),
             spawn_locks: StdArc::new(dashmap::DashMap::new()),
+            sessions: StdArc::new(crate::sessions::SessionTracker::new()),
         }
     }
 

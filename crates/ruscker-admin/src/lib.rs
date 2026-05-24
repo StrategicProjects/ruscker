@@ -30,6 +30,7 @@ pub mod i18n;
 pub mod images;
 pub mod routes;
 pub mod scaler;
+pub mod sessions;
 pub mod theme;
 pub mod view_model;
 
@@ -80,6 +81,14 @@ pub struct AppState {
     pub spawn_locks: std::sync::Arc<
         dashmap::DashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
     >,
+
+    /// Per-visitor session tracker. The proxy calls
+    /// `touch_or_register` on every routed request so the
+    /// replica's `sessions_active` reflects the real number of
+    /// live visitors. A background sweeper (started from
+    /// `AdminServer::run`) evicts idle sessions after
+    /// `proxy.heartbeat_timeout` ms.
+    pub sessions: std::sync::Arc<sessions::SessionTracker>,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -116,6 +125,7 @@ impl AdminServer {
             cookie_key: ruscker_proxy::sticky::CookieKey::from_env_or_random()
                 .context("load sticky cookie key")?,
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
+            sessions: std::sync::Arc::new(sessions::SessionTracker::new()),
         };
         Ok(Self {
             addr,
@@ -201,6 +211,16 @@ impl AdminServer {
         // protocol for the scaler because every tick is idempotent.
         if self.state.backend.is_some() {
             let _ = scaler::spawn(self.state.clone(), scaler::DEFAULT_INTERVAL);
+            // Session sweeper: evicts idle sessions per the
+            // global `heartbeat-timeout`. `-1` (the ShinyProxy
+            // idiom for "never expire") becomes a no-op loop
+            // inside `sessions::spawn` so the call shape stays
+            // uniform.
+            let _ = sessions::spawn(
+                self.state.sessions.clone(),
+                self.state.replicas.clone(),
+                self.state.config.proxy.heartbeat_timeout,
+            );
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

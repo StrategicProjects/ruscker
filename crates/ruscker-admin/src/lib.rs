@@ -280,12 +280,62 @@ pub fn router(state: AppState) -> Router {
 /// `images_dir` argument is now ignored because state carries the
 /// fallback directory itself (set via [`AdminServer::with_images_dir`]).
 pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router {
-    Router::new()
+    // Ruscker's own surfaces (landing, admin, prefs, assets) get
+    // security response headers. The proxy routes do NOT — those
+    // forward upstream app responses verbatim, and injecting our
+    // X-Frame-Options / CSP into a Shiny page would interfere
+    // with how the app expects to be served. Apps own their own
+    // security headers.
+    let own = Router::new()
         .merge(routes::landing::routes())
         .merge(routes::assets::routes())
         .merge(routes::prefs::routes())
         .merge(routes::admin::routes())
-        .merge(routes::proxy::routes())
+        .layer(axum::middleware::from_fn(security_headers));
+
+    own.merge(routes::proxy::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
+}
+
+/// Baseline security response headers for Ruscker's own pages.
+///
+/// - `X-Content-Type-Options: nosniff` — stop MIME sniffing
+///   (defends against polyglot uploads being interpreted as
+///   active content).
+/// - `X-Frame-Options: DENY` — the portal/admin is not meant to
+///   be embedded; blocks clickjacking.
+/// - `Referrer-Policy: same-origin` — don't leak admin URLs to
+///   third parties.
+/// - `Content-Security-Policy` — restricts resource origins to
+///   self. `'unsafe-inline'` is currently required because the
+///   landing + dashboard use inline `<script>`/`<style>`; a
+///   nonce-based CSP that drops `unsafe-inline` is a tracked
+///   follow-up. Even with it, this still blocks loading scripts
+///   / frames / objects from other origins.
+async fn security_headers(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::HeaderValue;
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
+    h.insert(
+        "content-security-policy",
+        HeaderValue::from_static(
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-inline'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; \
+             font-src 'self'; \
+             connect-src 'self'; \
+             frame-ancestors 'none'; \
+             base-uri 'self'; \
+             form-action 'self'",
+        ),
+    );
+    resp
 }

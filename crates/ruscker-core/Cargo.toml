@@ -13,6 +13,7 @@ description = "Core domain logic for Ruscker: session management, routing, lifec
 ruscker-config = { path = "../ruscker-config" }
 
 async-trait = { workspace = true }
+futures-util = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }

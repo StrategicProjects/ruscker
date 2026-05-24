@@ -30,8 +30,15 @@ pub use routing::{RoutingDecision, Router};
 pub use session::{Session, SessionId, SessionStore, StickySession};
 
 use async_trait::async_trait;
+use futures_util::Stream;
 use std::collections::HashMap;
+use std::pin::Pin;
 use thiserror::Error;
+
+/// A boxed, owned stream of log lines. Boxed (rather than an
+/// `impl Stream` associated type) so it can travel through the
+/// `dyn ContainerBackend` trait object the proxy/admin hold.
+pub type LogStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 #[derive(Debug, Error)]
 pub enum CoreError {
@@ -240,6 +247,16 @@ pub trait ContainerBackend: Send + Sync {
     /// the caller.
     async fn logs(&self, _replica_id: &ReplicaId, _tail: usize) -> CoreResult<Vec<String>> {
         Ok(Vec::new())
+    }
+
+    /// Follow a replica's combined stdout+stderr as a live
+    /// stream of lines, seeded with the last `tail` lines. The
+    /// stream stays open until the container stops (then it
+    /// ends) or the consumer drops it. Used by the dashboard's
+    /// live-logs SSE endpoint. Default impl returns an empty
+    /// stream so non-streaming backends don't break callers.
+    async fn logs_follow(&self, _replica_id: &ReplicaId, _tail: usize) -> CoreResult<LogStream> {
+        Ok(Box::pin(futures_util::stream::empty()))
     }
 }
 

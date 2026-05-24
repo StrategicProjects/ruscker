@@ -2763,6 +2763,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
+ "futures-util",
  "ruscker-config",
  "serde",
  "thiserror",
@@ -2774,6 +2775,7 @@ name = "ruscker-docker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
  "async-trait",
  "bollard",
  "chrono",

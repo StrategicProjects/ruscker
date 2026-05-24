@@ -145,6 +145,21 @@ fn mime_from_extension(name: &str) -> &'static str {
 /// Like [`serve`] but takes owned bytes (DB blob / FS read) and
 /// short-cache headers (these images can change without a binary
 /// rebuild so `immutable` would be wrong here).
+///
+/// These bytes are **operator-uploaded** (DB / disk), so the
+/// response is hardened against the SVG-script vector: a
+/// malicious `<script>`/`<foreignObject>` inside an uploaded SVG
+/// must not execute even if someone navigates to it directly or
+/// embeds it via `<object>`/`<iframe>`.
+///
+/// - `X-Content-Type-Options: nosniff` — the browser honors our
+///   declared type, no sniffing a PNG-named blob into HTML.
+/// - `Content-Security-Policy: default-src 'none'; …; sandbox` —
+///   neuters any active content in an SVG document regardless of
+///   embedding context. Harmless for raster images (they need no
+///   sources). Does NOT interfere with the common
+///   `<img src="/assets/img/x.svg">` use — scripts never run in
+///   `<img>` context anyway.
 fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
     let mut headers = HeaderMap::new();
     if let Ok(ct) = HeaderValue::from_str(content_type) {
@@ -153,6 +168,14 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
     headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=60, must-revalidate"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; sandbox"),
     );
     (StatusCode::OK, headers, body).into_response()
 }
@@ -173,4 +196,38 @@ async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
         HeaderValue::from_static("public, max-age=0, must-revalidate"),
     );
     (StatusCode::OK, headers, body).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+
+    #[tokio::test]
+    async fn serve_dynamic_hardens_user_uploaded_images() {
+        // A served (operator-uploaded) image must carry the
+        // SVG-script mitigations regardless of its real type.
+        let resp = serve_dynamic(b"<svg/>".to_vec(), "image/svg+xml");
+        let h = resp.headers();
+        assert_eq!(h.get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
+        assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        let csp = h
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(csp.contains("default-src 'none'"));
+        assert!(csp.contains("sandbox"));
+        // Body survives unchanged.
+        let body = to_bytes(resp.into_body(), 1024).await.unwrap();
+        assert_eq!(&body[..], b"<svg/>");
+    }
+
+    #[test]
+    fn mime_from_extension_maps_known_types() {
+        assert_eq!(mime_from_extension("a.png"), "image/png");
+        assert_eq!(mime_from_extension("a.svg"), "image/svg+xml");
+        assert_eq!(mime_from_extension("a.webp"), "image/webp");
+        assert_eq!(mime_from_extension("a.unknown"), "application/octet-stream");
+    }
 }

@@ -322,15 +322,22 @@ async fn security_headers(
     req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    use axum::http::header::HeaderName;
     use axum::http::HeaderValue;
     let mut resp = next.run(req).await;
     let h = resp.headers_mut();
-    h.insert("x-content-type-options", HeaderValue::from_static("nosniff"));
-    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
-    h.insert("referrer-policy", HeaderValue::from_static("same-origin"));
-    h.insert(
-        "content-security-policy",
-        HeaderValue::from_static(
+    // Provide defaults only — never clobber a header the handler
+    // already set. The `/assets/img/*` route sets a STRICTER CSP
+    // (`default-src 'none'; … sandbox`) for operator-uploaded
+    // SVGs; an unconditional `insert` here would overwrite it
+    // with the looser page policy. `entry().or_insert` leaves any
+    // handler-set value intact.
+    let defaults: &[(&str, &str)] = &[
+        ("x-content-type-options", "nosniff"),
+        ("x-frame-options", "DENY"),
+        ("referrer-policy", "same-origin"),
+        (
+            "content-security-policy",
             "default-src 'self'; \
              script-src 'self' 'unsafe-inline'; \
              style-src 'self' 'unsafe-inline'; \
@@ -341,6 +348,11 @@ async fn security_headers(
              base-uri 'self'; \
              form-action 'self'",
         ),
-    );
+    ];
+    for (name, value) in defaults {
+        if let Ok(hn) = HeaderName::from_bytes(name.as_bytes()) {
+            h.entry(hn).or_insert(HeaderValue::from_static(value));
+        }
+    }
     resp
 }

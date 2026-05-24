@@ -365,11 +365,15 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         .or_else(|| infer_inner_port(spec));
 
     tracing::info!(spec = %spec.id, image, inner_port = ?inner_port, "spawning first replica");
-    let replica = match inner_port {
+    let mut replica = match inner_port {
         Some(port) => backend.spawn_with_port(&spec.id, image, port).await,
         None => backend.spawn(&spec.id, image).await,
     }
     .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
+    // The backend doesn't know the spec's seat cap (lives in
+    // config). Enrich so the session tracker and scaler see the
+    // right capacity from the first request.
+    replica.sessions_max = spec.effective_seats();
 
     // Take the write lock only for the insert — a few microseconds
     // — and release before the spec mutex unwinds.

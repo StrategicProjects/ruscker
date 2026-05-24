@@ -16,9 +16,21 @@
 //! - `ruscker export <path>` — export DB back to YAML
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use ruscker_config::{Config, SpecKind, ValidationReport, Warning};
 use std::path::PathBuf;
+
+/// How log lines are rendered.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
+enum LogFormat {
+    /// Human-readable single-line output (default) — for terminals
+    /// and `journalctl`.
+    #[default]
+    Text,
+    /// One JSON object per line — for log shippers (Loki, Fluent
+    /// Bit, the ELK stack) that parse structured fields.
+    Json,
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -31,6 +43,11 @@ struct Cli {
     /// Increase output verbosity (`-v`, `-vv`, `-vvv`)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
+
+    /// Log output format. `text` for humans, `json` for log
+    /// aggregators. Also settable via `RUSCKER_LOG_FORMAT`.
+    #[arg(long, value_enum, default_value_t = LogFormat::Text, env = "RUSCKER_LOG_FORMAT", global = true)]
+    log_format: LogFormat,
 
     #[command(subcommand)]
     command: Command,
@@ -130,7 +147,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_tracing(cli.verbose);
+    init_tracing(cli.verbose, cli.log_format);
 
     match cli.command {
         Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
@@ -257,18 +274,31 @@ fn cmd_serve(
     })
 }
 
-fn init_tracing(verbosity: u8) {
+fn init_tracing(verbosity: u8, format: LogFormat) {
     let level = match verbosity {
         0 => "warn",
         1 => "info",
         2 => "debug",
         _ => "trace",
     };
+    // `RUST_LOG` always wins when set (operators expect it); the
+    // verbosity flag only sets the default filter.
     let env = std::env::var("RUST_LOG").unwrap_or_else(|_| format!("ruscker={level}"));
-    tracing_subscriber::fmt()
-        .with_env_filter(env)
-        .with_target(false)
-        .init();
+    let builder = tracing_subscriber::fmt().with_env_filter(env);
+    match format {
+        // `.json()` and the default formatter return different
+        // builder types, so each arm must call `.init()` itself.
+        LogFormat::Text => builder.with_target(false).init(),
+        LogFormat::Json => builder
+            // Keep the module target in structured logs — it's a
+            // cheap, high-value field for filtering in a shipper.
+            .json()
+            // Lift the event's fields to the top level instead of
+            // nesting them under `"fields"`, so queries like
+            // `addr="…"` work without a path prefix.
+            .flatten_event(true)
+            .init(),
+    }
 }
 
 fn cmd_validate(path: &PathBuf, json: bool, strict: bool) -> Result<()> {
@@ -421,5 +451,30 @@ fn truncate(s: &str, n: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..n.saturating_sub(1)])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_format_defaults_to_text() {
+        let cli = Cli::try_parse_from(["ruscker", "validate", "app.yml"]).unwrap();
+        assert_eq!(cli.log_format, LogFormat::Text);
+    }
+
+    #[test]
+    fn log_format_accepts_json() {
+        let cli =
+            Cli::try_parse_from(["ruscker", "--log-format", "json", "validate", "app.yml"]).unwrap();
+        assert_eq!(cli.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn log_format_rejects_unknown_value() {
+        assert!(
+            Cli::try_parse_from(["ruscker", "--log-format", "xml", "validate", "app.yml"]).is_err()
+        );
     }
 }

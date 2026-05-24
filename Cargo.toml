@@ -52,7 +52,7 @@ anyhow = "1.0.102"
 
 # Logging / tracing
 tracing = "0.1.44"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt", "json"] }
 
 # CLI
 clap = { version = "4.6", features = ["derive", "env"] }

@@ -21,12 +21,18 @@
 use askama::Template;
 use axum::{
     extract::State,
-    response::Response,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        Response,
+    },
     routing::get,
     Router,
 };
 use chrono::Utc;
+use futures_util::stream::Stream;
 use ruscker_core::{Replica, ReplicaState};
+use std::convert::Infallible;
+use std::time::Duration;
 
 use crate::auth::AdminSession;
 use crate::i18n::{Locale, Locales};
@@ -34,20 +40,51 @@ use crate::theme::Theme;
 use crate::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/admin/dashboard", get(index))
+    Router::new()
+        .route("/admin/dashboard", get(index))
+        .route("/admin/dashboard/events", get(events))
 }
 
-/// One row of the replicas table — flattened for the template.
+/// How often the SSE stream emits a snapshot. Same cadence as
+/// the metrics cache refresh — emitting more often would show
+/// stale CPU/memory values, less often would feel laggy on
+/// container state changes.
+const SSE_INTERVAL: Duration = Duration::from_secs(5);
+
+/// How often to send a comment-only keep-alive when no real
+/// event has fired. Stays under the typical 30-60s reverse-
+/// proxy idle timeout. Doesn't trigger the JS `onmessage`
+/// handler.
+const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// One row of the replicas table — flattened for the template
+/// and also serialized as JSON over the SSE stream so the
+/// client-side patcher can update in place.
+///
 /// We project `Replica` plus the operator-facing `display_name`
 /// resolved from the spec config (replicas only carry `spec_id`).
+/// The `replica_id` round-trips as a stringified UUID so the JS
+/// can target the right `<tr data-replica-id="…">`.
+#[derive(serde::Serialize, Clone)]
 struct ReplicaRow {
+    replica_id: String,
     spec_id: String,
     /// `display-name` from the spec config, or the spec_id if
     /// the spec was renamed/deleted out from under the registry.
     display_name: String,
-    state: ReplicaState,
+    /// Lowercase state string ("ready", "starting", …).
+    /// Kept stable across versions — the JS uses it to pick
+    /// the dot CSS class and (via the i18n keys baked into the
+    /// initial render) the state label.
+    state: &'static str,
+    /// CSS class for the dot — pre-resolved so the JS doesn't
+    /// have to mirror our match.
+    state_dot: &'static str,
+    /// i18n-translated label — server-translated so the JS
+    /// doesn't need its own locale bundle.
+    state_label: String,
     /// Pre-formatted "2h 14m" string. Built once at render time
-    /// so the template stays declarative.
+    /// so the template (and the JS) stays declarative.
     uptime: String,
     sessions_active: u32,
     sessions_max: u32,
@@ -63,6 +100,22 @@ struct ReplicaRow {
     memory_display: Option<String>,
 }
 
+/// What both the HTML render and the SSE stream consume.
+/// Building this once and serializing twice keeps the two
+/// surfaces in lockstep — fix a counting bug here, both
+/// endpoints get the fix.
+#[derive(serde::Serialize, Clone)]
+struct DashboardSnapshot {
+    backend_connected: bool,
+    total_containers: usize,
+    total_sessions: u32,
+    spec_count: usize,
+    tracker_sessions: usize,
+    total_memory_bytes: u64,
+    total_memory_display: String,
+    rows: Vec<ReplicaRow>,
+}
+
 #[derive(Template)]
 #[template(path = "admin/dashboard.html")]
 struct DashboardPage<'a> {
@@ -71,52 +124,55 @@ struct DashboardPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
-    /// `None` when ruscker was started without `--docker`. The
-    /// template renders a friendly "wire up Docker" banner
-    /// instead of a 0-everything dashboard, which would look
-    /// like a real production state.
+    /// Inline copy of `DashboardSnapshot` fields. Could be a
+    /// nested `snapshot:` field but askama doesn't auto-flatten
+    /// and rewriting all `{{ foo }}` to `{{ snapshot.foo }}`
+    /// buys no clarity.
     backend_connected: bool,
     total_containers: usize,
     total_sessions: u32,
     spec_count: usize,
     tracker_sessions: usize,
-    /// Sum of `memory_bytes` across all replicas with cached
-    /// metrics. `0` when no replicas have been observed yet
-    /// (refresher hasn't ticked, or backend isn't connected).
     total_memory_bytes: u64,
-    /// "412 MB" / "1.2 GB" pre-formatted for the top metric card.
     total_memory_display: String,
     rows: Vec<ReplicaRow>,
+    /// JSON of the same snapshot, embedded in a `<script
+    /// type="application/json">` tag so the SSE-driven JS
+    /// patcher has a starting state without an immediate
+    /// extra HTTP round-trip.
+    snapshot_json: String,
 }
 
 impl<'a> DashboardPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
+}
 
-    /// Per-state label key. Kept in Rust (not the template) so a
-    /// new `ReplicaState` variant produces a compiler error
-    /// instead of a missing translation at render time.
-    fn state_label(&self, s: &ReplicaState) -> String {
-        let key = match s {
-            ReplicaState::Ready => "admin-dashboard-state-ready",
-            ReplicaState::Starting => "admin-dashboard-state-starting",
-            ReplicaState::Draining => "admin-dashboard-state-draining",
-            ReplicaState::Stopped => "admin-dashboard-state-stopped",
-            ReplicaState::Failed => "admin-dashboard-state-failed",
-        };
-        self.t(key)
+/// Map a `ReplicaState` enum to the (lowercase id, CSS class)
+/// pair used throughout the dashboard. Centralized so the SSE
+/// JSON and the server-side HTML render stay consistent.
+fn state_codes(s: ReplicaState) -> (&'static str, &'static str) {
+    match s {
+        ReplicaState::Ready => ("ready", "dot-on"),
+        ReplicaState::Starting => ("starting", "dot-pulse"),
+        ReplicaState::Draining => ("draining", "dot-warm"),
+        ReplicaState::Stopped => ("stopped", "dot-off"),
+        ReplicaState::Failed => ("failed", "dot-off"),
     }
+}
 
-    /// CSS class for the status dot. Matches the mockup's
-    /// `.dot-on / .dot-pulse / .dot-warm / .dot-off` palette.
-    fn state_dot(&self, s: &ReplicaState) -> &'static str {
-        match s {
-            ReplicaState::Ready => "dot-on",
-            ReplicaState::Starting => "dot-pulse",
-            ReplicaState::Draining => "dot-warm",
-            ReplicaState::Stopped | ReplicaState::Failed => "dot-off",
-        }
+/// i18n key for each replica state. Kept in Rust (not the
+/// template) so a new `ReplicaState` variant produces a
+/// compiler error instead of a missing translation at render
+/// time.
+fn state_label_key(s: ReplicaState) -> &'static str {
+    match s {
+        ReplicaState::Ready => "admin-dashboard-state-ready",
+        ReplicaState::Starting => "admin-dashboard-state-starting",
+        ReplicaState::Draining => "admin-dashboard-state-draining",
+        ReplicaState::Stopped => "admin-dashboard-state-stopped",
+        ReplicaState::Failed => "admin-dashboard-state-failed",
     }
 }
 
@@ -126,6 +182,35 @@ async fn index(
     loc: Locale,
     theme: Theme,
 ) -> Response {
+    let snap = build_snapshot(&state, loc).await;
+    let snapshot_json = serde_json::to_string(&snap).unwrap_or_else(|_| "{}".to_string());
+    let page = DashboardPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        nav_section: "dashboard",
+        backend_connected: snap.backend_connected,
+        total_containers: snap.total_containers,
+        total_sessions: snap.total_sessions,
+        spec_count: snap.spec_count,
+        tracker_sessions: snap.tracker_sessions,
+        total_memory_bytes: snap.total_memory_bytes,
+        total_memory_display: snap.total_memory_display.clone(),
+        rows: snap.rows.clone(),
+        snapshot_json,
+    };
+    super::render(&page)
+}
+
+/// Build the dashboard data snapshot. Pure(ish) function used
+/// by both the initial HTML render and the SSE event stream
+/// so they can't drift.
+///
+/// `locale` is needed to translate the per-state labels server-
+/// side; the JS subscriber then just stamps the strings into
+/// the DOM without owning a locale bundle of its own.
+async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
     let backend_connected = state.backend.is_some();
 
     // Snapshot the registry once. Cloning `Replica` is cheap
@@ -151,11 +236,6 @@ async fn index(
         .len();
     let tracker_sessions = state.sessions.len();
 
-    // Build display rows. `display_name` falls back to spec_id
-    // when the operator deleted / renamed a spec out from under
-    // a still-running replica. Each row also looks up its
-    // cached metrics; rows without cached metrics show "n/a"
-    // until the next refresher tick.
     let mut total_memory_bytes: u64 = 0;
     let rows: Vec<ReplicaRow> = snap
         .into_iter()
@@ -176,10 +256,15 @@ async fn index(
             if let Some(c) = cached.as_ref() {
                 total_memory_bytes = total_memory_bytes.saturating_add(c.metrics.memory_bytes);
             }
+            let (state_code, state_dot) = state_codes(r.state);
+            let state_label = state.locales.t(locale, state_label_key(r.state), None);
             ReplicaRow {
+                replica_id: r.id.0.to_string(),
                 spec_id: r.spec_id,
                 display_name,
-                state: r.state,
+                state: state_code,
+                state_dot,
+                state_label,
                 uptime,
                 sessions_active: r.sessions_active,
                 sessions_max: r.sessions_max,
@@ -192,19 +277,10 @@ async fn index(
     let total_memory_display = if total_memory_bytes > 0 {
         format_bytes(total_memory_bytes)
     } else {
-        // i18n-friendly default: render an em-dash and let the
-        // operator infer "no data yet" from context. The full
-        // explanation lives below as the metrics-pending hint
-        // when rows exist but none have cached metrics.
         "—".to_string()
     };
 
-    let page = DashboardPage {
-        locale: loc,
-        theme,
-        locales: &state.locales,
-        locales_all: &Locale::ALL,
-        nav_section: "dashboard",
+    DashboardSnapshot {
         backend_connected,
         total_containers,
         total_sessions,
@@ -213,8 +289,7 @@ async fn index(
         total_memory_bytes,
         total_memory_display,
         rows,
-    };
-    super::render(&page)
+    }
 }
 
 /// Render a byte count as a short human string with binary
@@ -238,6 +313,45 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{:.1} GB", bytes as f64 / GIB as f64)
     }
+}
+
+/// Server-Sent Events stream of dashboard snapshots. The
+/// client connects with `EventSource('/admin/dashboard/events')`
+/// and receives a JSON-encoded [`DashboardSnapshot`] every
+/// [`SSE_INTERVAL`], plus a comment keep-alive every
+/// [`SSE_KEEPALIVE_INTERVAL`] to defeat proxy idle timeouts.
+///
+/// Each emission is independent; reconnecting after a network
+/// blip just resumes the cadence — there's no event-id /
+/// last-event-id handshake to manage, and replaying a snapshot
+/// is idempotent on the client side anyway.
+async fn events(
+    _: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    use async_stream::stream;
+    let stream = stream! {
+        // Emit the first snapshot immediately so the client
+        // patches on connect instead of waiting one full
+        // interval. Avoids a visible "stale" gap right after
+        // page load.
+        let first = build_snapshot(&state, loc).await;
+        let body = serde_json::to_string(&first).unwrap_or_else(|_| "{}".to_string());
+        yield Ok::<_, Infallible>(Event::default().data(body));
+
+        let mut ticker = tokio::time::interval(SSE_INTERVAL);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Burn the immediate first tick — we already emitted.
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            let snap = build_snapshot(&state, loc).await;
+            let body = serde_json::to_string(&snap).unwrap_or_else(|_| "{}".to_string());
+            yield Ok::<_, Infallible>(Event::default().data(body));
+        }
+    };
+    Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL))
 }
 
 /// Format a chrono `Duration` as a short uptime: "45s", "12m",
@@ -312,10 +426,23 @@ mod tests {
     }
 
     fn fake_row(spec: &str, name: &str, st: ReplicaState, active: u32, max: u32) -> ReplicaRow {
+        let (state_code, state_dot) = state_codes(st);
         ReplicaRow {
+            replica_id: uuid::Uuid::new_v4().to_string(),
             spec_id: spec.into(),
             display_name: name.into(),
-            state: st,
+            state: state_code,
+            state_dot,
+            // Hard-coded pt labels — keeps the test independent
+            // of the live locale bundle for these specific keys.
+            state_label: match st {
+                ReplicaState::Ready => "pronto",
+                ReplicaState::Starting => "iniciando",
+                ReplicaState::Draining => "drenando",
+                ReplicaState::Stopped => "parado",
+                ReplicaState::Failed => "falhou",
+            }
+            .into(),
             uptime: "2h 14m".into(),
             sessions_active: active,
             sessions_max: max,
@@ -345,6 +472,7 @@ mod tests {
             total_memory_bytes: 0,
             total_memory_display: "—".to_string(),
             rows,
+            snapshot_json: "{}".to_string(),
         };
         page.render().expect("render dashboard")
     }

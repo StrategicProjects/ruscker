@@ -38,6 +38,7 @@ hyper-util = { version = "0.1", features = ["client", "client-legacy", "http1", 
 http-body-util = "0.1"
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
+async-stream = "0.3.6"
 
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }

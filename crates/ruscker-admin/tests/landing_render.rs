@@ -31,6 +31,7 @@ fn app_state() -> AppState {
         backend: None,
         replicas: std::sync::Arc::new(tokio::sync::RwLock::new(Default::default())),
         cookie_key: ruscker_proxy::sticky::CookieKey::random(),
+        spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
     }
 }
 

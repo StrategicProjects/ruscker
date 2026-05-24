@@ -278,12 +278,25 @@ fn set_sticky_cookie(
     cookies.add(c);
 }
 
-/// Read-then-spawn replica picker. Holds the write lock across
-/// spawn — slow under heavy first-request contention but
-/// straightforward and correct. Phase 3.5 swaps this for a
-/// `tokio::sync::OnceCell`-per-spec coalescer.
+/// Pick an existing replica or spawn a new one.
+///
+/// **Fast path** (`O(1)` read lock): if at least one replica
+/// exists for this spec, return one via round-robin.
+///
+/// **Slow path** (cold start, coalesced per spec): acquire this
+/// spec's mutex from the per-spec coalescer, double-check the
+/// registry, then spawn. Concurrent first-requests for
+/// *different* specs go in parallel — only same-spec requests
+/// wait. After the spawn the mutex releases; any thread that
+/// was waiting now sees the registry already populated and
+/// returns from the double-check without re-spawning.
+///
+/// The per-spec mutex lives in `state.spawn_locks`, a DashMap
+/// keyed by spec id. Entries stay around forever; that's a few
+/// dozen bytes per spec and `Mutex<()>` has no payload to
+/// matter. Phase 4 GC sweeps them when a spec is deleted.
 async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica> {
-    // Fast path
+    // Fast path: read lock, no spawn coordination needed.
     {
         let reg = state.replicas.read().await;
         let replicas = reg.replicas_of(&spec.id);
@@ -293,10 +306,27 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         }
     }
 
-    let mut reg = state.replicas.write().await;
-    let replicas = reg.replicas_of(&spec.id);
-    if !replicas.is_empty() {
-        return Ok(replicas[0].clone());
+    // Slow path: coalesce concurrent first-requests for this spec.
+    // Clone the Arc<Mutex> out of the DashMap (cheap), then drop
+    // the DashMap entry guard before awaiting — never hold a
+    // sync DashMap guard across `.await`.
+    let spec_mutex: std::sync::Arc<tokio::sync::Mutex<()>> = state
+        .spawn_locks
+        .entry(spec.id.clone())
+        .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let _spawn_guard = spec_mutex.lock().await;
+
+    // Double-check under the spec mutex. A sibling first-request
+    // that ran ahead of us already populated the registry; we
+    // skip the spawn and reuse what they made.
+    {
+        let reg = state.replicas.read().await;
+        let replicas = reg.replicas_of(&spec.id);
+        if !replicas.is_empty() {
+            let idx = pick_index(replicas.len());
+            return Ok(replicas[idx].clone());
+        }
     }
 
     let backend = state
@@ -320,7 +350,10 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         None => backend.spawn(&spec.id, image).await,
     }
     .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
-    reg.add(replica.clone());
+
+    // Take the write lock only for the insert — a few microseconds
+    // — and release before the spec mutex unwinds.
+    state.replicas.write().await.add(replica.clone());
     Ok(replica)
 }
 
@@ -417,5 +450,170 @@ mod tests {
         assert_eq!((b + 3 - a) % 3, 1);
         assert_eq!((c + 3 - b) % 3, 1);
         assert_eq!((d + 3 - c) % 3, 1);
+    }
+
+    // -------------------------------------------------------------
+    // Spawn coalescer: when N requests for the same spec land on a
+    // cold cache, only ONE should call into the backend. The rest
+    // wait at the per-spec mutex, see the registry populated, and
+    // return without spawning. Without the coalescer (write-lock
+    // approach), they'd all be serialized but each would still
+    // spawn — N containers for one cold start.
+    // -------------------------------------------------------------
+
+    use async_trait::async_trait;
+    use ruscker_config::Spec;
+    use ruscker_core::{
+        CoreResult, ContainerBackend, ReplicaId, ReplicaMetrics, ReplicaRegistry, ReplicaState,
+    };
+    use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc as StdArc;
+    use std::time::Duration as StdDuration;
+    use tokio::sync::RwLock;
+
+    struct CountingBackend {
+        spawns: AtomicU32,
+        delay: StdDuration,
+    }
+
+    #[async_trait]
+    impl ContainerBackend for CountingBackend {
+        async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<ruscker_core::Replica> {
+            self.spawns.fetch_add(1, Ordering::SeqCst);
+            // Sleep so concurrent callers actually race past the
+            // double-check. Without this, the first caller would
+            // already be in the registry before its siblings ever
+            // touch the mutex.
+            tokio::time::sleep(self.delay).await;
+            Ok(ruscker_core::Replica {
+                id: ReplicaId(uuid::Uuid::new_v4()),
+                spec_id: spec_id.to_string(),
+                container_id: "fake".into(),
+                upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 0,
+                sessions_max: 1,
+            })
+        }
+        async fn spawn_with_port(
+            &self,
+            spec_id: &str,
+            image: &str,
+            _port: u16,
+        ) -> CoreResult<ruscker_core::Replica> {
+            self.spawn(spec_id, image).await
+        }
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn list(&self) -> CoreResult<Vec<ruscker_core::Replica>> {
+            Ok(vec![])
+        }
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            Ok(ReplicaMetrics {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+    }
+
+    fn coalescer_state(backend: StdArc<dyn ContainerBackend>) -> AppState {
+        // Minimal AppState — only the fields pick_or_spawn touches
+        // need to be real. Everything else uses Default or empty.
+        use ruscker_config::Config;
+        let cfg = Config::from_yaml("specs: []").expect("empty config");
+        AppState {
+            config: std::sync::Arc::new(cfg),
+            locales: std::sync::Arc::new(
+                crate::i18n::Locales::load().expect("load locales"),
+            ),
+            admin_auth: Default::default(),
+            db: None,
+            images_dir: None,
+            master_key: Default::default(),
+            backend: Some(backend),
+            replicas: StdArc::new(RwLock::new(ReplicaRegistry::new())),
+            cookie_key: CookieKey::random(),
+            spawn_locks: StdArc::new(dashmap::DashMap::new()),
+        }
+    }
+
+    fn fake_spec(id: &str) -> Spec {
+        let yaml = format!(
+            r#"
+id: {id}
+display-name: Test
+container-image: test:latest
+"#
+        );
+        serde_yaml_ng::from_str(&yaml).expect("parse fake spec")
+    }
+
+    #[tokio::test]
+    async fn coalescer_spawns_once_under_concurrent_first_requests() {
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(80),
+        });
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+        let spec = fake_spec("coalesced");
+
+        // Fan out 8 concurrent callers for the SAME spec.
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let st = state.clone();
+            let sp = spec.clone();
+            tasks.push(tokio::spawn(async move {
+                pick_or_spawn(&st, &sp).await.expect("pick_or_spawn")
+            }));
+        }
+        let mut replica_ids = std::collections::HashSet::new();
+        for t in tasks {
+            let r = t.await.expect("join");
+            replica_ids.insert(r.id);
+        }
+
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "exactly one backend spawn for {} concurrent first-requests",
+            8
+        );
+        assert_eq!(replica_ids.len(), 1, "all callers got the same replica");
+    }
+
+    #[tokio::test]
+    async fn coalescer_does_not_serialize_different_specs() {
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(120),
+        });
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+
+        // Two different specs — should spawn in parallel, not in
+        // series. Wall time bounded by 1× delay + overhead, not 2×.
+        let start = std::time::Instant::now();
+        let st1 = state.clone();
+        let st2 = state.clone();
+        let s1 = fake_spec("alpha");
+        let s2 = fake_spec("beta");
+        let (r1, r2) = tokio::join!(
+            tokio::spawn(async move { pick_or_spawn(&st1, &s1).await.expect("a") }),
+            tokio::spawn(async move { pick_or_spawn(&st2, &s2).await.expect("b") }),
+        );
+        r1.unwrap();
+        r2.unwrap();
+        let elapsed = start.elapsed();
+
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 2);
+        assert!(
+            elapsed < StdDuration::from_millis(220),
+            "two cold spawns should run in parallel, took {:?}",
+            elapsed
+        );
     }
 }

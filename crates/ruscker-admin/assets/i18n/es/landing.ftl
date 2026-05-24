@@ -167,6 +167,22 @@ admin-landing-preview-empty = (sin texto de introducción)
 admin-landing-future-title = Próximamente
 admin-landing-future-help = Editor de logos, reordenación de secciones, bloques HTML custom, SEO/analytics y meta tags. Por ahora siguen el YAML.
 
+# Admin audit log
+admin-audit-title = Auditoría
+admin-audit-subtitle = Todos los cambios del admin, del más reciente al más antiguo. Tope de 100 eventos por consulta.
+admin-audit-family = Familia
+admin-audit-family-all = Todas las acciones
+admin-audit-family-spec = Aplicaciones
+admin-audit-family-image = Imágenes
+admin-audit-family-credential = Credenciales
+admin-audit-family-landing = Portal
+admin-audit-actor = Autor
+admin-audit-actor-all = Todos los autores
+admin-audit-target-placeholder = Buscar destino (ej: spec:auroraprime)
+admin-audit-apply = Aplicar
+admin-audit-empty = Aún no hay cambios — o el filtro no coincide con nada.
+admin-audit-limit-hint = Mostrando los 100 más recientes. Afine el filtro para reducir.
+
 card-cta-open = Abrir
 card-cta-link = Visitar
 card-cta-open-app = Abrir aplicación

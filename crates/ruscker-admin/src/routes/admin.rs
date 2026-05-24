@@ -21,6 +21,7 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+pub mod audit;
 pub mod credentials;
 pub mod images;
 pub mod landing;
@@ -37,6 +38,7 @@ pub fn routes() -> Router<AppState> {
         .merge(images::routes())
         .merge(credentials::routes())
         .merge(landing::routes())
+        .merge(audit::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────

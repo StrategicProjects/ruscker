@@ -30,6 +30,7 @@ fn app_state() -> AppState {
         master_key: Default::default(),
         backend: None,
         replicas: std::sync::Arc::new(tokio::sync::RwLock::new(Default::default())),
+        cookie_key: ruscker_proxy::sticky::CookieKey::random(),
     }
 }
 

@@ -914,6 +914,116 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   border-radius: 4px;
 }
 
+/* ─── Audit log viewer ───────────────────────────────────────── */
+.audit-filter-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.audit-list {
+  list-style: none;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  padding: 0; margin: 0;
+}
+.audit-row {
+  border-bottom: 0.5px solid var(--border-soft);
+}
+.audit-row:last-child { border-bottom: none; }
+
+.audit-row-summary {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  color: var(--text);
+  transition: background 0.1s;
+}
+.audit-row-summary:hover { background: var(--surface-soft); }
+
+.audit-row-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+}
+.audit-row-action {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.tone-create  .audit-row-action,
+.tone-create  .audit-row-icon { color: #047857; }
+.tone-create  .audit-row-action { background: rgba(16, 185, 129, 0.12); }
+
+.tone-update  .audit-row-action,
+.tone-update  .audit-row-icon { color: #1d4ed8; }
+.tone-update  .audit-row-action { background: rgba(59, 130, 246, 0.12); }
+
+.tone-delete  .audit-row-action,
+.tone-delete  .audit-row-icon { color: #b91c1c; }
+.tone-delete  .audit-row-action { background: rgba(239, 68, 68, 0.12); }
+
+.tone-import  .audit-row-action,
+.tone-import  .audit-row-icon { color: var(--color-teal-800); }
+.tone-import  .audit-row-action { background: rgba(15, 110, 86, 0.12); }
+
+.tone-other   .audit-row-action { background: var(--surface-soft); color: var(--text-muted); }
+
+.audit-row-target {
+  color: var(--text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+}
+.audit-row-spacer { flex: 1; }
+.audit-row-actor {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 1px 6px;
+  background: var(--surface-soft);
+  border-radius: 4px;
+}
+.audit-row-time {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.audit-row-chev {
+  font-size: 13px;
+  color: var(--text-faint);
+  width: 14px;
+  text-align: center;
+}
+.audit-row-diff {
+  background: var(--surface-soft);
+  border-top: 0.5px solid var(--border-soft);
+  padding: 10px 14px 10px 38px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  margin: 0;
+  overflow-x: auto;
+}
+
 /* ─── Brand lockup (footer) ──────────────────────────────────────
  *
  * Inline mark + wordmark text. Wordmark is always lowercase,

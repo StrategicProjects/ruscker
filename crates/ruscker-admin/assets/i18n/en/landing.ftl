@@ -167,6 +167,22 @@ admin-landing-preview-empty = (no intro text)
 admin-landing-future-title = Coming soon
 admin-landing-future-help = Logo editor, section reordering, custom HTML blocks, SEO/analytics and meta tags. For now those fields follow the YAML.
 
+# Admin audit log
+admin-audit-title = Audit log
+admin-audit-subtitle = Every admin change, newest first. Capped at 100 events per query.
+admin-audit-family = Family
+admin-audit-family-all = All actions
+admin-audit-family-spec = Apps
+admin-audit-family-image = Images
+admin-audit-family-credential = Credentials
+admin-audit-family-landing = Portal
+admin-audit-actor = Actor
+admin-audit-actor-all = All actors
+admin-audit-target-placeholder = Search target (e.g. spec:auroraprime)
+admin-audit-apply = Apply
+admin-audit-empty = No changes yet — or the filter matches nothing.
+admin-audit-limit-hint = Showing the 100 most recent matches. Tighten the filter to refine.
+
 card-cta-open = Open
 card-cta-link = Visit
 card-cta-open-app = Open app

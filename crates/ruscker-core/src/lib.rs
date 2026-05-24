@@ -231,6 +231,16 @@ pub trait ContainerBackend: Send + Sync {
 
     /// Per-replica metrics (CPU, memory, network I/O).
     async fn metrics(&self, replica_id: &ReplicaId) -> CoreResult<ReplicaMetrics>;
+
+    /// Fetch the last `tail` lines of a replica's combined
+    /// stdout+stderr. A one-shot snapshot (no follow) — the
+    /// dashboard logs page uses it for "why did this container
+    /// crash" debugging. Default impl returns an empty vec so
+    /// backends that don't support log retrieval don't break
+    /// the caller.
+    async fn logs(&self, _replica_id: &ReplicaId, _tail: usize) -> CoreResult<Vec<String>> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

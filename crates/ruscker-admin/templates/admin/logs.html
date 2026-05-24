@@ -1,0 +1,67 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-logs-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<style>
+  .logs-pre {
+    background: var(--color-background-secondary, #1113);
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 70vh;
+    overflow-y: auto;
+    margin: 0;
+  }
+  .logs-empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.2));
+    border-radius: 10px;
+  }
+  .logs-mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+</style>
+
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-logs-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">
+      {{ display_name }}
+      {% if !spec_id.is_empty() %}<span class="logs-mono"> · {{ spec_id }}</span>{% endif %}
+    </p>
+    <p class="logs-mono mt-1">{{ self.t("admin-logs-replica") }}: {{ replica_id }}</p>
+  </div>
+  <a href="/admin/dashboard" class="admin-nav-link">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i>
+    <span>{{ self.t("admin-logs-back") }}</span>
+  </a>
+</div>
+
+{% if lines.is_empty() %}
+  <div class="logs-empty">{{ self.t("admin-logs-empty") }}</div>
+{% else %}
+  <p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-logs-tail-note") }}</p>
+  <pre class="logs-pre" id="logs-pre">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+  <script>
+    // Scroll to the newest line on load.
+    (function () {
+      var pre = document.getElementById('logs-pre');
+      if (pre) pre.scrollTop = pre.scrollHeight;
+    })();
+  </script>
+{% endif %}
+
+{% endblock %}

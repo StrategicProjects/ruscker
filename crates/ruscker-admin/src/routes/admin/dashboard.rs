@@ -20,17 +20,18 @@
 
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Path, State},
+    http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
-        Response,
+        IntoResponse, Response,
     },
     routing::get,
     Router,
 };
 use chrono::Utc;
 use futures_util::stream::Stream;
-use ruscker_core::{Replica, ReplicaState};
+use ruscker_core::{Replica, ReplicaId, ReplicaState};
 use std::convert::Infallible;
 use std::time::Duration;
 
@@ -43,7 +44,13 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/dashboard", get(index))
         .route("/admin/dashboard/events", get(events))
+        .route("/admin/dashboard/logs/{replica_id}", get(logs))
 }
+
+/// How many trailing log lines the logs page requests. Enough
+/// to see a crash traceback without flooding the page; the
+/// backend caps harder at its own `MAX_TAIL`.
+const LOGS_TAIL: usize = 500;
 
 /// How often the SSE stream emits a snapshot. Same cadence as
 /// the metrics cache refresh — emitting more often would show
@@ -144,6 +151,30 @@ struct DashboardPage<'a> {
 }
 
 impl<'a> DashboardPage<'a> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+#[derive(Template)]
+#[template(path = "admin/logs.html")]
+struct LogsPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    nav_section: &'static str,
+    /// Display name resolved from the spec config (or spec_id
+    /// fallback) for the page heading.
+    display_name: String,
+    spec_id: String,
+    replica_id: String,
+    /// The log lines, oldest-first. Empty vec renders an
+    /// "no output" hint.
+    lines: Vec<String>,
+}
+
+impl<'a> LogsPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
@@ -354,6 +385,87 @@ async fn events(
     Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL))
 }
 
+/// Per-replica logs page. Fetches the last [`LOGS_TAIL`] lines
+/// of combined stdout+stderr via the backend and renders them
+/// in a `<pre>`. One-shot — no live follow yet (that's a
+/// future slice that would reuse the SSE machinery).
+///
+/// `replica_id` is the stringified UUID from the dashboard
+/// row's `data-replica-id`. A malformed id → 400; a valid id
+/// that no longer maps to a container → the backend returns an
+/// error which we surface as 404.
+async fn logs(
+    _: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    Path(replica_id): Path<String>,
+) -> Response {
+    let Ok(uuid) = uuid::Uuid::parse_str(&replica_id) else {
+        return (StatusCode::BAD_REQUEST, "invalid replica id").into_response();
+    };
+    let rid = ReplicaId(uuid);
+
+    let Some(backend) = state.backend.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no container backend — start with --docker",
+        )
+            .into_response();
+    };
+
+    // Resolve display_name + spec_id from the registry snapshot
+    // so the page heading is friendly even though logs come
+    // straight from the backend.
+    let (display_name, spec_id) = {
+        let reg = state.replicas.read().await;
+        let found = reg.all().find(|r| r.id == rid).map(|r| r.spec_id.clone());
+        match found {
+            Some(sid) => {
+                let dn = state
+                    .config
+                    .proxy
+                    .specs
+                    .iter()
+                    .find(|s| s.id == sid)
+                    .and_then(|s| s.display_name.clone())
+                    .unwrap_or_else(|| sid.clone());
+                (dn, sid)
+            }
+            // Replica not in registry — still try to fetch logs
+            // (it may have just been dropped from the registry
+            // but the container lingers). Heading falls back to
+            // the raw id.
+            None => (replica_id.clone(), String::new()),
+        }
+    };
+
+    let lines = match backend.logs(&rid, LOGS_TAIL).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(replica = %replica_id, error = ?e, "fetch logs failed");
+            return (
+                StatusCode::NOT_FOUND,
+                format!("could not fetch logs for replica {replica_id}: {e}"),
+            )
+                .into_response();
+        }
+    };
+
+    let page = LogsPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        nav_section: "dashboard",
+        display_name,
+        spec_id,
+        replica_id,
+        lines,
+    };
+    super::render(&page)
+}
+
 /// Format a chrono `Duration` as a short uptime: "45s", "12m",
 /// "2h 14m", "3d 7h". One-line because that's how the table
 /// renders it; longer formats land in the per-replica detail
@@ -475,6 +587,63 @@ mod tests {
             snapshot_json: "{}".to_string(),
         };
         page.render().expect("render dashboard")
+    }
+
+    fn render_logs(lines: Vec<String>) -> String {
+        let locales = load_locales();
+        let page = LogsPage {
+            locale: Locale::Pt,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            nav_section: "dashboard",
+            display_name: "Aurora Prime".into(),
+            spec_id: "auroraprime".into(),
+            replica_id: "11111111-2222-3333-4444-555555555555".into(),
+            lines,
+        };
+        page.render().expect("render logs")
+    }
+
+    #[test]
+    fn logs_page_renders_each_line() {
+        let html = render_logs(vec![
+            "2026-05-24 starting nginx".into(),
+            "worker process 1 started".into(),
+        ]);
+        assert!(html.contains("Aurora Prime"));
+        assert!(html.contains("auroraprime"));
+        assert!(html.contains("11111111-2222-3333-4444-555555555555"));
+        assert!(html.contains("starting nginx"));
+        assert!(html.contains("worker process 1 started"));
+        // Tail note present, empty hint absent.
+        assert!(html.contains("últimas linhas"));
+        assert!(!html.contains("Sem saída de log"));
+    }
+
+    #[test]
+    fn logs_page_renders_empty_hint() {
+        let html = render_logs(vec![]);
+        assert!(html.contains("Sem saída de log"));
+    }
+
+    #[test]
+    fn logs_page_escapes_html_in_log_lines() {
+        // A log line containing HTML must not break out of the
+        // <pre>. Askama auto-escapes by default. We don't assert
+        // the exact entity form (askama may emit `&lt;` or
+        // `&#60;`) — only that the raw injectable form is gone
+        // and the `<` got encoded to *some* entity.
+        let html = render_logs(vec!["<script>alert(1)</script>".into()]);
+        assert!(
+            !html.contains("<script>alert(1)</script>"),
+            "raw script tag must not survive: {html}"
+        );
+        // The literal payload's `<` must be entity-encoded.
+        assert!(
+            html.contains("&lt;script&gt;") || html.contains("&#60;script&#62;"),
+            "escaped form not found in: {html}"
+        );
     }
 
     #[test]

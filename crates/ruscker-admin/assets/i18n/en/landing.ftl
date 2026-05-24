@@ -239,3 +239,10 @@ footer-theme = Theme
 theme-light = Light
 theme-dark = Dark
 theme-auto = Auto
+
+# Admin logs viewer
+admin-logs-title = Container logs
+admin-logs-back = Back to dashboard
+admin-logs-replica = Replica
+admin-logs-empty = No log output for this replica yet.
+admin-logs-tail-note = Showing the last lines (newest at the bottom).

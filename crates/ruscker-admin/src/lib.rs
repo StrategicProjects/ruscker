@@ -63,6 +63,10 @@ pub struct AppState {
     /// Shared across handlers via an RwLock; writes happen only
     /// on spawn / stop, reads happen per-request to pick a replica.
     pub replicas: std::sync::Arc<tokio::sync::RwLock<ruscker_core::ReplicaRegistry>>,
+
+    /// HMAC key used to sign sticky-session cookies. Auto-
+    /// generated per-process unless `RUSCKER_COOKIE_KEY` is set.
+    pub cookie_key: ruscker_proxy::sticky::CookieKey,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -96,6 +100,8 @@ impl AdminServer {
             replicas: std::sync::Arc::new(tokio::sync::RwLock::new(
                 ruscker_core::ReplicaRegistry::new(),
             )),
+            cookie_key: ruscker_proxy::sticky::CookieKey::from_env_or_random()
+                .context("load sticky cookie key")?,
         };
         Ok(Self {
             addr,

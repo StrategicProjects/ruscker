@@ -75,9 +75,8 @@ fn persistent_cookie(name: &'static str, value: String) -> Cookie<'static> {
 }
 
 fn redirect_back(headers: &HeaderMap) -> Redirect {
-    let target = headers
-        .get(REFERER)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("/");
-    Redirect::to(target)
+    // Same-origin only: an attacker-controlled `Referer` must not
+    // turn this 303 into an open redirect off our origin.
+    let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
+    Redirect::to(&super::same_origin_path(referer, "/"))
 }

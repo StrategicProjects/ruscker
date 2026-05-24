@@ -234,6 +234,7 @@ mod tests {
             replicas: Arc::new(tokio::sync::RwLock::new(ReplicaRegistry::new())),
             cookie_key: ruscker_proxy::sticky::CookieKey::random(),
             spawn_locks: Arc::new(dashmap::DashMap::new()),
+            sessions: Arc::new(crate::sessions::SessionTracker::new()),
         }
     }
 

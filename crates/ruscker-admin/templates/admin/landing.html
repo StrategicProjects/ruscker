@@ -4,25 +4,6 @@
 
 {% block content %}
 
-<style>
-  .grad-modes { display: inline-flex; gap: 2px; margin-bottom: 8px;
-    border: 0.5px solid var(--border, rgba(120,120,120,0.25)); border-radius: 8px; padding: 2px; }
-  .grad-mode { font-size: 12px; padding: 4px 12px; border: none; background: transparent;
-    color: var(--text-muted); cursor: pointer; border-radius: 6px; }
-  .grad-mode.is-active { background: var(--surface-soft, rgba(120,120,120,0.15)); color: var(--text-primary); }
-  .grad-builder { display: flex; flex-direction: column; gap: 8px; }
-  .grad-row { display: flex; align-items: center; gap: 10px; }
-  .grad-angle { display: flex; align-items: center; gap: 6px; font-size: 12px;
-    color: var(--text-muted); flex: 1; }
-  .grad-angle input[type=range] { flex: 1; }
-  .grad-stop { display: flex; align-items: center; gap: 6px; }
-  .grad-pos { width: 56px; font-size: 12px; padding: 4px 6px;
-    border: 0.5px solid var(--border, rgba(120,120,120,0.25)); border-radius: 6px; }
-  .grad-pos-unit { font-size: 11px; color: var(--text-faint); }
-  .grad-add { font-size: 12px; align-self: flex-start; }
-  .grad-output { font-size: 11px; opacity: 0.75; }
-</style>
-
 <div x-data="ruscker.landingForm({{ form_initial_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
@@ -237,36 +218,10 @@
 
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>
+// Gradient helpers (gradientCss / gradientDefault / bgMode) are
+// defined in admin/_layout.html so they're shared with the
+// spec-form cover editor.
 window.ruscker = window.ruscker || {};
-
-// ── Shared gradient helpers (reused by the spec-form cover too) ──
-
-// Build a CSS background string from builder state.
-// g = { type: 'linear'|'radial', angle: 0-360, stops: [{color, pos}] }
-// `pos` is an optional 0-100 percentage; omitted when null/''.
-window.ruscker.gradientCss = (g) => {
-  const stops = (g.stops || [])
-    .filter((s) => s && s.color)
-    .map((s) => (s.pos === '' || s.pos == null) ? s.color : `${s.color} ${s.pos}%`)
-    .join(', ');
-  if (!stops) return '';
-  if (g.type === 'radial') return `radial-gradient(circle, ${stops})`;
-  return `linear-gradient(${g.angle | 0}deg, ${stops})`;
-};
-
-// Fresh default builder state — two stops, a pleasant diagonal.
-window.ruscker.gradientDefault = () => ({
-  type: 'linear',
-  angle: 135,
-  stops: [ { color: '#0f6e56', pos: 0 }, { color: '#5dcaa5', pos: 100 } ],
-});
-
-// Decide the initial editing mode for an existing value:
-// a gradient string → 'gradient', anything else → 'solid'.
-window.ruscker.bgMode = (value) =>
-  (typeof value === 'string' && /^(linear|radial)-gradient\(/.test(value.trim()))
-    ? 'gradient' : 'solid';
-
 window.ruscker.landingForm = (initial) => ({
   form: initial,
   // Header-background editing mode + gradient builder sub-state.

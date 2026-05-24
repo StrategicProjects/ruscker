@@ -273,3 +273,8 @@ admin-grad-linear = Lineal
 admin-grad-radial = Radial
 admin-grad-add-stop = Agregar color
 admin-grad-remove-stop = Quitar color
+
+# Spec form — card cover
+spec-form-cover = Cover de la tarjeta
+spec-form-cover-auto = Auto (color del tipo)
+spec-form-cover-auto-help = Usa el tono por defecto del tipo. Elija Sólido o Degradado para personalizar.

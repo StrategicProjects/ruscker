@@ -277,3 +277,8 @@ admin-grad-linear = Linear
 admin-grad-radial = Radial
 admin-grad-add-stop = Adicionar cor
 admin-grad-remove-stop = Remover cor
+
+# Spec form — card cover
+spec-form-cover = Cover do card
+spec-form-cover-auto = Auto (cor do tipo)
+spec-form-cover-auto-help = Usa o tom padrão do tipo do card. Escolha Sólida ou Gradiente para personalizar.

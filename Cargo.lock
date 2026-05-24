@@ -1727,6 +1727,7 @@ dependencies = [
  "ruscker-core",
  "serde",
  "serde_json",
+ "serde_yaml_ng",
  "sqlx",
  "thiserror",
  "tokio",

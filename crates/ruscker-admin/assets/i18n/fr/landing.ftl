@@ -59,6 +59,54 @@ admin-specs-filter-state-all = Actifs et inactifs
 admin-specs-edit = Modifier
 admin-specs-delete = Supprimer
 
+# Spec form (new / edit)
+spec-form-title-new = Nouvelle application
+spec-form-crumb-new = Nouvelle
+spec-form-crumb-edit = Modifier
+spec-form-cancel = Annuler
+spec-form-save = Enregistrer
+spec-form-kind = Type
+spec-form-kind-app = App conteneur
+spec-form-kind-talk = Présentation
+spec-form-kind-report = Rapport
+spec-form-kind-package = Paquet
+spec-form-kind-api = API
+spec-form-kind-link = Lien externe
+spec-form-identity = Identité
+spec-form-id = ID
+spec-form-id-help-new = Choisi par l'opérateur. Apparaît à /app/<id>/.
+spec-form-id-help-edit = L'ID est immuable une fois créé.
+spec-form-name = Nom d'affichage
+spec-form-desc = Description
+spec-form-visual = Visuel
+spec-form-logo = Logo de la carte
+spec-form-logo-help = URL ou chemin /assets/img/foo.png. Voir docs/IMAGES.md.
+spec-form-access = Accès
+spec-form-state = État
+spec-form-state-active = Actif
+spec-form-state-inactive = Inactif
+spec-form-tema = Thème
+spec-form-container = Conteneur
+spec-form-image = Image Docker
+spec-form-seats = Sessions/conteneur
+spec-form-lifetime = Durée max. (min)
+spec-form-lifetime-help = 360 = 6 heures
+spec-form-link-section = Lien externe
+spec-form-link = URL cible
+spec-form-meta = Métadonnées
+spec-form-updated = Mis à jour le
+spec-form-updated-help = Vide pour utiliser la date d'aujourd'hui.
+spec-form-preview = Aperçu de la carte
+spec-form-preview-help = Mise à jour en direct.
+spec-form-actions = Actions
+spec-form-delete = Supprimer l'application
+spec-form-delete-confirm = Êtes-vous sûr ? Cette action est irréversible.
+
+spec-form-error-id-required = L'ID est obligatoire.
+spec-form-error-id-shape = L'ID doit commencer par une lettre et contenir uniquement lettres, chiffres, "_" et "-".
+spec-form-error-id-duplicate = Une application avec cet ID existe déjà.
+spec-form-error-name-required = Le nom d'affichage est obligatoire.
+
 card-cta-open = Ouvrir
 card-cta-link = Accéder
 card-cta-open-app = Ouvrir l'application

@@ -63,6 +63,54 @@ admin-specs-filter-state-all = Ativos e inativos
 admin-specs-edit = Editar
 admin-specs-delete = Apagar
 
+# Spec form (new / edit)
+spec-form-title-new = Nova aplicação
+spec-form-crumb-new = Nova
+spec-form-crumb-edit = Editar
+spec-form-cancel = Cancelar
+spec-form-save = Salvar alterações
+spec-form-kind = Tipo
+spec-form-kind-app = App container
+spec-form-kind-talk = Apresentação
+spec-form-kind-report = Relatório
+spec-form-kind-package = Pacote
+spec-form-kind-api = API
+spec-form-kind-link = Link externo
+spec-form-identity = Identidade
+spec-form-id = ID
+spec-form-id-help-new = Gerado pelo operador. Aparece em /app/<id>/.
+spec-form-id-help-edit = ID é imutável depois de criado.
+spec-form-name = Nome de exibição
+spec-form-desc = Descrição
+spec-form-visual = Visual
+spec-form-logo = Logo do card
+spec-form-logo-help = URL ou caminho /assets/img/foo.png. Veja docs/IMAGES.md.
+spec-form-access = Acesso
+spec-form-state = Estado
+spec-form-state-active = Ativo
+spec-form-state-inactive = Inativo
+spec-form-tema = Tema
+spec-form-container = Container
+spec-form-image = Imagem Docker
+spec-form-seats = Sessões/container
+spec-form-lifetime = Vida máx. (min)
+spec-form-lifetime-help = 360 = 6 horas
+spec-form-link-section = Link externo
+spec-form-link = URL de destino
+spec-form-meta = Metadados
+spec-form-updated = Atualizado em
+spec-form-updated-help = Vazio para usar a data de hoje.
+spec-form-preview = Prévia do card
+spec-form-preview-help = Atualiza ao vivo conforme você edita.
+spec-form-actions = Ações
+spec-form-delete = Excluir aplicação
+spec-form-delete-confirm = Tem certeza? Esta ação não pode ser desfeita.
+
+spec-form-error-id-required = ID é obrigatório.
+spec-form-error-id-shape = ID deve começar com letra e conter apenas letras, números, "_" e "-".
+spec-form-error-id-duplicate = Já existe uma aplicação com esse ID.
+spec-form-error-name-required = Nome de exibição é obrigatório.
+
 card-cta-open = Abrir
 card-cta-link = Acessar
 card-cta-open-app = Abrir aplicativo

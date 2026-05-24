@@ -59,6 +59,54 @@ admin-specs-filter-state-all = Activos e inactivos
 admin-specs-edit = Editar
 admin-specs-delete = Borrar
 
+# Spec form (new / edit)
+spec-form-title-new = Nueva aplicación
+spec-form-crumb-new = Nueva
+spec-form-crumb-edit = Editar
+spec-form-cancel = Cancelar
+spec-form-save = Guardar cambios
+spec-form-kind = Tipo
+spec-form-kind-app = App contenedor
+spec-form-kind-talk = Presentación
+spec-form-kind-report = Informe
+spec-form-kind-package = Paquete
+spec-form-kind-api = API
+spec-form-kind-link = Enlace externo
+spec-form-identity = Identidad
+spec-form-id = ID
+spec-form-id-help-new = Elegido por el operador. Aparece en /app/<id>/.
+spec-form-id-help-edit = El ID es inmutable después de creado.
+spec-form-name = Nombre visible
+spec-form-desc = Descripción
+spec-form-visual = Visual
+spec-form-logo = Logo del card
+spec-form-logo-help = URL o ruta /assets/img/foo.png. Ver docs/IMAGES.md.
+spec-form-access = Acceso
+spec-form-state = Estado
+spec-form-state-active = Activo
+spec-form-state-inactive = Inactivo
+spec-form-tema = Tema
+spec-form-container = Contenedor
+spec-form-image = Imagen Docker
+spec-form-seats = Sesiones/contenedor
+spec-form-lifetime = Vida máx. (min)
+spec-form-lifetime-help = 360 = 6 horas
+spec-form-link-section = Enlace externo
+spec-form-link = URL destino
+spec-form-meta = Metadatos
+spec-form-updated = Actualizado el
+spec-form-updated-help = Vacío para usar la fecha de hoy.
+spec-form-preview = Vista previa
+spec-form-preview-help = Se actualiza en vivo.
+spec-form-actions = Acciones
+spec-form-delete = Eliminar aplicación
+spec-form-delete-confirm = ¿Está seguro? Esto no se puede deshacer.
+
+spec-form-error-id-required = El ID es obligatorio.
+spec-form-error-id-shape = El ID debe empezar con una letra y contener solo letras, números, "_" y "-".
+spec-form-error-id-duplicate = Ya existe una aplicación con ese ID.
+spec-form-error-name-required = El nombre visible es obligatorio.
+
 card-cta-open = Abrir
 card-cta-link = Visitar
 card-cta-open-app = Abrir aplicación

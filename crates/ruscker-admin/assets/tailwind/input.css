@@ -581,6 +581,131 @@ body {
 .pill-kind-api         { background: rgba(6, 182, 212, 0.18); color: #083344; }
 .pill-kind-external    { background: rgba(38, 84, 124, 0.15); color: #26547c; }
 
+/* ─── Spec form (admin/spec_form.html) ───────────────────────── */
+.spec-form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 24px;
+}
+@media (max-width: 900px) {
+  .spec-form-layout { grid-template-columns: 1fr; }
+}
+.spec-form-fields { min-width: 0; }
+.spec-form-preview {
+  position: sticky; top: 16px; align-self: start;
+  max-width: 320px;
+}
+.spec-form-section { margin-bottom: 16px; }
+.spec-form-section-title {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 20px 0 10px;
+}
+.spec-form-field { margin-bottom: 12px; }
+.spec-form-label {
+  font-size: 12px;
+  color: var(--text);
+  display: block;
+  margin-bottom: 4px;
+}
+.spec-form-help {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+.spec-form-input {
+  width: 100%;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  font-family: inherit;
+  color: var(--text);
+  appearance: none;
+}
+.spec-form-input:focus {
+  outline: none;
+  border-color: var(--color-teal-600);
+  box-shadow: 0 0 0 2px rgba(15, 110, 86, 0.15);
+}
+.spec-form-input:read-only {
+  background: var(--surface-soft);
+  color: var(--text-muted);
+}
+.spec-form-input--mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+textarea.spec-form-input { resize: vertical; min-height: 64px; }
+
+/* Type picker — 6 cards, equal columns */
+.kind-picker {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+@media (max-width: 720px) {
+  .kind-picker { grid-template-columns: repeat(3, 1fr); }
+}
+.kind-picker-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 10px 4px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-muted);
+  transition: all 0.15s;
+  text-align: center;
+}
+.kind-picker-card i { font-size: 18px; }
+.kind-picker-card:hover { border-color: var(--border-strong); color: var(--text); }
+.kind-picker-card.is-active {
+  border: 2px solid var(--color-teal-600);
+  background: rgba(15, 110, 86, 0.06);
+  color: var(--color-teal-800);
+  padding: 9px 3px;  /* compensate the extra 1px border */
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0);
+  border: 0;
+}
+
+.spec-form-actions-box {
+  margin-top: 18px;
+  padding: 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+}
+.spec-form-actions-title {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+.spec-form-delete {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent;
+  border: 0.5px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-lock);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.spec-form-delete:hover {
+  background: rgba(239, 68, 68, 0.08);
+}
+
 /* ─── Brand lockup (footer) ──────────────────────────────────────
  *
  * Inline mark + wordmark text. Wordmark is always lowercase,

@@ -21,6 +21,7 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+pub mod spec_form;
 pub mod specs;
 
 pub fn routes() -> Router<AppState> {
@@ -29,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/login", get(login_form).post(login_submit))
         .route("/admin/logout", post(logout))
         .merge(specs::routes())
+        .merge(spec_form::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────

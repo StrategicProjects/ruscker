@@ -24,6 +24,7 @@ type-api-abbr = API
 type-link-abbr = LNK
 
 # Admin shell
+admin-nav-dashboard = Dashboard
 admin-nav-apps = Apps
 admin-nav-images = Images
 admin-nav-credentials = Credentials
@@ -31,6 +32,27 @@ admin-nav-landing = Portal
 admin-nav-audit = Audit log
 admin-nav-portal = Back to portal
 admin-nav-logout = Sign out
+
+# Admin dashboard
+admin-dashboard-title = Monitoring dashboard
+admin-dashboard-subtitle = Live container and session state
+admin-dashboard-metric-containers = Containers
+admin-dashboard-metric-sessions = Active sessions
+admin-dashboard-metric-specs = Apps with replicas
+admin-dashboard-metric-tracker = Tracked sessions
+admin-dashboard-replicas-heading = Active replicas
+admin-dashboard-no-replicas = No replicas running. Replicas show up here when the scaler enforces a minimum or when a request triggers a cold start.
+admin-dashboard-col-spec = App
+admin-dashboard-col-state = State
+admin-dashboard-col-uptime = Uptime
+admin-dashboard-col-sessions = Sessions
+admin-dashboard-col-container = Container
+admin-dashboard-state-ready = ready
+admin-dashboard-state-starting = starting
+admin-dashboard-state-draining = draining
+admin-dashboard-state-stopped = stopped
+admin-dashboard-state-failed = failed
+admin-dashboard-backend-missing = Docker backend is not connected — start the server with `--docker` to see containers here.
 
 # Admin login
 admin-login-title = Admin sign in

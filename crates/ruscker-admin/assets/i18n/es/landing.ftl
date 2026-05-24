@@ -24,6 +24,7 @@ type-api-abbr = API
 type-link-abbr = LNK
 
 # Admin shell
+admin-nav-dashboard = Panel
 admin-nav-apps = Aplicaciones
 admin-nav-images = Imágenes
 admin-nav-credentials = Credenciales
@@ -31,6 +32,27 @@ admin-nav-landing = Portal
 admin-nav-audit = Auditoría
 admin-nav-portal = Volver al portal
 admin-nav-logout = Salir
+
+# Admin dashboard
+admin-dashboard-title = Panel de monitoreo
+admin-dashboard-subtitle = Estado de contenedores y sesiones en tiempo real
+admin-dashboard-metric-containers = Contenedores
+admin-dashboard-metric-sessions = Sesiones activas
+admin-dashboard-metric-specs = Aplicaciones con réplicas
+admin-dashboard-metric-tracker = Sesiones rastreadas
+admin-dashboard-replicas-heading = Réplicas activas
+admin-dashboard-no-replicas = Ninguna réplica en ejecución. Las réplicas aparecen aquí cuando el scaler garantiza el mínimo o una solicitud dispara un arranque en frío.
+admin-dashboard-col-spec = Aplicación
+admin-dashboard-col-state = Estado
+admin-dashboard-col-uptime = Uptime
+admin-dashboard-col-sessions = Sesiones
+admin-dashboard-col-container = Contenedor
+admin-dashboard-state-ready = listo
+admin-dashboard-state-starting = iniciando
+admin-dashboard-state-draining = drenando
+admin-dashboard-state-stopped = detenido
+admin-dashboard-state-failed = falló
+admin-dashboard-backend-missing = El backend de Docker no está conectado — inicie el servidor con `--docker` para ver contenedores aquí.
 
 # Admin login
 admin-login-title = Acceso admin

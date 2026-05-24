@@ -23,6 +23,7 @@ use crate::AppState;
 
 pub mod audit;
 pub mod credentials;
+pub mod dashboard;
 pub mod images;
 pub mod landing;
 pub mod spec_form;
@@ -30,9 +31,10 @@ pub mod specs;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin", get(redirect_to_specs))
+        .route("/admin", get(redirect_to_dashboard))
         .route("/admin/login", get(login_form).post(login_submit))
         .route("/admin/logout", post(logout))
+        .merge(dashboard::routes())
         .merge(specs::routes())
         .merge(spec_form::routes())
         .merge(images::routes())
@@ -63,8 +65,8 @@ impl LoginPage<'_> {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
-async fn redirect_to_specs(_: AdminSession) -> Redirect {
-    Redirect::to("/admin/specs")
+async fn redirect_to_dashboard(_: AdminSession) -> Redirect {
+    Redirect::to("/admin/dashboard")
 }
 
 async fn login_form(
@@ -139,12 +141,12 @@ async fn login_submit(
 
     // Redirect to the page the operator was trying to reach. The
     // login form preserves the destination in a `?next=` param —
-    // not implemented yet, so default to /admin/specs.
+    // not implemented yet, so default to /admin/dashboard.
     let target = headers
         .get(REFERER)
         .and_then(|v| v.to_str().ok())
         .filter(|r| r.contains("/admin/") && !r.contains("/admin/login"))
-        .unwrap_or("/admin/specs");
+        .unwrap_or("/admin/dashboard");
     Redirect::to(target).into_response()
 }
 

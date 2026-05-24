@@ -35,6 +35,7 @@ fn app_state() -> AppState {
         spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
         sessions: std::sync::Arc::new(ruscker_admin::sessions::SessionTracker::new()),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
+        draining: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
 

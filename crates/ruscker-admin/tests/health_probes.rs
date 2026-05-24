@@ -37,6 +37,7 @@ fn base_state() -> AppState {
         spawn_locks: Arc::new(dashmap::DashMap::new()),
         sessions: Arc::new(ruscker_admin::sessions::SessionTracker::new()),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
+        draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }
 }
 
@@ -90,6 +91,19 @@ async fn readyz_is_ready_with_no_dependencies() {
     let (status, body) = get(base_state(), "/readyz").await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("\"status\":\"ready\""), "body: {body}");
+}
+
+#[tokio::test]
+async fn readyz_503_when_draining() {
+    // Once the draining flag is set, readiness must fail fast and
+    // skip the dependency probes — even with healthy deps.
+    let state = base_state();
+    state
+        .draining
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (status, body) = get(state, "/readyz").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(body.contains("\"status\":\"draining\""), "body: {body}");
 }
 
 #[tokio::test]

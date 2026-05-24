@@ -522,6 +522,7 @@ mod tests {
             spawn_locks: Arc::new(dashmap::DashMap::new()),
             sessions: Arc::new(crate::sessions::SessionTracker::new()),
             metrics: crate::metrics_cache::MetricsCache::new(),
+            draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 

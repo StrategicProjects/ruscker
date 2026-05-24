@@ -338,15 +338,18 @@ async fn spawn_one(
         .or_else(|| infer_inner_port(spec));
 
     let creds = crate::routes::proxy::creds_from_spec(spec);
-    let mut replica = match inner_port {
-        Some(port) => {
-            backend
-                .spawn_with_port_and_creds(&spec.id, image, port, creds.as_ref())
-                .await
-        }
-        None => backend.spawn(&spec.id, image).await,
+    let limits = crate::routes::proxy::limits_from_spec(spec);
+    let mut req = ruscker_core::SpawnRequest::new(&spec.id, image).with_limits(limits);
+    if let Some(port) = inner_port {
+        req = req.with_port(port);
     }
-    .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
+    if let Some(c) = creds {
+        req = req.with_creds(c);
+    }
+    let mut replica = backend
+        .spawn_request(&req)
+        .await
+        .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
     // The backend doesn't know the spec's seat cap — that lives
     // in config. Enrich so `available_seats()` / `all_saturated`
     // immediately reflect the right capacity.

@@ -236,5 +236,7 @@ ignored:
 - `proxy.docker.*` — global docker config (use defaults or env vars)
 
 Setting any of these will produce a startup warning but not an error.
-A future strict mode (`ruscker validate --strict-compat`) will refuse
-configs using unsupported features.
+Run `ruscker validate --strict-compat <config>` to list every
+unsupported feature a config uses (and exit non-zero if any are
+found) — the recommended pre-flight check when migrating from
+ShinyProxy.

@@ -23,7 +23,7 @@
 //! [`scan_raw_text`] runs against raw YAML; [`run`] runs against the
 //! parsed model. [`Config::validate`] merges results from both.
 
-use crate::schema::{Config, Spec, SpecKind};
+use crate::schema::{AuthScheme, Config, Spec, SpecKind};
 use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
@@ -131,6 +131,133 @@ pub fn scan_raw_text(raw: &str) -> Vec<Warning> {
         }
     }
     warnings
+}
+
+/// A ShinyProxy feature that a migrated config uses but Ruscker
+/// does **not** honour. Surfaced only by `ruscker validate
+/// --strict-compat` — it's an opt-in migration aid, separate from
+/// the always-on [`Warning`] checks, so a normal `validate` run
+/// stays quiet about features that simply aren't built yet.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum CompatWarning {
+    /// `proxy.authentication` is set to a scheme other than `none`.
+    /// Ruscker's MVP only does `none` (auth happens inside apps).
+    UnsupportedAuth { scheme: String },
+    /// A per-spec ShinyProxy field that parses but is ignored, or
+    /// isn't modelled at all. `note` tells the operator what to do.
+    UnsupportedSpecField {
+        spec_id: String,
+        field: String,
+        note: String,
+    },
+    /// A top-level `proxy.*` field that's unsupported (e.g.
+    /// `proxy.docker`).
+    UnsupportedProxyField { field: String, note: String },
+}
+
+/// Per-spec ShinyProxy keys Ruscker accepts-but-ignores or doesn't
+/// model yet, paired with operator-facing guidance. These are
+/// invisible in the parsed model (serde drops unknown keys), so the
+/// scan walks the raw YAML tree.
+const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
+    (
+        "port",
+        "explicit upstream port is ignored — Ruscker auto-detects (use `api.port` for APIs)",
+    ),
+    (
+        "minimum-seats-available",
+        "pre-warm pool not implemented — use `min-replicas`",
+    ),
+    ("labels", "custom container labels are not applied (phase 3.5)"),
+    (
+        "network-connections",
+        "container network wiring is not implemented (phase 3.5)",
+    ),
+    ("volumes", "volume mounts are not implemented (phase 3)"),
+    (
+        "environment",
+        "per-spec environment injection is not implemented (phase 3)",
+    ),
+];
+
+/// Top-level `proxy.*` keys that are unsupported.
+const UNSUPPORTED_PROXY_FIELDS: &[(&str, &str)] = &[(
+    "docker",
+    "global docker config is ignored — rely on daemon defaults or env vars",
+)];
+
+/// Scan a config for ShinyProxy features Ruscker doesn't honour.
+///
+/// Two sources, because the unsupported surface splits cleanly:
+/// - `proxy.authentication` is a typed field, so it's read from the
+///   parsed `config` (post env-interpolation).
+/// - Everything else (`kubernetes-*`, `port`, `volumes`, …) is
+///   dropped by serde at parse time, so it's only visible by walking
+///   the raw YAML tree. Keys survive interpolation untouched, so the
+///   raw text is parsed as-is (no env vars required).
+///
+/// Returns an empty vec for a fully-supported config.
+pub fn compat_scan(config: &Config, raw: &str) -> Vec<CompatWarning> {
+    let mut out = Vec::new();
+
+    if config.proxy.authentication != AuthScheme::None {
+        out.push(CompatWarning::UnsupportedAuth {
+            scheme: format!("{:?}", config.proxy.authentication).to_lowercase(),
+        });
+    }
+
+    // Unparseable raw is the parser's problem, not ours — bail with
+    // whatever we already found.
+    let Ok(root) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(raw) else {
+        return out;
+    };
+    let proxy = &root["proxy"];
+
+    for (field, note) in UNSUPPORTED_PROXY_FIELDS {
+        if proxy.get(*field).is_some_and(|v| !v.is_null()) {
+            out.push(CompatWarning::UnsupportedProxyField {
+                field: (*field).to_string(),
+                note: (*note).to_string(),
+            });
+        }
+    }
+
+    if let Some(specs) = proxy.get("specs").and_then(|v| v.as_sequence()) {
+        for spec in specs {
+            let spec_id = spec
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("<unknown>")
+                .to_string();
+
+            // Any `kubernetes-*` key signals a Kubernetes backend
+            // config (phase 6).
+            if let Some(map) = spec.as_mapping() {
+                for key in map.keys().filter_map(|k| k.as_str()) {
+                    if key.starts_with("kubernetes-") {
+                        out.push(CompatWarning::UnsupportedSpecField {
+                            spec_id: spec_id.clone(),
+                            field: key.to_string(),
+                            note: "Kubernetes backend is not implemented (phase 6)".to_string(),
+                        });
+                    }
+                }
+            }
+
+            for (field, note) in UNSUPPORTED_SPEC_FIELDS {
+                if spec.get(*field).is_some_and(|v| !v.is_null()) {
+                    out.push(CompatWarning::UnsupportedSpecField {
+                        spec_id: spec_id.clone(),
+                        field: (*field).to_string(),
+                        note: (*note).to_string(),
+                    });
+                }
+            }
+        }
+    }
+
+    out
 }
 
 pub fn run(config: &Config) -> ValidationReport {
@@ -290,5 +417,100 @@ mod tests {
             Warning::EmbeddedCredential { line, .. } => assert_eq!(*line, 3),
             _ => panic!("expected EmbeddedCredential"),
         }
+    }
+
+    fn compat(yaml: &str) -> Vec<CompatWarning> {
+        let config = Config::from_yaml(yaml).expect("parse config");
+        compat_scan(&config, yaml)
+    }
+
+    #[test]
+    fn compat_scan_clean_config_is_empty() {
+        let yaml = "\
+proxy:
+  authentication: none
+  specs:
+  - id: app1
+    container-image: rocker/shiny
+";
+        assert!(compat(yaml).is_empty());
+    }
+
+    #[test]
+    fn compat_scan_flags_unsupported_auth() {
+        let yaml = "\
+proxy:
+  authentication: ldap
+  specs: []
+";
+        let issues = compat(yaml);
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(
+            &issues[0],
+            CompatWarning::UnsupportedAuth { scheme } if scheme == "ldap"
+        ));
+    }
+
+    #[test]
+    fn compat_scan_flags_dropped_spec_fields() {
+        let yaml = "\
+proxy:
+  specs:
+  - id: legacy
+    container-image: rocker/shiny
+    port: 3838
+    volumes:
+    - /data:/data
+    kubernetes-pod-patches: '[]'
+";
+        let issues = compat(yaml);
+        let fields: Vec<&str> = issues
+            .iter()
+            .filter_map(|w| match w {
+                CompatWarning::UnsupportedSpecField { spec_id, field, .. } => {
+                    assert_eq!(spec_id, "legacy");
+                    Some(field.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert!(fields.contains(&"port"), "fields: {fields:?}");
+        assert!(fields.contains(&"volumes"), "fields: {fields:?}");
+        assert!(
+            fields.contains(&"kubernetes-pod-patches"),
+            "fields: {fields:?}"
+        );
+    }
+
+    #[test]
+    fn compat_scan_does_not_flag_api_port() {
+        // `api.port` is a supported field — only a *spec-level* `port`
+        // is unsupported. The tree walk must not confuse the two.
+        let yaml = "\
+proxy:
+  specs:
+  - id: myapi
+    container-image: my/api
+    type: api
+    api:
+      port: 8000
+";
+        assert!(compat(yaml).is_empty(), "{:?}", compat(yaml));
+    }
+
+    #[test]
+    fn compat_scan_flags_proxy_docker() {
+        let yaml = "\
+proxy:
+  docker:
+    url: tcp://localhost:2375
+  specs: []
+";
+        let issues = compat(yaml);
+        assert_eq!(issues.len(), 1);
+        assert!(matches!(
+            &issues[0],
+            CompatWarning::UnsupportedProxyField { field, .. } if field == "docker"
+        ));
     }
 }

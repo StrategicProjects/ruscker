@@ -136,19 +136,32 @@ impl SessionTracker {
     /// each. Returns the number of sessions evicted (for
     /// metrics / logging).
     ///
-    /// `timeout < 0` semantics live one level up — the caller
-    /// (loop) decides whether to call this at all. Here we
-    /// require an unsigned timeout.
+    /// Each session's expiry is resolved **per spec**: the
+    /// spec's `heartbeat-timeout` override if it set one, else
+    /// `global_ms`. A negative effective timeout (the `-1`
+    /// ShinyProxy idiom) means "never expire" — those sessions
+    /// are skipped. This lets a long-running Shiny app pin
+    /// `heartbeat-timeout: -1` while the rest of the portal
+    /// reaps idle sessions normally.
     pub async fn sweep(
         &self,
         registry: &RwLock<ReplicaRegistry>,
-        timeout: Duration,
+        global_ms: i64,
+        overrides: &std::collections::HashMap<String, i64>,
     ) -> usize {
         let now = Instant::now();
         // Collect victims first so we don't hold DashMap shard
         // guards across the registry await.
         let mut victims: Vec<(Uuid, ReplicaId)> = Vec::new();
         for kv in self.sessions.iter() {
+            let eff_ms = overrides
+                .get(&kv.value().spec_id)
+                .copied()
+                .unwrap_or(global_ms);
+            if eff_ms < 0 {
+                continue; // never expire
+            }
+            let timeout = Duration::from_millis(eff_ms as u64);
             if now.duration_since(kv.value().last_seen) > timeout {
                 victims.push((*kv.key(), kv.value().replica_id.clone()));
             }
@@ -187,31 +200,35 @@ impl Default for SessionTracker {
 /// that callers can drop on shutdown — the loop only does
 /// idempotent work, no graceful-stop protocol needed.
 ///
-/// `heartbeat_timeout_ms < 0` (the `-1` ShinyProxy idiom for
-/// "never expire") makes this a no-op task that ticks but
-/// evicts nothing. Useful so the wiring stays uniform.
+/// `global_ms` is `proxy.heartbeat-timeout`; `overrides` maps a
+/// spec id to its own `heartbeat-timeout` when the spec set one.
+/// A negative value (global or per-spec) means "never expire"
+/// for the matching sessions — the sweep simply skips them, so
+/// there's no special no-op task branch anymore.
 pub fn spawn(
     tracker: Arc<SessionTracker>,
     registry: Arc<RwLock<ReplicaRegistry>>,
-    heartbeat_timeout_ms: i64,
+    config: Arc<ruscker_config::Config>,
 ) -> JoinHandle<()> {
+    let global_ms = config.proxy.heartbeat_timeout;
+    let overrides: std::collections::HashMap<String, i64> = config
+        .proxy
+        .specs
+        .iter()
+        .filter_map(|s| s.heartbeat_timeout.map(|t| (s.id.clone(), t)))
+        .collect();
     tokio::spawn(async move {
-        if heartbeat_timeout_ms < 0 {
-            info!("session sweeper started in never-expire mode (heartbeat-timeout=-1)");
-            // We still hold the task open so the JoinHandle stays
-            // valid for callers; this branch deliberately spins
-            // forever doing nothing.
-            loop {
-                tokio::time::sleep(Duration::from_secs(60)).await;
-            }
-        }
-        let timeout = Duration::from_millis(heartbeat_timeout_ms as u64);
-        info!(?timeout, interval = ?SWEEPER_INTERVAL, "session sweeper started");
+        info!(
+            global_ms,
+            per_spec_overrides = overrides.len(),
+            interval = ?SWEEPER_INTERVAL,
+            "session sweeper started"
+        );
         let mut ticker = tokio::time::interval(SWEEPER_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let evicted = tracker.sweep(&registry, timeout).await;
+            let evicted = tracker.sweep(&registry, global_ms, &overrides).await;
             if evicted > 0 {
                 info!(evicted, "session sweeper evicted idle sessions");
             }
@@ -289,7 +306,8 @@ mod tests {
             e.last_seen = Instant::now() - Duration::from_secs(60);
         }
 
-        let evicted = tracker.sweep(&reg, Duration::from_secs(10)).await;
+        let no_overrides = std::collections::HashMap::new();
+        let evicted = tracker.sweep(&reg, 10_000, &no_overrides).await;
         assert_eq!(evicted, 1);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
         assert!(tracker.is_empty());
@@ -307,9 +325,71 @@ mod tests {
         tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
         // last_seen is now, sweep with 10s timeout — nothing
         // should evict.
-        let evicted = tracker.sweep(&reg, Duration::from_secs(10)).await;
+        let no_overrides = std::collections::HashMap::new();
+        let evicted = tracker.sweep(&reg, 10_000, &no_overrides).await;
         assert_eq!(evicted, 0);
         assert_eq!(tracker.len(), 1);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
+    }
+
+    #[tokio::test]
+    async fn sweep_respects_per_spec_never_expire() {
+        // Global timeout is short, but spec "pinned" overrides
+        // to -1 (never expire). Its session must survive even
+        // when stale; a different spec on the global timeout
+        // still gets reaped.
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let pinned = fake_replica("pinned");
+        let normal = fake_replica("normal");
+        let (pid, nid) = (pinned.id.clone(), normal.id.clone());
+        {
+            let mut w = reg.write().await;
+            w.add(pinned);
+            w.add(normal);
+        }
+        let tracker = SessionTracker::new();
+        let s_pinned = Uuid::new_v4();
+        let s_normal = Uuid::new_v4();
+        tracker.touch_or_register(&reg, s_pinned, "pinned", &pid).await;
+        tracker.touch_or_register(&reg, s_normal, "normal", &nid).await;
+        // Age both sessions well past the global timeout.
+        for sid in [s_pinned, s_normal] {
+            if let Some(mut e) = tracker.sessions.get_mut(&sid) {
+                e.last_seen = Instant::now() - Duration::from_secs(600);
+            }
+        }
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("pinned".to_string(), -1_i64); // never expire
+
+        let evicted = tracker.sweep(&reg, 10_000, &overrides).await;
+        assert_eq!(evicted, 1, "only the global-timeout session is reaped");
+        // pinned survives, normal is gone
+        assert!(tracker.sessions.contains_key(&s_pinned));
+        assert!(!tracker.sessions.contains_key(&s_normal));
+        assert_eq!(reg.read().await.replicas_of("pinned")[0].sessions_active, 1);
+        assert_eq!(reg.read().await.replicas_of("normal")[0].sessions_active, 0);
+    }
+
+    #[tokio::test]
+    async fn sweep_per_spec_shorter_timeout_reaps_sooner() {
+        // A spec with a shorter override expires while the
+        // global-timeout sibling is still fresh.
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r = fake_replica("snappy");
+        let rid = r.id.clone();
+        reg.write().await.add(r);
+        let tracker = SessionTracker::new();
+        let sid = Uuid::new_v4();
+        tracker.touch_or_register(&reg, sid, "snappy", &rid).await;
+        // 30s old.
+        if let Some(mut e) = tracker.sessions.get_mut(&sid) {
+            e.last_seen = Instant::now() - Duration::from_secs(30);
+        }
+        let mut overrides = std::collections::HashMap::new();
+        overrides.insert("snappy".to_string(), 5_000_i64); // 5s override
+
+        // Global is 1h (would keep it), but the 5s override reaps it.
+        let evicted = tracker.sweep(&reg, 3_600_000, &overrides).await;
+        assert_eq!(evicted, 1);
     }
 }

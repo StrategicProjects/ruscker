@@ -385,26 +385,26 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         .or_else(|| infer_inner_port(spec));
 
     let creds = creds_from_spec(spec);
+    let limits = limits_from_spec(spec);
     tracing::info!(
         spec = %spec.id,
         image,
         inner_port = ?inner_port,
         with_creds = creds.is_some(),
+        with_limits = !limits.is_empty(),
         "spawning first replica"
     );
-    let mut replica = match inner_port {
-        Some(port) => {
-            backend
-                .spawn_with_port_and_creds(&spec.id, image, port, creds.as_ref())
-                .await
-        }
-        // No explicit port → fall through to the legacy spawn
-        // (uses the backend's default port). Credentials still
-        // wouldn't apply here in practice because a non-port
-        // spec is rare and largely a back-compat path.
-        None => backend.spawn(&spec.id, image).await,
+    let mut req = ruscker_core::SpawnRequest::new(&spec.id, image).with_limits(limits);
+    if let Some(port) = inner_port {
+        req = req.with_port(port);
     }
-    .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
+    if let Some(c) = creds {
+        req = req.with_creds(c);
+    }
+    let mut replica = backend
+        .spawn_request(&req)
+        .await
+        .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
     // The backend doesn't know the spec's seat cap (lives in
     // config). Enrich so the session tracker and scaler see the
     // right capacity from the first request.
@@ -432,6 +432,21 @@ fn infer_inner_port(spec: &Spec) -> Option<u16> {
 /// The password comes through already env-interpolated by
 /// `ruscker-config`'s loader — there's no `${VAR}` left to
 /// resolve here.
+/// Build [`ResourceLimits`] from a spec's `container-*-limit` /
+/// `container-*-request` fields. Returns an empty (all-`None`)
+/// `ResourceLimits` when the spec sets nothing — the backend
+/// treats that as "no limits applied" and leaves the bollard
+/// HostConfig minimal.
+pub(crate) fn limits_from_spec(spec: &Spec) -> ruscker_core::ResourceLimits {
+    ruscker_core::ResourceLimits {
+        memory_bytes: spec.effective_memory_limit_bytes(),
+        memory_reservation_bytes: spec.effective_memory_request_bytes(),
+        cpu_fraction: spec
+            .container_cpu_limit
+            .filter(|c| c.is_finite() && *c > 0.0),
+    }
+}
+
 pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCredentials> {
     let user = spec.docker_registry_username.as_deref().filter(|s| !s.is_empty());
     let pass = spec.docker_registry_password.as_deref().filter(|s| !s.is_empty());
@@ -712,6 +727,47 @@ docker-registry-domain: ""
             creds_from_spec(&s).is_none(),
             "empty strings shouldn't authenticate"
         );
+    }
+
+    #[test]
+    fn limits_from_spec_empty_when_no_fields_set() {
+        let s = fake_spec("x");
+        let l = limits_from_spec(&s);
+        assert!(l.is_empty());
+    }
+
+    #[test]
+    fn limits_from_spec_parses_memory_and_cpu() {
+        let s = spec_yaml(
+            r#"
+id: capped
+display-name: Capped
+container-image: x:1
+container-memory-limit: 512m
+container-memory-request: 256m
+container-cpu-limit: 1.5
+"#,
+        );
+        let l = limits_from_spec(&s);
+        assert_eq!(l.memory_bytes, Some(512 * 1024 * 1024));
+        assert_eq!(l.memory_reservation_bytes, Some(256 * 1024 * 1024));
+        assert_eq!(l.cpu_fraction, Some(1.5));
+        assert!(!l.is_empty());
+    }
+
+    #[test]
+    fn limits_from_spec_rejects_nonsense_cpu() {
+        let s = spec_yaml(
+            r#"
+id: nan
+display-name: NaN
+container-image: x:1
+container-cpu-limit: -1.0
+"#,
+        );
+        // Negative CPU is filtered out; the rest of limits stays empty.
+        let l = limits_from_spec(&s);
+        assert!(l.cpu_fraction.is_none());
     }
 
     #[test]

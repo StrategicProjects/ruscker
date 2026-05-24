@@ -90,9 +90,9 @@ impl LocalDockerBackend {
     }
 
     /// Like [`Self::spawn_with_port`] but takes optional registry
-    /// credentials for pulling private images. Passes the creds
-    /// through to bollard's `create_image` only on the pull path;
-    /// the rest of the container lifecycle is identical.
+    /// credentials for pulling private images. Thin wrapper around
+    /// [`Self::spawn_request`] kept for callers that pre-date the
+    /// `SpawnRequest` consolidation.
     pub async fn spawn_with_port_and_creds(
         &self,
         spec_id: &str,
@@ -100,11 +100,26 @@ impl LocalDockerBackend {
         inner_port: u16,
         creds: Option<&ruscker_core::RegistryCredentials>,
     ) -> CoreResult<Replica> {
+        let mut req = ruscker_core::SpawnRequest::new(spec_id, image).with_port(inner_port);
+        if let Some(c) = creds {
+            req = req.with_creds(c.clone());
+        }
+        self.spawn_request(&req).await
+    }
+
+    /// Spawn one replica from a fully-described
+    /// [`ruscker_core::SpawnRequest`]. This is the real
+    /// implementation; the older `spawn_*` shims delegate here.
+    pub async fn spawn_request(
+        &self,
+        req: &ruscker_core::SpawnRequest,
+    ) -> CoreResult<Replica> {
         let replica_id = ReplicaId::new();
+        let inner_port = req.inner_port.unwrap_or(DEFAULT_INNER_PORT);
 
         // 1. Pull image (idempotent — Docker no-ops when local).
         //    Errors bubble up through the stream-of-events.
-        self.ensure_image_pulled(image, creds).await?;
+        self.ensure_image_pulled(&req.image, req.creds.as_ref()).await?;
 
         // 2. Create container with our labels + ephemeral host port.
         let port_key = format!("{inner_port}/tcp");
@@ -118,24 +133,31 @@ impl LocalDockerBackend {
         );
 
         let mut labels = HashMap::new();
-        labels.insert(LABEL_SPEC_ID.to_string(), spec_id.to_string());
+        labels.insert(LABEL_SPEC_ID.to_string(), req.spec_id.clone());
         labels.insert(LABEL_REPLICA_ID.to_string(), replica_id.to_string());
         labels.insert(LABEL_INNER_PORT.to_string(), inner_port.to_string());
 
+        let mut host_config = HostConfig {
+            port_bindings: Some(port_bindings),
+            ..Default::default()
+        };
+        // Apply resource limits if the spec set any. Empty limits
+        // leave the HostConfig minimal so we don't paint Docker
+        // with zero-quotas that mean "unlimited" anyway but show
+        // up in `inspect` output and confuse operators.
+        apply_limits(&mut host_config, &req.limits);
+
         let body = ContainerCreateBody {
-            image: Some(image.to_string()),
+            image: Some(req.image.clone()),
             // bollard 0.21 takes a flat Vec<String> here, not a
             // HashMap — list of "<port>/<proto>" strings.
             exposed_ports: Some(vec![port_key.clone()]),
             labels: Some(labels),
-            host_config: Some(HostConfig {
-                port_bindings: Some(port_bindings),
-                ..Default::default()
-            }),
+            host_config: Some(host_config),
             ..Default::default()
         };
 
-        let container_name = format!("ruscker-{spec_id}-{}", &replica_id.to_string()[..8]);
+        let container_name = format!("ruscker-{}-{}", req.spec_id, &replica_id.to_string()[..8]);
         let opts = CreateContainerOptions {
             name: Some(container_name.clone()),
             ..Default::default()
@@ -164,7 +186,7 @@ impl LocalDockerBackend {
 
         Ok(Replica {
             id: replica_id,
-            spec_id: spec_id.to_string(),
+            spec_id: req.spec_id.clone(),
             container_id,
             upstream,
             state: ReplicaState::Ready,
@@ -290,6 +312,16 @@ impl ContainerBackend for LocalDockerBackend {
         creds: Option<&ruscker_core::RegistryCredentials>,
     ) -> CoreResult<Replica> {
         Self::spawn_with_port_and_creds(self, spec_id, image, inner_port, creds).await
+    }
+
+    /// Trait override: the full SpawnRequest path lands here.
+    /// This is the only override that honors `req.limits` —
+    /// older callers fall through to the back-compat shims.
+    async fn spawn_request(
+        &self,
+        req: &ruscker_core::SpawnRequest,
+    ) -> CoreResult<Replica> {
+        Self::spawn_request(self, req).await
     }
 
     async fn stop(&self, replica_id: &ReplicaId) -> CoreResult<()> {
@@ -480,6 +512,34 @@ fn backend_err(op: &str, e: bollard::errors::Error) -> CoreError {
     CoreError::Backend(format!("{op}: {e}"))
 }
 
+/// Docker's cpu_period unit. 100ms is the cgroup v2 default and
+/// what `docker run --cpus=N` uses internally. Quoting one value
+/// here means our `cpu_quota` math always matches what an
+/// operator would see from `docker run`.
+const CPU_PERIOD_US: i64 = 100_000;
+
+/// Translate backend-neutral [`ResourceLimits`] into the bollard
+/// [`HostConfig`] fields. No-op when limits are empty so the
+/// `inspect` output for unlimited containers stays clean.
+fn apply_limits(host_config: &mut HostConfig, limits: &ruscker_core::ResourceLimits) {
+    if limits.is_empty() {
+        return;
+    }
+    if let Some(bytes) = limits.memory_bytes {
+        host_config.memory = Some(bytes);
+    }
+    if let Some(bytes) = limits.memory_reservation_bytes {
+        host_config.memory_reservation = Some(bytes);
+    }
+    if let Some(cpus) = limits.cpu_fraction {
+        // cpu_quota / cpu_period = fractional CPUs. Docker stores
+        // both fields; we always set them as a pair so the
+        // operator-visible `--cpus` math works out.
+        host_config.cpu_period = Some(CPU_PERIOD_US);
+        host_config.cpu_quota = Some((cpus * CPU_PERIOD_US as f64) as i64);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +551,62 @@ mod tests {
         assert_eq!(state_from_docker(Some("paused")), ReplicaState::Draining);
         assert_eq!(state_from_docker(Some("exited")), ReplicaState::Stopped);
         assert_eq!(state_from_docker(None), ReplicaState::Starting);
+    }
+
+    #[test]
+    fn apply_limits_noop_when_empty() {
+        let mut hc = HostConfig::default();
+        apply_limits(&mut hc, &ruscker_core::ResourceLimits::default());
+        assert!(hc.memory.is_none());
+        assert!(hc.memory_reservation.is_none());
+        assert!(hc.cpu_period.is_none());
+        assert!(hc.cpu_quota.is_none());
+    }
+
+    #[test]
+    fn apply_limits_sets_memory_caps() {
+        let mut hc = HostConfig::default();
+        apply_limits(
+            &mut hc,
+            &ruscker_core::ResourceLimits {
+                memory_bytes: Some(512 * 1024 * 1024),
+                memory_reservation_bytes: Some(256 * 1024 * 1024),
+                cpu_fraction: None,
+            },
+        );
+        assert_eq!(hc.memory, Some(512 * 1024 * 1024));
+        assert_eq!(hc.memory_reservation, Some(256 * 1024 * 1024));
+        assert!(hc.cpu_period.is_none(), "CPU untouched when unset");
+    }
+
+    #[test]
+    fn apply_limits_translates_cpu_fraction_to_quota() {
+        let mut hc = HostConfig::default();
+        apply_limits(
+            &mut hc,
+            &ruscker_core::ResourceLimits {
+                memory_bytes: None,
+                memory_reservation_bytes: None,
+                cpu_fraction: Some(0.5),
+            },
+        );
+        assert_eq!(hc.cpu_period, Some(CPU_PERIOD_US));
+        assert_eq!(hc.cpu_quota, Some(CPU_PERIOD_US / 2));
+    }
+
+    #[test]
+    fn apply_limits_two_cpus() {
+        let mut hc = HostConfig::default();
+        apply_limits(
+            &mut hc,
+            &ruscker_core::ResourceLimits {
+                memory_bytes: None,
+                memory_reservation_bytes: None,
+                cpu_fraction: Some(2.0),
+            },
+        );
+        assert_eq!(hc.cpu_period, Some(CPU_PERIOD_US));
+        assert_eq!(hc.cpu_quota, Some(CPU_PERIOD_US * 2));
     }
 
     /// Integration test gated behind `--features docker-it`. Pulls

@@ -102,77 +102,181 @@
   </div>
 {% endif %}
 
-<div class="dash-metric-grid">
+<div class="dash-metric-grid" id="dash-metrics">
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-box"></i>{{ self.t("admin-dashboard-metric-containers") }}</div>
-    <div class="dash-metric-value">{{ total_containers }}</div>
+    <div class="dash-metric-value" data-metric="containers">{{ total_containers }}</div>
   </div>
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
-    <div class="dash-metric-value">{{ total_sessions }}</div>
+    <div class="dash-metric-value" data-metric="sessions">{{ total_sessions }}</div>
   </div>
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-apps"></i>{{ self.t("admin-dashboard-metric-specs") }}</div>
-    <div class="dash-metric-value">{{ spec_count }}</div>
+    <div class="dash-metric-value" data-metric="specs">{{ spec_count }}</div>
   </div>
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
-    <div class="dash-metric-value">{{ tracker_sessions }}</div>
+    <div class="dash-metric-value" data-metric="tracker">{{ tracker_sessions }}</div>
   </div>
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-database"></i>{{ self.t("admin-dashboard-metric-memory") }}</div>
-    <div class="dash-metric-value">{{ total_memory_display }}</div>
+    <div class="dash-metric-value" data-metric="memory">{{ total_memory_display }}</div>
   </div>
 </div>
 
 <h2 class="text-sm font-medium mb-2">{{ self.t("admin-dashboard-replicas-heading") }}</h2>
 
-{% if rows.is_empty() %}
-  <div class="dash-empty">{{ self.t("admin-dashboard-no-replicas") }}</div>
-{% else %}
-  <div style="border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2)); border-radius: 10px; overflow: hidden;">
-    <table class="dash-table">
-      <thead>
-        <tr>
-          <th style="width: 24px;"></th>
-          <th>{{ self.t("admin-dashboard-col-spec") }}</th>
-          <th>{{ self.t("admin-dashboard-col-state") }}</th>
-          <th>{{ self.t("admin-dashboard-col-uptime") }}</th>
-          <th>{{ self.t("admin-dashboard-col-sessions") }}</th>
-          <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
-          <th>{{ self.t("admin-dashboard-col-memory") }}</th>
-          <th>{{ self.t("admin-dashboard-col-container") }}</th>
+<div id="dash-rows-empty" class="dash-empty"{% if !rows.is_empty() %} style="display:none"{% endif %}>{{ self.t("admin-dashboard-no-replicas") }}</div>
+<div id="dash-rows-wrap" style="border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2)); border-radius: 10px; overflow: hidden;{% if rows.is_empty() %} display:none;{% endif %}">
+  <table class="dash-table">
+    <thead>
+      <tr>
+        <th style="width: 24px;"></th>
+        <th>{{ self.t("admin-dashboard-col-spec") }}</th>
+        <th>{{ self.t("admin-dashboard-col-state") }}</th>
+        <th>{{ self.t("admin-dashboard-col-uptime") }}</th>
+        <th>{{ self.t("admin-dashboard-col-sessions") }}</th>
+        <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
+        <th>{{ self.t("admin-dashboard-col-memory") }}</th>
+        <th>{{ self.t("admin-dashboard-col-container") }}</th>
+      </tr>
+    </thead>
+    <tbody id="dash-rows" data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}">
+      {% for row in rows %}
+        <tr data-replica-id="{{ row.replica_id }}">
+          <td><span class="dash-dot {{ row.state_dot }}"></span></td>
+          <td>
+            <div style="font-weight: 500;">{{ row.display_name }}</div>
+            <div class="dash-mono">{{ row.spec_id }}</div>
+          </td>
+          <td>{{ row.state_label }}</td>
+          <td class="dash-mono">{{ row.uptime }}</td>
+          <td>{{ row.sessions_active }}<span style="color: var(--text-muted)">/{{ row.sessions_max }}</span></td>
+          <td>
+            {% match row.cpu_display %}
+              {% when Some with (s) %}{{ s }}
+              {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
+            {% endmatch %}
+          </td>
+          <td>
+            {% match row.memory_display %}
+              {% when Some with (s) %}{{ s }}
+              {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
+            {% endmatch %}
+          </td>
+          <td class="dash-mono">{{ row.container_short }}</td>
         </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
-          <tr>
-            <td><span class="dash-dot {{ self.state_dot(row.state) }}"></span></td>
-            <td>
-              <div style="font-weight: 500;">{{ row.display_name }}</div>
-              <div class="dash-mono">{{ row.spec_id }}</div>
-            </td>
-            <td>{{ self.state_label(row.state) }}</td>
-            <td class="dash-mono">{{ row.uptime }}</td>
-            <td>{{ row.sessions_active }}<span style="color: var(--text-muted)">/{{ row.sessions_max }}</span></td>
-            <td>
-              {% match row.cpu_display %}
-                {% when Some with (s) %}{{ s }}
-                {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
-              {% endmatch %}
-            </td>
-            <td>
-              {% match row.memory_display %}
-                {% when Some with (s) %}{{ s }}
-                {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
-              {% endmatch %}
-            </td>
-            <td class="dash-mono">{{ row.container_short }}</td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-{% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# Tiny SSE patcher. No framework — just EventSource +
+   targeted DOM updates. Initial state already came in the
+   server-rendered HTML; this only handles refreshes. #}
+<script id="dash-initial-snapshot" type="application/json">{{ snapshot_json|safe }}</script>
+<script>
+(function () {
+  var pendingLabel = document.getElementById('dash-rows')
+    && document.getElementById('dash-rows').dataset.pendingLabel
+    || 'awaiting first reading';
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+
+  function metric(name, value) {
+    var el = document.querySelector('[data-metric="' + name + '"]');
+    if (el && el.textContent !== String(value)) el.textContent = value;
+  }
+
+  function rowHtml(row) {
+    var cpu = row.cpu_display !== null && row.cpu_display !== undefined
+      ? escapeHtml(row.cpu_display)
+      : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
+    var mem = row.memory_display !== null && row.memory_display !== undefined
+      ? escapeHtml(row.memory_display)
+      : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
+    return ''
+      + '<td><span class="dash-dot ' + escapeHtml(row.state_dot) + '"></span></td>'
+      + '<td>'
+        + '<div style="font-weight: 500;">' + escapeHtml(row.display_name) + '</div>'
+        + '<div class="dash-mono">' + escapeHtml(row.spec_id) + '</div>'
+      + '</td>'
+      + '<td>' + escapeHtml(row.state_label) + '</td>'
+      + '<td class="dash-mono">' + escapeHtml(row.uptime) + '</td>'
+      + '<td>' + row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span></td>'
+      + '<td>' + cpu + '</td>'
+      + '<td>' + mem + '</td>'
+      + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>';
+  }
+
+  function apply(snap) {
+    metric('containers', snap.total_containers);
+    metric('sessions', snap.total_sessions);
+    metric('specs', snap.spec_count);
+    metric('tracker', snap.tracker_sessions);
+    metric('memory', snap.total_memory_display);
+
+    var tbody = document.getElementById('dash-rows');
+    var wrap = document.getElementById('dash-rows-wrap');
+    var empty = document.getElementById('dash-rows-empty');
+    if (!tbody || !wrap || !empty) return;
+
+    if (!snap.rows || snap.rows.length === 0) {
+      wrap.style.display = 'none';
+      empty.style.display = '';
+      tbody.innerHTML = '';
+      return;
+    }
+    wrap.style.display = '';
+    empty.style.display = 'none';
+
+    // Build new rows keyed by replica_id. Reuse existing <tr>
+    // when the id matches so the browser preserves any focus /
+    // selection inside (defensive — we don't have any inputs
+    // here yet, but cheap).
+    var existing = {};
+    Array.prototype.forEach.call(tbody.children, function (tr) {
+      var id = tr.dataset.replicaId;
+      if (id) existing[id] = tr;
+    });
+
+    var frag = document.createDocumentFragment();
+    snap.rows.forEach(function (row) {
+      var tr = existing[row.replica_id];
+      if (!tr) {
+        tr = document.createElement('tr');
+        tr.dataset.replicaId = row.replica_id;
+      }
+      tr.innerHTML = rowHtml(row);
+      frag.appendChild(tr);
+    });
+    tbody.replaceChildren(frag);
+  }
+
+  // The initial render already populated the DOM, but parsing
+  // the embedded snapshot keeps the JS path covered even if
+  // the SSE connection is slow to open or proxied through
+  // something that buffers.
+  try {
+    var initial = JSON.parse(
+      document.getElementById('dash-initial-snapshot').textContent
+    );
+    if (initial && initial.rows !== undefined) apply(initial);
+  } catch (_) { /* initial snapshot embedding is best-effort */ }
+
+  if (!window.EventSource) return;
+  var es = new EventSource('/admin/dashboard/events');
+  es.onmessage = function (e) {
+    try { apply(JSON.parse(e.data)); } catch (_) { /* ignore */ }
+  };
+  // No retry handling needed — EventSource auto-reconnects
+  // on network errors. We just let it.
+})();
+</script>
 
 {% endblock %}

@@ -353,7 +353,7 @@ async fn spawn_one(
         .and_then(|a| a.port)
         .or_else(|| infer_inner_port(spec));
 
-    let creds = crate::routes::proxy::creds_from_spec(spec);
+    let creds = crate::routes::proxy::resolve_creds(state, spec).await;
     let limits = crate::routes::proxy::limits_from_spec(spec);
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image).with_limits(limits);
     if let Some(port) = inner_port {

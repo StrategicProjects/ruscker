@@ -296,6 +296,16 @@ pub struct Spec {
     #[serde(rename = "docker-registry-domain")]
     pub docker_registry_domain: Option<String>,
 
+    /// Ruscker extension: name of a credential stored in the
+    /// admin's encrypted credential store. When set, the runtime
+    /// resolves username/password/registry from the DB (decrypted
+    /// with the master key) at pull time, taking precedence over
+    /// the inline `docker-registry-*` fields above. Lets operators
+    /// keep secrets out of YAML entirely — reference a named
+    /// credential instead.
+    #[serde(rename = "docker-registry-credential")]
+    pub docker_registry_credential: Option<String>,
+
     // -- Container resource limits (ShinyProxy-compatible) --
     /// CPU hard limit, expressed as a fraction of a single core.
     /// `0.5` = half a core, `2.0` = two cores. Maps to Docker's
@@ -690,6 +700,7 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            docker_registry_credential: None,
             container_cpu_limit: None,
             container_cpu_request: None,
             container_memory_limit: None,
@@ -725,6 +736,7 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            docker_registry_credential: None,
             container_cpu_limit: None,
             container_cpu_request: None,
             container_memory_limit: None,
@@ -760,6 +772,7 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            docker_registry_credential: None,
             container_cpu_limit: None,
             container_cpu_request: None,
             container_memory_limit: None,

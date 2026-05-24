@@ -166,6 +166,7 @@ impl SpecForm {
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            docker_registry_credential: None,
             container_cpu_limit: None,
             container_cpu_request: None,
             container_memory_limit: None,

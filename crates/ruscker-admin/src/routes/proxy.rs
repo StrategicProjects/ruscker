@@ -384,7 +384,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         .and_then(|a| a.port)
         .or_else(|| infer_inner_port(spec));
 
-    let creds = creds_from_spec(spec);
+    let creds = resolve_creds(state, spec).await;
     let limits = limits_from_spec(spec);
     tracing::info!(
         spec = %spec.id,
@@ -462,6 +462,59 @@ pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCrede
         }),
         _ => None,
     }
+}
+
+/// Resolve the registry credentials a spec should pull with,
+/// consulting (in priority order):
+///
+/// 1. **DB credential store** — if the spec sets
+///    `docker-registry-credential: "name"` and the admin DB +
+///    master key are available, look the name up and decrypt.
+///    Keeps secrets entirely out of YAML.
+/// 2. **Inline fields** — the env-interpolated
+///    `docker-registry-{username,password,domain}` on the spec.
+///
+/// Async (unlike `creds_from_spec`) because the DB lookup +
+/// decrypt is I/O. Both spawn paths call this.
+pub(crate) async fn resolve_creds(
+    state: &AppState,
+    spec: &Spec,
+) -> Option<ruscker_core::RegistryCredentials> {
+    if let Some(name) = spec
+        .docker_registry_credential
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        match (state.db.as_ref(), state.master_key.is_configured()) {
+            (Some(pool), true) => {
+                match crate::db::credentials::resolve(pool, &state.master_key, name).await {
+                    Ok(Some(c)) => return Some(c),
+                    Ok(None) => {
+                        tracing::warn!(
+                            credential = name, spec = %spec.id,
+                            "spec references a credential not in the store; \
+                             falling back to inline fields"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            credential = name, spec = %spec.id, error = ?e,
+                            "failed to resolve stored credential; \
+                             falling back to inline fields"
+                        );
+                    }
+                }
+            }
+            _ => {
+                tracing::warn!(
+                    credential = name, spec = %spec.id,
+                    "spec references a stored credential but DB / master key \
+                     is unavailable; falling back to inline fields"
+                );
+            }
+        }
+    }
+    creds_from_spec(spec)
 }
 
 fn pick_index(n: usize) -> usize {

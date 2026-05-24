@@ -109,6 +109,50 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<CredentialMeta>> {
         .collect())
 }
 
+/// Resolve a named credential to backend-neutral
+/// [`RegistryCredentials`] for use at image-pull time: fetch
+/// registry + username, decrypt the password. Returns `None`
+/// when the name doesn't exist.
+///
+/// This is the one place where a stored secret is turned back
+/// into a usable credential outside the admin's own
+/// encrypt/decrypt path; it's called from the spawn path, never
+/// from a UI handler.
+pub async fn resolve(
+    pool: &SqlitePool,
+    key: &MasterKey,
+    name: &str,
+) -> Result<Option<ruscker_core::RegistryCredentials>> {
+    let row: Option<(String, String, Vec<u8>, Vec<u8>)> = sqlx::query_as(
+        "SELECT registry, username, password_enc, nonce FROM credentials WHERE name = ?",
+    )
+    .bind(name)
+    .fetch_optional(pool)
+    .await
+    .with_context(|| format!("resolve credential {name}"))?;
+    match row {
+        None => Ok(None),
+        Some((registry, username, enc, nonce)) => {
+            let pt = key.decrypt(&enc, &nonce)?;
+            let password = String::from_utf8(pt.to_vec())
+                .context("decrypted password is not valid UTF-8")?;
+            // An empty `registry` means Docker Hub — keep
+            // `server_address` None in that case so bollard
+            // doesn't get an empty serveraddress.
+            let server_address = if registry.trim().is_empty() {
+                None
+            } else {
+                Some(registry)
+            };
+            Ok(Some(ruscker_core::RegistryCredentials {
+                username,
+                password,
+                server_address,
+            }))
+        }
+    }
+}
+
 /// Decrypt the password for a single credential. Used by the
 /// runtime when pulling an image; **not** exposed in the UI.
 /// Returns `None` if the name doesn't exist.
@@ -212,5 +256,34 @@ mod tests {
         upsert(&pool, &key, "dh", "docker.io", "milkway", "x", None).await.unwrap();
         assert!(delete_one(&pool, "dh", None).await.unwrap());
         assert!(fetch_password(&pool, &key, "dh").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn resolve_returns_full_credential() {
+        let pool = open_memory().await.unwrap();
+        let key = fixed_key();
+        upsert(&pool, &key, "priv", "registry.example.com", "bot", "hunter2", None)
+            .await
+            .unwrap();
+        let c = resolve(&pool, &key, "priv").await.unwrap().expect("resolved");
+        assert_eq!(c.username, "bot");
+        assert_eq!(c.password, "hunter2");
+        assert_eq!(c.server_address.as_deref(), Some("registry.example.com"));
+    }
+
+    #[tokio::test]
+    async fn resolve_empty_registry_means_docker_hub() {
+        let pool = open_memory().await.unwrap();
+        let key = fixed_key();
+        upsert(&pool, &key, "hub", "", "bot", "pw", None).await.unwrap();
+        let c = resolve(&pool, &key, "hub").await.unwrap().unwrap();
+        assert!(c.server_address.is_none(), "empty registry -> Docker Hub default");
+    }
+
+    #[tokio::test]
+    async fn resolve_unknown_name_is_none() {
+        let pool = open_memory().await.unwrap();
+        let key = fixed_key();
+        assert!(resolve(&pool, &key, "nope").await.unwrap().is_none());
     }
 }

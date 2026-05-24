@@ -254,3 +254,14 @@ admin-dashboard-confirm-stop = ¿Detener esta réplica? El auto-scaler puede rec
 admin-dashboard-confirm-restart = ¿Reiniciar esta réplica? Se perderá la sesión activa.
 admin-logs-follow = En vivo
 admin-logs-follow-stop = Detener
+
+# Admin YAML import
+admin-import-button = Importar YAML
+admin-import-title = Importar configuración YAML
+admin-import-help = Elija un application.yml de ShinyProxy o Ruscker. El import es idempotente y no elimina specs existentes.
+admin-import-file = Archivo .yml / .yaml
+admin-import-submit = Importar
+admin-import-cancel = Cancelar
+admin-import-ok = Import completo: { $created } creados, { $updated } actualizados, { $unchanged } sin cambios.
+admin-import-ok-warnings = { $warnings } advertencia(s) de validación — revise credenciales embebidas y nombres vacíos.
+admin-import-err = Error en el import: { $msg }

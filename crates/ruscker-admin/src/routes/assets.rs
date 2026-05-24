@@ -13,6 +13,7 @@
 //! `cache-control: immutable` header — safe to cache aggressively.
 
 use axum::{
+    extract::{Path as AxumPath, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -90,6 +91,70 @@ pub fn routes() -> Router<AppState> {
         // Conventional well-known browser hooks.
         .route("/favicon.svg", get(|| serve(BRAND_MARK_FLAT, SVG)))
         .route("/apple-touch-icon.png", get(|| serve(BRAND_APP_ICON, SVG)))
+        // Operator-uploaded card images. DB first (Phase 2 image
+        // library); on miss, fall back to the on-disk `images_dir`
+        // (Phase 1 deploy that uses a static folder of files).
+        .route("/assets/img/{filename}", get(serve_card_image))
+}
+
+async fn serve_card_image(
+    State(state): State<AppState>,
+    AxumPath(filename): AxumPath<String>,
+) -> Response {
+    // Don't allow `../` or directory components — Axum's path
+    // extractor already collapses path segments per route, but
+    // we double-check before any FS read.
+    if filename.contains('/') || filename.contains("..") {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    // 1. DB lookup
+    if let Some(pool) = state.db.as_ref() {
+        match crate::db::images::fetch_by_filename(pool, &filename).await {
+            Ok(Some((mime, bytes))) => return serve_dynamic(bytes, &mime),
+            Ok(None) => {}
+            Err(err) => {
+                tracing::error!(error = ?err, filename, "image DB lookup failed");
+            }
+        }
+    }
+
+    // 2. Disk fallback
+    if let Some(dir) = state.images_dir.as_ref() {
+        let candidate = dir.join(&filename);
+        if let Ok(bytes) = tokio::fs::read(&candidate).await {
+            let mime = mime_from_extension(&filename);
+            return serve_dynamic(bytes, mime);
+        }
+    }
+
+    StatusCode::NOT_FOUND.into_response()
+}
+
+fn mime_from_extension(name: &str) -> &'static str {
+    match name.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()) {
+        Some(ref e) if e == "webp" => "image/webp",
+        Some(ref e) if e == "png" => "image/png",
+        Some(ref e) if e == "jpg" || e == "jpeg" => "image/jpeg",
+        Some(ref e) if e == "svg" => "image/svg+xml",
+        Some(ref e) if e == "gif" => "image/gif",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Like [`serve`] but takes owned bytes (DB blob / FS read) and
+/// short-cache headers (these images can change without a binary
+/// rebuild so `immutable` would be wrong here).
+fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
+    let mut headers = HeaderMap::new();
+    if let Ok(ct) = HeaderValue::from_str(content_type) {
+        headers.insert(header::CONTENT_TYPE, ct);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=60, must-revalidate"),
+    );
+    (StatusCode::OK, headers, body).into_response()
 }
 
 // ── Helpers ───────────────────────────────────────────────────────

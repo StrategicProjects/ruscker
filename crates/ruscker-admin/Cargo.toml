@@ -41,9 +41,14 @@ serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+uuid = { workspace = true }
 
 # Persistence (Phase 2)
 sqlx = { workspace = true }
+
+# Image library (Phase 2)
+image = { workspace = true }
+infer = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }

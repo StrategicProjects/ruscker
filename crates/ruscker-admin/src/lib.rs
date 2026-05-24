@@ -21,12 +21,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tower_cookies::CookieManagerLayer;
-use tower_http::services::ServeDir;
 use tracing::info;
 
 pub mod auth;
 pub mod db;
 pub mod i18n;
+pub mod images;
 pub mod routes;
 pub mod theme;
 pub mod view_model;
@@ -42,6 +42,11 @@ pub struct AppState {
     /// Optional SQLite pool. `None` ⇒ admin CRUD routes 503
     /// because they have no source of truth to read or write.
     pub db: Option<SqlitePool>,
+    /// On-disk fallback directory for `/assets/img/<file>`. When
+    /// the DB lookup misses (or `db` is `None`), the assets route
+    /// falls through to this directory before 404'ing. `None`
+    /// disables the disk fallback entirely.
+    pub images_dir: Option<Arc<Path>>,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -69,6 +74,7 @@ impl AdminServer {
             locales: Arc::new(locales),
             admin_auth: auth::AdminAuth::from_env(),
             db: None,
+            images_dir: None,
         };
         Ok(Self {
             addr,
@@ -77,11 +83,15 @@ impl AdminServer {
         })
     }
 
-    /// Set the on-disk directory served at `/assets/img/`. Files
-    /// must already exist when the server starts — `ServeDir`
-    /// responds 404 for missing files, never directory-lists.
+    /// Set the on-disk fallback directory for `/assets/img/<file>`.
+    /// When the DB image library has the filename it wins; otherwise
+    /// the handler reads from this directory. `None` disables the
+    /// fallback (DB-only mode).
     pub fn with_images_dir(mut self, dir: impl AsRef<Path>) -> Self {
-        self.images_dir = Some(dir.as_ref().to_path_buf());
+        let pathbuf = dir.as_ref().to_path_buf();
+        let arc: Arc<Path> = Arc::from(pathbuf.clone().into_boxed_path());
+        self.images_dir = Some(pathbuf);
+        self.state.images_dir = Some(arc);
         self
     }
 
@@ -122,20 +132,15 @@ pub fn router(state: AppState) -> Router {
     router_with_images(state, None)
 }
 
-/// Same as [`router`], but also mounts `images_dir` at
-/// `/assets/img/` via [`ServeDir`]. `None` skips the mount entirely.
-pub fn router_with_images(state: AppState, images_dir: Option<&Path>) -> Router {
-    let mut r = Router::new()
+/// Deprecated alias kept for the CLI's call site — the
+/// `images_dir` argument is now ignored because state carries the
+/// fallback directory itself (set via [`AdminServer::with_images_dir`]).
+pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router {
+    Router::new()
         .merge(routes::landing::routes())
         .merge(routes::assets::routes())
         .merge(routes::prefs::routes())
-        .merge(routes::admin::routes());
-    if let Some(dir) = images_dir {
-        // ServeDir handles 404, content-type sniffing, and range
-        // requests. Specific routes in routes::assets (e.g.
-        // /assets/styles.css) take precedence — only the `img`
-        // subtree is delegated to disk.
-        r = r.nest_service("/assets/img", ServeDir::new(dir));
-    }
-    r.layer(CookieManagerLayer::new()).with_state(state)
+        .merge(routes::admin::routes())
+        .layer(CookieManagerLayer::new())
+        .with_state(state)
 }

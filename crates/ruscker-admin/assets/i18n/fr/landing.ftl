@@ -107,6 +107,17 @@ spec-form-error-id-shape = L'ID doit commencer par une lettre et contenir unique
 spec-form-error-id-duplicate = Une application avec cet ID existe déjà.
 spec-form-error-name-required = Le nom d'affichage est obligatoire.
 
+# Admin image library
+admin-images-title = Bibliothèque d'images
+admin-images-subtitle = PNG, JPEG et WebP sont convertis en WebP. Le SVG passe tel quel.
+admin-images-drop-here = Cliquez pour choisir un fichier
+admin-images-formats = PNG · JPEG · WebP · SVG · jusqu'à 10 Mo
+admin-images-upload = Envoyer
+admin-images-uploaded = Image envoyée :
+admin-images-empty = Aucune image. Envoyez la première ci-dessus.
+admin-images-delete = Supprimer
+admin-images-delete-confirm = Supprimer cette image ? Les specs qui référencent le fichier afficheront le cover teinté.
+
 card-cta-open = Ouvrir
 card-cta-link = Accéder
 card-cta-open-app = Ouvrir l'application

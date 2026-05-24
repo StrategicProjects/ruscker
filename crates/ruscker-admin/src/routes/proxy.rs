@@ -46,6 +46,7 @@ use std::sync::OnceLock;
 use tower_cookies::cookie::time::Duration;
 use tower_cookies::{Cookie, Cookies};
 
+use super::rewrite;
 use crate::AppState;
 
 /// Wrapper extractor: `WebSocketUpgrade::FromRequestParts` returns
@@ -82,6 +83,12 @@ fn http_client() -> &'static Client<HttpConnector, Body> {
 
 // ── Path-strip handlers ───────────────────────────────────────────
 
+/// User-visible URL prefix for the two route families. Threaded
+/// through to the core forward handler so the HTML rewriter knows
+/// what to point `<base href>` at.
+const APP_PREFIX: &str = "/app/";
+const API_PREFIX: &str = "/api/";
+
 #[axum::debug_handler]
 async fn forward_app(
     state: State<AppState>,
@@ -90,7 +97,7 @@ async fn forward_app(
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, APP_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_app_root(
     state: State<AppState>,
@@ -99,7 +106,7 @@ async fn forward_app_root(
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, APP_PREFIX, spec_id, "/".to_string(), req).await
 }
 async fn forward_api(
     state: State<AppState>,
@@ -108,7 +115,7 @@ async fn forward_api(
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, API_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_api_root(
     state: State<AppState>,
@@ -117,7 +124,7 @@ async fn forward_api_root(
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, API_PREFIX, spec_id, "/".to_string(), req).await
 }
 
 // ── Core forward ───────────────────────────────────────────────────
@@ -126,6 +133,7 @@ async fn forward(
     State(state): State<AppState>,
     cookies: Cookies,
     ws_upgrade: MaybeWs,
+    route_prefix: &'static str,
     spec_id: String,
     upstream_path: String,
     req: Request,
@@ -218,6 +226,18 @@ async fn forward(
             )
                 .into_response();
         }
+    };
+
+    // 6b. Inject `<base href>` into HTML responses on the
+    //     `/app/` route family so relative URLs in the app's
+    //     templates resolve against the prefix rather than the
+    //     server root. API responses skip this entirely — APIs
+    //     return JSON / binary, not HTML.
+    let resp = if route_prefix == APP_PREFIX {
+        let base = format!("{route_prefix}{}/", spec.id);
+        rewrite::inject_base_href(resp, &base).await
+    } else {
+        resp
     };
 
     // 7. Issue sticky cookie when we just bound the visitor to a

@@ -243,3 +243,10 @@ footer-theme = Tema
 theme-light = Claro
 theme-dark = Escuro
 theme-auto = Automático
+
+# Admin logs viewer
+admin-logs-title = Logs do container
+admin-logs-back = Voltar ao painel
+admin-logs-replica = Réplica
+admin-logs-empty = Sem saída de log para esta réplica ainda.
+admin-logs-tail-note = Mostrando as últimas linhas (mais recentes ao final).

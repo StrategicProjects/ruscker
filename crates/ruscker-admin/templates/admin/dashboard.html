@@ -140,9 +140,10 @@
         <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
         <th>{{ self.t("admin-dashboard-col-memory") }}</th>
         <th>{{ self.t("admin-dashboard-col-container") }}</th>
+        <th style="width: 32px;"></th>
       </tr>
     </thead>
-    <tbody id="dash-rows" data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}">
+    <tbody id="dash-rows" data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}" data-logs-title="{{ self.t("admin-logs-title") }}">
       {% for row in rows %}
         <tr data-replica-id="{{ row.replica_id }}">
           <td><span class="dash-dot {{ row.state_dot }}"></span></td>
@@ -166,6 +167,10 @@
             {% endmatch %}
           </td>
           <td class="dash-mono">{{ row.container_short }}</td>
+          <td>
+            <a href="/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
+               style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
+          </td>
         </tr>
       {% endfor %}
     </tbody>
@@ -178,9 +183,9 @@
 <script id="dash-initial-snapshot" type="application/json">{{ snapshot_json|safe }}</script>
 <script>
 (function () {
-  var pendingLabel = document.getElementById('dash-rows')
-    && document.getElementById('dash-rows').dataset.pendingLabel
-    || 'awaiting first reading';
+  var tbodyEl = document.getElementById('dash-rows');
+  var pendingLabel = (tbodyEl && tbodyEl.dataset.pendingLabel) || 'awaiting first reading';
+  var logsTitle = (tbodyEl && tbodyEl.dataset.logsTitle) || 'Logs';
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -211,7 +216,10 @@
       + '<td>' + row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span></td>'
       + '<td>' + cpu + '</td>'
       + '<td>' + mem + '</td>'
-      + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>';
+      + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
+      + '<td><a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
+        + '" title="' + escapeHtml(logsTitle)
+        + '" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a></td>';
   }
 
   function apply(snap) {

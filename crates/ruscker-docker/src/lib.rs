@@ -19,8 +19,8 @@
 use async_trait::async_trait;
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
-    CreateContainerOptions, CreateImageOptions, ListContainersOptions, RemoveContainerOptions,
-    StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
+    CreateContainerOptions, CreateImageOptions, ListContainersOptions, LogsOptionsBuilder,
+    RemoveContainerOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
 };
 use bollard::Docker;
 use chrono::Utc;
@@ -453,6 +453,11 @@ impl ContainerBackend for LocalDockerBackend {
         let container_id = self.container_id_for_replica(replica_id).await?;
         self.metrics_for_container(&container_id).await
     }
+
+    async fn logs(&self, replica_id: &ReplicaId, tail: usize) -> CoreResult<Vec<String>> {
+        let container_id = self.container_id_for_replica(replica_id).await?;
+        self.logs_for_container(&container_id, tail).await
+    }
 }
 
 impl LocalDockerBackend {
@@ -557,6 +562,45 @@ impl LocalDockerBackend {
     /// bound across long-lived deployments.
     pub fn forget_metrics(&self, container_id: &str) {
         self.prev_stats.remove(container_id);
+    }
+
+    /// Fetch the last `tail` lines of a container's combined
+    /// stdout + stderr. One-shot (`follow: false`). Each
+    /// returned `String` is one log line with its trailing
+    /// newline trimmed; the stream framing bytes that Docker
+    /// prepends in multiplexed mode are stripped by bollard's
+    /// `LogOutput` decoding, so we just stringify each chunk.
+    ///
+    /// `tail` is capped defensively — an operator-supplied
+    /// huge number shouldn't let a chatty container balloon
+    /// the response.
+    pub async fn logs_for_container(
+        &self,
+        container_id: &str,
+        tail: usize,
+    ) -> CoreResult<Vec<String>> {
+        const MAX_TAIL: usize = 5_000;
+        let tail = tail.min(MAX_TAIL);
+        let opts = LogsOptionsBuilder::default()
+            .stdout(true)
+            .stderr(true)
+            .follow(false)
+            .tail(&tail.to_string())
+            .build();
+
+        let mut stream = self.docker.logs(container_id, Some(opts));
+        let mut lines: Vec<String> = Vec::new();
+        while let Some(item) = stream.next().await {
+            let chunk = item.map_err(|e| backend_err("logs", e))?;
+            // `LogOutput` Display gives the decoded text for the
+            // frame (stdout/stderr/console). A single frame can
+            // hold multiple newline-separated lines, so split.
+            let text = chunk.to_string();
+            for line in text.split_inclusive('\n') {
+                lines.push(line.trim_end_matches(['\r', '\n']).to_string());
+            }
+        }
+        Ok(lines)
     }
 }
 

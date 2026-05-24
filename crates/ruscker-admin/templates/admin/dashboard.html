@@ -1,0 +1,157 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-dashboard-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<style>
+  /* Scoped to the dashboard; reuses tokens from the global
+     theme so light/dark switching keeps working. */
+  .dash-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 720px) {
+    .dash-metric-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .dash-metric {
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .dash-metric-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .dash-metric-value { font-size: 22px; font-weight: 500; line-height: 1.1; }
+  .dash-metric-sub { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+  .dash-banner {
+    margin-bottom: 18px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--color-accent, #3b82f6) 10%, transparent);
+    color: var(--text-primary);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .dash-table th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-muted);
+    padding: 8px 10px;
+    border-bottom: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
+  }
+  .dash-table td {
+    padding: 10px;
+    border-bottom: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.15));
+    vertical-align: middle;
+  }
+  .dash-dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    display: inline-block;
+  }
+  .dot-on { background: #10b981; }
+  .dot-warm { background: #f59e0b; }
+  .dot-off { background: #6b7280; }
+  .dot-pulse {
+    background: #3b82f6;
+    animation: dash-pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes dash-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .dash-mono {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .dash-empty {
+    padding: 32px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+    border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.2));
+    border-radius: 10px;
+  }
+</style>
+
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-dashboard-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-dashboard-subtitle") }}</p>
+  </div>
+</div>
+
+{% if !backend_connected %}
+  <div class="dash-banner">
+    <i class="ti ti-info-circle" aria-hidden="true"></i>
+    <span>{{ self.t("admin-dashboard-backend-missing") }}</span>
+  </div>
+{% endif %}
+
+<div class="dash-metric-grid">
+  <div class="dash-metric">
+    <div class="dash-metric-label"><i class="ti ti-box"></i>{{ self.t("admin-dashboard-metric-containers") }}</div>
+    <div class="dash-metric-value">{{ total_containers }}</div>
+  </div>
+  <div class="dash-metric">
+    <div class="dash-metric-label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
+    <div class="dash-metric-value">{{ total_sessions }}</div>
+  </div>
+  <div class="dash-metric">
+    <div class="dash-metric-label"><i class="ti ti-apps"></i>{{ self.t("admin-dashboard-metric-specs") }}</div>
+    <div class="dash-metric-value">{{ spec_count }}</div>
+  </div>
+  <div class="dash-metric">
+    <div class="dash-metric-label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
+    <div class="dash-metric-value">{{ tracker_sessions }}</div>
+  </div>
+</div>
+
+<h2 class="text-sm font-medium mb-2">{{ self.t("admin-dashboard-replicas-heading") }}</h2>
+
+{% if rows.is_empty() %}
+  <div class="dash-empty">{{ self.t("admin-dashboard-no-replicas") }}</div>
+{% else %}
+  <div style="border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2)); border-radius: 10px; overflow: hidden;">
+    <table class="dash-table">
+      <thead>
+        <tr>
+          <th style="width: 24px;"></th>
+          <th>{{ self.t("admin-dashboard-col-spec") }}</th>
+          <th>{{ self.t("admin-dashboard-col-state") }}</th>
+          <th>{{ self.t("admin-dashboard-col-uptime") }}</th>
+          <th>{{ self.t("admin-dashboard-col-sessions") }}</th>
+          <th>{{ self.t("admin-dashboard-col-container") }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><span class="dash-dot {{ self.state_dot(row.state) }}"></span></td>
+            <td>
+              <div style="font-weight: 500;">{{ row.display_name }}</div>
+              <div class="dash-mono">{{ row.spec_id }}</div>
+            </td>
+            <td>{{ self.state_label(row.state) }}</td>
+            <td class="dash-mono">{{ row.uptime }}</td>
+            <td>{{ row.sessions_active }}<span style="color: var(--text-muted)">/{{ row.sessions_max }}</span></td>
+            <td class="dash-mono">{{ row.container_short }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}

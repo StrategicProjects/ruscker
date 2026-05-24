@@ -250,3 +250,9 @@ admin-logs-back = Voltar ao painel
 admin-logs-replica = Réplica
 admin-logs-empty = Sem saída de log para esta réplica ainda.
 admin-logs-tail-note = Mostrando as últimas linhas (mais recentes ao final).
+
+# Dashboard replica actions
+admin-dashboard-action-stop = Parar
+admin-dashboard-action-restart = Reiniciar
+admin-dashboard-confirm-stop = Parar esta réplica? O auto-scaler pode recriá-la se o mínimo configurado exigir.
+admin-dashboard-confirm-restart = Reiniciar esta réplica? A sessão ativa será perdida.

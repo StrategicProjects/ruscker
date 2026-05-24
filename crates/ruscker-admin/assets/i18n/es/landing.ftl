@@ -140,6 +140,33 @@ admin-creds-col-created = Creada
 admin-creds-key-missing-title = RUSCKER_MASTER_KEY no está configurada
 admin-creds-key-missing-help = El store de credenciales necesita una clave de 32 bytes en hex (64 chars) o base64 (44 chars). Genere una con:
 
+# Admin landing editor
+admin-landing-title = Editor del portal
+admin-landing-crumb = Ajustes · Landing page
+admin-landing-subtitle = Personalice el portal público. Los cambios surten efecto al refrescar.
+admin-landing-open-portal = Abrir portal
+admin-landing-save = Guardar
+admin-landing-saved = Ajustes guardados. Recargue el portal para ver los cambios.
+admin-landing-colors = Colores del encabezado
+admin-landing-header-bg = Color de fondo
+admin-landing-bg-help = Vacío = usa el color predeterminado del tema (claro/oscuro).
+admin-landing-header-fg = Color del texto
+admin-landing-clear = Limpiar
+admin-landing-intro = Texto de introducción (predeterminado)
+admin-landing-intro-default = Predeterminado (fallback para todos los idiomas)
+admin-landing-intro-default-placeholder = Bienvenido al portal…
+admin-landing-intro-help = Se muestra entre el encabezado y los filtros. Vacío = sin texto.
+admin-landing-intro-locales = Texto de introducción por idioma
+admin-landing-intro-pt = Portugués
+admin-landing-intro-en = Inglés
+admin-landing-intro-es = Español
+admin-landing-intro-fr = Francés
+admin-landing-preview = Vista previa
+admin-landing-preview-help = Aproximación visual del encabezado y la introducción. Cards y filtros como en la landing real.
+admin-landing-preview-empty = (sin texto de introducción)
+admin-landing-future-title = Próximamente
+admin-landing-future-help = Editor de logos, reordenación de secciones, bloques HTML custom, SEO/analytics y meta tags. Por ahora siguen el YAML.
+
 card-cta-open = Abrir
 card-cta-link = Visitar
 card-cta-open-app = Abrir aplicación

@@ -23,6 +23,7 @@ use crate::AppState;
 
 pub mod credentials;
 pub mod images;
+pub mod landing;
 pub mod spec_form;
 pub mod specs;
 
@@ -35,6 +36,7 @@ pub fn routes() -> Router<AppState> {
         .merge(spec_form::routes())
         .merge(images::routes())
         .merge(credentials::routes())
+        .merge(landing::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────

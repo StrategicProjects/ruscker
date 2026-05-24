@@ -140,6 +140,33 @@ admin-creds-col-created = Créé le
 admin-creds-key-missing-title = RUSCKER_MASTER_KEY n'est pas configurée
 admin-creds-key-missing-help = Le store d'identifiants a besoin d'une clé de 32 octets en hex (64 chars) ou base64 (44 chars). Générez-en une avec :
 
+# Admin landing editor
+admin-landing-title = Éditeur du portail
+admin-landing-crumb = Paramètres · Page d'accueil
+admin-landing-subtitle = Personnalisez le portail public. Les modifications s'appliquent au prochain rafraîchissement du visiteur.
+admin-landing-open-portal = Ouvrir le portail
+admin-landing-save = Enregistrer
+admin-landing-saved = Paramètres enregistrés. Rechargez le portail public pour voir.
+admin-landing-colors = Couleurs de l'en-tête
+admin-landing-header-bg = Couleur de fond
+admin-landing-bg-help = Vide = utilise la couleur par défaut du thème (clair/sombre).
+admin-landing-header-fg = Couleur du texte
+admin-landing-clear = Effacer
+admin-landing-intro = Texte d'introduction (par défaut)
+admin-landing-intro-default = Par défaut (fallback pour toutes les langues)
+admin-landing-intro-default-placeholder = Bienvenue sur le portail…
+admin-landing-intro-help = Affiché entre l'en-tête et les filtres. Vide = pas de texte.
+admin-landing-intro-locales = Texte d'introduction par langue
+admin-landing-intro-pt = Portugais
+admin-landing-intro-en = Anglais
+admin-landing-intro-es = Espagnol
+admin-landing-intro-fr = Français
+admin-landing-preview = Aperçu du portail
+admin-landing-preview-help = Approximation visuelle de l'en-tête et de l'intro. Les cartes et filtres ressemblent au portail réel.
+admin-landing-preview-empty = (pas de texte d'introduction)
+admin-landing-future-title = Bientôt
+admin-landing-future-help = Éditeur de logos, réorganisation des sections, blocs HTML personnalisés, SEO/analytics et meta tags. Pour l'instant ces champs suivent le YAML.
+
 card-cta-open = Ouvrir
 card-cta-link = Accéder
 card-cta-open-app = Ouvrir l'application

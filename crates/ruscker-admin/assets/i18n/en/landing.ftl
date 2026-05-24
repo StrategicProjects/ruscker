@@ -140,6 +140,33 @@ admin-creds-col-created = Created
 admin-creds-key-missing-title = RUSCKER_MASTER_KEY is not configured
 admin-creds-key-missing-help = The credentials store needs a 32-byte key as hex (64 chars) or base64 (44 chars). Generate one with:
 
+# Admin landing editor
+admin-landing-title = Landing editor
+admin-landing-crumb = Settings · Landing page
+admin-landing-subtitle = Customize the public portal. Changes take effect on the visitor's next refresh.
+admin-landing-open-portal = Open portal
+admin-landing-save = Save
+admin-landing-saved = Settings saved. Reload the public portal to see them.
+admin-landing-colors = Header colors
+admin-landing-header-bg = Background color
+admin-landing-bg-help = Empty = use the theme's default (light/dark).
+admin-landing-header-fg = Text color
+admin-landing-clear = Clear
+admin-landing-intro = Intro text (default)
+admin-landing-intro-default = Default (fallback for all languages)
+admin-landing-intro-default-placeholder = Welcome to the portal…
+admin-landing-intro-help = Rendered between the header and the filters. Empty = no text.
+admin-landing-intro-locales = Intro text per language
+admin-landing-intro-pt = Portuguese
+admin-landing-intro-en = English
+admin-landing-intro-es = Spanish
+admin-landing-intro-fr = French
+admin-landing-preview = Portal preview
+admin-landing-preview-help = Approximate look of the header and intro. Cards and filters appear as on the real landing.
+admin-landing-preview-empty = (no intro text)
+admin-landing-future-title = Coming soon
+admin-landing-future-help = Logo editor, section reordering, custom HTML blocks, SEO/analytics and meta tags. For now those fields follow the YAML.
+
 card-cta-open = Open
 card-cta-link = Visit
 card-cta-open-app = Open app

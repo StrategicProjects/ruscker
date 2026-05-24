@@ -826,6 +826,94 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   cursor: not-allowed;
 }
 
+/* ─── Landing editor ─────────────────────────────────────────── */
+.color-input {
+  display: flex; align-items: center; gap: 6px;
+}
+.color-input input[type="color"] {
+  width: 36px; height: 36px;
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  padding: 2px;
+}
+.color-input input[type="text"] {
+  flex: 1;
+}
+
+.info-box {
+  display: flex; gap: 10px;
+  background: var(--surface-soft);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 16px;
+}
+.info-box i {
+  font-size: 14px;
+  color: var(--color-teal-600);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.landing-preview-frame {
+  width: 100%;
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+}
+.landing-preview-header {
+  background: var(--bg);
+  color: var(--text);
+  border-bottom: 0.5px solid var(--border);
+}
+.landing-preview-header-inner {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 10px 12px;
+}
+.landing-preview-title {
+  font-size: 13px; font-weight: 500;
+  letter-spacing: -0.02em;
+}
+.landing-preview-sub {
+  font-size: 9px; opacity: 0.75; margin-top: 2px;
+}
+.landing-preview-count {
+  font-size: 9px; opacity: 0.7;
+}
+.landing-preview-body {
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.landing-preview-intro {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  margin: 0;
+}
+.landing-preview-mockfilter {
+  height: 22px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 999px;
+}
+.landing-preview-mockgrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+.landing-preview-mockgrid > div {
+  height: 36px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+}
+
 /* ─── Brand lockup (footer) ──────────────────────────────────────
  *
  * Inline mark + wordmark text. Wordmark is always lowercase,

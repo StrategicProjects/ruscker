@@ -11,12 +11,65 @@
   </div>
   <div class="flex items-center gap-2">
     <span class="text-xs text-[color:var(--text-faint)]">{{ specs.len() }}</span>
+    <button type="button" class="admin-nav-link" style="padding:6px 10px;font-size:12px"
+            title="{{ self.t("admin-import-title") }}"
+            onclick="document.getElementById('import-modal').showModal()">
+      <i class="ti ti-file-upload" aria-hidden="true"></i>
+      {{ self.t("admin-import-button") }}
+    </button>
     <a href="/admin/specs/new" class="admin-login-btn" style="padding:6px 10px;font-size:12px">
       <i class="ti ti-plus" aria-hidden="true"></i>
       {{ self.t("admin-specs-add") }}
     </a>
   </div>
 </div>
+
+{% match flash %}
+  {% when Some with (f) %}
+    <div class="import-flash import-flash--{{ f.tone }}" role="status">{{ f.text }}</div>
+  {% when None %}
+{% endmatch %}
+
+<dialog id="import-modal" class="import-dialog">
+  <form method="post" action="/admin/specs/import" enctype="multipart/form-data" class="import-form">
+    <h2 class="text-base font-medium mb-1">{{ self.t("admin-import-title") }}</h2>
+    <p class="text-xs text-[color:var(--text-muted)] mb-3">{{ self.t("admin-import-help") }}</p>
+    <label class="block text-xs mb-1">{{ self.t("admin-import-file") }}</label>
+    <input type="file" name="file" accept=".yml,.yaml" required class="import-file" />
+    <div class="flex justify-end gap-2 mt-4">
+      <button type="button" class="admin-nav-link" style="font-size:12px"
+              onclick="document.getElementById('import-modal').close()">
+        {{ self.t("admin-import-cancel") }}
+      </button>
+      <button type="submit" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
+        <i class="ti ti-file-upload" aria-hidden="true"></i>
+        {{ self.t("admin-import-submit") }}
+      </button>
+    </div>
+  </form>
+</dialog>
+
+<style>
+  .import-flash {
+    margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; font-size: 13px;
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
+  }
+  .import-flash--ok   { background: color-mix(in srgb, #10b981 12%, transparent); }
+  .import-flash--warn { background: color-mix(in srgb, #f59e0b 14%, transparent); }
+  .import-flash--err  { background: color-mix(in srgb, #ef4444 14%, transparent); }
+  .import-dialog {
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.25));
+    border-radius: 12px; padding: 0; max-width: 460px; width: 92%;
+    background: var(--surface, #fff); color: var(--text-primary);
+  }
+  .import-dialog::backdrop { background: rgba(0,0,0,0.35); }
+  .import-form { padding: 20px; }
+  .import-file {
+    width: 100%; font-size: 12px; padding: 8px;
+    border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.3));
+    border-radius: 8px;
+  }
+</style>
 
 {% if specs.is_empty() %}
   <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)]">

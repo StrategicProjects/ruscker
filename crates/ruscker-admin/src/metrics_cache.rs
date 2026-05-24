@@ -1,0 +1,261 @@
+//! In-memory cache of per-replica metrics for the dashboard.
+//!
+//! Each `backend.metrics(replica_id)` call hits the Docker
+//! daemon's stats endpoint, which on the local socket costs a
+//! few milliseconds per container. With N replicas, a dashboard
+//! render that polled every replica synchronously would block
+//! the request for ~N × few ms — fine at N=5, painful at N=50.
+//!
+//! This module solves it with a single background tokio task
+//! that:
+//!
+//! 1. Snapshots the registry.
+//! 2. Fans out `backend.metrics()` calls in parallel (via
+//!    `futures_util::future::join_all`).
+//! 3. Writes the results into a shared `DashMap` keyed by
+//!    `ReplicaId`.
+//!
+//! Dashboard handlers read straight out of the DashMap — no
+//! awaits on Docker — and accept that the data is up to
+//! [`REFRESH_INTERVAL`] seconds stale. For a monitoring view
+//! that's correct: real-time CPU bars on a 10-tab admin would
+//! be visual noise anyway.
+
+use dashmap::DashMap;
+use ruscker_core::{ContainerBackend, ReplicaId, ReplicaMetrics};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
+use tracing::{info, warn};
+
+/// How often the background task refreshes the cache. 5 s
+/// matches the dashboard mockup's polling indicator and keeps
+/// CPU delta windows large enough to read sanely.
+pub const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+/// What we keep per replica.
+#[derive(Debug, Clone)]
+pub struct CachedMetrics {
+    pub metrics: ReplicaMetrics,
+    pub observed_at: Instant,
+}
+
+/// The cache itself. Cheap to clone (it's all `Arc`s underneath)
+/// so the refresher task and the dashboard handler share the
+/// same map.
+#[derive(Debug, Clone, Default)]
+pub struct MetricsCache {
+    inner: Arc<DashMap<ReplicaId, CachedMetrics>>,
+}
+
+impl MetricsCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn get(&self, id: &ReplicaId) -> Option<CachedMetrics> {
+        self.inner.get(id).map(|r| r.clone())
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Replace the cache contents with the given (id, metrics)
+    /// pairs and drop any entries for ids that didn't appear.
+    /// Called by the refresher each tick.
+    pub fn replace(&self, fresh: Vec<(ReplicaId, ReplicaMetrics)>) {
+        use std::collections::HashSet;
+        let now = Instant::now();
+        let kept: HashSet<ReplicaId> = fresh.iter().map(|(id, _)| id.clone()).collect();
+        self.inner.retain(|id, _| kept.contains(id));
+        for (id, m) in fresh {
+            self.inner.insert(
+                id,
+                CachedMetrics {
+                    metrics: m,
+                    observed_at: now,
+                },
+            );
+        }
+    }
+}
+
+/// Spawn the refresher loop as a detached tokio task. Returns a
+/// handle that callers can drop on shutdown — each tick is
+/// idempotent so an abrupt drop just stops the polling.
+///
+/// Stops gracefully on backend errors: a single failed
+/// `metrics()` call logs a warning and the replica is omitted
+/// from this tick's update; the next tick retries.
+pub fn spawn(
+    cache: MetricsCache,
+    backend: Arc<dyn ContainerBackend>,
+    replicas: Arc<RwLock<ruscker_core::ReplicaRegistry>>,
+    interval: Duration,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        info!(?interval, "metrics-cache refresher started");
+        let mut ticker = tokio::time::interval(interval);
+        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            ticker.tick().await;
+            refresh_once(&cache, backend.as_ref(), &replicas).await;
+        }
+    })
+}
+
+async fn refresh_once(
+    cache: &MetricsCache,
+    backend: &dyn ContainerBackend,
+    replicas: &RwLock<ruscker_core::ReplicaRegistry>,
+) {
+    // Snapshot replica ids under the read lock, then release it
+    // before issuing any I/O.
+    let ids: Vec<ReplicaId> = {
+        let reg = replicas.read().await;
+        reg.all().map(|r| r.id.clone()).collect()
+    };
+    if ids.is_empty() {
+        cache.replace(Vec::new());
+        return;
+    }
+
+    // Fan out `backend.metrics()` calls in parallel. Each call
+    // is independent so they should overlap their Docker stats
+    // round-trips.
+    use futures_util::future::join_all;
+    let results: Vec<(ReplicaId, Result<ReplicaMetrics, _>)> = join_all(ids.into_iter().map(|id| {
+        let id_for_err = id.clone();
+        async move {
+            let r = backend.metrics(&id).await;
+            (id_for_err, r)
+        }
+    }))
+    .await;
+
+    let mut fresh = Vec::with_capacity(results.len());
+    for (id, result) in results {
+        match result {
+            Ok(m) => fresh.push((id, m)),
+            Err(e) => {
+                warn!(replica = ?id, error = ?e, "metrics refresh failed");
+            }
+        }
+    }
+    cache.replace(fresh);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use ruscker_core::{CoreResult, Replica, ReplicaId, ReplicaRegistry, ReplicaState};
+    use std::net::SocketAddr;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn fake_replica(spec: &str) -> Replica {
+        Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: spec.into(),
+            container_id: "x".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+        }
+    }
+
+    struct CountingMetricsBackend {
+        calls: AtomicU32,
+    }
+    #[async_trait]
+    impl ContainerBackend for CountingMetricsBackend {
+        async fn spawn(&self, _spec_id: &str, _image: &str) -> CoreResult<Replica> {
+            unimplemented!()
+        }
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn list(&self) -> CoreResult<Vec<Replica>> {
+            Ok(vec![])
+        }
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            let n = self.calls.fetch_add(1, Ordering::SeqCst) as f64;
+            Ok(ReplicaMetrics {
+                cpu_percent: n,
+                memory_bytes: 100,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn refresh_populates_cache_for_each_replica() {
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r1 = fake_replica("alpha");
+        let r2 = fake_replica("beta");
+        let (id1, id2) = (r1.id.clone(), r2.id.clone());
+        {
+            let mut w = reg.write().await;
+            w.add(r1);
+            w.add(r2);
+        }
+        let cache = MetricsCache::new();
+        let backend = Arc::new(CountingMetricsBackend {
+            calls: AtomicU32::new(0),
+        });
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+
+        assert_eq!(cache.len(), 2);
+        assert!(cache.get(&id1).is_some());
+        assert!(cache.get(&id2).is_some());
+    }
+
+    #[tokio::test]
+    async fn replace_evicts_disappeared_replicas() {
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r1 = fake_replica("alpha");
+        let id1 = r1.id.clone();
+        reg.write().await.add(r1);
+        let cache = MetricsCache::new();
+        let backend = Arc::new(CountingMetricsBackend {
+            calls: AtomicU32::new(0),
+        });
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert!(cache.get(&id1).is_some());
+
+        // Replica goes away.
+        reg.write().await.remove(&id1);
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert!(cache.is_empty(), "stale entry must be evicted");
+    }
+
+    #[tokio::test]
+    async fn empty_registry_clears_cache() {
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let cache = MetricsCache::new();
+        // Pre-poison the cache with a fake entry.
+        cache.replace(vec![(
+            ReplicaId(uuid::Uuid::new_v4()),
+            ReplicaMetrics {
+                cpu_percent: 42.0,
+                memory_bytes: 1,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            },
+        )]);
+        let backend = Arc::new(CountingMetricsBackend {
+            calls: AtomicU32::new(0),
+        });
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert!(cache.is_empty());
+    }
+}

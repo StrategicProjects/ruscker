@@ -442,6 +442,7 @@ mod tests {
             cookie_key: ruscker_proxy::sticky::CookieKey::random(),
             spawn_locks: Arc::new(dashmap::DashMap::new()),
             sessions: Arc::new(crate::sessions::SessionTracker::new()),
+            metrics: crate::metrics_cache::MetricsCache::new(),
         }
     }
 

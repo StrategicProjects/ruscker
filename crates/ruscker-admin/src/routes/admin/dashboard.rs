@@ -54,6 +54,13 @@ struct ReplicaRow {
     /// First 12 chars of the container ID, enough to disambiguate
     /// while staying readable.
     container_short: String,
+    /// Pre-formatted "23%" / "n/a" for the CPU column. `None`
+    /// when the metrics cache hasn't observed this replica yet
+    /// (first 5 s after spawn, before the refresher's first
+    /// tick).
+    cpu_display: Option<String>,
+    /// Pre-formatted "412 MB" / "n/a" for the memory column.
+    memory_display: Option<String>,
 }
 
 #[derive(Template)]
@@ -73,6 +80,12 @@ struct DashboardPage<'a> {
     total_sessions: u32,
     spec_count: usize,
     tracker_sessions: usize,
+    /// Sum of `memory_bytes` across all replicas with cached
+    /// metrics. `0` when no replicas have been observed yet
+    /// (refresher hasn't ticked, or backend isn't connected).
+    total_memory_bytes: u64,
+    /// "412 MB" / "1.2 GB" pre-formatted for the top metric card.
+    total_memory_display: String,
     rows: Vec<ReplicaRow>,
 }
 
@@ -140,7 +153,10 @@ async fn index(
 
     // Build display rows. `display_name` falls back to spec_id
     // when the operator deleted / renamed a spec out from under
-    // a still-running replica.
+    // a still-running replica. Each row also looks up its
+    // cached metrics; rows without cached metrics show "n/a"
+    // until the next refresher tick.
+    let mut total_memory_bytes: u64 = 0;
     let rows: Vec<ReplicaRow> = snap
         .into_iter()
         .map(|r| {
@@ -154,6 +170,12 @@ async fn index(
                 .unwrap_or_else(|| r.spec_id.clone());
             let container_short = r.container_id.chars().take(12).collect();
             let uptime = format_uptime(Utc::now() - r.started_at);
+            let cached = state.metrics.get(&r.id);
+            let cpu_display = cached.as_ref().map(|c| format!("{:.0}%", c.metrics.cpu_percent));
+            let memory_display = cached.as_ref().map(|c| format_bytes(c.metrics.memory_bytes));
+            if let Some(c) = cached.as_ref() {
+                total_memory_bytes = total_memory_bytes.saturating_add(c.metrics.memory_bytes);
+            }
             ReplicaRow {
                 spec_id: r.spec_id,
                 display_name,
@@ -162,9 +184,20 @@ async fn index(
                 sessions_active: r.sessions_active,
                 sessions_max: r.sessions_max,
                 container_short,
+                cpu_display,
+                memory_display,
             }
         })
         .collect();
+    let total_memory_display = if total_memory_bytes > 0 {
+        format_bytes(total_memory_bytes)
+    } else {
+        // i18n-friendly default: render an em-dash and let the
+        // operator infer "no data yet" from context. The full
+        // explanation lives below as the metrics-pending hint
+        // when rows exist but none have cached metrics.
+        "—".to_string()
+    };
 
     let page = DashboardPage {
         locale: loc,
@@ -177,9 +210,34 @@ async fn index(
         total_sessions,
         spec_count,
         tracker_sessions,
+        total_memory_bytes,
+        total_memory_display,
         rows,
     };
     super::render(&page)
+}
+
+/// Render a byte count as a short human string with binary
+/// units (KiB / MiB / GiB) and one decimal place at GB. Used
+/// for the dashboard memory column and the aggregate memory
+/// metric card.
+///
+/// "412 MB" reads better than "432211456 bytes". One-decimal
+/// at GB keeps small fluctuations legible without going to
+/// "412.345678 MB".
+fn format_bytes(bytes: u64) -> String {
+    const KIB: u64 = 1024;
+    const MIB: u64 = 1024 * KIB;
+    const GIB: u64 = 1024 * MIB;
+    if bytes < KIB {
+        format!("{bytes} B")
+    } else if bytes < MIB {
+        format!("{} KB", bytes / KIB)
+    } else if bytes < GIB {
+        format!("{} MB", bytes / MIB)
+    } else {
+        format!("{:.1} GB", bytes as f64 / GIB as f64)
+    }
 }
 
 /// Format a chrono `Duration` as a short uptime: "45s", "12m",
@@ -230,6 +288,16 @@ mod tests {
         assert_eq!(format_uptime(D::seconds(-30)), "0s");
     }
 
+    #[test]
+    fn format_bytes_picks_the_right_unit() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(1023), "1023 B");
+        assert_eq!(format_bytes(1024), "1 KB");
+        assert_eq!(format_bytes(2_000_000), "1 MB");
+        assert_eq!(format_bytes(512 * 1024 * 1024), "512 MB");
+        assert_eq!(format_bytes(1_500_000_000), "1.4 GB");
+    }
+
     // -------------------------------------------------------------
     // Template rendering — fake data, no DB / backend / HTTP.
     // Catches template-side regressions (missing field, wrong
@@ -252,6 +320,8 @@ mod tests {
             sessions_active: active,
             sessions_max: max,
             container_short: "abc123def456".into(),
+            cpu_display: None,
+            memory_display: None,
         }
     }
 
@@ -272,6 +342,8 @@ mod tests {
                 .collect::<std::collections::HashSet<_>>()
                 .len(),
             tracker_sessions: 0,
+            total_memory_bytes: 0,
+            total_memory_display: "—".to_string(),
             rows,
         };
         page.render().expect("render dashboard")

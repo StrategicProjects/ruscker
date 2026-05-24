@@ -27,7 +27,7 @@
 {% when None %}{% endmatch %}
 
 {# ── Upload form ──────────────────────────────────────────── #}
-<form method="post" action="/admin/images" enctype="multipart/form-data"
+<form method="post" action="/admin/media" enctype="multipart/form-data"
       class="image-upload-zone">
   <input type="file" name="file" id="img-file" required
          accept="image/png,image/jpeg,image/webp,image/svg+xml">
@@ -66,7 +66,7 @@
             {% when None %}{% endmatch %}{% when None %}{% endmatch %}
           </div>
         </div>
-        <form method="post" action="/admin/images/{{ img.id }}/delete"
+        <form method="post" action="/admin/media/{{ img.id }}/delete"
               onsubmit="return confirm('{{ self.t("admin-images-delete-confirm") }}');">
           <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">
             <i class="ti ti-trash" aria-hidden="true"></i>

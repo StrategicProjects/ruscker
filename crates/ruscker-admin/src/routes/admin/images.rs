@@ -31,8 +31,18 @@ const UPLOAD_BODY_LIMIT: usize = 12 * 1024 * 1024;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
-        .route("/admin/images", get(index).post(upload))
-        .route("/admin/images/{id}/delete", post(delete))
+        // The media library — card logos/covers. Mounted at
+        // `/admin/media` (the nav label is "Media") to avoid the
+        // "Docker images" confusion (#9). The DB table + Rust
+        // module stay `images` — that's internal and accurate.
+        .route("/admin/media", get(index).post(upload))
+        .route("/admin/media/{id}/delete", post(delete))
+        // 301 from the old path so any bookmarks / in-flight
+        // links keep working.
+        .route(
+            "/admin/images",
+            get(|| async { Redirect::permanent("/admin/media") }),
+        )
         .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT))
 }
 
@@ -187,7 +197,7 @@ async fn delete(
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::images::delete_one(pool, &id, Some("admin")).await {
-        Ok(_) => Redirect::to("/admin/images").into_response(),
+        Ok(_) => Redirect::to("/admin/media").into_response(),
         Err(err) => {
             tracing::error!(error = ?err, id, "image delete failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response()

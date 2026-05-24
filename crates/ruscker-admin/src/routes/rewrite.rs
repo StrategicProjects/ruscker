@@ -28,18 +28,33 @@
 //! pass they become `/app/auroraprime/sockjs/info` and route
 //! back through the same proxy handler that served the page.
 //!
-//! ## What this is NOT
+//! ## Runtime URL interception (JS shim)
 //!
-//! - **Runtime URL interception.** WebSocket / `fetch()` /
-//!   XHR constructed in JavaScript still emit root-relative
-//!   URLs and bypass the static rewriter. A JS shim (next
-//!   slice) overrides `WebSocket` / `fetch` / `XMLHttpRequest`
-//!   to prepend the prefix.
+//! `WebSocket('/websocket/')`, `fetch('/api/x')`, and
+//! `XMLHttpRequest.open(..., '/foo')` construct URLs at
+//! runtime, after the HTML rewriter has finished. The same
+//! prefix problem applies. We inject a small `<script>` at
+//! the very top of `<head>` that monkey-patches the three
+//! globals to prepend the mount prefix on absolute paths,
+//! using the same skip rules as the HTML rewriter so behavior
+//! is uniform.
+//!
+//! "Top of `<head>`" matters: any subsequent `<script>` —
+//! including the page's own bundle — sees the patched globals,
+//! so even modules captured into closures (e.g. Shiny's
+//! `shiny.connections.js`) use the wrappers.
+//!
+//! ## What this is still NOT
+//!
 //! - **CSS `url()` rewriting.** External stylesheets are
 //!   loaded via `<link href>` (covered), and their internal
 //!   `url(/foo.png)` paths are relative to the stylesheet's
 //!   own URL — which is now under `/app/{spec}/`, so they
 //!   resolve correctly without rewriting.
+//! - **Inline `<script>` source.** A string literal like
+//!   `var url = '/foo'` inside a `<script>` block is opaque
+//!   to us and will reach the patched fetch/WebSocket only
+//!   when the script eventually calls those APIs.
 //!
 //! ## Trade-offs
 //!
@@ -183,15 +198,100 @@ fn is_html(resp: &Response<Body>) -> bool {
         .unwrap_or(false)
 }
 
-/// Run the streaming transform: inject `<base href>` and
-/// rewrite known URL-bearing attributes. Wrapped in a
-/// fallible function so the caller can swallow the
-/// (vanishingly rare) lol_html error.
+/// Build the runtime-shim `<script>` that monkey-patches
+/// `WebSocket`, `fetch`, and `XMLHttpRequest.open` to prefix
+/// absolute-path URLs at call time. Mirrors the same skip
+/// rules as [`rewrite_url`] but in JavaScript.
+///
+/// `base_path` is embedded as a string literal — kept in sync
+/// with the `<base href>` injection so the static and dynamic
+/// passes agree on the prefix.
+///
+/// IIFE-wrapped so it doesn't leak helpers onto `window`.
+/// `try { ... } catch (_) { }` around each wrap so a single
+/// browser oddity (older Edge, no `WebSocket`, etc.) can't
+/// take the whole page down.
+fn build_runtime_shim(base_path: &str) -> String {
+    // The JS-level skip prefixes mirror SKIP_PREFIXES on the
+    // Rust side. Kept inline (not loaded from a constant)
+    // because they're a different scope and we want each
+    // injection to be self-contained.
+    format!(
+        r##"<script>(function(){{
+  var base = {base:?};
+  function prefix(u) {{
+    if (typeof u !== "string") return u;
+    if (u.length === 0) return u;
+    if (u.charAt(0) !== "/") return u;          // relative
+    if (u.charAt(1) === "/") return u;           // protocol-relative
+    var skips = ["/admin/", "/admin", "/assets/", "/app/", "/api/", "/__set/", "/__assets__/"];
+    for (var i = 0; i < skips.length; i++) {{
+      if (u.indexOf(skips[i]) === 0) return u;
+    }}
+    if (u.indexOf(base) === 0) return u;
+    return base + u.replace(/^\/+/, "");
+  }}
+  function prefixWsUrl(u) {{
+    if (typeof u !== "string") return u;
+    var m = u.match(/^(wss?:)\/\/([^\/]+)(\/.*)?$/);
+    if (!m) return u;
+    var path = m[3] || "/";
+    var newPath = prefix(path);
+    return m[1] + "//" + m[2] + newPath;
+  }}
+  // WebSocket
+  try {{
+    var OrigWS = window.WebSocket;
+    if (OrigWS) {{
+      function PatchedWS(url, protocols) {{
+        var u = prefixWsUrl(url);
+        return arguments.length > 1 ? new OrigWS(u, protocols) : new OrigWS(u);
+      }}
+      PatchedWS.prototype = OrigWS.prototype;
+      PatchedWS.CONNECTING = OrigWS.CONNECTING;
+      PatchedWS.OPEN = OrigWS.OPEN;
+      PatchedWS.CLOSING = OrigWS.CLOSING;
+      PatchedWS.CLOSED = OrigWS.CLOSED;
+      window.WebSocket = PatchedWS;
+    }}
+  }} catch (_) {{}}
+  // fetch
+  try {{
+    var origFetch = window.fetch;
+    if (origFetch) {{
+      window.fetch = function (input, init) {{
+        if (typeof input === "string") input = prefix(input);
+        else if (input && typeof input.url === "string") {{
+          var p = prefix(input.url);
+          if (p !== input.url) input = new Request(p, input);
+        }}
+        return origFetch.call(this, input, init);
+      }};
+    }}
+  }} catch (_) {{}}
+  // XMLHttpRequest
+  try {{
+    var origOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function (method, url) {{
+      var rest = Array.prototype.slice.call(arguments, 2);
+      return origOpen.apply(this, [method, prefix(url)].concat(rest));
+    }};
+  }} catch (_) {{}}
+}})();</script>"##,
+        base = base_path
+    )
+}
+
+/// Run the streaming transform: inject `<base href>`, the
+/// runtime JS shim, and rewrite known URL-bearing attributes.
+/// Wrapped in a fallible function so the caller can swallow
+/// the (vanishingly rare) lol_html error.
 fn transform(html: &[u8], base_path: &str) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
-    let mut out = Vec::with_capacity(html.len() + 64);
+    let mut out = Vec::with_capacity(html.len() + 256);
     // Track whether we've already injected the `<base>` tag —
     // we only want one, and only if a `<head>` exists.
     let base_tag = format!("<base href=\"{}\">", base_path);
+    let runtime_shim = build_runtime_shim(base_path);
 
     // Per-attribute element handlers. Each entry is a CSS
     // selector + the attribute name to rewrite if its value
@@ -216,10 +316,24 @@ fn transform(html: &[u8], base_path: &str) -> Result<Vec<u8>, lol_html::errors::
 
     let mut element_handlers: Vec<_> = Vec::with_capacity(url_attrs.len() + 1);
 
-    // `<head>`: prepend the base tag as the first child. lol_html's
-    // `prepend` runs once on the open tag, which is what we want.
-    element_handlers.push(element!("head", |el| {
+    // `<head>`: prepend `<base href>` AND the runtime shim as
+    // the first children. Order matters: we prepend in
+    // sequence so the final document order is
+    // `<head><base><script>(shim)</script>...everything else`.
+    // The shim must come before any page script so that when
+    // the page's own JS opens a WebSocket / calls fetch, our
+    // wrapper is already in place.
+    //
+    // Both prepends run on the same `<head>` open-tag event;
+    // each call inserts at the start, so the *last* prepend
+    // becomes the first child. We prepend the shim LAST so
+    // it lands BEFORE the base tag — both are equally
+    // unobservable to the browser, but the shim wraps
+    // globals that any other inline script could touch, and
+    // running first removes ambiguity.
+    element_handlers.push(element!("head", move |el| {
         el.prepend(&base_tag, ContentType::Html);
+        el.prepend(&runtime_shim, ContentType::Html);
         Ok(())
     }));
 
@@ -392,6 +506,63 @@ mod tests {
         let out = transform(html, "/app/x/").unwrap();
         let s = std::str::from_utf8(&out).unwrap();
         assert!(s.contains("action=\"/app/x/submit\""));
+    }
+
+    // ── runtime shim ────────────────────────────────────────
+
+    #[test]
+    fn build_runtime_shim_embeds_base_path_as_string() {
+        let shim = build_runtime_shim("/app/alpha/");
+        assert!(shim.starts_with("<script>"));
+        assert!(shim.ends_with("</script>"));
+        // base must be a quoted JS string so `{base:?}` does
+        // the right thing.
+        assert!(
+            shim.contains(r#"var base = "/app/alpha/";"#),
+            "base path not quoted as a JS string literal: {shim}"
+        );
+    }
+
+    #[test]
+    fn build_runtime_shim_patches_three_globals() {
+        let shim = build_runtime_shim("/app/x/");
+        assert!(shim.contains("window.WebSocket"));
+        assert!(shim.contains("window.fetch"));
+        assert!(shim.contains("XMLHttpRequest.prototype.open"));
+    }
+
+    #[test]
+    fn build_runtime_shim_wraps_each_patch_in_try_catch() {
+        // A single browser quirk shouldn't break the others.
+        let shim = build_runtime_shim("/app/x/");
+        assert_eq!(
+            shim.matches("} catch (_) {}").count(),
+            3,
+            "expected one try/catch per patched global"
+        );
+    }
+
+    #[test]
+    fn transform_injects_runtime_shim_before_other_head_scripts() {
+        let html = br#"<html><head><script src="/lib/app.js"></script></head><body></body></html>"#;
+        let out = transform(html, "/app/x/").unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        let shim_idx = s.find("(function(){").expect("shim present");
+        let app_idx = s.find("/app/x/lib/app.js").expect("app script present");
+        assert!(
+            shim_idx < app_idx,
+            "shim must precede any page script so its wrappers are in place"
+        );
+    }
+
+    #[test]
+    fn transform_no_head_skips_shim_injection() {
+        // Fragment without <head> means no shim. The
+        // attribute rewriting still runs.
+        let html = br#"<div><img src="/foo.png"></div>"#;
+        let out = transform(html, "/app/x/").unwrap();
+        let s = std::str::from_utf8(&out).unwrap();
+        assert!(!s.contains("XMLHttpRequest.prototype.open"));
     }
 
     #[test]

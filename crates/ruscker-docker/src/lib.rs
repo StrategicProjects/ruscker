@@ -20,10 +20,11 @@ use async_trait::async_trait;
 use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
 use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, ListContainersOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
 };
 use bollard::Docker;
 use chrono::Utc;
+use dashmap::DashMap;
 use futures_util::StreamExt;
 use ruscker_core::{
     ContainerBackend, CoreError, CoreResult, Replica, ReplicaId, ReplicaMetrics, ReplicaState,
@@ -57,6 +58,26 @@ pub const STOP_TIMEOUT_SECS: i32 = 10;
 
 pub struct LocalDockerBackend {
     docker: Docker,
+    /// Previous-reading cache for CPU delta calculation. Docker
+    /// reports CPU as a cumulative counter; converting to a
+    /// percentage requires comparing two readings against each
+    /// other. We hold the last reading per container here so a
+    /// single `metrics()` call can produce a percent on its own
+    /// (returning 0% only on the very first observation of a
+    /// given container, until the next refresh fills the cache).
+    prev_stats: DashMap<String, PrevReading>,
+}
+
+/// Cumulative CPU counters from a previous `stats` read,
+/// used to compute the delta on the next read.
+#[derive(Debug, Clone, Copy)]
+struct PrevReading {
+    /// Cumulative container CPU time in nanoseconds, monotonically
+    /// increasing for the container's lifetime.
+    cpu_total: u64,
+    /// Cumulative system-wide CPU time in nanoseconds at the same
+    /// instant. Used as the denominator of the percent calc.
+    cpu_system: u64,
 }
 
 impl LocalDockerBackend {
@@ -67,13 +88,19 @@ impl LocalDockerBackend {
     pub fn local() -> CoreResult<Self> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| CoreError::Backend(format!("connect to docker socket: {e}")))?;
-        Ok(Self { docker })
+        Ok(Self {
+            docker,
+            prev_stats: DashMap::new(),
+        })
     }
 
     /// Build over an existing bollard connection — used by tests
     /// to inject a stub via testcontainers-rs.
     pub fn from_docker(docker: Docker) -> Self {
-        Self { docker }
+        Self {
+            docker,
+            prev_stats: DashMap::new(),
+        }
     }
 
     /// Spawn a container for `spec_id` with the explicit inner
@@ -421,14 +448,136 @@ impl ContainerBackend for LocalDockerBackend {
         Ok(replicas)
     }
 
-    async fn metrics(&self, _replica_id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
-        // TODO(phase-4): stream stats via bollard::Docker::stats().
-        // The dashboard ships in phase 4; the proxy itself doesn't
-        // need metrics to function.
-        Err(CoreError::Backend(
-            "metrics() not implemented until phase 4".into(),
-        ))
+    async fn metrics(&self, replica_id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+        // Map replica → container via the label set on spawn.
+        let container_id = self.container_id_for_replica(replica_id).await?;
+        self.metrics_for_container(&container_id).await
     }
+}
+
+impl LocalDockerBackend {
+    /// One-shot stats read for a known container id. Returns the
+    /// current memory + network counters and a CPU percent
+    /// computed against the previous reading stored in
+    /// [`Self::prev_stats`]. First observation of a container
+    /// returns `cpu_percent: 0.0` because there's no delta — the
+    /// next call (typically ~5 s later from the dashboard cache
+    /// refresher) starts producing real percentages.
+    ///
+    /// Failing to read stats for one container doesn't trigger a
+    /// retry — the cache layer will try again on its next tick.
+    pub async fn metrics_for_container(&self, container_id: &str) -> CoreResult<ReplicaMetrics> {
+        let opts = StatsOptionsBuilder::default()
+            .stream(false)
+            .one_shot(true)
+            .build();
+        // `stream: false` returns a single event and the stream
+        // completes. Use `take(1)` defensively in case bollard's
+        // semantics shift.
+        let mut stream = self.docker.stats(container_id, Some(opts)).take(1);
+        let Some(maybe) = stream.next().await else {
+            return Err(CoreError::Backend(format!(
+                "no stats event for container {container_id}"
+            )));
+        };
+        let stat = maybe.map_err(|e| backend_err("stats", e))?;
+
+        let cpu_total = stat
+            .cpu_stats
+            .as_ref()
+            .and_then(|c| c.cpu_usage.as_ref())
+            .and_then(|u| u.total_usage)
+            .unwrap_or(0);
+        let cpu_system = stat
+            .cpu_stats
+            .as_ref()
+            .and_then(|c| c.system_cpu_usage)
+            .unwrap_or(0);
+        // bollard reports `online_cpus` as a `u32` in 0.21;
+        // promote to `u64` so the percent math doesn't overflow
+        // on absurdly large numbers (and matches our delta types).
+        let online_cpus = stat
+            .cpu_stats
+            .as_ref()
+            .and_then(|c| c.online_cpus)
+            .map(u64::from)
+            .unwrap_or_else(|| {
+                // Fall back to percpu length if `online_cpus`
+                // isn't reported (older Docker engines).
+                stat.cpu_stats
+                    .as_ref()
+                    .and_then(|c| c.cpu_usage.as_ref())
+                    .and_then(|u| u.percpu_usage.as_ref())
+                    .map(|v| v.len() as u64)
+                    .unwrap_or(1)
+            })
+            .max(1);
+
+        // Compute the percent against the previous reading if we
+        // have one. Otherwise stash the current reading and
+        // report 0% for this call.
+        let prev = self.prev_stats.get(container_id).map(|r| *r);
+        self.prev_stats.insert(
+            container_id.to_string(),
+            PrevReading {
+                cpu_total,
+                cpu_system,
+            },
+        );
+        let cpu_percent = match prev {
+            Some(p) => cpu_percent_from_delta(p, cpu_total, cpu_system, online_cpus),
+            None => 0.0,
+        };
+
+        let memory_bytes = stat.memory_stats.as_ref().and_then(|m| m.usage).unwrap_or(0);
+
+        // Sum across all network interfaces. Most containers
+        // have exactly one (`eth0`); summing keeps the math
+        // robust if the operator attaches extras.
+        let (network_rx_bytes, network_tx_bytes) = stat
+            .networks
+            .as_ref()
+            .map(|nets| {
+                nets.values().fold((0u64, 0u64), |(rx, tx), n| {
+                    (rx + n.rx_bytes.unwrap_or(0), tx + n.tx_bytes.unwrap_or(0))
+                })
+            })
+            .unwrap_or((0, 0));
+
+        Ok(ReplicaMetrics {
+            cpu_percent,
+            memory_bytes,
+            network_rx_bytes,
+            network_tx_bytes,
+        })
+    }
+
+    /// Forget a container's previous-reading entry. Called when
+    /// a replica is stopped so the map doesn't grow without
+    /// bound across long-lived deployments.
+    pub fn forget_metrics(&self, container_id: &str) {
+        self.prev_stats.remove(container_id);
+    }
+}
+
+/// CPU percent in the Docker convention: container CPU time over
+/// system CPU time, scaled by online CPU count to give a
+/// "percent of one core" reading that exceeds 100% on multi-core
+/// hosts. Returns 0% when the system delta is zero (no time
+/// elapsed) to avoid divide-by-zero — that's typical for two
+/// readings collected too close together.
+fn cpu_percent_from_delta(
+    prev: PrevReading,
+    cpu_total: u64,
+    cpu_system: u64,
+    online_cpus: u64,
+) -> f64 {
+    let cpu_delta = cpu_total.saturating_sub(prev.cpu_total) as f64;
+    let system_delta = cpu_system.saturating_sub(prev.cpu_system) as f64;
+    if system_delta <= 0.0 {
+        return 0.0;
+    }
+    (cpu_delta / system_delta) * (online_cpus as f64) * 100.0
 }
 
 /// Two-phase readiness:
@@ -592,6 +741,57 @@ mod tests {
         );
         assert_eq!(hc.cpu_period, Some(CPU_PERIOD_US));
         assert_eq!(hc.cpu_quota, Some(CPU_PERIOD_US / 2));
+    }
+
+    #[test]
+    fn cpu_percent_zero_when_no_delta() {
+        let prev = PrevReading {
+            cpu_total: 100,
+            cpu_system: 1_000,
+        };
+        // Same readings → zero delta → 0%.
+        assert_eq!(cpu_percent_from_delta(prev, 100, 1_000, 4), 0.0);
+    }
+
+    #[test]
+    fn cpu_percent_handles_half_a_core_on_quad_host() {
+        // Container used 1 unit of CPU time while the system
+        // observed 4 (4-core machine, 1 second). That's 25% of
+        // the total system, but Docker expresses it as
+        // 25% × 4 cores = 100% of one core.
+        let prev = PrevReading {
+            cpu_total: 0,
+            cpu_system: 0,
+        };
+        let pct = cpu_percent_from_delta(prev, 1, 4, 4);
+        assert!((pct - 100.0).abs() < 1e-9, "got {pct}");
+    }
+
+    #[test]
+    fn cpu_percent_full_core_on_quad_host() {
+        // Container used as much CPU as the whole system saw —
+        // it pegged one core. 100% of system × 4 = 400% Docker-
+        // style.
+        let prev = PrevReading {
+            cpu_total: 0,
+            cpu_system: 0,
+        };
+        let pct = cpu_percent_from_delta(prev, 4, 4, 4);
+        assert!((pct - 400.0).abs() < 1e-9, "got {pct}");
+    }
+
+    #[test]
+    fn cpu_percent_saturates_counter_rollback() {
+        // Docker shouldn't ever go backward, but a daemon
+        // restart could reset the counters. Saturating
+        // subtraction means we just report 0% on that tick
+        // instead of producing wild negatives.
+        let prev = PrevReading {
+            cpu_total: 999,
+            cpu_system: 999,
+        };
+        let pct = cpu_percent_from_delta(prev, 100, 1000, 1);
+        assert_eq!(pct, 0.0);
     }
 
     #[test]

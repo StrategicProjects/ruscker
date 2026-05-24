@@ -640,6 +640,7 @@ mod tests {
             cookie_key: CookieKey::random(),
             spawn_locks: StdArc::new(dashmap::DashMap::new()),
             sessions: StdArc::new(crate::sessions::SessionTracker::new()),
+            metrics: crate::metrics_cache::MetricsCache::new(),
         }
     }
 

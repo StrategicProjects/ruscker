@@ -9,9 +9,12 @@
      theme so light/dark switching keeps working. */
   .dash-metric-grid {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
     margin-bottom: 24px;
+  }
+  @media (max-width: 1080px) {
+    .dash-metric-grid { grid-template-columns: repeat(3, 1fr); }
   }
   @media (max-width: 720px) {
     .dash-metric-grid { grid-template-columns: repeat(2, 1fr); }
@@ -116,6 +119,10 @@
     <div class="dash-metric-label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
     <div class="dash-metric-value">{{ tracker_sessions }}</div>
   </div>
+  <div class="dash-metric">
+    <div class="dash-metric-label"><i class="ti ti-database"></i>{{ self.t("admin-dashboard-metric-memory") }}</div>
+    <div class="dash-metric-value">{{ total_memory_display }}</div>
+  </div>
 </div>
 
 <h2 class="text-sm font-medium mb-2">{{ self.t("admin-dashboard-replicas-heading") }}</h2>
@@ -132,6 +139,8 @@
           <th>{{ self.t("admin-dashboard-col-state") }}</th>
           <th>{{ self.t("admin-dashboard-col-uptime") }}</th>
           <th>{{ self.t("admin-dashboard-col-sessions") }}</th>
+          <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
+          <th>{{ self.t("admin-dashboard-col-memory") }}</th>
           <th>{{ self.t("admin-dashboard-col-container") }}</th>
         </tr>
       </thead>
@@ -146,6 +155,18 @@
             <td>{{ self.state_label(row.state) }}</td>
             <td class="dash-mono">{{ row.uptime }}</td>
             <td>{{ row.sessions_active }}<span style="color: var(--text-muted)">/{{ row.sessions_max }}</span></td>
+            <td>
+              {% match row.cpu_display %}
+                {% when Some with (s) %}{{ s }}
+                {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
+              {% endmatch %}
+            </td>
+            <td>
+              {% match row.memory_display %}
+                {% when Some with (s) %}{{ s }}
+                {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
+              {% endmatch %}
+            </td>
             <td class="dash-mono">{{ row.container_short }}</td>
           </tr>
         {% endfor %}

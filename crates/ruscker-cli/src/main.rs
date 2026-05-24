@@ -17,7 +17,7 @@
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use ruscker_config::{Config, SpecKind, ValidationReport, Warning};
+use ruscker_config::{CompatWarning, Config, SpecKind, ValidationReport, Warning};
 use std::path::PathBuf;
 
 /// How log lines are rendered.
@@ -67,6 +67,12 @@ enum Command {
         /// Exit non-zero if any warnings are produced
         #[arg(long)]
         strict: bool,
+
+        /// Also report ShinyProxy features this config uses that
+        /// Ruscker does not support (auth schemes, `volumes`,
+        /// `kubernetes-*`, …). Exits non-zero if any are found.
+        #[arg(long)]
+        strict_compat: bool,
     },
 
     /// Render the YAML with environment variables interpolated, for
@@ -150,7 +156,12 @@ fn main() -> Result<()> {
     init_tracing(cli.verbose, cli.log_format);
 
     match cli.command {
-        Command::Validate { path, json, strict } => cmd_validate(&path, json, strict),
+        Command::Validate {
+            path,
+            json,
+            strict,
+            strict_compat,
+        } => cmd_validate(&path, json, strict, strict_compat),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
@@ -301,26 +312,72 @@ fn init_tracing(verbosity: u8, format: LogFormat) {
     }
 }
 
-fn cmd_validate(path: &PathBuf, json: bool, strict: bool) -> Result<()> {
+fn cmd_validate(path: &PathBuf, json: bool, strict: bool, strict_compat: bool) -> Result<()> {
     let config = Config::from_file(path)
         .with_context(|| format!("failed to load config from {}", path.display()))?;
     let report = config.validate();
+
+    // Compatibility scan needs the raw YAML — the unsupported fields
+    // it looks for are dropped by serde at parse time. Only run it
+    // when asked; an empty vec otherwise keeps the output unchanged.
+    let compat = if strict_compat {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        ruscker_config::validate::compat_scan(&config, &raw)
+    } else {
+        Vec::new()
+    };
 
     if json {
         let payload = serde_json::json!({
             "path": path,
             "ok": report.is_clean(),
             "report": report,
+            "compat_ok": compat.is_empty(),
+            "compat": compat,
         });
         println!("{}", serde_json::to_string_pretty(&payload)?);
     } else {
         print_human_report(path, &config, &report);
+        if strict_compat {
+            print_compat_report(&compat);
+        }
     }
 
-    if strict && !report.is_clean() {
+    if (strict && !report.is_clean()) || (strict_compat && !compat.is_empty()) {
         std::process::exit(2);
     }
     Ok(())
+}
+
+fn print_compat_report(compat: &[CompatWarning]) {
+    println!("  ShinyProxy compatibility");
+    println!("  ────────────────────────");
+    if compat.is_empty() {
+        println!("  ✓ no unsupported features");
+    } else {
+        println!("  ⚠ {} unsupported feature(s):", compat.len());
+        for w in compat {
+            println!("    - {}", format_compat_warning(w));
+        }
+    }
+    println!();
+}
+
+fn format_compat_warning(w: &CompatWarning) -> String {
+    match w {
+        CompatWarning::UnsupportedAuth { scheme } => {
+            format!("authentication '{scheme}' is not supported — only `none` (auth inside apps)")
+        }
+        CompatWarning::UnsupportedSpecField {
+            spec_id,
+            field,
+            note,
+        } => format!("spec {spec_id}: `{field}` — {note}"),
+        CompatWarning::UnsupportedProxyField { field, note } => {
+            format!("proxy.{field} — {note}")
+        }
+    }
 }
 
 fn cmd_show(path: &PathBuf) -> Result<()> {

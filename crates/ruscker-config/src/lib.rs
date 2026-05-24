@@ -45,7 +45,7 @@ pub use schema::{
     Config, LandingCustomization, Logging, Proxy, RoutingStrategy, Server, Spec,
     SpecKind, SpecKindOverride, TemplateProperties,
 };
-pub use validate::{ValidationReport, Warning};
+pub use validate::{CompatWarning, ValidationReport, Warning};
 
 use std::path::Path;
 

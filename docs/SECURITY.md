@@ -106,16 +106,22 @@ Status: living document. Tracks the Phase 5 security audit
 - **[implemented]** `X-Content-Type-Options: nosniff` on served
   responses (§7) so a polyglot upload can't be reinterpreted as
   active content.
-- **[accepted limitation / deferred]** **SVG uploads are stored
-  and served without sanitization** (`image/svg+xml`). Served in
-  an `<img>` tag, embedded `<script>` does NOT execute; but an
-  operator who embeds the SVG via `<object>`/`<iframe>` would
-  execute it. Operator-uploaded only (not visitor-facing), so the
-  risk is operator-to-operator. **Deferred**: sanitize via `usvg`
-  or a DOM whitelist, or refuse SVG entirely.
+- **[implemented]** **SVG script neutralization at serve time.**
+  Uploaded SVGs are still stored as-is, but `/assets/img/*`
+  responses (`routes::assets::serve_dynamic`) carry
+  `Content-Security-Policy: default-src 'none'; style-src
+  'unsafe-inline'; sandbox` + `X-Content-Type-Options: nosniff`.
+  Even if a malicious SVG is opened directly or embedded via
+  `<object>`/`<iframe>`, its `<script>`/`<foreignObject>` can't
+  execute. The common `<img src=…>` use is unaffected (scripts
+  never run in `<img>` context). The global page-header
+  middleware uses `entry().or_insert` so it does NOT clobber this
+  stricter per-asset policy. **[deferred]** content-level
+  sanitization (`usvg`) if we ever need SVG in an active context.
 - **[implemented]** Path traversal guard on `/assets/img/{file}`
-  rejects `/` and `..`. **[deferred]** add tests for encoded
-  variants (`%2F`, backslash, unicode slash).
+  rejects `/` and `..`, with tests for encoded variants
+  (`%2F`, `%2e%2e`, backslash) — all 400 / 404, never a file
+  read.
 
 ## 5. SQL & database
 
@@ -263,10 +269,10 @@ Blocking-for-prod (all done):
 - [x] `Secure` cookie flag under TLS (§7)
 - [x] Login rate limiting (§2)
 
-Non-blocking follow-ups (tracked):
-- [ ] SVG sanitization or refusal (§4)
+Non-blocking follow-ups:
+- [x] SVG script neutralization (CSP+sandbox at serve time) (§4)
+- [x] Encoded path-traversal tests for `/assets/img` (§4)
 - [ ] Nonce-based CSP, drop `unsafe-inline` (§7)
 - [ ] `proxy-connection` in hop-by-hop strip (§6)
 - [ ] WS pump backpressure bound (§6)
-- [ ] Encoded path-traversal tests for `/assets/img` (§4)
 - [ ] Automated `cargo audit` + `semgrep` in CI

@@ -50,6 +50,12 @@ sqlx = { workspace = true }
 image = { workspace = true }
 infer = { workspace = true }
 
+# Credentials store (Phase 2)
+aes-gcm = { workspace = true }
+zeroize = { workspace = true }
+hex = { workspace = true }
+base64 = { workspace = true }
+
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 insta = { workspace = true }

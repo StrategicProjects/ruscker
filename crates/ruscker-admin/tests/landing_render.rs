@@ -27,6 +27,7 @@ fn app_state() -> AppState {
         admin_auth: Default::default(),
         db: None,
         images_dir: None,
+        master_key: Default::default(),
     }
 }
 

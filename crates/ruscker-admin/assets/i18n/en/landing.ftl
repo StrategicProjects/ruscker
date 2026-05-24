@@ -118,6 +118,28 @@ admin-images-empty = No images yet. Upload the first one above.
 admin-images-delete = Delete
 admin-images-delete-confirm = Delete this image? Specs referencing the filename will fall back to the tinted cover.
 
+# Admin credentials
+admin-creds-title = Registry credentials
+admin-creds-subtitle = Passwords are encrypted at rest with AES-256-GCM. They never appear in the YAML or in the panel after saving.
+admin-creds-form-title = Add / update credential
+admin-creds-name = Name
+admin-creds-name-help = Unique identifier. Use the same name in your specs.
+admin-creds-registry = Registry
+admin-creds-username = Username
+admin-creds-password = Password / token
+admin-creds-password-help = Encrypted on save and never echoed back.
+admin-creds-save = Save credential
+admin-creds-saved = Credential saved:
+admin-creds-empty = No credentials stored yet.
+admin-creds-delete = Delete
+admin-creds-delete-confirm = Delete this credential?
+admin-creds-col-name = Name
+admin-creds-col-registry = Registry
+admin-creds-col-username = Username
+admin-creds-col-created = Created
+admin-creds-key-missing-title = RUSCKER_MASTER_KEY is not configured
+admin-creds-key-missing-help = The credentials store needs a 32-byte key as hex (64 chars) or base64 (44 chars). Generate one with:
+
 card-cta-open = Open
 card-cta-link = Visit
 card-cta-open-app = Open app

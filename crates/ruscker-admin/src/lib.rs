@@ -24,6 +24,7 @@ use tower_cookies::CookieManagerLayer;
 use tracing::info;
 
 pub mod auth;
+pub mod crypto;
 pub mod db;
 pub mod i18n;
 pub mod images;
@@ -47,6 +48,10 @@ pub struct AppState {
     /// falls through to this directory before 404'ing. `None`
     /// disables the disk fallback entirely.
     pub images_dir: Option<Arc<Path>>,
+    /// Master key for the credentials store. When unset, the
+    /// `/admin/credentials` route 503s with a hint to set
+    /// `RUSCKER_MASTER_KEY`.
+    pub master_key: crypto::MasterKey,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -75,6 +80,7 @@ impl AdminServer {
             admin_auth: auth::AdminAuth::from_env(),
             db: None,
             images_dir: None,
+            master_key: crypto::MasterKey::from_env().context("load master key")?,
         };
         Ok(Self {
             addr,
@@ -101,6 +107,13 @@ impl AdminServer {
     pub fn with_admin_token(mut self, token: impl Into<String>) -> Self {
         self.state.admin_auth = auth::AdminAuth::with_token(token);
         self
+    }
+
+    /// Override the credentials master key (default: pulled from
+    /// `RUSCKER_MASTER_KEY`). Accepts hex (64ch) or base64 (44ch).
+    pub fn with_master_key(mut self, raw: impl AsRef<str>) -> Result<Self> {
+        self.state.master_key = crypto::MasterKey::from_str(raw.as_ref())?;
+        Ok(self)
     }
 
     /// Attach a SQLite pool. Required for the `/admin/*` routes

@@ -112,6 +112,13 @@ enum Command {
         /// when set. Without either, /admin/* routes return 503.
         #[arg(long, env = "RUSCKER_ADMIN_TOKEN")]
         admin_token: Option<String>,
+
+        /// 32-byte master key for the credentials store. Accepts
+        /// hex (64 chars) or base64 (44 chars). Generate with
+        /// `openssl rand -hex 32`. Without this set,
+        /// /admin/credentials shows a hint instead of the form.
+        #[arg(long, env = "RUSCKER_MASTER_KEY")]
+        master_key: Option<String>,
     },
 }
 
@@ -125,8 +132,8 @@ fn main() -> Result<()> {
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
         Command::Export { db } => cmd_export(&db),
-        Command::Serve { config, bind, images_dir, db, admin_token } => {
-            cmd_serve(&config, bind, images_dir, db, admin_token)
+        Command::Serve { config, bind, images_dir, db, admin_token, master_key } => {
+            cmd_serve(&config, bind, images_dir, db, admin_token, master_key)
         }
     }
 }
@@ -188,6 +195,7 @@ fn cmd_serve(
     images_dir_override: Option<PathBuf>,
     db_path: Option<PathBuf>,
     admin_token: Option<String>,
+    master_key: Option<String>,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
@@ -225,6 +233,9 @@ fn cmd_serve(
         }
         if let Some(token) = admin_token {
             server = server.with_admin_token(token);
+        }
+        if let Some(k) = master_key {
+            server = server.with_master_key(k).context("invalid --master-key")?;
         }
         if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;

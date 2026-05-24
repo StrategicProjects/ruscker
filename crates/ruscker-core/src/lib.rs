@@ -67,6 +67,87 @@ pub struct RegistryCredentials {
     pub server_address: Option<String>,
 }
 
+/// Backend-neutral container resource limits. The local Docker
+/// backend translates these into `HostConfig.memory`,
+/// `memory_reservation`, `cpu_period`, `cpu_quota`. Backends
+/// that don't natively support a field (e.g. CPU requests on
+/// Docker) silently ignore it.
+///
+/// `cpu_fraction` is fractional CPUs — `0.5` = half a core,
+/// `2.0` = two cores. Matches Docker's `--cpus` semantics.
+/// The Docker backend converts to a `cpu_period` of 100ms and a
+/// proportional `cpu_quota`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ResourceLimits {
+    /// Hard memory cap in bytes. Container is OOM-killed if it
+    /// exceeds. Maps to Docker `HostConfig.memory`.
+    pub memory_bytes: Option<i64>,
+
+    /// Soft memory request (Docker `memory_reservation`). The
+    /// container can briefly exceed this; OOM only when the
+    /// hard limit is hit.
+    pub memory_reservation_bytes: Option<i64>,
+
+    /// CPU hard limit as a fraction of one CPU. `0.5` allows the
+    /// container to use up to half a core; `4.0` allows up to
+    /// four cores.
+    pub cpu_fraction: Option<f64>,
+}
+
+impl ResourceLimits {
+    /// Are any fields set? An all-`None` `ResourceLimits` is
+    /// equivalent to "no limits" and backends should skip the
+    /// translation entirely to keep the bollard `HostConfig`
+    /// minimal.
+    pub fn is_empty(&self) -> bool {
+        self.memory_bytes.is_none()
+            && self.memory_reservation_bytes.is_none()
+            && self.cpu_fraction.is_none()
+    }
+}
+
+/// All the parameters needed to spawn one replica. Bundled so
+/// the trait surface doesn't keep growing one method per new
+/// optional knob. New backend features go in here; the trait
+/// method stays one.
+#[derive(Debug, Clone)]
+pub struct SpawnRequest {
+    pub spec_id: String,
+    pub image: String,
+    /// `None` → backend uses its default port (e.g. 3838 for
+    /// Shiny on the local Docker backend).
+    pub inner_port: Option<u16>,
+    /// `None` → anonymous pull.
+    pub creds: Option<RegistryCredentials>,
+    /// All-`None` (or omitted via `Default`) → no limits applied.
+    pub limits: ResourceLimits,
+}
+
+impl SpawnRequest {
+    pub fn new(spec_id: impl Into<String>, image: impl Into<String>) -> Self {
+        Self {
+            spec_id: spec_id.into(),
+            image: image.into(),
+            inner_port: None,
+            creds: None,
+            limits: ResourceLimits::default(),
+        }
+    }
+
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.inner_port = Some(port);
+        self
+    }
+    pub fn with_creds(mut self, creds: RegistryCredentials) -> Self {
+        self.creds = Some(creds);
+        self
+    }
+    pub fn with_limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+}
+
 /// Abstract container backend. The default implementation is Docker
 /// (via bollard) in `ruscker-docker`. Future backends could include
 /// Kubernetes, Docker Swarm, or a multi-host scheduler.
@@ -110,6 +191,31 @@ pub trait ContainerBackend: Send + Sync {
         _creds: Option<&RegistryCredentials>,
     ) -> CoreResult<Replica> {
         self.spawn_with_port(spec_id, image, inner_port).await
+    }
+
+    /// Start a container from a fully-described [`SpawnRequest`]:
+    /// port, credentials, resource limits. **This is the
+    /// preferred entry point** — the older `spawn*` methods are
+    /// thin wrappers retained for back-compat with mock
+    /// backends and the test suite.
+    ///
+    /// Default impl ignores `limits` and falls back to
+    /// `spawn_with_port_and_creds` (or further fallbacks) so a
+    /// backend that doesn't override this still works for
+    /// public unlimited pulls.
+    async fn spawn_request(&self, req: &SpawnRequest) -> CoreResult<Replica> {
+        match req.inner_port {
+            Some(port) => {
+                self.spawn_with_port_and_creds(
+                    &req.spec_id,
+                    &req.image,
+                    port,
+                    req.creds.as_ref(),
+                )
+                .await
+            }
+            None => self.spawn(&req.spec_id, &req.image).await,
+        }
     }
 
     /// Gracefully stop a replica. The implementation should:

@@ -296,6 +296,34 @@ pub struct Spec {
     #[serde(rename = "docker-registry-domain")]
     pub docker_registry_domain: Option<String>,
 
+    // -- Container resource limits (ShinyProxy-compatible) --
+    /// CPU hard limit, expressed as a fraction of a single core.
+    /// `0.5` = half a core, `2.0` = two cores. Maps to Docker's
+    /// `--cpus`. Backend translates to `cpu_period` + `cpu_quota`.
+    #[serde(rename = "container-cpu-limit")]
+    pub container_cpu_limit: Option<f64>,
+
+    /// CPU soft request. ShinyProxy accepts this but Docker has
+    /// no first-class "request" concept; for the local backend
+    /// it's accepted-and-ignored. Captured so K8s/Swarm backends
+    /// can honor it later without a schema change.
+    #[serde(rename = "container-cpu-request")]
+    pub container_cpu_request: Option<f64>,
+
+    /// Memory hard limit. Accepts plain bytes ("536870912") or
+    /// a suffix-tagged string ("512m", "1g", "1500M"). Suffixes
+    /// follow the Docker convention: `b`/none = bytes, `k`/`K` =
+    /// 1024, `m`/`M` = 1024², `g`/`G` = 1024³. Parsed lazily by
+    /// [`Spec::effective_memory_limit_bytes`].
+    #[serde(rename = "container-memory-limit")]
+    pub container_memory_limit: Option<String>,
+
+    /// Memory soft request. Same format as the limit. Maps to
+    /// Docker `memory_reservation` on the local backend; ignored
+    /// elsewhere.
+    #[serde(rename = "container-memory-request")]
+    pub container_memory_request: Option<String>,
+
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
     #[serde(rename = "template-properties", default)]
@@ -473,6 +501,107 @@ impl Spec {
             SpecKind::Shiny | SpecKind::InteractiveApp
         )
     }
+
+    /// Parsed memory hard limit in bytes, or `None` if the spec
+    /// didn't set one. A malformed value (e.g. `"500frogs"`)
+    /// also yields `None` — the validator catches that at
+    /// load time; downstream callers can safely treat parse
+    /// failure as "no limit".
+    pub fn effective_memory_limit_bytes(&self) -> Option<i64> {
+        self.container_memory_limit
+            .as_deref()
+            .and_then(parse_memory_string)
+    }
+
+    /// Parsed memory soft request in bytes (Docker's
+    /// `memory_reservation`), or `None`.
+    pub fn effective_memory_request_bytes(&self) -> Option<i64> {
+        self.container_memory_request
+            .as_deref()
+            .and_then(parse_memory_string)
+    }
+}
+
+/// Parse Docker-style memory strings: `"512"` (bytes), `"512m"`,
+/// `"1g"`, `"1.5G"`. Suffix is single-letter ASCII, case-
+/// insensitive: `b` = bytes, `k` = KiB (1024), `m` = MiB,
+/// `g` = GiB. Returns `None` on any parse failure or negative
+/// result.
+///
+/// We deliberately use binary (1024-based) units to match the
+/// ShinyProxy / Docker convention. Operators who type `512m`
+/// expect ~512 MiB, not ~512 MB.
+fn parse_memory_string(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let last = s.chars().last()?;
+    let (num_part, multiplier) = match last.to_ascii_lowercase() {
+        'b' => (&s[..s.len() - 1], 1_i64),
+        'k' => (&s[..s.len() - 1], 1024_i64),
+        'm' => (&s[..s.len() - 1], 1024_i64 * 1024),
+        'g' => (&s[..s.len() - 1], 1024_i64 * 1024 * 1024),
+        'a'..='z' => return None, // unknown suffix
+        _ => (s, 1_i64),           // plain bytes, no suffix
+    };
+    let n: f64 = num_part.trim().parse().ok()?;
+    if !n.is_finite() || n < 0.0 {
+        return None;
+    }
+    // Multiply in f64 then cast — handles "1.5g" cleanly.
+    let bytes = (n * multiplier as f64) as i64;
+    Some(bytes).filter(|&b| b >= 0)
+}
+
+#[cfg(test)]
+mod parse_memory_tests {
+    use super::parse_memory_string;
+
+    #[test]
+    fn plain_bytes() {
+        assert_eq!(parse_memory_string("1024"), Some(1024));
+        assert_eq!(parse_memory_string("0"), Some(0));
+    }
+
+    #[test]
+    fn kilo_mega_giga_binary() {
+        assert_eq!(parse_memory_string("1k"), Some(1024));
+        assert_eq!(parse_memory_string("1m"), Some(1024 * 1024));
+        assert_eq!(parse_memory_string("1g"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_memory_string("512m"), Some(512 * 1024 * 1024));
+    }
+
+    #[test]
+    fn case_insensitive_suffix() {
+        assert_eq!(parse_memory_string("1G"), Some(1024 * 1024 * 1024));
+        assert_eq!(parse_memory_string("256M"), Some(256 * 1024 * 1024));
+    }
+
+    #[test]
+    fn fractional_values() {
+        assert_eq!(parse_memory_string("1.5g"), Some(1610612736)); // 1.5 * 1024^3
+        assert_eq!(parse_memory_string("0.5m"), Some(524288));
+    }
+
+    #[test]
+    fn explicit_byte_suffix() {
+        assert_eq!(parse_memory_string("100b"), Some(100));
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert_eq!(parse_memory_string(""), None);
+        assert_eq!(parse_memory_string("abc"), None);
+        assert_eq!(parse_memory_string("500frogs"), None);
+        assert_eq!(parse_memory_string("-1g"), None);
+        assert_eq!(parse_memory_string("1.5x"), None); // unknown suffix
+    }
+
+    #[test]
+    fn whitespace_tolerated() {
+        assert_eq!(parse_memory_string("  512m  "), Some(512 * 1024 * 1024));
+    }
 }
 
 /// Configuration block for `type: api` specs (Plumber, FastAPI, etc.).
@@ -561,6 +690,10 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            container_cpu_limit: None,
+            container_cpu_request: None,
+            container_memory_limit: None,
+            container_memory_request: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -592,6 +725,10 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            container_cpu_limit: None,
+            container_cpu_request: None,
+            container_memory_limit: None,
+            container_memory_request: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -623,6 +760,10 @@ proxy:
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
+            container_cpu_limit: None,
+            container_cpu_request: None,
+            container_memory_limit: None,
+            container_memory_request: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,

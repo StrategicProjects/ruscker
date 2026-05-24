@@ -139,15 +139,18 @@ async fn login_submit(
     c.set_max_age(Duration::hours(24));
     cookies.add(c);
 
-    // Redirect to the page the operator was trying to reach. The
-    // login form preserves the destination in a `?next=` param —
-    // not implemented yet, so default to /admin/dashboard.
-    let target = headers
-        .get(REFERER)
-        .and_then(|v| v.to_str().ok())
-        .filter(|r| r.contains("/admin/") && !r.contains("/admin/login"))
-        .unwrap_or("/admin/dashboard");
-    Redirect::to(target).into_response()
+    // Redirect to the page the operator was trying to reach,
+    // reduced to a same-origin path (no open redirect). Only
+    // honor admin paths; anything else (or the login page
+    // itself) falls back to the dashboard.
+    let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
+    let path = super::same_origin_path(referer, "/admin/dashboard");
+    let target = if path.starts_with("/admin/") && !path.starts_with("/admin/login") {
+        path
+    } else {
+        "/admin/dashboard".to_string()
+    };
+    Redirect::to(&target).into_response()
 }
 
 async fn logout(_: MaybeAdminSession, cookies: Cookies) -> Redirect {

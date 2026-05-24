@@ -131,3 +131,43 @@ async fn assets_styles_css_served_with_cache_headers() {
     assert!(cache.contains("must-revalidate"));
     assert!(!cache.contains("immutable"));
 }
+
+#[tokio::test]
+async fn landing_carries_security_headers() {
+    let app = router(app_state());
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let h = response.headers();
+    assert_eq!(h.get("x-content-type-options").unwrap(), "nosniff");
+    assert_eq!(h.get("x-frame-options").unwrap(), "DENY");
+    assert_eq!(h.get("referrer-policy").unwrap(), "same-origin");
+    let csp = h.get("content-security-policy").unwrap().to_str().unwrap();
+    assert!(csp.contains("default-src 'self'"));
+    assert!(csp.contains("frame-ancestors 'none'"));
+}
+
+#[tokio::test]
+async fn set_locale_redirect_is_same_origin_only() {
+    // An attacker-controlled Referer pointing off-origin must not
+    // become an open redirect — we keep only the path.
+    let app = router(app_state());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/__set/locale")
+                .header(header::REFERER, "https://evil.example.com/phish")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("locale=en"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let location = response.headers().get(header::LOCATION).unwrap().to_str().unwrap();
+    // Path preserved, host dropped → stays on our origin.
+    assert_eq!(location, "/phish");
+    assert!(!location.contains("evil.example.com"));
+}

@@ -26,7 +26,7 @@ type-link-abbr = LNK
 # Admin shell
 admin-nav-dashboard = Dashboard
 admin-nav-apps = Apps
-admin-nav-images = Images
+admin-nav-images = Media
 admin-nav-credentials = Credentials
 admin-nav-landing = Portal
 admin-nav-audit = Audit log
@@ -134,7 +134,7 @@ spec-form-error-id-duplicate = An app with that ID already exists.
 spec-form-error-name-required = Display name is required.
 
 # Admin image library
-admin-images-title = Image library
+admin-images-title = Media library
 admin-images-subtitle = PNG, JPEG and WebP are converted to WebP. SVG passes through.
 admin-images-drop-here = Click to pick a file
 admin-images-formats = PNG · JPEG · WebP · SVG · up to 10 MB

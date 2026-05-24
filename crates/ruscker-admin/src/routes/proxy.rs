@@ -138,6 +138,11 @@ async fn forward(
     upstream_path: String,
     req: Request,
 ) -> Response {
+    // Capture the request scheme before `req` is consumed by the
+    // forward — used to decide the `Secure` flag on the sticky
+    // cookie we may set at the end.
+    let is_https = crate::auth::request_is_https(req.headers());
+
     // 1. Find the spec.
     let Some(spec) = find_spec(&state.config, &spec_id) else {
         return (StatusCode::NOT_FOUND, format!("spec `{spec_id}` not found")).into_response();
@@ -251,7 +256,7 @@ async fn forward(
             spec_id: spec.id.clone(),
             replica_id: replica.id.clone(),
         };
-        set_sticky_cookie(&cookies, &state.cookie_key, &session);
+        set_sticky_cookie(&cookies, &state.cookie_key, &session, is_https);
     }
 
     resp
@@ -299,7 +304,12 @@ async fn resolve_replica(
 /// — keeps the session_id consistent with what we tracked in the
 /// `SessionTracker` rather than minting a fresh, untracked id
 /// inside the cookie helper.
-fn set_sticky_cookie(cookies: &Cookies, key: &CookieKey, session: &StickySession) {
+fn set_sticky_cookie(
+    cookies: &Cookies,
+    key: &CookieKey,
+    session: &StickySession,
+    is_https: bool,
+) {
     let value = match sticky::encode(key, session) {
         Ok(v) => v,
         Err(err) => {
@@ -311,6 +321,10 @@ fn set_sticky_cookie(cookies: &Cookies, key: &CookieKey, session: &StickySession
     c.set_path("/");
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Lax);
+    // `Secure` only under TLS (X-Forwarded-Proto: https) — the
+    // plain-HTTP dev server would otherwise see the browser drop
+    // the cookie.
+    c.set_secure(is_https);
     // 8h matches a typical workday — long enough that returning
     // visitors don't lose state mid-session, short enough that a
     // forgotten browser tab doesn't pin a container forever.
@@ -685,6 +699,7 @@ mod tests {
                 crate::i18n::Locales::load().expect("load locales"),
             ),
             admin_auth: Default::default(),
+            login_limiter: StdArc::new(crate::auth::LoginRateLimiter::default_policy()),
             db: None,
             images_dir: None,
             master_key: Default::default(),

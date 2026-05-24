@@ -34,6 +34,8 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "fs", "cors"] }
 tower-cookies = "0.11"
 hyper = "1.9"
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
 
 # Serialization
 serde = { version = "1.0.228", features = ["derive"] }

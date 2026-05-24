@@ -150,6 +150,31 @@ async fn landing_carries_security_headers() {
 }
 
 #[tokio::test]
+async fn assets_img_rejects_path_traversal() {
+    // The `/assets/img/{filename}` guard must reject decoded
+    // slash / parent-dir tricks before any FS read. Axum decodes
+    // `%2F` into `/`, which the `.contains('/')` check catches;
+    // route-mismatch yields 404. Never a 200 / file read.
+    for evil in [
+        "/assets/img/..%2f..%2fetc%2fpasswd",
+        "/assets/img/%2e%2e%2f%2e%2e%2fsecret",
+        "/assets/img/..%5c..%5cwindows",
+    ] {
+        let app = router(app_state());
+        let response = app
+            .oneshot(Request::builder().uri(evil).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            response.status() == StatusCode::BAD_REQUEST
+                || response.status() == StatusCode::NOT_FOUND,
+            "traversal `{evil}` should be rejected, got {}",
+            response.status()
+        );
+    }
+}
+
+#[tokio::test]
 async fn set_locale_redirect_is_same_origin_only() {
     // An attacker-controlled Referer pointing off-origin must not
     // become an open redirect — we keep only the path.

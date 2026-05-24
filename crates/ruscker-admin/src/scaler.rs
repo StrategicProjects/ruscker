@@ -1,29 +1,28 @@
 //! Periodic auto-scaler.
 //!
-//! Walks every spec on each tick and ensures the running replica
-//! count is at least `effective_min_replicas`. Spawns are funneled
-//! through the same per-spec coalescer as on-demand spawns, so a
-//! cold-start request that arrives at the same time as a scaler
-//! tick never races into a duplicate container.
+//! Walks every spec on each tick and reconciles its replica
+//! count toward `[min, max]`. Three reasons to act:
 //!
-//! ## What this is NOT (yet)
+//! 1. **Below min** — bring count up to `effective_min_replicas`.
+//! 2. **All replicas saturated, count < max** — spawn one extra.
+//! 3. **Idle replicas above min** — stop them, but only after
+//!    they've been observed idle for [`DEFAULT_IDLE_GRACE_TICKS`]
+//!    consecutive ticks. The hysteresis breaks the
+//!    spawn→drop→spawn flap that otherwise happens when one
+//!    long-lived sticky session saturates a single-seat replica:
+//!    saturation spawns replica B, B starts idle, an aggressive
+//!    drop sends it away, A is still saturated, scale-up spawns
+//!    B again, ad infinitum.
 //!
-//! - **Saturation-based scale-up.** Needs per-replica session
-//!   tracking that doesn't exist yet — `sessions_active` stays
-//!   at 0 on every replica, so `available_seats()` always says
-//!   "infinite capacity". Once the proxy increments/decrements
-//!   `sessions_active` on connect/disconnect, this loop grows a
-//!   "scale up when all-saturated && count < max" branch.
-//! - **Scale-down on idle.** Same reason — without tracking, every
-//!   replica looks idle and we'd thrash. Comes with heartbeats.
-//!
-//! The minimum-replicas loop is useful on its own: it guarantees
-//! that an operator who sets `min-replicas: 3` actually sees 3
-//! warm containers instead of waiting for traffic to populate
-//! them one at a time.
+//! Spawns are funneled through the same per-spec coalescer as
+//! on-demand spawns, so a cold-start request that arrives at
+//! the same time as a scaler tick never races into a duplicate
+//! container.
 
 use crate::AppState;
 use ruscker_config::{Spec, SpecKind};
+use ruscker_core::ReplicaId;
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 use tracing::{info, warn};
@@ -32,21 +31,40 @@ use tracing::{info, warn};
 /// deployment later once we add a config knob.
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 
+/// Default number of consecutive idle ticks a replica must be
+/// observed before scale-down stops it. With the default 10s
+/// interval that's ~30s of sustained idleness — long enough to
+/// dampen the spawn↔drop flap, short enough that an operator
+/// won't be wondering where their idle container went.
+///
+/// Setting this to 1 (used in unit tests) restores the
+/// "drop on first observation" behavior.
+pub const DEFAULT_IDLE_GRACE_TICKS: u32 = 3;
+
 /// Spawn the scaler loop as a detached tokio task. The returned
 /// handle is dropped at shutdown — there's no graceful stop
 /// because the loop only does idempotent work; an abrupt drop
 /// leaves the registry consistent.
 pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
     tokio::spawn(async move {
-        info!(?interval, "auto-scaler started");
+        info!(
+            ?interval,
+            idle_grace_ticks = DEFAULT_IDLE_GRACE_TICKS,
+            "auto-scaler started"
+        );
+        // Per-replica idle-tick counter, kept inside the task so
+        // no locking is needed. Replicas that go active reset
+        // their counter; replicas that disappear from the
+        // registry get GC'd from the map each tick.
+        let mut idle_ticks: HashMap<ReplicaId, u32> = HashMap::new();
+        let mut ticker = tokio::time::interval(interval);
         // `MissedTickBehavior::Skip` so a long pull doesn't leave
         // a backlog of ticks queued — we just resume on the next
         // boundary.
-        let mut ticker = tokio::time::interval(interval);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            tick(&state).await;
+            tick(&state, &mut idle_ticks, DEFAULT_IDLE_GRACE_TICKS).await;
         }
     })
 }
@@ -55,23 +73,40 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
 /// spawn or stop is reported and the loop continues with the
 /// next spec.
 ///
-/// Three reasons to act on a spec:
-/// 1. **Below min** — bring count up to `effective_min_replicas`
-///    in one tick.
-/// 2. **All replicas saturated** — spawn one additional replica
-///    (one per tick to avoid overshoot) up to
-///    `effective_max_replicas`.
-/// 3. **Idle replicas above min** — stop them.
+/// `idle_ticks` is the per-replica observed-idle counter,
+/// threaded through ticks by the caller. `drop_after_ticks` is
+/// the hysteresis threshold: a replica is only eligible for
+/// scale-down once its counter reaches this value.
 ///
 /// Scale-up and scale-down are mutually exclusive for a single
 /// spec on a single tick: a saturated spec by definition has no
 /// idle replicas, and an over-min spec with idle replicas isn't
 /// saturated.
-async fn tick(state: &AppState) {
+async fn tick(
+    state: &AppState,
+    idle_ticks: &mut HashMap<ReplicaId, u32>,
+    drop_after_ticks: u32,
+) {
     let Some(backend) = state.backend.clone() else {
         return;
     };
     let specs = state.config.proxy.specs.clone();
+
+    // Build a snapshot of every replica across every spec in one
+    // read-lock acquisition. We use it for the idle-tick
+    // accounting AND to GC counters for replicas that have left
+    // the registry (stopped, crashed, reconciled out).
+    let registry_snap: Vec<ruscker_core::Replica> = {
+        let reg = state.replicas.read().await;
+        state
+            .config
+            .proxy
+            .specs
+            .iter()
+            .flat_map(|s| reg.replicas_of(&s.id).iter().cloned().collect::<Vec<_>>())
+            .collect()
+    };
+    update_idle_ticks(idle_ticks, &registry_snap);
 
     for spec in specs {
         let kind = spec.kind();
@@ -85,12 +120,8 @@ async fn tick(state: &AppState) {
         let min = spec.effective_min_replicas() as usize;
         let max = spec.effective_max_replicas() as usize;
 
-        // Snapshot replicas with their session counts at this
-        // instant. We clone out so the read-lock releases before
-        // we take any write-lock for spawn/stop. The window
-        // between snapshot and act is small but real; the
-        // coalescer mutex makes spawn safe, and stop is
-        // idempotent at the backend so a stale stop is fine.
+        // Per-spec snapshot — small Vec; not worth threading
+        // through the registry-wide snapshot above.
         let snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
         let count = snap.len();
 
@@ -106,8 +137,6 @@ async fn tick(state: &AppState) {
                     break;
                 }
             }
-            // Done with this spec on this tick — fresh snapshot
-            // next tick.
             continue;
         }
 
@@ -122,27 +151,33 @@ async fn tick(state: &AppState) {
             continue;
         }
 
-        // --- scale-down pass ---
+        // --- scale-down pass (with hysteresis) ---
 
-        // (3) Above min with idle replicas: stop them. Cap the
-        //     drop at `count - min` to never go below min.
+        // (3) Above min with idle replicas that have been idle
+        //     for at least `drop_after_ticks` consecutive ticks:
+        //     stop them. Cap the drop at `count - min` to never
+        //     go below min.
         if count > min {
             let allowed_to_drop = count - min;
-            let idle: Vec<_> = snap
+            let drop_candidates: Vec<_> = snap
                 .iter()
-                .filter(|r| r.sessions_active == 0)
+                .filter(|r| {
+                    r.sessions_active == 0
+                        && idle_ticks.get(&r.id).copied().unwrap_or(0) >= drop_after_ticks
+                })
                 .take(allowed_to_drop)
                 .cloned()
                 .collect();
-            if !idle.is_empty() {
+            if !drop_candidates.is_empty() {
                 info!(
                     spec = %spec.id,
                     count,
                     min,
-                    dropping = idle.len(),
-                    "idle replicas — scaling down"
+                    dropping = drop_candidates.len(),
+                    grace_ticks = drop_after_ticks,
+                    "idle replicas past grace — scaling down"
                 );
-                for r in idle {
+                for r in drop_candidates {
                     if let Err(e) = stop_one(state, &r.id, backend.as_ref()).await {
                         warn!(
                             spec = %spec.id,
@@ -151,8 +186,33 @@ async fn tick(state: &AppState) {
                             "scale-down stop failed"
                         );
                     }
+                    // Removed from registry → forget its counter
+                    // so it can't haunt us if the same id
+                    // somehow returns (it can't — uuids — but
+                    // belt-and-braces).
+                    idle_ticks.remove(&r.id);
                 }
             }
+        }
+    }
+}
+
+/// Bump or reset each replica's idle-tick counter based on
+/// current `sessions_active`, then GC entries for replicas no
+/// longer in the registry. Pure function over the snapshot —
+/// no I/O, no locks, easy to test.
+fn update_idle_ticks(
+    idle_ticks: &mut HashMap<ReplicaId, u32>,
+    registry_snap: &[ruscker_core::Replica],
+) {
+    use std::collections::HashSet;
+    let alive: HashSet<&ReplicaId> = registry_snap.iter().map(|r| &r.id).collect();
+    idle_ticks.retain(|id, _| alive.contains(id));
+    for r in registry_snap {
+        if r.sessions_active == 0 {
+            *idle_ticks.entry(r.id.clone()).or_insert(0) += 1;
+        } else {
+            idle_ticks.remove(&r.id);
         }
     }
 }
@@ -330,7 +390,7 @@ proxy:
             backend.clone(),
         );
 
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 3, "spawned to min");
         assert_eq!(
             state.replicas.read().await.replicas_of("warmpool").len(),
@@ -338,7 +398,7 @@ proxy:
         );
 
         // Second tick: already at min, no more spawns.
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 3, "no extra spawns");
     }
 
@@ -359,7 +419,7 @@ proxy:
 "#,
             backend.clone(),
         );
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -380,7 +440,7 @@ proxy:
 "#,
             backend.clone(),
         );
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -421,7 +481,7 @@ proxy:
             reg.add(pre2);
         }
 
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             0,
@@ -469,7 +529,7 @@ proxy:
             .await
             .add(replica_with_sessions("hot", 1, 1));
 
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             1,
@@ -503,7 +563,7 @@ proxy:
             reg.add(r1);
             reg.add(r2);
         }
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
     }
 
@@ -529,7 +589,7 @@ proxy:
             .write()
             .await
             .add(replica_with_sessions("gradual", 1, 1));
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             1,
@@ -565,7 +625,7 @@ proxy:
             reg.add(idle1);
             reg.add(idle2);
         }
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         let remaining = state.replicas.read().await.replicas_of("shrink").to_vec();
         assert_eq!(remaining.len(), 1, "two idle stopped, busy stays");
         assert_eq!(remaining[0].sessions_active, 1);
@@ -594,7 +654,7 @@ proxy:
             reg.add(replica_with_sessions("floor", 0, 5));
             reg.add(replica_with_sessions("floor", 0, 5));
         }
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(
             state.replicas.read().await.replicas_of("floor").len(),
             2,
@@ -626,7 +686,7 @@ proxy:
             reg.add(replica_with_sessions("half", 1, 5));
             reg.add(replica_with_sessions("half", 1, 5));
         }
-        tick(&state).await;
+        tick(&state, &mut HashMap::new(), 1).await;
         assert_eq!(state.replicas.read().await.replicas_of("half").len(), 2);
     }
 
@@ -642,5 +702,157 @@ proxy:
             replica_with_sessions("a", 5, 5),
             replica_with_sessions("a", 3, 3),
         ]));
+    }
+
+    // -------------------------------------------------------------
+    // Hysteresis tests — drop only after N consecutive idle ticks
+    // -------------------------------------------------------------
+
+    #[test]
+    fn update_idle_ticks_increments_for_idle_resets_for_active() {
+        let mut counts: HashMap<ReplicaId, u32> = HashMap::new();
+        let idle = replica_with_sessions("x", 0, 1);
+        let busy = replica_with_sessions("x", 1, 1);
+        let snap = vec![idle.clone(), busy.clone()];
+
+        update_idle_ticks(&mut counts, &snap);
+        assert_eq!(counts.get(&idle.id), Some(&1));
+        assert!(counts.get(&busy.id).is_none(), "active replicas have no entry");
+
+        update_idle_ticks(&mut counts, &snap);
+        assert_eq!(counts.get(&idle.id), Some(&2));
+
+        // Idle replica goes active → counter resets (removed).
+        let now_active = ruscker_core::Replica {
+            sessions_active: 1,
+            ..idle.clone()
+        };
+        update_idle_ticks(&mut counts, &[now_active]);
+        assert!(counts.get(&idle.id).is_none(), "active replicas drop the counter");
+    }
+
+    #[test]
+    fn update_idle_ticks_gcs_disappeared_replicas() {
+        let mut counts: HashMap<ReplicaId, u32> = HashMap::new();
+        let gone = replica_with_sessions("x", 0, 1);
+        counts.insert(gone.id.clone(), 42);
+        // The new snapshot doesn't include `gone` → it must be
+        // garbage-collected so we don't leak counters.
+        update_idle_ticks(&mut counts, &[]);
+        assert!(counts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn tick_holds_idle_replica_through_grace_then_drops() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: graceful
+    display-name: Graceful
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 5
+"#,
+            backend.clone(),
+        );
+        // Two replicas: one busy, one idle. min=1 so dropping the
+        // idle one is allowed, but only after 3 consecutive idle
+        // ticks under the chosen threshold.
+        let busy = replica_with_sessions("graceful", 1, 1);
+        let idle = replica_with_sessions("graceful", 0, 1);
+        let idle_id = idle.id.clone();
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(busy);
+            reg.add(idle);
+        }
+        let mut counts: HashMap<ReplicaId, u32> = HashMap::new();
+        let threshold = 3;
+
+        // Tick 1 + 2: idle counter is 1, then 2 — both under
+        // threshold, replica stays.
+        tick(&state, &mut counts, threshold).await;
+        assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 2);
+        assert_eq!(counts.get(&idle_id), Some(&1));
+
+        tick(&state, &mut counts, threshold).await;
+        assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 2);
+        assert_eq!(counts.get(&idle_id), Some(&2));
+
+        // Tick 3: counter reaches 3 = threshold → drop.
+        tick(&state, &mut counts, threshold).await;
+        assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 1);
+        assert!(counts.get(&idle_id).is_none(), "dropped replica's counter GC'd");
+    }
+
+    #[tokio::test]
+    async fn tick_resets_grace_counter_when_replica_becomes_active() {
+        // The flap-prevention scenario in miniature: an idle
+        // replica builds up grace, then a request lands on it
+        // and resets it. The replica must NOT be dropped on the
+        // tick where the reset happens or the one right after.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        // max=2 so saturation scale-up can't fire and confound
+        // the grace-reset assertion — this test is about the
+        // counter behavior, not about scale-up.
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: bouncy
+    display-name: Bouncy
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 2
+"#,
+            backend.clone(),
+        );
+        let busy = replica_with_sessions("bouncy", 1, 1);
+        let idle = replica_with_sessions("bouncy", 0, 1);
+        let idle_id = idle.id.clone();
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(busy);
+            reg.add(idle);
+        }
+        let mut counts: HashMap<ReplicaId, u32> = HashMap::new();
+        let threshold = 3;
+
+        // Two idle ticks accumulate grace=2.
+        tick(&state, &mut counts, threshold).await;
+        tick(&state, &mut counts, threshold).await;
+        assert_eq!(counts.get(&idle_id), Some(&2));
+
+        // Replica gets a session — reset to active.
+        {
+            let mut reg = state.replicas.write().await;
+            reg.inc_sessions(&idle_id);
+        }
+        tick(&state, &mut counts, threshold).await;
+        assert!(counts.get(&idle_id).is_none(), "active replica's grace resets");
+        assert_eq!(
+            state.replicas.read().await.replicas_of("bouncy").len(),
+            2,
+            "active replica must not be dropped"
+        );
+
+        // Replica goes idle again — grace starts from 1, not 3.
+        {
+            let mut reg = state.replicas.write().await;
+            reg.dec_sessions(&idle_id);
+        }
+        tick(&state, &mut counts, threshold).await;
+        assert_eq!(
+            counts.get(&idle_id),
+            Some(&1),
+            "grace counter starts fresh after activity"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("bouncy").len(), 2);
     }
 }

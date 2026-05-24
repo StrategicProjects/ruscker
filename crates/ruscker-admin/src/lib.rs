@@ -29,6 +29,7 @@ pub mod db;
 pub mod i18n;
 pub mod images;
 pub mod routes;
+pub mod scaler;
 pub mod theme;
 pub mod view_model;
 
@@ -191,6 +192,15 @@ impl AdminServer {
                     tracing::warn!(error = ?err, "backend.list() failed at startup; starting with empty registry");
                 }
             }
+        }
+
+        // Start the auto-scaler. With no backend wired the task is
+        // still spawned but its loop short-circuits on every tick,
+        // so this is safe in landing-only mode. The JoinHandle is
+        // deliberately dropped — there's no graceful shutdown
+        // protocol for the scaler because every tick is idempotent.
+        if self.state.backend.is_some() {
+            let _ = scaler::spawn(self.state.clone(), scaler::DEFAULT_INTERVAL);
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

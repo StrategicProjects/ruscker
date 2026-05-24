@@ -67,6 +67,18 @@ pub struct AppState {
     /// HMAC key used to sign sticky-session cookies. Auto-
     /// generated per-process unless `RUSCKER_COOKIE_KEY` is set.
     pub cookie_key: ruscker_proxy::sticky::CookieKey,
+
+    /// Per-spec coalescer for first-request spawns. The fast path
+    /// in `pick_or_spawn` only touches the read lock on
+    /// `replicas`; on miss it acquires this spec's mutex, double-
+    /// checks, and (if still empty) does the spawn. Concurrent
+    /// first-requests for **different** specs go in parallel
+    /// because the mutex is per-key. Concurrent first-requests
+    /// for the **same** spec wait for one spawn instead of
+    /// racing.
+    pub spawn_locks: std::sync::Arc<
+        dashmap::DashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>,
+    >,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -102,6 +114,7 @@ impl AdminServer {
             )),
             cookie_key: ruscker_proxy::sticky::CookieKey::from_env_or_random()
                 .context("load sticky cookie key")?,
+            spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
         };
         Ok(Self {
             addr,
@@ -159,6 +172,27 @@ impl AdminServer {
 
     /// Start listening. Blocks until the process is shut down.
     pub async fn run(self) -> Result<()> {
+        // Reconcile the in-memory replica registry with whatever
+        // the backend reports as already running. This lets
+        // Ruscker survive its own restart without losing track
+        // of containers spawned in a prior incarnation — the
+        // `ruscker.replica_id` label on each container is the
+        // durable identifier.
+        if let Some(backend) = self.state.backend.as_ref() {
+            match backend.list().await {
+                Ok(existing) => {
+                    let n = existing.len();
+                    self.state.replicas.write().await.reset(existing);
+                    if n > 0 {
+                        info!(replicas = n, "reconciled existing replicas from backend");
+                    }
+                }
+                Err(err) => {
+                    tracing::warn!(error = ?err, "backend.list() failed at startup; starting with empty registry");
+                }
+            }
+        }
+
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());
         let listener = TcpListener::bind(self.addr)
             .await

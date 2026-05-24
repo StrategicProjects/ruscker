@@ -161,4 +161,82 @@ impl ReplicaRegistry {
     pub fn total(&self) -> usize {
         self.by_spec.values().map(Vec::len).sum()
     }
+
+    /// Increment the active-session counter on a replica. Called
+    /// by the session tracker when a new visitor lands. Silently
+    /// no-ops if the replica is gone (race with stop/remove).
+    pub fn inc_sessions(&mut self, replica_id: &ReplicaId) {
+        if let Some(r) = self.find_mut(replica_id) {
+            r.sessions_active = r.sessions_active.saturating_add(1);
+        }
+    }
+
+    /// Decrement the active-session counter on a replica. Used
+    /// by the sweeper on idle-expiry. Saturating-subtraction so
+    /// a stray double-dec can't underflow.
+    pub fn dec_sessions(&mut self, replica_id: &ReplicaId) {
+        if let Some(r) = self.find_mut(replica_id) {
+            r.sessions_active = r.sessions_active.saturating_sub(1);
+        }
+    }
+
+    fn find_mut(&mut self, replica_id: &ReplicaId) -> Option<&mut Replica> {
+        for replicas in self.by_spec.values_mut() {
+            if let Some(r) = replicas.iter_mut().find(|r| r.id == *replica_id) {
+                return Some(r);
+            }
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod registry_tests {
+    use super::*;
+    use crate::replica::ReplicaState;
+    use std::net::SocketAddr;
+
+    fn fake_replica(spec: &str) -> Replica {
+        Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: spec.to_string(),
+            container_id: "x".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 5,
+        }
+    }
+
+    #[test]
+    fn inc_and_dec_round_trip() {
+        let mut reg = ReplicaRegistry::new();
+        let r = fake_replica("x");
+        let id = r.id.clone();
+        reg.add(r);
+        reg.inc_sessions(&id);
+        reg.inc_sessions(&id);
+        assert_eq!(reg.replicas_of("x")[0].sessions_active, 2);
+        reg.dec_sessions(&id);
+        assert_eq!(reg.replicas_of("x")[0].sessions_active, 1);
+    }
+
+    #[test]
+    fn dec_saturates_at_zero() {
+        let mut reg = ReplicaRegistry::new();
+        let r = fake_replica("x");
+        let id = r.id.clone();
+        reg.add(r);
+        reg.dec_sessions(&id); // already zero, must not underflow
+        reg.dec_sessions(&id);
+        assert_eq!(reg.replicas_of("x")[0].sessions_active, 0);
+    }
+
+    #[test]
+    fn inc_on_unknown_id_is_noop() {
+        let mut reg = ReplicaRegistry::new();
+        let unknown = ReplicaId(uuid::Uuid::new_v4());
+        reg.inc_sessions(&unknown); // must not panic
+    }
 }

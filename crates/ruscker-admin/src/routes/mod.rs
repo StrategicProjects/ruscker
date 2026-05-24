@@ -2,6 +2,7 @@
 
 pub mod admin;
 pub mod assets;
+pub mod health;
 pub mod landing;
 pub mod prefs;
 pub mod proxy;

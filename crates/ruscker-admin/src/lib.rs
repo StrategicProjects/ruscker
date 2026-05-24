@@ -298,7 +298,13 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::admin::routes())
         .layer(axum::middleware::from_fn(security_headers));
 
+    // Health probes (`/healthz`, `/readyz`) sit outside the
+    // `security_headers` layer: they return JSON for orchestrators,
+    // not HTML for browsers, so CSP / X-Frame-Options are
+    // irrelevant. Like the proxy routes, they're merged at the
+    // outer level.
     own.merge(routes::proxy::routes())
+        .merge(routes::health::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

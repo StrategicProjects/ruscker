@@ -59,10 +59,25 @@ pub type CoreResult<T> = Result<T, CoreError>;
 /// doesn't yet have native async fn in traits in all positions.
 #[async_trait]
 pub trait ContainerBackend: Send + Sync {
-    /// Start a new container instance for the given spec. Returns a
-    /// [`Replica`] handle once the container is ready (healthy + bound
-    /// to a port).
+    /// Start a new container instance for the given spec, with a
+    /// best-guess inner port. Implementations default to 3838
+    /// (Shiny Server). Callers that know the spec's inner port
+    /// (e.g. an API with `api.port`) should prefer
+    /// [`Self::spawn_with_port`].
     async fn spawn(&self, spec_id: &str, image: &str) -> CoreResult<Replica>;
+
+    /// Start a container with an explicit inner port. Default impl
+    /// falls back to `spawn` — backends without per-port support
+    /// (none today) won't break, but Phase 3 features like API
+    /// routing depend on the override.
+    async fn spawn_with_port(
+        &self,
+        spec_id: &str,
+        image: &str,
+        _inner_port: u16,
+    ) -> CoreResult<Replica> {
+        self.spawn(spec_id, image).await
+    }
 
     /// Gracefully stop a replica. The implementation should:
     /// 1. Mark it as draining (stop accepting new sessions)
@@ -103,5 +118,47 @@ impl ReplicaRegistry {
             .get(spec_id)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Insert a freshly-spawned replica into the pool for its
+    /// spec. Used by the proxy on every successful
+    /// `ContainerBackend::spawn`.
+    pub fn add(&mut self, replica: Replica) {
+        self.by_spec
+            .entry(replica.spec_id.clone())
+            .or_default()
+            .push(replica);
+    }
+
+    /// Remove a replica by id. Returns the removed value if found.
+    /// Used by stop() and by reconciliation against
+    /// `ContainerBackend::list()` on startup.
+    pub fn remove(&mut self, replica_id: &ReplicaId) -> Option<Replica> {
+        for replicas in self.by_spec.values_mut() {
+            if let Some(pos) = replicas.iter().position(|r| r.id == *replica_id) {
+                return Some(replicas.remove(pos));
+            }
+        }
+        None
+    }
+
+    /// Replace the registry contents with `replicas`, grouped by
+    /// spec id. Used at startup to reconcile with whatever the
+    /// container backend reports as already running.
+    pub fn reset(&mut self, replicas: Vec<Replica>) {
+        self.by_spec.clear();
+        for r in replicas {
+            self.add(r);
+        }
+    }
+
+    /// Count of distinct specs with at least one replica.
+    pub fn spec_count(&self) -> usize {
+        self.by_spec.len()
+    }
+
+    /// Total replicas across all specs.
+    pub fn total(&self) -> usize {
+        self.by_spec.values().map(Vec::len).sum()
     }
 }

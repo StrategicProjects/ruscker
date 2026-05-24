@@ -9,6 +9,7 @@ description = "Admin panel and public landing for Ruscker (Askama + HTMX + Tailw
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
 ruscker-core = { path = "../ruscker-core" }
+ruscker-proxy = { path = "../ruscker-proxy" }
 
 # Web stack
 axum = { workspace = true }
@@ -17,6 +18,9 @@ tower = { workspace = true }
 tower-http = { workspace = true }
 tower-cookies = { workspace = true }
 hyper = { workspace = true }
+hyper-util = { workspace = true }
+http-body-util = { workspace = true }
+futures-util = { workspace = true }
 
 # Async
 tokio = { workspace = true }

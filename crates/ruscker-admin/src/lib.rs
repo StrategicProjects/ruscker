@@ -52,6 +52,17 @@ pub struct AppState {
     /// `/admin/credentials` route 503s with a hint to set
     /// `RUSCKER_MASTER_KEY`.
     pub master_key: crypto::MasterKey,
+
+    /// Container backend used by the proxy to spawn/list/stop
+    /// replicas. `None` ⇒ proxy routes (`/app/*`, `/api/*`) return
+    /// 503 with a hint that no backend is wired (Phase 1/2 mode,
+    /// landing-only).
+    pub backend: Option<std::sync::Arc<dyn ruscker_core::ContainerBackend>>,
+
+    /// Live registry of running replicas, keyed by spec id.
+    /// Shared across handlers via an RwLock; writes happen only
+    /// on spawn / stop, reads happen per-request to pick a replica.
+    pub replicas: std::sync::Arc<tokio::sync::RwLock<ruscker_core::ReplicaRegistry>>,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -81,6 +92,10 @@ impl AdminServer {
             db: None,
             images_dir: None,
             master_key: crypto::MasterKey::from_env().context("load master key")?,
+            backend: None,
+            replicas: std::sync::Arc::new(tokio::sync::RwLock::new(
+                ruscker_core::ReplicaRegistry::new(),
+            )),
         };
         Ok(Self {
             addr,
@@ -114,6 +129,17 @@ impl AdminServer {
     pub fn with_master_key(mut self, raw: impl AsRef<str>) -> Result<Self> {
         self.state.master_key = crypto::MasterKey::from_str(raw.as_ref())?;
         Ok(self)
+    }
+
+    /// Attach a container backend (e.g. `LocalDockerBackend`).
+    /// Without this, the proxy routes `/app/*` and `/api/*` reply
+    /// 503 with a hint that no backend is wired.
+    pub fn with_backend(
+        mut self,
+        backend: std::sync::Arc<dyn ruscker_core::ContainerBackend>,
+    ) -> Self {
+        self.state.backend = Some(backend);
+        self
     }
 
     /// Attach a SQLite pool. Required for the `/admin/*` routes
@@ -154,6 +180,7 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::assets::routes())
         .merge(routes::prefs::routes())
         .merge(routes::admin::routes())
+        .merge(routes::proxy::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

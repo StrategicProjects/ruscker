@@ -28,6 +28,7 @@ pub mod crypto;
 pub mod db;
 pub mod i18n;
 pub mod images;
+pub mod metrics_cache;
 pub mod routes;
 pub mod scaler;
 pub mod sessions;
@@ -89,6 +90,12 @@ pub struct AppState {
     /// `AdminServer::run`) evicts idle sessions after
     /// `proxy.heartbeat_timeout` ms.
     pub sessions: std::sync::Arc<sessions::SessionTracker>,
+
+    /// Per-replica metrics cache. Filled by a background
+    /// refresher that fans out `backend.metrics()` calls every
+    /// [`metrics_cache::REFRESH_INTERVAL`]; the dashboard reads
+    /// straight from here without ever waiting on Docker.
+    pub metrics: metrics_cache::MetricsCache,
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -126,6 +133,7 @@ impl AdminServer {
                 .context("load sticky cookie key")?,
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
             sessions: std::sync::Arc::new(sessions::SessionTracker::new()),
+            metrics: metrics_cache::MetricsCache::new(),
         };
         Ok(Self {
             addr,
@@ -227,7 +235,7 @@ impl AdminServer {
         // so this is safe in landing-only mode. The JoinHandle is
         // deliberately dropped — there's no graceful shutdown
         // protocol for the scaler because every tick is idempotent.
-        if self.state.backend.is_some() {
+        if let Some(backend) = self.state.backend.clone() {
             let _ = scaler::spawn(self.state.clone(), scaler::DEFAULT_INTERVAL);
             // Session sweeper: evicts idle sessions per the
             // global `heartbeat-timeout`. `-1` (the ShinyProxy
@@ -238,6 +246,15 @@ impl AdminServer {
                 self.state.sessions.clone(),
                 self.state.replicas.clone(),
                 self.state.config.proxy.heartbeat_timeout,
+            );
+            // Dashboard metrics: keep `state.metrics` fresh in
+            // the background so dashboard renders are read-only
+            // and never block on a Docker stats call.
+            let _ = metrics_cache::spawn(
+                self.state.metrics.clone(),
+                backend,
+                self.state.replicas.clone(),
+                metrics_cache::REFRESH_INTERVAL,
             );
         }
 

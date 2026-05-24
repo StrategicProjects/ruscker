@@ -301,6 +301,14 @@ impl ReplicaRegistry {
         self.by_spec.values().map(Vec::len).sum()
     }
 
+    /// Flat iterator over every replica regardless of spec. The
+    /// dashboard and metrics cache use this for whole-registry
+    /// walks; callers that need per-spec lookups should keep
+    /// using `replicas_of`.
+    pub fn all(&self) -> impl Iterator<Item = &Replica> {
+        self.by_spec.values().flat_map(|v| v.iter())
+    }
+
     /// Increment the active-session counter on a replica. Called
     /// by the session tracker when a new visitor lands. Silently
     /// no-ops if the replica is gone (race with stop/remove).

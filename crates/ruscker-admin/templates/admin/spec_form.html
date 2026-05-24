@@ -104,6 +104,67 @@
         <div class="spec-form-help">{{ self.t("spec-form-logo-help") }}</div>
       </div>
 
+      {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("spec-form-cover") }}</label>
+        <div class="grad-modes" role="tablist">
+          <button type="button" class="grad-mode" :class="coverMode === 'auto' ? 'is-active' : ''"
+                  @click="setCoverMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
+          <button type="button" class="grad-mode" :class="coverMode === 'solid' ? 'is-active' : ''"
+                  @click="setCoverMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+          <button type="button" class="grad-mode" :class="coverMode === 'gradient' ? 'is-active' : ''"
+                  @click="setCoverMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+        </div>
+
+        {# AUTO: nothing to configure — the kind tint is used. The
+           submitted `cover` is empty (the disabled input below). #}
+        <div class="spec-form-help" x-show="coverMode === 'auto'">{{ self.t("spec-form-cover-auto-help") }}</div>
+
+        {# SOLID #}
+        <div class="color-input" x-show="coverMode === 'solid'" x-cloak>
+          <input type="color" x-model="form.cover" :value="form.cover || '#0f6e56'">
+          <input type="text" name="cover" x-model="form.cover"
+                 :disabled="coverMode !== 'solid'"
+                 placeholder="#0f6e56"
+                 class="spec-form-input spec-form-input--mono">
+        </div>
+
+        {# GRADIENT — same builder component as the landing header. #}
+        <div class="grad-builder" x-show="coverMode === 'gradient'" x-cloak>
+          <div class="grad-row">
+            <select class="theme-select" x-model="grad.type" @change="applyCoverGrad()">
+              <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+              <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+            </select>
+            <label class="grad-angle" x-show="grad.type === 'linear'">
+              <span x-text="grad.angle + '°'"></span>
+              <input type="range" min="0" max="360" step="5"
+                     x-model.number="grad.angle" @input="applyCoverGrad()">
+            </label>
+          </div>
+          <template x-for="(stop, i) in grad.stops" :key="i">
+            <div class="grad-stop">
+              <input type="color" x-model="stop.color" @input="applyCoverGrad()">
+              <input type="number" min="0" max="100" class="grad-pos"
+                     x-model.number="stop.pos" @input="applyCoverGrad()">
+              <span class="grad-pos-unit">%</span>
+              <button type="button" class="admin-nav-link" @click="removeStop(i)"
+                      x-show="grad.stops.length > 2"
+                      title="{{ self.t("admin-grad-remove-stop") }}">
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </template>
+          <button type="button" class="admin-nav-link grad-add" @click="addStop()"
+                  x-show="grad.stops.length < 4">
+            <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+          </button>
+          <input type="text" name="cover" x-model="form.cover" readonly
+                 :disabled="coverMode !== 'gradient'"
+                 class="spec-form-input spec-form-input--mono grad-output">
+        </div>
+      </div>
+
       <div class="grid grid-cols-3 gap-3">
         <div class="spec-form-field">
           <label for="f-access" class="spec-form-label">{{ self.t("spec-form-access") }}</label>
@@ -204,7 +265,9 @@
 
       <div class="rcard" style="margin:0">
         <div class="rcover">
-          <div class="rcover-bg" :class="'tint-' + form.display_type"></div>
+          <div class="rcover-bg"
+               :class="form.cover ? '' : 'tint-' + form.display_type"
+               :style="form.cover ? `background:${form.cover};` : ''"></div>
           <template x-if="form.logo">
             <img :src="form.logo" alt="" class="rcover-img">
           </template>
@@ -257,6 +320,35 @@
 window.ruscker = window.ruscker || {};
 window.ruscker.specForm = (initial) => ({
   form: initial,
+  // Card-cover editing mode: 'auto' (kind tint, empty cover),
+  // 'solid' (color), 'gradient' (builder). Seeded from any
+  // existing `cover` value.
+  coverMode: !((initial.cover || '').trim())
+    ? 'auto'
+    : window.ruscker.bgMode(initial.cover),
+  grad: window.ruscker.gradientDefault(),
+  applyCoverGrad() {
+    this.form.cover = window.ruscker.gradientCss(this.grad);
+  },
+  addStop() {
+    if (this.grad.stops.length < 4) {
+      this.grad.stops.push({ color: '#1d9e75', pos: 50 });
+      this.applyCoverGrad();
+    }
+  },
+  removeStop(i) {
+    if (this.grad.stops.length > 2) {
+      this.grad.stops.splice(i, 1);
+      this.applyCoverGrad();
+    }
+  },
+  setCoverMode(mode) {
+    this.coverMode = mode;
+    if (mode === 'auto') this.form.cover = '';
+    else if (mode === 'gradient') this.applyCoverGrad();
+    // 'solid' keeps whatever's in form.cover (or the picker
+    // default once the operator touches it).
+  },
   needsContainer() {
     return ['app', 'api', 'talk', 'report'].includes(this.form.display_type);
   },

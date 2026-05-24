@@ -63,6 +63,12 @@ pub struct SpecForm {
     pub access: String,
     pub tema: String,
     pub logo: String,
+    /// Card-cover CSS background (`template-properties.cover`):
+    /// a solid color or a gradient string. Empty ⇒ fall back to
+    /// the per-kind tint. Not validated server-side (browser
+    /// fail-softs), same policy as `landing_customization.header_bg`.
+    #[serde(default)]
+    pub cover: String,
     /// Updated date in DD/MM/YYYY. Empty ⇒ stamp with today.
     pub updated: String,
     /// External link target (for type=link/package).
@@ -93,6 +99,7 @@ impl SpecForm {
                 .unwrap_or_else(|| "lock".into()),
             tema: tp.get_str("tema").map(str::to_string).unwrap_or_default(),
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
+            cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
             updated: tp.get_str("updated").map(str::to_string).unwrap_or_default(),
             link: tp.get_str("link").map(str::to_string).unwrap_or_default(),
             seats_per_container: spec
@@ -139,6 +146,12 @@ impl SpecForm {
             tp_map.insert(
                 "logo".into(),
                 YamlValue::String(self.logo.trim().to_string()),
+            );
+        }
+        if !self.cover.trim().is_empty() {
+            tp_map.insert(
+                "cover".into(),
+                YamlValue::String(self.cover.trim().to_string()),
             );
         }
         if !self.link.trim().is_empty() {

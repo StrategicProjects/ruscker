@@ -86,11 +86,25 @@ impl LocalDockerBackend {
         image: &str,
         inner_port: u16,
     ) -> CoreResult<Replica> {
+        self.spawn_with_port_and_creds(spec_id, image, inner_port, None).await
+    }
+
+    /// Like [`Self::spawn_with_port`] but takes optional registry
+    /// credentials for pulling private images. Passes the creds
+    /// through to bollard's `create_image` only on the pull path;
+    /// the rest of the container lifecycle is identical.
+    pub async fn spawn_with_port_and_creds(
+        &self,
+        spec_id: &str,
+        image: &str,
+        inner_port: u16,
+        creds: Option<&ruscker_core::RegistryCredentials>,
+    ) -> CoreResult<Replica> {
         let replica_id = ReplicaId::new();
 
         // 1. Pull image (idempotent — Docker no-ops when local).
         //    Errors bubble up through the stream-of-events.
-        self.ensure_image_pulled(image).await?;
+        self.ensure_image_pulled(image, creds).await?;
 
         // 2. Create container with our labels + ephemeral host port.
         let port_key = format!("{inner_port}/tcp");
@@ -160,7 +174,11 @@ impl LocalDockerBackend {
         })
     }
 
-    async fn ensure_image_pulled(&self, image: &str) -> CoreResult<()> {
+    async fn ensure_image_pulled(
+        &self,
+        image: &str,
+        creds: Option<&ruscker_core::RegistryCredentials>,
+    ) -> CoreResult<()> {
         // bollard's create_image always hits the registry for the
         // manifest — even when the layers are already local. Skip
         // the round-trip when the image is present, mirroring the
@@ -175,10 +193,22 @@ impl LocalDockerBackend {
             from_image: Some(image.to_string()),
             ..Default::default()
         };
-        // None for credentials — anonymous public pulls only for
-        // now; private registries come through the credentials
-        // store in a follow-up.
-        let mut stream = self.docker.create_image(Some(opts), None, None);
+        // Convert our backend-neutral creds to bollard's native
+        // type only at the pull boundary. `None` keeps the pull
+        // anonymous (Docker Hub public images).
+        let bollard_creds = creds.map(|c| bollard::auth::DockerCredentials {
+            username: Some(c.username.clone()),
+            password: Some(c.password.clone()),
+            serveraddress: c.server_address.clone(),
+            ..Default::default()
+        });
+        tracing::info!(
+            image,
+            with_creds = bollard_creds.is_some(),
+            registry = ?creds.and_then(|c| c.server_address.as_deref()),
+            "pulling image"
+        );
+        let mut stream = self.docker.create_image(Some(opts), None, bollard_creds);
         while let Some(event) = stream.next().await {
             event.map_err(|e| backend_err("pull image", e))?;
         }
@@ -248,6 +278,18 @@ impl ContainerBackend for LocalDockerBackend {
         inner_port: u16,
     ) -> CoreResult<Replica> {
         Self::spawn_with_port(self, spec_id, image, inner_port).await
+    }
+
+    /// Trait override: pass-through to the credentials-aware
+    /// inherent method.
+    async fn spawn_with_port_and_creds(
+        &self,
+        spec_id: &str,
+        image: &str,
+        inner_port: u16,
+        creds: Option<&ruscker_core::RegistryCredentials>,
+    ) -> CoreResult<Replica> {
+        Self::spawn_with_port_and_creds(self, spec_id, image, inner_port, creds).await
     }
 
     async fn stop(&self, replica_id: &ReplicaId) -> CoreResult<()> {

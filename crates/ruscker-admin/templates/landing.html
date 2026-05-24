@@ -128,7 +128,12 @@
          x-transition.opacity>
 
         <div class="rcover">
-          <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+          {% match card.cover %}
+            {% when Some with (cover) %}
+              <div class="rcover-bg" style="background: {{ cover }};"></div>
+            {% when None %}
+              <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+          {% endmatch %}
           {% match card.logo %}{% when Some with (logo) %}
             <img src="{{ logo }}"
                  alt=""

@@ -199,6 +199,15 @@ pub struct CardCtx<'a> {
     /// in the UI — operators choose their own taxonomy.
     pub tema: Option<&'a str>,
     pub logo: Option<&'a str>,
+    /// Optional CSS background for the card cover, read verbatim
+    /// from `template-properties.cover` (a solid color or a
+    /// `linear-/radial-gradient(...)`). When `None`, the card
+    /// falls back to the per-kind tint class. Interpolated raw
+    /// into a `style="background: …"` — the browser fail-softs on
+    /// invalid CSS, and the value round-trips through YAML/export
+    /// untouched. (Not server-validated, same policy as
+    /// `landing_customization.header_bg`.)
+    pub cover: Option<&'a str>,
     pub updated_raw: Option<&'a str>,
     /// "DD/MM" — short form used in the meta row.
     pub updated_short: Option<String>,
@@ -222,6 +231,9 @@ impl<'a> CardCtx<'a> {
         let active = tp.is_active();
         let tema = tp.get_str("tema");
         let logo = tp.get_str("logo");
+        // Empty string ⇒ treat as unset so the kind-tint fallback
+        // kicks in rather than rendering `background: ;`.
+        let cover = tp.get_str("cover").filter(|s| !s.trim().is_empty());
         let updated_raw = tp.get_str("updated");
         let updated_date = updated_raw.and_then(parse_dmy);
         let updated_short = updated_date.map(|d| d.format("%d/%m").to_string());
@@ -239,6 +251,7 @@ impl<'a> CardCtx<'a> {
             active,
             tema,
             logo,
+            cover,
             updated_raw,
             updated_short,
             status,
@@ -378,6 +391,36 @@ mod tests {
         );
         // missing → Unknown
         assert_eq!(compute_status(None, today), StatusKind::Unknown);
+    }
+
+    fn spec_with_tp(yaml_tp: &str) -> ruscker_config::Spec {
+        let yaml = format!(
+            "id: x\ndisplay-name: X\ncontainer-image: a:1\ntemplate-properties:\n{yaml_tp}"
+        );
+        serde_yaml_ng::from_str(&yaml).expect("parse spec")
+    }
+
+    #[test]
+    fn card_cover_read_from_template_properties() {
+        let spec = spec_with_tp("  cover: \"linear-gradient(135deg, #0f6e56, #5dcaa5)\"\n");
+        let card = CardCtx::from_spec(&spec);
+        assert_eq!(card.cover, Some("linear-gradient(135deg, #0f6e56, #5dcaa5)"));
+    }
+
+    #[test]
+    fn card_cover_absent_falls_back_to_tint() {
+        let spec = spec_with_tp("  tema: Saúde\n");
+        let card = CardCtx::from_spec(&spec);
+        assert_eq!(card.cover, None);
+    }
+
+    #[test]
+    fn card_cover_empty_string_is_none() {
+        // Empty cover must not render `background: ;` — it should
+        // fall through to the kind tint.
+        let spec = spec_with_tp("  cover: \"  \"\n");
+        let card = CardCtx::from_spec(&spec);
+        assert_eq!(card.cover, None);
     }
 }
 

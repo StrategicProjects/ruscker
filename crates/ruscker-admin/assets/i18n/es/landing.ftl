@@ -118,6 +118,28 @@ admin-images-empty = Aún no hay imágenes. Suba la primera arriba.
 admin-images-delete = Eliminar
 admin-images-delete-confirm = ¿Eliminar esta imagen? Las specs que referencian el archivo mostrarán el cover tintado.
 
+# Admin credentials
+admin-creds-title = Credenciales del registry
+admin-creds-subtitle = Las contraseñas se cifran en reposo con AES-256-GCM. Nunca aparecen en el YAML ni en el panel después de guardarlas.
+admin-creds-form-title = Añadir / actualizar credencial
+admin-creds-name = Nombre
+admin-creds-name-help = Identificador único. Use el mismo nombre en sus specs.
+admin-creds-registry = Registry
+admin-creds-username = Usuario
+admin-creds-password = Contraseña / token
+admin-creds-password-help = Cifrada al guardar; no se muestra de nuevo.
+admin-creds-save = Guardar credencial
+admin-creds-saved = Credencial guardada:
+admin-creds-empty = No hay credenciales aún.
+admin-creds-delete = Borrar
+admin-creds-delete-confirm = ¿Borrar esta credencial?
+admin-creds-col-name = Nombre
+admin-creds-col-registry = Registry
+admin-creds-col-username = Usuario
+admin-creds-col-created = Creada
+admin-creds-key-missing-title = RUSCKER_MASTER_KEY no está configurada
+admin-creds-key-missing-help = El store de credenciales necesita una clave de 32 bytes en hex (64 chars) o base64 (44 chars). Genere una con:
+
 card-cta-open = Abrir
 card-cta-link = Visitar
 card-cta-open-app = Abrir aplicación

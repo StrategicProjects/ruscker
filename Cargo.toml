@@ -82,6 +82,9 @@ bollard = "0.21"
 # Cryptography
 ring = "0.17.14"
 base64 = "0.22"
+aes-gcm = "0.10"
+zeroize = "1.8"
+hex = "0.4"
 
 # Testing
 pretty_assertions = "1.4"

@@ -803,6 +803,29 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .image-tile:hover .image-tile-delete { opacity: 1; }
 .image-tile-delete:hover { background: var(--color-lock); }
 
+/* ─── Credentials store ───────────────────────────────────────── */
+.creds-form {
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+}
+.creds-form-section-title {
+  font-size: 11px; font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+.creds-form input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.creds-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 /* ─── Brand lockup (footer) ──────────────────────────────────────
  *
  * Inline mark + wordmark text. Wordmark is always lowercase,

@@ -191,7 +191,25 @@ impl AdminServer {
         // durable identifier.
         if let Some(backend) = self.state.backend.as_ref() {
             match backend.list().await {
-                Ok(existing) => {
+                Ok(mut existing) => {
+                    // The backend can't know each replica's seat
+                    // cap — that lives in the spec config. Enrich
+                    // each reconciled replica with its spec's
+                    // `effective_seats` so `sessions_max` is
+                    // accurate and the scaler's saturation /
+                    // available-seats math works on first tick.
+                    for r in &mut existing {
+                        if let Some(spec) = self
+                            .state
+                            .config
+                            .proxy
+                            .specs
+                            .iter()
+                            .find(|s| s.id == r.spec_id)
+                        {
+                            r.sessions_max = spec.effective_seats();
+                        }
+                    }
                     let n = existing.len();
                     self.state.replicas.write().await.reset(existing);
                     if n > 0 {

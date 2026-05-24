@@ -52,64 +52,143 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
 }
 
 /// One pass over every spec. Logs but never panics — a failed
-/// spawn is reported and the loop continues with the next spec.
+/// spawn or stop is reported and the loop continues with the
+/// next spec.
+///
+/// Three reasons to act on a spec:
+/// 1. **Below min** — bring count up to `effective_min_replicas`
+///    in one tick.
+/// 2. **All replicas saturated** — spawn one additional replica
+///    (one per tick to avoid overshoot) up to
+///    `effective_max_replicas`.
+/// 3. **Idle replicas above min** — stop them.
+///
+/// Scale-up and scale-down are mutually exclusive for a single
+/// spec on a single tick: a saturated spec by definition has no
+/// idle replicas, and an over-min spec with idle replicas isn't
+/// saturated.
 async fn tick(state: &AppState) {
-    // No backend ⇒ landing-only mode; nothing to scale.
     let Some(backend) = state.backend.clone() else {
         return;
     };
-
-    // Snapshot the spec list once — config is `Arc<Config>` so
-    // this is a single Arc clone, not a deep walk.
     let specs = state.config.proxy.specs.clone();
 
     for spec in specs {
         let kind = spec.kind();
-        // External specs route to a URL; nothing to spawn.
         if matches!(kind, SpecKind::External) {
             continue;
         }
-        // No image ⇒ misconfigured spec. The validator already
-        // warned at config-load time; we silently skip here.
         if spec.container_image.is_none() {
             continue;
         }
 
-        let want = spec.effective_min_replicas() as usize;
-        if want == 0 {
+        let min = spec.effective_min_replicas() as usize;
+        let max = spec.effective_max_replicas() as usize;
+
+        // Snapshot replicas with their session counts at this
+        // instant. We clone out so the read-lock releases before
+        // we take any write-lock for spawn/stop. The window
+        // between snapshot and act is small but real; the
+        // coalescer mutex makes spawn safe, and stop is
+        // idempotent at the backend so a stale stop is fine.
+        let snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
+        let count = snap.len();
+
+        // --- scale-up pass ---
+
+        // (1) Below min: bring up in one tick.
+        if count < min {
+            let to_spawn = min - count;
+            info!(spec = %spec.id, count, min, to_spawn, "scaling up to min-replicas");
+            for _ in 0..to_spawn {
+                if let Err(e) = spawn_one(state, &spec, backend.as_ref()).await {
+                    warn!(spec = %spec.id, error = ?e, "scale-up spawn failed");
+                    break;
+                }
+            }
+            // Done with this spec on this tick — fresh snapshot
+            // next tick.
             continue;
         }
 
-        let have = state.replicas.read().await.replicas_of(&spec.id).len();
-        if have >= want {
-            continue;
-        }
-
-        let to_spawn = want - have;
-        info!(
-            spec = %spec.id,
-            have, want, to_spawn,
-            "scaling spec up to min-replicas"
-        );
-        for _ in 0..to_spawn {
+        // (2) Saturated above min, below max: spawn ONE this
+        //     tick. Spawning multiple per tick risks overshoot
+        //     because the new replica's seats aren't filled yet.
+        if count < max && all_saturated(&snap) {
+            info!(spec = %spec.id, count, max, "saturated — scaling up by 1");
             if let Err(e) = spawn_one(state, &spec, backend.as_ref()).await {
-                warn!(spec = %spec.id, error = ?e, "auto-scaler spawn failed");
-                // Stop trying for THIS spec on THIS tick — if the
-                // first spawn failed, the second probably will too
-                // (image pull error, daemon down, etc.). Wait for
-                // the next tick to retry.
-                break;
+                warn!(spec = %spec.id, error = ?e, "saturation spawn failed");
+            }
+            continue;
+        }
+
+        // --- scale-down pass ---
+
+        // (3) Above min with idle replicas: stop them. Cap the
+        //     drop at `count - min` to never go below min.
+        if count > min {
+            let allowed_to_drop = count - min;
+            let idle: Vec<_> = snap
+                .iter()
+                .filter(|r| r.sessions_active == 0)
+                .take(allowed_to_drop)
+                .cloned()
+                .collect();
+            if !idle.is_empty() {
+                info!(
+                    spec = %spec.id,
+                    count,
+                    min,
+                    dropping = idle.len(),
+                    "idle replicas — scaling down"
+                );
+                for r in idle {
+                    if let Err(e) = stop_one(state, &r.id, backend.as_ref()).await {
+                        warn!(
+                            spec = %spec.id,
+                            replica = ?r.id,
+                            error = ?e,
+                            "scale-down stop failed"
+                        );
+                    }
+                }
             }
         }
     }
 }
 
-/// Spawn one additional replica for `spec`. Mirrors the spawn
-/// branch of `pick_or_spawn` but does NOT short-circuit when
-/// replicas already exist (the scaler is the one path that
-/// deliberately wants "spawn more"). Still goes through the
-/// per-spec mutex so a concurrent on-demand spawn coalesces with
-/// us.
+/// All replicas hit their seat cap? An empty list reads as
+/// "not saturated" — there's nothing TO be saturated.
+fn all_saturated(replicas: &[ruscker_core::Replica]) -> bool {
+    !replicas.is_empty() && replicas.iter().all(|r| r.available_seats() == 0)
+}
+
+/// Stop a single replica and remove it from the registry. Used
+/// by the idle scale-down path. The backend stop is best-effort
+/// — even if it fails (already gone, network blip), we still
+/// remove the entry so the registry doesn't accumulate
+/// phantoms.
+async fn stop_one(
+    state: &AppState,
+    replica_id: &ruscker_core::ReplicaId,
+    backend: &dyn ruscker_core::ContainerBackend,
+) -> anyhow::Result<()> {
+    backend
+        .stop(replica_id)
+        .await
+        .map_err(|e| anyhow::anyhow!("backend stop: {e}"))?;
+    state.replicas.write().await.remove(replica_id);
+    Ok(())
+}
+
+/// Spawn one additional replica for `spec`. Used by every
+/// scale-up branch (to-min and on-saturation). Goes through the
+/// per-spec mutex so a concurrent on-demand spawn coalesces
+/// with us — the caller decided we should add capacity, so we
+/// don't re-check against any threshold here.
+///
+/// Capping (don't exceed max, don't undershoot min) is the
+/// caller's job; this function just performs one spawn.
 async fn spawn_one(
     state: &AppState,
     spec: &Spec,
@@ -122,15 +201,6 @@ async fn spawn_one(
         .clone();
     let _guard = spec_mutex.lock().await;
 
-    // Re-check under the mutex. A first-request spawn that landed
-    // between our snapshot read and the mutex acquire may have
-    // already added the replica we were going to spawn; in that
-    // case we yield to it and skip.
-    let have = state.replicas.read().await.replicas_of(&spec.id).len();
-    if have >= spec.effective_min_replicas() as usize {
-        return Ok(());
-    }
-
     let image = spec
         .container_image
         .as_deref()
@@ -142,11 +212,15 @@ async fn spawn_one(
         .and_then(|a| a.port)
         .or_else(|| infer_inner_port(spec));
 
-    let replica = match inner_port {
+    let mut replica = match inner_port {
         Some(port) => backend.spawn_with_port(&spec.id, image, port).await,
         None => backend.spawn(&spec.id, image).await,
     }
     .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
+    // The backend doesn't know the spec's seat cap — that lives
+    // in config. Enrich so `available_seats()` / `all_saturated`
+    // immediately reflect the right capacity.
+    replica.sessions_max = spec.effective_seats();
 
     state.replicas.write().await.add(replica);
     Ok(())
@@ -353,5 +427,220 @@ proxy:
             0,
             "reconciled replicas count toward min — no extra spawns"
         );
+    }
+
+    // Helper: build a Replica with explicit session counts so we
+    // can exercise the saturation / idle branches without driving
+    // the proxy.
+    fn replica_with_sessions(spec: &str, active: u32, max: u32) -> Replica {
+        Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: spec.into(),
+            container_id: "x".into(),
+            upstream: "127.0.0.1:1".parse().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: active,
+            sessions_max: max,
+        }
+    }
+
+    #[tokio::test]
+    async fn tick_scales_up_one_on_saturation() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: hot
+    display-name: Hot
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 3
+"#,
+            backend.clone(),
+        );
+        // One replica, fully saturated (1/1).
+        state
+            .replicas
+            .write()
+            .await
+            .add(replica_with_sessions("hot", 1, 1));
+
+        tick(&state).await;
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "saturated → one extra spawn"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("hot").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn tick_caps_scale_up_at_max() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: capped
+    display-name: Capped
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 2
+"#,
+            backend.clone(),
+        );
+        // Two saturated replicas; max is 2 — must NOT spawn.
+        let r1 = replica_with_sessions("capped", 1, 1);
+        let r2 = replica_with_sessions("capped", 1, 1);
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(r1);
+            reg.add(r2);
+        }
+        tick(&state).await;
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn tick_scales_up_one_per_tick_not_to_max() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: gradual
+    display-name: Gradual
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 5
+"#,
+            backend.clone(),
+        );
+        state
+            .replicas
+            .write()
+            .await
+            .add(replica_with_sessions("gradual", 1, 1));
+        tick(&state).await;
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "one tick = at most one saturation spawn"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_scales_down_idle_above_min() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: shrink
+    display-name: Shrink
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 5
+"#,
+            backend.clone(),
+        );
+        // Three replicas: one busy, two idle. min=1 → drop both
+        // idle ones, keeping the busy one.
+        let busy = replica_with_sessions("shrink", 1, 5);
+        let idle1 = replica_with_sessions("shrink", 0, 5);
+        let idle2 = replica_with_sessions("shrink", 0, 5);
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(busy);
+            reg.add(idle1);
+            reg.add(idle2);
+        }
+        tick(&state).await;
+        let remaining = state.replicas.read().await.replicas_of("shrink").to_vec();
+        assert_eq!(remaining.len(), 1, "two idle stopped, busy stays");
+        assert_eq!(remaining[0].sessions_active, 1);
+    }
+
+    #[tokio::test]
+    async fn tick_does_not_scale_down_below_min() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: floor
+    display-name: Floor
+    container-image: nginx:alpine
+    min-replicas: 2
+    max-replicas: 4
+"#,
+            backend.clone(),
+        );
+        // Two idle replicas, min=2 → drop nothing.
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(replica_with_sessions("floor", 0, 5));
+            reg.add(replica_with_sessions("floor", 0, 5));
+        }
+        tick(&state).await;
+        assert_eq!(
+            state.replicas.read().await.replicas_of("floor").len(),
+            2,
+            "min is a hard floor"
+        );
+    }
+
+    #[tokio::test]
+    async fn tick_does_not_scale_down_busy_replica() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: half
+    display-name: Half busy
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 5
+"#,
+            backend.clone(),
+        );
+        // 2 replicas, both have 1 active session each (below seat
+        // cap of 5). Neither is idle → no scale-down.
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(replica_with_sessions("half", 1, 5));
+            reg.add(replica_with_sessions("half", 1, 5));
+        }
+        tick(&state).await;
+        assert_eq!(state.replicas.read().await.replicas_of("half").len(), 2);
+    }
+
+    #[test]
+    fn all_saturated_helper() {
+        assert!(!all_saturated(&[]));
+        assert!(all_saturated(&[replica_with_sessions("a", 1, 1)]));
+        assert!(!all_saturated(&[
+            replica_with_sessions("a", 1, 1),
+            replica_with_sessions("a", 0, 1),
+        ]));
+        assert!(all_saturated(&[
+            replica_with_sessions("a", 5, 5),
+            replica_with_sessions("a", 3, 3),
+        ]));
     }
 }

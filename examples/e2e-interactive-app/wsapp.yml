@@ -1,0 +1,15 @@
+proxy:
+  title: WS App e2e
+  port: 8082
+  bind-address: 127.0.0.1
+  authentication: none
+  heartbeat-timeout: 60000
+  specs:
+    - id: wsapp
+      display-name: WS Test App
+      type: streamlit
+      container-image: ruscker-wsapp:test
+      min-replicas: 1
+      max-replicas: 1
+      api:
+        port: 8080

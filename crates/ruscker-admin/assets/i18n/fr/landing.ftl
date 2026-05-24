@@ -265,3 +265,11 @@ admin-import-cancel = Annuler
 admin-import-ok = Import terminé : { $created } créés, { $updated } mis à jour, { $unchanged } inchangés.
 admin-import-ok-warnings = { $warnings } avertissement(s) de validation — vérifiez les identifiants intégrés et les noms vides.
 admin-import-err = Échec de l import : { $msg }
+
+# Gradient builder
+admin-grad-solid = Uni
+admin-grad-gradient = Dégradé
+admin-grad-linear = Linéaire
+admin-grad-radial = Radial
+admin-grad-add-stop = Ajouter une couleur
+admin-grad-remove-stop = Retirer la couleur

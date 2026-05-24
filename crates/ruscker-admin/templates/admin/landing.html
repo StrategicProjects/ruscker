@@ -4,6 +4,25 @@
 
 {% block content %}
 
+<style>
+  .grad-modes { display: inline-flex; gap: 2px; margin-bottom: 8px;
+    border: 0.5px solid var(--border, rgba(120,120,120,0.25)); border-radius: 8px; padding: 2px; }
+  .grad-mode { font-size: 12px; padding: 4px 12px; border: none; background: transparent;
+    color: var(--text-muted); cursor: pointer; border-radius: 6px; }
+  .grad-mode.is-active { background: var(--surface-soft, rgba(120,120,120,0.15)); color: var(--text-primary); }
+  .grad-builder { display: flex; flex-direction: column; gap: 8px; }
+  .grad-row { display: flex; align-items: center; gap: 10px; }
+  .grad-angle { display: flex; align-items: center; gap: 6px; font-size: 12px;
+    color: var(--text-muted); flex: 1; }
+  .grad-angle input[type=range] { flex: 1; }
+  .grad-stop { display: flex; align-items: center; gap: 6px; }
+  .grad-pos { width: 56px; font-size: 12px; padding: 4px 6px;
+    border: 0.5px solid var(--border, rgba(120,120,120,0.25)); border-radius: 6px; }
+  .grad-pos-unit { font-size: 11px; color: var(--text-faint); }
+  .grad-add { font-size: 12px; align-self: flex-start; }
+  .grad-output { font-size: 11px; opacity: 0.75; }
+</style>
+
 <div x-data="ruscker.landingForm({{ form_initial_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
@@ -52,17 +71,68 @@
       <div class="grid grid-cols-2 gap-3">
         <div class="spec-form-field">
           <label class="spec-form-label">{{ self.t("admin-landing-header-bg") }}</label>
-          <div class="color-input">
+
+          {# Mode toggle: solid color vs. gradient builder. #}
+          <div class="grad-modes" role="tablist">
+            <button type="button" class="grad-mode" :class="bgMode === 'solid' ? 'is-active' : ''"
+                    @click="setBgMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+            <button type="button" class="grad-mode" :class="bgMode === 'gradient' ? 'is-active' : ''"
+                    @click="setBgMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          </div>
+
+          {# SOLID — the original color + hex inputs. #}
+          <div class="color-input" x-show="bgMode === 'solid'">
             <input type="color" x-model="form.header_bg"
                    :value="form.header_bg || '#fafaf7'">
             <input type="text" name="header_bg" x-model="form.header_bg"
                    placeholder="#0f6e56"
+                   :disabled="bgMode !== 'solid'"
                    class="spec-form-input spec-form-input--mono">
             <button type="button" @click="form.header_bg = ''"
                     class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
               <i class="ti ti-x" aria-hidden="true"></i>
             </button>
           </div>
+
+          {# GRADIENT — builder. The submitted value still lives in
+             a (read-only-ish) text input named header_bg, kept in
+             sync by applyGrad(). #}
+          <div class="grad-builder" x-show="bgMode === 'gradient'" x-cloak>
+            <div class="grad-row">
+              <select class="theme-select" x-model="grad.type" @change="applyGrad()">
+                <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+                <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+              </select>
+              <label class="grad-angle" x-show="grad.type === 'linear'">
+                <span x-text="grad.angle + '°'"></span>
+                <input type="range" min="0" max="360" step="5"
+                       x-model.number="grad.angle" @input="applyGrad()">
+              </label>
+            </div>
+            <template x-for="(stop, i) in grad.stops" :key="i">
+              <div class="grad-stop">
+                <input type="color" x-model="stop.color" @input="applyGrad()">
+                <input type="number" min="0" max="100" class="grad-pos"
+                       x-model.number="stop.pos" @input="applyGrad()">
+                <span class="grad-pos-unit">%</span>
+                <button type="button" class="admin-nav-link" @click="removeStop(i)"
+                        x-show="grad.stops.length > 2"
+                        title="{{ self.t("admin-grad-remove-stop") }}">
+                  <i class="ti ti-x" aria-hidden="true"></i>
+                </button>
+              </div>
+            </template>
+            <button type="button" class="admin-nav-link grad-add" @click="addStop()"
+                    x-show="grad.stops.length < 4">
+              <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+            </button>
+            {# The canonical submitted value; in gradient mode it's
+               driven by applyGrad(), shown read-only as feedback. #}
+            <input type="text" name="header_bg" x-model="form.header_bg" readonly
+                   :disabled="bgMode !== 'gradient'"
+                   class="spec-form-input spec-form-input--mono grad-output">
+          </div>
+
           <div class="spec-form-help">{{ self.t("admin-landing-bg-help") }}</div>
         </div>
         <div class="spec-form-field">
@@ -168,8 +238,65 @@
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
+
+// ── Shared gradient helpers (reused by the spec-form cover too) ──
+
+// Build a CSS background string from builder state.
+// g = { type: 'linear'|'radial', angle: 0-360, stops: [{color, pos}] }
+// `pos` is an optional 0-100 percentage; omitted when null/''.
+window.ruscker.gradientCss = (g) => {
+  const stops = (g.stops || [])
+    .filter((s) => s && s.color)
+    .map((s) => (s.pos === '' || s.pos == null) ? s.color : `${s.color} ${s.pos}%`)
+    .join(', ');
+  if (!stops) return '';
+  if (g.type === 'radial') return `radial-gradient(circle, ${stops})`;
+  return `linear-gradient(${g.angle | 0}deg, ${stops})`;
+};
+
+// Fresh default builder state — two stops, a pleasant diagonal.
+window.ruscker.gradientDefault = () => ({
+  type: 'linear',
+  angle: 135,
+  stops: [ { color: '#0f6e56', pos: 0 }, { color: '#5dcaa5', pos: 100 } ],
+});
+
+// Decide the initial editing mode for an existing value:
+// a gradient string → 'gradient', anything else → 'solid'.
+window.ruscker.bgMode = (value) =>
+  (typeof value === 'string' && /^(linear|radial)-gradient\(/.test(value.trim()))
+    ? 'gradient' : 'solid';
+
 window.ruscker.landingForm = (initial) => ({
   form: initial,
+  // Header-background editing mode + gradient builder sub-state.
+  bgMode: window.ruscker.bgMode(initial.header_bg || ''),
+  grad: window.ruscker.gradientDefault(),
+  // Recompute header_bg from the gradient builder. Called on any
+  // builder control change while in gradient mode.
+  applyGrad() {
+    this.form.header_bg = window.ruscker.gradientCss(this.grad);
+  },
+  addStop() {
+    if (this.grad.stops.length < 4) {
+      this.grad.stops.push({ color: '#1d9e75', pos: 50 });
+      this.applyGrad();
+    }
+  },
+  removeStop(i) {
+    if (this.grad.stops.length > 2) {
+      this.grad.stops.splice(i, 1);
+      this.applyGrad();
+    }
+  },
+  // Switching to gradient mode seeds header_bg from the builder
+  // so the preview updates immediately; switching to solid clears
+  // the gradient string so the color picker drives a fresh value.
+  setBgMode(mode) {
+    this.bgMode = mode;
+    if (mode === 'gradient') this.applyGrad();
+    else this.form.header_bg = '';
+  },
   /// Resolve the intro shown in the preview given the admin's
   /// own locale: prefer the per-locale field, fall back to the
   /// default. Mirrors the server-side resolution in routes/landing.rs.

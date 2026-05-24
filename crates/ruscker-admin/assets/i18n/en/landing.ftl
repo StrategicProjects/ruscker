@@ -265,3 +265,11 @@ admin-import-cancel = Cancel
 admin-import-ok = Import complete: { $created } created, { $updated } updated, { $unchanged } unchanged.
 admin-import-ok-warnings = { $warnings } validation warning(s) — review embedded credentials and empty names.
 admin-import-err = Import failed: { $msg }
+
+# Gradient builder
+admin-grad-solid = Solid
+admin-grad-gradient = Gradient
+admin-grad-linear = Linear
+admin-grad-radial = Radial
+admin-grad-add-stop = Add stop
+admin-grad-remove-stop = Remove stop

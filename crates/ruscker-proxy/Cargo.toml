@@ -6,11 +6,21 @@ rust-version.workspace = true
 license.workspace = true
 description = "HTTP and WebSocket reverse proxy for Ruscker"
 
-# NOTE: this crate is a STUB. The real implementation (phase 3) will
-# add axum, tower, tower-http, hyper, tracing, etc. See CLAUDE.md in
-# this crate for the full dependency list.
-
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
 ruscker-core = { path = "../ruscker-core" }
 anyhow = { workspace = true }
+
+# Phase 3 stack
+axum = { workspace = true }
+tokio = { workspace = true }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tracing-subscriber = { workspace = true }
+
+[[example]]
+name = "ws_spike"
+path = "examples/ws_spike.rs"

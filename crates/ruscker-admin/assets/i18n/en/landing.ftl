@@ -246,3 +246,9 @@ admin-logs-back = Back to dashboard
 admin-logs-replica = Replica
 admin-logs-empty = No log output for this replica yet.
 admin-logs-tail-note = Showing the last lines (newest at the bottom).
+
+# Dashboard replica actions
+admin-dashboard-action-stop = Stop
+admin-dashboard-action-restart = Restart
+admin-dashboard-confirm-stop = Stop this replica? The auto-scaler may recreate it if the configured minimum requires it.
+admin-dashboard-confirm-restart = Restart this replica? Any active session will be lost.

@@ -384,9 +384,24 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         .and_then(|a| a.port)
         .or_else(|| infer_inner_port(spec));
 
-    tracing::info!(spec = %spec.id, image, inner_port = ?inner_port, "spawning first replica");
+    let creds = creds_from_spec(spec);
+    tracing::info!(
+        spec = %spec.id,
+        image,
+        inner_port = ?inner_port,
+        with_creds = creds.is_some(),
+        "spawning first replica"
+    );
     let mut replica = match inner_port {
-        Some(port) => backend.spawn_with_port(&spec.id, image, port).await,
+        Some(port) => {
+            backend
+                .spawn_with_port_and_creds(&spec.id, image, port, creds.as_ref())
+                .await
+        }
+        // No explicit port → fall through to the legacy spawn
+        // (uses the backend's default port). Credentials still
+        // wouldn't apply here in practice because a non-port
+        // spec is rare and largely a back-compat path.
         None => backend.spawn(&spec.id, image).await,
     }
     .map_err(|e| anyhow::anyhow!("backend spawn: {e}"))?;
@@ -404,6 +419,32 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
 fn infer_inner_port(spec: &Spec) -> Option<u16> {
     match spec.kind() {
         SpecKind::Api => Some(8080),
+        _ => None,
+    }
+}
+
+/// Build optional registry credentials from a spec. Returns
+/// `None` if the spec doesn't carry both a username and a
+/// password — partial credentials make no sense (Docker would
+/// just reject the pull). Lives next to the proxy spawn path
+/// so the scaler can reuse it via `pub(crate)`.
+///
+/// The password comes through already env-interpolated by
+/// `ruscker-config`'s loader — there's no `${VAR}` left to
+/// resolve here.
+pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCredentials> {
+    let user = spec.docker_registry_username.as_deref().filter(|s| !s.is_empty());
+    let pass = spec.docker_registry_password.as_deref().filter(|s| !s.is_empty());
+    match (user, pass) {
+        (Some(u), Some(p)) => Some(ruscker_core::RegistryCredentials {
+            username: u.to_string(),
+            password: p.to_string(),
+            server_address: spec
+                .docker_registry_domain
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
+        }),
         _ => None,
     }
 }
@@ -596,6 +637,96 @@ container-image: test:latest
 "#
         );
         serde_yaml_ng::from_str(&yaml).expect("parse fake spec")
+    }
+
+    fn spec_yaml(yaml: &str) -> Spec {
+        serde_yaml_ng::from_str(yaml).expect("parse spec yaml")
+    }
+
+    #[test]
+    fn creds_from_spec_returns_none_for_anonymous_spec() {
+        let s = fake_spec("x");
+        assert!(creds_from_spec(&s).is_none());
+    }
+
+    #[test]
+    fn creds_from_spec_returns_full_creds_when_both_present() {
+        let s = spec_yaml(
+            r#"
+id: privapp
+display-name: Private
+container-image: priv.io/team/app:1
+docker-registry-username: bot
+docker-registry-password: hunter2
+docker-registry-domain: priv.io
+"#,
+        );
+        let c = creds_from_spec(&s).expect("creds present");
+        assert_eq!(c.username, "bot");
+        assert_eq!(c.password, "hunter2");
+        assert_eq!(c.server_address.as_deref(), Some("priv.io"));
+    }
+
+    #[test]
+    fn creds_from_spec_skips_when_only_username() {
+        let s = spec_yaml(
+            r#"
+id: half
+display-name: Half
+container-image: x:1
+docker-registry-username: bot
+"#,
+        );
+        assert!(
+            creds_from_spec(&s).is_none(),
+            "half-credentials are no credentials"
+        );
+    }
+
+    #[test]
+    fn creds_from_spec_skips_when_only_password() {
+        let s = spec_yaml(
+            r#"
+id: half2
+display-name: Half2
+container-image: x:1
+docker-registry-password: secret
+"#,
+        );
+        assert!(creds_from_spec(&s).is_none());
+    }
+
+    #[test]
+    fn creds_from_spec_treats_empty_strings_as_absent() {
+        let s = spec_yaml(
+            r#"
+id: blanks
+display-name: Blanks
+container-image: x:1
+docker-registry-username: ""
+docker-registry-password: ""
+docker-registry-domain: ""
+"#,
+        );
+        assert!(
+            creds_from_spec(&s).is_none(),
+            "empty strings shouldn't authenticate"
+        );
+    }
+
+    #[test]
+    fn creds_from_spec_allows_no_domain_for_docker_hub() {
+        let s = spec_yaml(
+            r#"
+id: hubapp
+display-name: Hub
+container-image: bot/app:1
+docker-registry-username: bot
+docker-registry-password: hunter2
+"#,
+        );
+        let c = creds_from_spec(&s).expect("creds present");
+        assert!(c.server_address.is_none(), "Docker Hub default");
     }
 
     #[tokio::test]

@@ -1,0 +1,278 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}
+  {% if mode.is_new() %}{{ self.t("spec-form-title-new") }}{% else %}{{ form.id }} · Ruscker{% endif %}
+{% endblock %}
+
+{% block content %}
+
+<div x-data="ruscker.specForm({{ form_initial_json() }})" x-cloak>
+
+  {# ── Header ───────────────────────────────────────────────── #}
+  <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
+    <div>
+      <div class="text-[11px] text-[color:var(--text-faint)] uppercase tracking-wide">
+        <a href="/admin/specs" class="hover:underline">{{ self.t("admin-nav-apps") }}</a>
+        · {% if mode.is_new() %}{{ self.t("spec-form-crumb-new") }}{% else %}{{ self.t("spec-form-crumb-edit") }}{% endif %}
+      </div>
+      <h1 class="text-xl font-medium tracking-tight" x-text="form.display_name || form.id || '{{ self.t("spec-form-title-new") }}'"></h1>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/admin/specs" class="admin-nav-link">{{ self.t("spec-form-cancel") }}</a>
+      <button type="submit" form="spec-form" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
+        <i class="ti ti-check" aria-hidden="true"></i>
+        {{ self.t("spec-form-save") }}
+      </button>
+    </div>
+  </div>
+
+  {# ── Validation banner (server-side errors) ───────────────── #}
+  {% if !errors.is_empty() %}
+    <div class="admin-login-error mb-4" role="alert">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      <ul class="m-0 p-0">
+        {% for key in errors %}
+          <li>{{ self.t(key) }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="spec-form-layout">
+
+    {# ── LEFT: form ────────────────────────────────────────── #}
+    <form id="spec-form" method="post"
+          action="{% if mode.is_new() %}/admin/specs{% else %}/admin/specs/{{ form.id }}{% endif %}"
+          class="spec-form-fields"
+          autocomplete="off">
+
+      {# Type picker — 4 cards #}
+      <div class="spec-form-section">
+        <div class="spec-form-label">{{ self.t("spec-form-kind") }}</div>
+        <div class="kind-picker">
+          {% for k in display_type_options() %}
+            <label class="kind-picker-card" :class="form.display_type === '{{ k.0 }}' ? 'is-active' : ''">
+              <input type="radio" name="display_type" value="{{ k.0 }}" x-model="form.display_type" class="sr-only">
+              <i class="ti ti-{{ k.2 }}" aria-hidden="true"></i>
+              <span>{{ self.t(k.1) }}</span>
+            </label>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="spec-form-section-title">{{ self.t("spec-form-identity") }}</div>
+
+      <div class="spec-form-field">
+        <label for="f-id" class="spec-form-label">{{ self.t("spec-form-id") }}</label>
+        <input id="f-id" type="text" name="id"
+               value="{{ form.id }}"
+               x-model="form.id"
+               required pattern="[A-Za-z][A-Za-z0-9_\-]*"
+               {% if mode.is_edit() %}readonly{% endif %}
+               class="spec-form-input spec-form-input--mono">
+        <div class="spec-form-help">
+          {% if mode.is_new() %}{{ self.t("spec-form-id-help-new") }}{% else %}{{ self.t("spec-form-id-help-edit") }}{% endif %}
+        </div>
+      </div>
+
+      <div class="spec-form-field">
+        <label for="f-name" class="spec-form-label">{{ self.t("spec-form-name") }}</label>
+        <input id="f-name" type="text" name="display_name"
+               value="{{ form.display_name }}"
+               x-model="form.display_name"
+               required
+               class="spec-form-input">
+      </div>
+
+      <div class="spec-form-field">
+        <label for="f-desc" class="spec-form-label">{{ self.t("spec-form-desc") }}</label>
+        <textarea id="f-desc" name="description"
+                  x-model="form.description"
+                  rows="3"
+                  class="spec-form-input">{{ form.description }}</textarea>
+      </div>
+
+      <div class="spec-form-section-title">{{ self.t("spec-form-visual") }}</div>
+
+      <div class="spec-form-field">
+        <label for="f-logo" class="spec-form-label">{{ self.t("spec-form-logo") }}</label>
+        <input id="f-logo" type="text" name="logo"
+               value="{{ form.logo }}"
+               x-model="form.logo"
+               placeholder="/assets/img/myapp.png"
+               class="spec-form-input spec-form-input--mono">
+        <div class="spec-form-help">{{ self.t("spec-form-logo-help") }}</div>
+      </div>
+
+      <div class="grid grid-cols-3 gap-3">
+        <div class="spec-form-field">
+          <label for="f-access" class="spec-form-label">{{ self.t("spec-form-access") }}</label>
+          <select id="f-access" name="access" x-model="form.access" class="spec-form-input">
+            <option value="lock">🔒 {{ self.t("filter-access-restricted") }}</option>
+            <option value="lock_open">🔓 {{ self.t("filter-access-public") }}</option>
+          </select>
+        </div>
+        <div class="spec-form-field">
+          <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
+          <select id="f-state" name="state" x-model="form.state" class="spec-form-input">
+            <option value="active">{{ self.t("spec-form-state-active") }}</option>
+            <option value="inactive">{{ self.t("spec-form-state-inactive") }}</option>
+          </select>
+        </div>
+        <div class="spec-form-field">
+          <label for="f-tema" class="spec-form-label">{{ self.t("spec-form-tema") }}</label>
+          <input id="f-tema" type="text" name="tema"
+                 value="{{ form.tema }}"
+                 x-model="form.tema"
+                 list="tema-suggestions"
+                 class="spec-form-input">
+          <datalist id="tema-suggestions">
+            <option value="Gestão"></option>
+            <option value="Infraestrutura e Mobilidade"></option>
+            <option value="Políticas Públicas"></option>
+            <option value="Saúde Pública"></option>
+            <option value="Segurança Pública"></option>
+          </datalist>
+        </div>
+      </div>
+
+      <template x-if="needsContainer()">
+        <div>
+          <div class="spec-form-section-title">{{ self.t("spec-form-container") }}</div>
+
+          <div class="spec-form-field">
+            <label for="f-img" class="spec-form-label">{{ self.t("spec-form-image") }}</label>
+            <input id="f-img" type="text" name="container_image"
+                   value="{{ form.container_image }}"
+                   x-model="form.container_image"
+                   placeholder="org/repo:tag"
+                   class="spec-form-input spec-form-input--mono">
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <label for="f-seats" class="spec-form-label">{{ self.t("spec-form-seats") }}</label>
+              <input id="f-seats" type="number" name="seats_per_container"
+                     value="{{ form.seats_per_container }}"
+                     min="1"
+                     placeholder="10"
+                     class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <label for="f-lifetime" class="spec-form-label">{{ self.t("spec-form-lifetime") }}</label>
+              <input id="f-lifetime" type="number" name="max_lifetime"
+                     value="{{ form.max_lifetime }}"
+                     min="1"
+                     placeholder="360"
+                     class="spec-form-input">
+              <div class="spec-form-help">{{ self.t("spec-form-lifetime-help") }}</div>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <template x-if="needsLink()">
+        <div>
+          <div class="spec-form-section-title">{{ self.t("spec-form-link-section") }}</div>
+          <div class="spec-form-field">
+            <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
+            <input id="f-link" type="url" name="link"
+                   value="{{ form.link }}"
+                   x-model="form.link"
+                   placeholder="https://example.com"
+                   class="spec-form-input">
+          </div>
+        </div>
+      </template>
+
+      <div class="spec-form-section-title">{{ self.t("spec-form-meta") }}</div>
+      <div class="spec-form-field">
+        <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
+        <input id="f-updated" type="text" name="updated"
+               value="{{ form.updated }}"
+               x-model="form.updated"
+               placeholder="DD/MM/YYYY"
+               pattern="\d{2}/\d{2}/\d{4}"
+               class="spec-form-input spec-form-input--mono">
+        <div class="spec-form-help">{{ self.t("spec-form-updated-help") }}</div>
+      </div>
+    </form>
+
+    {# ── RIGHT: live preview + actions ─────────────────────── #}
+    <aside class="spec-form-preview">
+      <div class="spec-form-section-title">{{ self.t("spec-form-preview") }}</div>
+
+      <div class="rcard" style="margin:0">
+        <div class="rcover">
+          <div class="rcover-bg" :class="'tint-' + form.display_type"></div>
+          <template x-if="form.logo">
+            <img :src="form.logo" alt="" class="rcover-img">
+          </template>
+          <template x-if="!form.logo">
+            <span class="rcover-fallback" x-text="form.id || '—'"></span>
+          </template>
+          <span class="rbadge" :class="'b-' + form.display_type" x-text="badgeText()"></span>
+          <span class="rlock">
+            <i class="ti" :class="form.access === 'lock_open'
+                ? 'ti-lock-open text-[color:var(--color-lock-open)]'
+                : 'ti-lock text-[color:var(--color-lock)]'"></i>
+          </span>
+        </div>
+        <div class="rbody">
+          <div class="rtitle" x-text="form.display_name || form.id || '—'"></div>
+          <div class="rdesc" x-text="form.description || '—'"></div>
+          <div class="rmeta">
+            <span class="rmeta-left">
+              <span class="status-dot status-dot-new"></span>
+              <span x-text="form.updated ? form.updated : '—'"></span>
+            </span>
+            <i class="ti ti-arrow-right arrow-go"></i>
+          </div>
+        </div>
+      </div>
+
+      <div class="spec-form-help" style="margin-top:8px">
+        {{ self.t("spec-form-preview-help") }}
+      </div>
+
+      {% if mode.is_edit() %}
+        <div class="spec-form-actions-box">
+          <div class="spec-form-actions-title">{{ self.t("spec-form-actions") }}</div>
+          <form method="post" action="/admin/specs/{{ form.id }}/delete"
+                onsubmit="return confirm('{{ self.t("spec-form-delete-confirm") }}');">
+            <button type="submit" class="spec-form-delete">
+              <i class="ti ti-trash" aria-hidden="true"></i>
+              {{ self.t("spec-form-delete") }}
+            </button>
+          </form>
+        </div>
+      {% endif %}
+    </aside>
+
+  </div>
+</div>
+
+<script src="/assets/js/alpine.min.js" defer></script>
+<script>
+window.ruscker = window.ruscker || {};
+window.ruscker.specForm = (initial) => ({
+  form: initial,
+  needsContainer() {
+    return ['app', 'api', 'talk', 'report'].includes(this.form.display_type);
+  },
+  needsLink() {
+    return ['link', 'package'].includes(this.form.display_type);
+  },
+  badgeText() {
+    const map = {
+      // PT — matches type-*-abbr keys; localizing the preview is
+      // a polish item for the next batch.
+      app: 'APP', talk: 'APR', report: 'RLT',
+      package: 'PCT', api: 'API', link: 'LNK',
+    };
+    return map[this.form.display_type] || 'APP';
+  },
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="application-name" content="Ruscker">
+<meta name="robots" content="noindex,nofollow">
+<title>{% block title %}Admin · Ruscker{% endblock %}</title>
+
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="mask-icon" href="/assets/brand/mark.svg" color="#0f6e56">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+<link rel="preload" href="/assets/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/assets/fonts/jost-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css">
+</head>
+<body class="min-h-screen flex flex-col">
+
+{% block navbar %}
+<nav class="admin-navbar">
+  <a href="/admin" class="admin-brand">
+    <svg viewBox="0 0 80 80" width="22" height="22" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <span>ruscker · admin</span>
+  </a>
+
+  <div class="admin-nav-links">
+    <a href="/admin/specs" class="admin-nav-link {% if nav_section == "specs" %}is-active{% endif %}">
+      <i class="ti ti-apps" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-apps") }}</span>
+    </a>
+    <a href="/admin/images" class="admin-nav-link {% if nav_section == "images" %}is-active{% endif %}">
+      <i class="ti ti-photo" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-images") }}</span>
+    </a>
+    <a href="/admin/credentials" class="admin-nav-link {% if nav_section == "credentials" %}is-active{% endif %}">
+      <i class="ti ti-key" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-credentials") }}</span>
+    </a>
+    <a href="/admin/landing" class="admin-nav-link {% if nav_section == "landing" %}is-active{% endif %}">
+      <i class="ti ti-layout" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-landing") }}</span>
+    </a>
+    <a href="/admin/audit" class="admin-nav-link {% if nav_section == "audit" %}is-active{% endif %}">
+      <i class="ti ti-history" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-audit") }}</span>
+    </a>
+  </div>
+
+  <div class="admin-nav-actions">
+    <a href="/" class="admin-nav-link" title="{{ self.t("admin-nav-portal") }}">
+      <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-portal") }}</span>
+    </a>
+    <form method="post" action="/admin/logout" class="contents">
+      <button type="submit" class="admin-nav-link admin-nav-link--logout">
+        <i class="ti ti-logout" aria-hidden="true"></i>
+        <span>{{ self.t("admin-nav-logout") }}</span>
+      </button>
+    </form>
+  </div>
+</nav>
+{% endblock %}
+
+<main class="flex-1 px-6 py-6 max-w-7xl mx-auto w-full">
+  {% block content %}{% endblock %}
+</main>
+
+</body>
+</html>

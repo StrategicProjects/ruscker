@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="robots" content="noindex,nofollow">
+<title>{{ self.t("admin-login-title") }} · Ruscker</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css">
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center px-4">
+
+<form method="post" action="/admin/login" class="admin-login-card" autocomplete="off">
+
+  <div class="admin-login-brand">
+    <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <div class="brand-wordmark text-base">ruscker · admin</div>
+  </div>
+
+  <h1 class="text-lg font-medium tracking-tight">{{ self.t("admin-login-title") }}</h1>
+  <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-login-help") }}</p>
+
+  {% if error == "wrong-token" %}
+    <div class="admin-login-error" role="alert">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      {{ self.t("admin-login-error-wrong") }}
+    </div>
+  {% endif %}
+
+  <label class="admin-login-field">
+    <span class="admin-login-label">{{ self.t("admin-login-token-label") }}</span>
+    <input type="password" name="token" required autofocus
+           placeholder="{{ self.t("admin-login-token-placeholder") }}">
+  </label>
+
+  <button type="submit" class="admin-login-btn">
+    <i class="ti ti-login" aria-hidden="true"></i>
+    {{ self.t("admin-login-submit") }}
+  </button>
+
+  <div class="admin-login-footer">
+    <a href="/">{{ self.t("admin-login-back-portal") }}</a>
+    <form method="post" action="/__set/locale" class="contents">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="admin-login-locale {% if *loc == locale %}is-active{% endif %}">
+          {{ loc.code()|upper }}
+        </button>
+      {% endfor %}
+    </form>
+  </div>
+</form>
+
+</body>
+</html>

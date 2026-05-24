@@ -1,0 +1,120 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-audit-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div x-data="ruscker.audit()" x-cloak>
+
+  <div class="flex items-end justify-between mb-5">
+    <div>
+      <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-audit-title") }}</h1>
+      <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-audit-subtitle") }}</p>
+    </div>
+    <div class="text-xs text-[color:var(--text-faint)]">{{ entries.len() }}</div>
+  </div>
+
+  {# ── Filter bar ───────────────────────────────────────────── #}
+  <form method="get" action="/admin/audit"
+        class="audit-filter-bar">
+    <div class="select-wrap" :class="'{{ filter.family }}' !== '' ? 'is-active' : ''">
+      <select name="family" class="theme-select" onchange="this.form.submit()"
+              aria-label="{{ self.t("admin-audit-family") }}">
+        <option value="" {% if filter.family.is_empty() %}selected{% endif %}>{{ self.t("admin-audit-family-all") }}</option>
+        <option value="spec"       {% if filter.family == "spec" %}selected{% endif %}>{{ self.t("admin-audit-family-spec") }}</option>
+        <option value="image"      {% if filter.family == "image" %}selected{% endif %}>{{ self.t("admin-audit-family-image") }}</option>
+        <option value="credential" {% if filter.family == "credential" %}selected{% endif %}>{{ self.t("admin-audit-family-credential") }}</option>
+        <option value="landing"    {% if filter.family == "landing" %}selected{% endif %}>{{ self.t("admin-audit-family-landing") }}</option>
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+
+    <label class="search-pill flex-1 min-w-[180px]">
+      <i class="ti ti-search text-[14px] text-[color:var(--text-faint)]" aria-hidden="true"></i>
+      <input type="search" name="target"
+             value="{{ filter.target }}"
+             placeholder="{{ self.t("admin-audit-target-placeholder") }}">
+    </label>
+
+    {% if distinct_actors.len() > 1 %}
+      <div class="select-wrap" :class="'{{ filter.actor }}' !== '' ? 'is-active' : ''">
+        <select name="actor" class="theme-select" onchange="this.form.submit()"
+                aria-label="{{ self.t("admin-audit-actor") }}">
+          <option value="" {% if filter.actor.is_empty() %}selected{% endif %}>{{ self.t("admin-audit-actor-all") }}</option>
+          {% for a in distinct_actors %}
+            <option value="{{ a }}" {% if filter.actor == *a %}selected{% endif %}>{{ a }}</option>
+          {% endfor %}
+        </select>
+        <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+      </div>
+    {% endif %}
+
+    <button type="submit" class="sort-btn">
+      <i class="ti ti-filter" aria-hidden="true"></i>
+      <span>{{ self.t("admin-audit-apply") }}</span>
+    </button>
+
+    {% if !filter.family.is_empty() || !filter.target.is_empty() || !filter.actor.is_empty() %}
+      <a href="/admin/audit" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
+        {{ self.t("filter-clear") }}
+      </a>
+    {% endif %}
+  </form>
+
+  {# ── Entries ──────────────────────────────────────────────── #}
+  {% if entries.is_empty() %}
+    <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)] mt-4">
+      {{ self.t("admin-audit-empty") }}
+    </div>
+  {% else %}
+    <ul class="audit-list mt-4">
+      {% for e in entries %}
+        <li class="audit-row">
+          <button class="audit-row-summary {{ self.action_tone(e.action.as_str()) }}"
+                  type="button"
+                  @click="toggle({{ e.id }})">
+            <i class="ti {{ self.action_icon(e.action.as_str()) }} audit-row-icon" aria-hidden="true"></i>
+            <span class="audit-row-action">{{ e.action }}</span>
+            {% match e.target %}{% when Some with (t) %}
+              <span class="audit-row-target id-cell">{{ t }}</span>
+            {% when None %}
+              <span class="audit-row-target opacity-50">—</span>
+            {% endmatch %}
+            <span class="audit-row-spacer"></span>
+            {% match e.actor %}{% when Some with (a) %}
+              <span class="audit-row-actor">{{ a }}</span>
+            {% when None %}
+              <span class="audit-row-actor opacity-50">system</span>
+            {% endmatch %}
+            <time class="audit-row-time">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</time>
+            {% if e.diff.is_some() %}
+              <i class="ti audit-row-chev" :class="open === {{ e.id }} ? 'ti-chevron-down' : 'ti-chevron-right'" aria-hidden="true"></i>
+            {% else %}
+              <span class="audit-row-chev opacity-30">·</span>
+            {% endif %}
+          </button>
+          {% if e.diff.is_some() %}
+            <pre x-show="open === {{ e.id }}" class="audit-row-diff" x-transition.opacity>{{ self.pretty_diff(e) }}</pre>
+          {% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+    {% if entries.len() >= 100 %}
+      <p class="text-[11px] text-[color:var(--text-faint)] text-center mt-3">
+        {{ self.t("admin-audit-limit-hint") }}
+      </p>
+    {% endif %}
+  {% endif %}
+
+</div>
+
+<script src="/assets/js/alpine.min.js" defer></script>
+<script>
+window.ruscker = window.ruscker || {};
+window.ruscker.audit = () => ({
+  open: null,
+  toggle(id) { this.open = this.open === id ? null : id; },
+});
+</script>
+
+{% endblock %}

@@ -94,10 +94,92 @@ pub async fn import_all(pool: &SqlitePool, config: &Config) -> Result<ImportRepo
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum UpsertOutcome {
+pub enum UpsertOutcome {
     Created,
     Updated,
     Unchanged,
+}
+
+/// Fetch a single spec by id, deserializing `config_json` back to
+/// a [`Spec`]. Returns `None` if no row matches.
+pub async fn fetch_one(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT config_json FROM specs WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .with_context(|| format!("fetch spec {id}"))?;
+    match row {
+        None => Ok(None),
+        Some((json,)) => {
+            let s: Spec = serde_json::from_str(&json)
+                .with_context(|| format!("deserialize spec {id}"))?;
+            Ok(Some(s))
+        }
+    }
+}
+
+/// Upsert a single spec — used by the admin form. Wraps the same
+/// logic as `import_all`'s per-row path in its own transaction
+/// (with an audit-log entry tagged with `actor` if provided).
+pub async fn upsert_one(
+    pool: &SqlitePool,
+    spec: &Spec,
+    actor: Option<&str>,
+) -> Result<UpsertOutcome> {
+    let now = Utc::now();
+    let mut tx = pool.begin().await.context("begin upsert tx")?;
+    let outcome = upsert_in_tx(&mut tx, spec, now).await?;
+    if outcome != UpsertOutcome::Unchanged {
+        let action = if outcome == UpsertOutcome::Created {
+            "spec.create"
+        } else {
+            "spec.update"
+        };
+        sqlx::query(
+            "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+             VALUES (?, ?, ?, NULL, ?)",
+        )
+        .bind(actor)
+        .bind(action)
+        .bind(format!("spec:{}", spec.id))
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .context("audit upsert_one")?;
+    }
+    tx.commit().await.context("commit upsert_one tx")?;
+    Ok(outcome)
+}
+
+/// Delete a spec and all its history. Returns `true` if a row was
+/// actually removed (false if the id didn't exist). Audit log
+/// records the action either way.
+pub async fn delete_one(pool: &SqlitePool, id: &str, actor: Option<&str>) -> Result<bool> {
+    let now = Utc::now();
+    let mut tx = pool.begin().await.context("begin delete tx")?;
+    // ON DELETE CASCADE handles spec_versions; we still need to
+    // delete the specs row itself.
+    let rows = sqlx::query("DELETE FROM specs WHERE id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("delete spec {id}"))?;
+    let removed = rows.rows_affected() > 0;
+    if removed {
+        sqlx::query(
+            "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+             VALUES (?, 'spec.delete', ?, NULL, ?)",
+        )
+        .bind(actor)
+        .bind(format!("spec:{id}"))
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .context("audit delete")?;
+    }
+    tx.commit().await.context("commit delete tx")?;
+    Ok(removed)
 }
 
 async fn upsert_in_tx(

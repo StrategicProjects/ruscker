@@ -23,6 +23,7 @@ hyper-util = { workspace = true }
 http-body-util = { workspace = true }
 futures-util = { workspace = true }
 async-stream = { workspace = true }
+lol_html = { workspace = true }
 
 # Async
 tokio = { workspace = true }

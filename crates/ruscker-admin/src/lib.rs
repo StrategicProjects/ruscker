@@ -445,23 +445,71 @@ async fn security_headers(
         ("x-content-type-options", "nosniff"),
         ("x-frame-options", "DENY"),
         ("referrer-policy", "same-origin"),
-        (
-            "content-security-policy",
-            "default-src 'self'; \
-             script-src 'self' 'unsafe-inline'; \
-             style-src 'self' 'unsafe-inline'; \
-             img-src 'self' data:; \
-             font-src 'self'; \
-             connect-src 'self'; \
-             frame-ancestors 'none'; \
-             base-uri 'self'; \
-             form-action 'self'",
-        ),
     ];
     for (name, value) in defaults {
         if let Ok(hn) = HeaderName::from_bytes(name.as_bytes()) {
             h.entry(hn).or_insert(HeaderValue::from_static(value));
         }
     }
+    // CSP as a default too — but the landing route may set its own
+    // (widened for an operator's analytics origins), so `or_insert`
+    // must leave a handler-set value intact.
+    if let Ok(v) = HeaderValue::from_str(&content_security_policy("")) {
+        h.entry(axum::http::header::CONTENT_SECURITY_POLICY)
+            .or_insert(v);
+    }
     resp
+}
+
+/// Build the Content-Security-Policy for Ruscker's own pages.
+///
+/// `extra_origins` (space-separated, may be empty) is appended to the
+/// directives that fetch third-party resources (`script-src`,
+/// `img-src`, `connect-src`). The landing uses this to allow an
+/// operator-configured analytics provider without loosening the
+/// policy for every other page. `'unsafe-inline'` on script/style is
+/// still required by the inline landing/dashboard scripts (a
+/// nonce-based CSP is a tracked follow-up).
+pub(crate) fn content_security_policy(extra_origins: &str) -> String {
+    let e = extra_origins.trim();
+    let extra = if e.is_empty() {
+        String::new()
+    } else {
+        format!(" {e}")
+    };
+    format!(
+        "default-src 'self'; \
+         script-src 'self' 'unsafe-inline'{extra}; \
+         style-src 'self' 'unsafe-inline'; \
+         img-src 'self' data:{extra}; \
+         font-src 'self'; \
+         connect-src 'self'{extra}; \
+         frame-ancestors 'none'; \
+         base-uri 'self'; \
+         form-action 'self'"
+    )
+}
+
+#[cfg(test)]
+mod csp_tests {
+    use super::content_security_policy;
+
+    #[test]
+    fn base_policy_is_self_only() {
+        let csp = content_security_policy("");
+        assert!(csp.contains("script-src 'self' 'unsafe-inline';"));
+        assert!(csp.contains("connect-src 'self';"));
+        assert!(!csp.contains("plausible"));
+    }
+
+    #[test]
+    fn extra_origins_widen_script_img_connect() {
+        let csp = content_security_policy("https://plausible.io");
+        assert!(csp.contains("script-src 'self' 'unsafe-inline' https://plausible.io;"));
+        assert!(csp.contains("img-src 'self' data: https://plausible.io;"));
+        assert!(csp.contains("connect-src 'self' https://plausible.io;"));
+        // Directives that must NOT be widened.
+        assert!(csp.contains("style-src 'self' 'unsafe-inline';"));
+        assert!(csp.contains("frame-ancestors 'none';"));
+    }
 }

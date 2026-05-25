@@ -7,7 +7,7 @@
 use askama::Template;
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{header, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::get,
     Router,
@@ -54,6 +54,9 @@ struct LandingPage<'a> {
     seo_description: String,
     /// `og:image` URL, or empty ⇒ tag omitted.
     og_image: String,
+    /// Operator analytics snippet, injected verbatim into `<head>`
+    /// (rendered with `|safe`). Empty ⇒ nothing injected.
+    analytics_html: String,
 }
 
 impl<'a> LandingPage<'a> {
@@ -126,6 +129,8 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
     let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
     let og_image = not_blank(&lc.og_image).unwrap_or_default();
+    let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
+    let analytics_origins = not_blank(&lc.analytics_origins).unwrap_or_default();
 
     let page = LandingPage {
         locale: loc,
@@ -141,8 +146,19 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         page_title,
         seo_description,
         og_image,
+        analytics_html,
     };
-    render(&page)
+    let mut resp = render(&page);
+    // Widen *this page's* CSP so the analytics script can load/report.
+    // `security_headers` uses `or_insert`, so this handler-set value
+    // wins. Only applied when the operator listed origins.
+    if !analytics_origins.is_empty() {
+        if let Ok(v) = HeaderValue::from_str(&crate::content_security_policy(&analytics_origins)) {
+            resp.headers_mut()
+                .insert(header::CONTENT_SECURITY_POLICY, v);
+        }
+    }
+    resp
 }
 
 /// Centralized `askama::Template` → axum `Response`. Replaces the

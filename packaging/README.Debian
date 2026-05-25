@@ -16,6 +16,17 @@ the admin panel, and the proxy on 0.0.0.0:8080.
   systemctl status ruscker
   curl http://localhost:8080/healthz
 
+Admin token
+-----------
+On first install the package generates a strong, unique admin token
+and prints it ONCE in the install output (there is no default
+password). It is stored in /etc/ruscker/ruscker.env as
+RUSCKER_ADMIN_TOKEN. Log in at /admin/login with it. To see it again
+or rotate it:
+
+  sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env
+  # to rotate: edit the value, then  sudo systemctl restart ruscker
+
 First steps
 -----------
 1. Edit /etc/ruscker/application.yml to add your apps/APIs.

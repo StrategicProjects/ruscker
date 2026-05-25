@@ -22,9 +22,36 @@ case "$1" in
         chmod 750 /var/lib/ruscker
 
         # The secrets file must not be world-readable.
-        if [ -f /etc/ruscker/ruscker.env ]; then
-            chown root:ruscker /etc/ruscker/ruscker.env || true
-            chmod 640 /etc/ruscker/ruscker.env || true
+        ENVF=/etc/ruscker/ruscker.env
+        if [ -f "$ENVF" ]; then
+            chown root:ruscker "$ENVF" || true
+            chmod 640 "$ENVF" || true
+        fi
+
+        # On FIRST install only ("$2" empty), if no admin token is set
+        # yet, generate a strong random one so the admin panel works out
+        # of the box — WITHOUT shipping a guessable default credential.
+        # We never regenerate on upgrades, and never overwrite a token
+        # the operator already set. Uses /dev/urandom + od (coreutils),
+        # so there's no openssl dependency.
+        if [ -z "${2:-}" ] && [ -f "$ENVF" ] && ! grep -qE '^RUSCKER_ADMIN_TOKEN=.' "$ENVF"; then
+            TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            if grep -qE '^#*RUSCKER_ADMIN_TOKEN=' "$ENVF"; then
+                sed -i "s|^#*RUSCKER_ADMIN_TOKEN=.*|RUSCKER_ADMIN_TOKEN=${TOKEN}|" "$ENVF"
+            else
+                printf '\nRUSCKER_ADMIN_TOKEN=%s\n' "$TOKEN" >> "$ENVF"
+            fi
+            chown root:ruscker "$ENVF" || true
+            chmod 640 "$ENVF" || true
+            echo ""
+            echo "  +------------------------------------------------------------------+"
+            echo "  | Ruscker admin token (generated now, shown ONCE):                 |"
+            echo "  |   $TOKEN"
+            echo "  | Stored in $ENVF (root:ruscker 0640).         |"
+            echo "  | Log in at  /admin/login  with this token.                        |"
+            echo "  | Rotate it by editing that file, then: systemctl restart ruscker  |"
+            echo "  +------------------------------------------------------------------+"
+            echo ""
         fi
         ;;
 esac

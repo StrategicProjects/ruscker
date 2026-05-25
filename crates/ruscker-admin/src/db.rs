@@ -78,4 +78,5 @@ pub mod credentials;
 pub mod export;
 pub mod images;
 pub mod landing;
+pub mod landing_blocks;
 pub mod specs;

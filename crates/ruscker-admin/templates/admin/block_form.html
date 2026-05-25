@@ -1,0 +1,66 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-blocks-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="max-w-2xl">
+  <h1 class="text-xl font-medium tracking-tight mb-5">
+    {% if mode == "edit" %}{{ self.t("admin-blocks-form-edit") }}{% else %}{{ self.t("admin-blocks-form-new") }}{% endif %}
+  </h1>
+
+  <form method="post"
+        action="{% if mode == "edit" %}/admin/blocks/{{ id }}{% else %}/admin/blocks{% endif %}">
+
+    <div class="spec-form-field">
+      <label class="spec-form-label">{{ self.t("admin-blocks-slot") }}</label>
+      <select name="slot" class="spec-form-input">
+        {% for s in slots %}
+        <option value="{{ s }}" {% if *s == slot %}selected{% endif %}>
+          {% if *s == "bottom" %}{{ self.t("admin-blocks-slot-bottom") }}{% else %}{{ self.t("admin-blocks-slot-top") }}{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <div class="spec-form-help">{{ self.t("admin-blocks-slot-help") }}</div>
+    </div>
+
+    <div class="spec-form-field">
+      <label class="spec-form-label">{{ self.t("admin-blocks-title-label") }}</label>
+      <input type="text" name="title" value="{{ title }}" class="spec-form-input"
+             placeholder="{{ self.t("admin-blocks-title-placeholder") }}">
+    </div>
+
+    <div class="spec-form-field">
+      <label class="spec-form-label">{{ self.t("admin-blocks-html") }}</label>
+      <textarea name="html" rows="8" class="spec-form-input spec-form-input--mono"
+                placeholder="&lt;div&gt;…&lt;/div&gt;">{{ html }}</textarea>
+      <div class="spec-form-help">{{ self.t("admin-blocks-html-help") }}</div>
+    </div>
+
+    <div class="spec-form-field">
+      <label class="spec-form-label">{{ self.t("admin-blocks-origins") }}</label>
+      <input type="text" name="csp_origins" value="{{ csp_origins }}"
+             class="spec-form-input spec-form-input--mono" placeholder="https://example.com">
+      <div class="spec-form-help">{{ self.t("admin-blocks-origins-help") }}</div>
+    </div>
+
+    <div class="spec-form-field">
+      <label class="inline-flex items-center gap-2 text-sm">
+        <input type="checkbox" name="enabled" value="1" {% if enabled %}checked{% endif %}>
+        {{ self.t("admin-blocks-enabled-label") }}
+      </label>
+    </div>
+
+    <div class="flex items-center gap-3 mt-4">
+      <button type="submit"
+              class="px-4 py-2 rounded-md text-sm bg-[#0f6e56] text-white hover:bg-[#0c5a47]">
+        {{ self.t("admin-blocks-save") }}
+      </button>
+      <a href="/admin/blocks" class="text-sm text-[color:var(--text-muted)] hover:text-[color:var(--text)]">
+        {{ self.t("admin-blocks-cancel") }}
+      </a>
+    </div>
+  </form>
+</div>
+
+{% endblock %}

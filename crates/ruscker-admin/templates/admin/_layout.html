@@ -51,6 +51,10 @@
       <i class="ti ti-layout" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-landing") }}</span>
     </a>
+    <a href="/admin/blocks" class="admin-nav-link {% if nav_section == "blocks" %}is-active{% endif %}">
+      <i class="ti ti-code" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-blocks") }}</span>
+    </a>
     <a href="/admin/audit" class="admin-nav-link {% if nav_section == "audit" %}is-active{% endif %}">
       <i class="ti ti-history" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-audit") }}</span>

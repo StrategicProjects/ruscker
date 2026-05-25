@@ -22,6 +22,7 @@ use crate::theme::Theme;
 use crate::AppState;
 
 pub mod audit;
+pub mod blocks;
 pub mod credentials;
 pub mod dashboard;
 pub mod images;
@@ -40,6 +41,7 @@ pub fn routes() -> Router<AppState> {
         .merge(images::routes())
         .merge(credentials::routes())
         .merge(landing::routes())
+        .merge(blocks::routes())
         .merge(audit::routes())
 }
 

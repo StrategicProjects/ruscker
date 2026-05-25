@@ -1,0 +1,61 @@
+#!/bin/sh
+# postinst — create the service account and lock down the secrets file.
+# cargo-deb injects the systemd enable/start logic at the marker below.
+set -e
+
+case "$1" in
+    configure)
+        # System group + user the unit runs as. No login, no home dir
+        # of its own beyond the state directory.
+        if ! getent group ruscker >/dev/null; then
+            addgroup --system ruscker
+        fi
+        # Create the state directory before adduser so it doesn't warn
+        # about the home dir (/var/lib/ruscker) not existing yet.
+        mkdir -p /var/lib/ruscker
+        if ! getent passwd ruscker >/dev/null; then
+            adduser --system --ingroup ruscker --no-create-home \
+                --home /var/lib/ruscker --shell /usr/sbin/nologin \
+                --gecos "Ruscker service" ruscker
+        fi
+        chown ruscker:ruscker /var/lib/ruscker
+        chmod 750 /var/lib/ruscker
+
+        # The secrets file must not be world-readable.
+        ENVF=/etc/ruscker/ruscker.env
+        if [ -f "$ENVF" ]; then
+            chown root:ruscker "$ENVF" || true
+            chmod 640 "$ENVF" || true
+        fi
+
+        # On FIRST install only ("$2" empty), if no admin token is set
+        # yet, generate a strong random one so the admin panel works out
+        # of the box — WITHOUT shipping a guessable default credential.
+        # We never regenerate on upgrades, and never overwrite a token
+        # the operator already set. Uses /dev/urandom + od (coreutils),
+        # so there's no openssl dependency.
+        if [ -z "${2:-}" ] && [ -f "$ENVF" ] && ! grep -qE '^RUSCKER_ADMIN_TOKEN=.' "$ENVF"; then
+            TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+            if grep -qE '^#*RUSCKER_ADMIN_TOKEN=' "$ENVF"; then
+                sed -i "s|^#*RUSCKER_ADMIN_TOKEN=.*|RUSCKER_ADMIN_TOKEN=${TOKEN}|" "$ENVF"
+            else
+                printf '\nRUSCKER_ADMIN_TOKEN=%s\n' "$TOKEN" >> "$ENVF"
+            fi
+            chown root:ruscker "$ENVF" || true
+            chmod 640 "$ENVF" || true
+            echo ""
+            echo "  +------------------------------------------------------------------+"
+            echo "  | Ruscker admin token (generated now, shown ONCE):                 |"
+            echo "  |   $TOKEN"
+            echo "  | Stored in $ENVF (root:ruscker 0640).         |"
+            echo "  | Log in at  /admin/login  with this token.                        |"
+            echo "  | Rotate it by editing that file, then: systemctl restart ruscker  |"
+            echo "  +------------------------------------------------------------------+"
+            echo ""
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,14 @@
+#!/bin/sh
+# postrm — cargo-deb injects the systemd cleanup at the marker below. On
+# purge we also drop the state directory. The `ruscker` system user is
+# intentionally left behind (Debian policy discourages removing system
+# users), and config files are conf-files that dpkg removes on purge.
+set -e
+
+#DEBHELPER#
+
+if [ "$1" = "purge" ]; then
+    rm -rf /var/lib/ruscker
+fi
+
+exit 0

@@ -10,6 +10,39 @@ description = "Ruscker command-line interface"
 name = "ruscker"
 path = "src/main.rs"
 
+# --- Debian/Ubuntu packaging (cargo-deb) -----------------------------
+# Build with: cargo deb -p ruscker-cli
+# Paths are relative to this manifest dir, hence the ../../ to reach the
+# repo-root `packaging/` directory.
+[package.metadata.deb]
+name = "ruscker"
+maintainer = "Ruscker contributors <ruscker@strategicprojects.github.io>"
+copyright = "2025-2026, Ruscker contributors. Licensed under Apache-2.0."
+section = "web"
+priority = "optional"
+# $auto pulls the binary's shared-lib deps (libc, …); ca-certificates
+# is needed for TLS when pulling private images from registries.
+depends = "$auto, ca-certificates"
+extended-description = """\
+Ruscker is a lightweight Rust alternative to ShinyProxy and Shiny Server \
+Free. It hosts and load-balances containerized interactive web apps \
+(R/Shiny, Streamlit, Dash, Voila) and stateless HTTP APIs behind a single \
+proxy with a custom landing page and an admin panel. Ships as a single \
+binary with no JVM."""
+assets = [
+    ["target/release/ruscker", "usr/bin/", "755"],
+    ["../../packaging/application.example.yml", "etc/ruscker/application.yml", "644"],
+    ["../../packaging/ruscker.env.example", "etc/ruscker/ruscker.env", "640"],
+    ["../../packaging/README.Debian", "usr/share/doc/ruscker/README.Debian", "644"],
+]
+conf-files = ["/etc/ruscker/application.yml", "/etc/ruscker/ruscker.env"]
+maintainer-scripts = "../../packaging/debian/"
+
+[package.metadata.deb.systemd-units]
+unit-scripts = "../../packaging/systemd"
+enable = true
+start = true
+
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
 ruscker-core = { path = "../ruscker-core" }

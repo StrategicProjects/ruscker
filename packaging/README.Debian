@@ -1,0 +1,64 @@
+Ruscker for Debian/Ubuntu
+=========================
+
+Installed layout
+----------------
+  /usr/bin/ruscker                 the binary
+  /etc/ruscker/application.yml     your config (conffile)
+  /etc/ruscker/ruscker.env         secrets & env, root:ruscker 0640 (conffile)
+  /lib/systemd/system/ruscker.service   the service unit
+  /var/lib/ruscker/                writable state (SQLite db, etc.)
+
+The package creates a `ruscker` system user and enables + starts the
+service on install. By default it serves the public landing page,
+the admin panel, and the proxy on 0.0.0.0:8080.
+
+  systemctl status ruscker
+  curl http://localhost:8080/healthz
+
+Admin token
+-----------
+On first install the package generates a strong, unique admin token
+and prints it ONCE in the install output (there is no default
+password). It is stored in /etc/ruscker/ruscker.env as
+RUSCKER_ADMIN_TOKEN. Log in at /admin/login with it. To see it again
+or rotate it:
+
+  sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env
+  # to rotate: edit the value, then  sudo systemctl restart ruscker
+
+First steps
+-----------
+1. Edit /etc/ruscker/application.yml to add your apps/APIs.
+2. Put secrets in /etc/ruscker/ruscker.env (admin token, master key,
+   registry password). Generate values with `openssl rand -hex 32`.
+3. `sudo systemctl restart ruscker`
+
+Validate a config before restarting:
+
+  ruscker validate /etc/ruscker/application.yml
+  ruscker validate --strict-compat /etc/ruscker/application.yml   # migrating from ShinyProxy
+
+Enabling the container backend (--docker)
+-----------------------------------------
+To let Ruscker spawn app containers, it must talk to the Docker daemon:
+
+1. Add `--docker` (and usually `--db /var/lib/ruscker/ruscker.db`) to
+   ExecStart. Use a drop-in so package upgrades don't clobber it:
+
+     sudo systemctl edit ruscker
+     # then add:
+     [Service]
+     ExecStart=
+     ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml \
+       --bind 0.0.0.0:8080 --docker --db /var/lib/ruscker/ruscker.db
+
+2. Give the `ruscker` user access to the Docker socket by uncommenting
+   `SupplementaryGroups=docker` in the same drop-in. NOTE: membership in
+   the docker group is effectively root on the host — the same trade-off
+   ShinyProxy carries.
+
+3. `sudo systemctl daemon-reload && sudo systemctl restart ruscker`
+
+Health probes for load balancers / orchestrators: GET /healthz
+(liveness) and /readyz (readiness).

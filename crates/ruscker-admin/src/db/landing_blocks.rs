@@ -216,6 +216,65 @@ pub async fn delete(pool: &SqlitePool, id: &str, actor: Option<&str>) -> Result<
     Ok(removed)
 }
 
+/// Move a block one step within its slot by swapping `position` with
+/// the adjacent block (`up` = toward the front). No-op (returns
+/// `false`) when the block doesn't exist or is already at the slot
+/// edge. Gap-safe: it picks the nearest neighbour by position, not by
+/// `position ± 1`.
+pub async fn move_block(
+    pool: &SqlitePool,
+    id: &str,
+    up: bool,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let now = Utc::now();
+    let mut tx = pool.begin().await.context("begin block move tx")?;
+
+    let me: Option<(String, i64)> =
+        sqlx::query_as("SELECT slot, position FROM landing_blocks WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("lookup block for move")?;
+    let Some((slot, pos)) = me else {
+        return Ok(false);
+    };
+
+    let neighbour: Option<(String, i64)> = if up {
+        sqlx::query_as(
+            "SELECT id, position FROM landing_blocks
+               WHERE slot = ? AND position < ? ORDER BY position DESC LIMIT 1",
+        )
+    } else {
+        sqlx::query_as(
+            "SELECT id, position FROM landing_blocks
+               WHERE slot = ? AND position > ? ORDER BY position ASC LIMIT 1",
+        )
+    }
+    .bind(&slot)
+    .bind(pos)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("find move neighbour")?;
+    let Some((nid, npos)) = neighbour else {
+        return Ok(false); // already at the slot edge
+    };
+
+    for (bid, p) in [(id, npos), (nid.as_str(), pos)] {
+        sqlx::query("UPDATE landing_blocks SET position = ?, updated_at = ? WHERE id = ?")
+            .bind(p)
+            .bind(now)
+            .bind(bid)
+            .execute(&mut *tx)
+            .await
+            .context("swap block position")?;
+    }
+
+    audit(&mut tx, actor, "landing_block.move", id, now).await?;
+    tx.commit().await.context("commit block move")?;
+    Ok(true)
+}
+
 async fn audit(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     actor: Option<&str>,
@@ -265,6 +324,32 @@ mod tests {
         assert_eq!(top[0].position, 0);
         assert_eq!(top[1].position, 1);
         assert_eq!(all.iter().filter(|b| b.slot == "bottom").count(), 1);
+    }
+
+    #[tokio::test]
+    async fn move_block_swaps_within_slot() {
+        let pool = open_memory().await.unwrap();
+        let a = insert(&pool, &input("top", "a"), None).await.unwrap();
+        let _b = insert(&pool, &input("top", "b"), None).await.unwrap();
+        let c = insert(&pool, &input("top", "c"), None).await.unwrap();
+        let order = |v: &[LandingBlock]| {
+            v.iter()
+                .filter(|b| b.slot == "top")
+                .map(|b| b.title.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // Move c (last) up → swaps with b → a, c, b.
+        assert!(move_block(&pool, &c, true, None).await.unwrap());
+        assert_eq!(order(&list_all(&pool).await.unwrap()), ["a", "c", "b"]);
+
+        // Moving a (first) up is a no-op at the slot edge.
+        assert!(!move_block(&pool, &a, true, None).await.unwrap());
+        assert_eq!(order(&list_all(&pool).await.unwrap()), ["a", "c", "b"]);
+
+        // Move a down → swaps with c → c, a, b.
+        assert!(move_block(&pool, &a, false, None).await.unwrap());
+        assert_eq!(order(&list_all(&pool).await.unwrap()), ["c", "a", "b"]);
     }
 
     #[tokio::test]

@@ -27,6 +27,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/blocks/new", get(new_form))
         .route("/admin/blocks/{id}", get(edit_form).post(update))
         .route("/admin/blocks/{id}/delete", post(delete))
+        .route("/admin/blocks/{id}/move/{dir}", post(move_block))
 }
 
 // ── List ─────────────────────────────────────────────────────────
@@ -243,6 +244,28 @@ async fn delete(
         Ok(_) => Redirect::to("/admin/blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "delete block failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
+        }
+    }
+}
+
+async fn move_block(
+    _: AdminSession,
+    State(state): State<AppState>,
+    Path((id, dir)): Path<(String, String)>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return no_db();
+    };
+    let up = match dir.as_str() {
+        "up" => true,
+        "down" => false,
+        _ => return (StatusCode::BAD_REQUEST, "dir must be up|down").into_response(),
+    };
+    match landing_blocks::move_block(pool, &id, up, Some("admin")).await {
+        Ok(_) => Redirect::to("/admin/blocks").into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, id, "move block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
         }
     }

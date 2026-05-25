@@ -40,6 +40,18 @@
           {% endif %}
         </td>
         <td class="py-2 text-right whitespace-nowrap">
+          <form method="post" action="/admin/blocks/{{ b.id }}/move/up" class="inline">
+            <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-1"
+                    title="{{ self.t("admin-blocks-move-up") }}" aria-label="{{ self.t("admin-blocks-move-up") }}">
+              <i class="ti ti-arrow-up" aria-hidden="true"></i>
+            </button>
+          </form>
+          <form method="post" action="/admin/blocks/{{ b.id }}/move/down" class="inline">
+            <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-3"
+                    title="{{ self.t("admin-blocks-move-down") }}" aria-label="{{ self.t("admin-blocks-move-down") }}">
+              <i class="ti ti-arrow-down" aria-hidden="true"></i>
+            </button>
+          </form>
           <a href="/admin/blocks/{{ b.id }}" class="text-[color:var(--text-muted)] hover:text-[color:var(--text)] mr-3">{{ self.t("admin-blocks-edit") }}</a>
           <form method="post" action="/admin/blocks/{{ b.id }}/delete" class="inline"
                 onsubmit="return confirm('{{ self.t("admin-blocks-delete-confirm") }}')">

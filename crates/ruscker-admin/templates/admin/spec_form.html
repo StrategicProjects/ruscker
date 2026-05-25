@@ -102,6 +102,24 @@
                placeholder="/assets/img/myapp.png"
                class="spec-form-input spec-form-input--mono">
         <div class="spec-form-help">{{ self.t("spec-form-logo-help") }}</div>
+
+        {# Logo picker — choose from the media library (#54). Clicking a
+           thumbnail sets form.logo; the text field still accepts manual
+           paths / external URLs. Hidden when the library is empty. #}
+        {% if !logo_images.is_empty() %}
+        <div class="flex flex-wrap gap-2 mt-2" x-cloak>
+          {% for name in logo_images %}
+          <button type="button" title="{{ name }}"
+                  @click="form.logo = '/assets/img/{{ name }}'"
+                  class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
+                  :class="form.logo === '/assets/img/{{ name }}' ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
+            <img src="/assets/img/{{ name }}" alt="{{ name }}" loading="lazy"
+                 class="w-full h-full object-cover">
+          </button>
+          {% endfor %}
+        </div>
+        <div class="spec-form-help">{{ self.t("spec-form-logo-pick-help") }}</div>
+        {% endif %}
       </div>
 
       {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}

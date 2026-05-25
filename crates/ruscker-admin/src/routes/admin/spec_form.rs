@@ -262,6 +262,9 @@ struct SpecFormPage<'a> {
     form: SpecForm,
     /// Pre-validation errors (Fluent keys) shown above the form.
     errors: Vec<&'static str>,
+    /// Filenames in the media library, for the logo picker. Empty
+    /// when no DB is wired or the listing fails.
+    logo_images: Vec<String>,
 }
 
 impl<'a> SpecFormPage<'a> {
@@ -291,6 +294,18 @@ impl<'a> SpecFormPage<'a> {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
+/// Media-library filenames for the logo picker. Empty when no DB is
+/// wired or the query fails — the picker degrades to the text field.
+async fn logo_filenames(state: &AppState) -> Vec<String> {
+    match state.db.as_ref() {
+        Some(pool) => db::images::list_all(pool)
+            .await
+            .map(|imgs| imgs.into_iter().map(|i| i.filename).collect())
+            .unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
+
 async fn new_form(
     _: AdminSession,
     State(state): State<AppState>,
@@ -312,6 +327,7 @@ async fn new_form(
             ..Default::default()
         },
         errors: Vec::new(),
+        logo_images: logo_filenames(&state).await,
     };
     super::render(&page)
 }
@@ -343,6 +359,7 @@ async fn edit_form(
         mode: FormMode::Edit,
         form: SpecForm::from_spec(&spec),
         errors: Vec::new(),
+        logo_images: logo_filenames(&state).await,
     };
     super::render(&page)
 }
@@ -373,7 +390,7 @@ async fn create(
     }
 
     if !errors.is_empty() {
-        return render_form_with_errors(&state, loc, theme, FormMode::New, form, errors);
+        return render_form_with_errors(&state, loc, theme, FormMode::New, form, errors).await;
     }
 
     let id = form.id.trim().to_string();
@@ -413,7 +430,7 @@ async fn update(
 
     let errors = form.validate(FormMode::Edit);
     if !errors.is_empty() {
-        return render_form_with_errors(&state, loc, theme, FormMode::Edit, form, errors);
+        return render_form_with_errors(&state, loc, theme, FormMode::Edit, form, errors).await;
     }
 
     let spec = match form.into_spec() {
@@ -450,7 +467,7 @@ async fn delete(
     }
 }
 
-fn render_form_with_errors(
+async fn render_form_with_errors(
     state: &AppState,
     loc: Locale,
     theme: Theme,
@@ -467,6 +484,7 @@ fn render_form_with_errors(
         mode,
         form,
         errors,
+        logo_images: logo_filenames(&state).await,
     };
     let body = match page.render() {
         Ok(s) => s,

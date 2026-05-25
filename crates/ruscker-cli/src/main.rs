@@ -18,7 +18,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use ruscker_config::{CompatWarning, Config, SpecKind, ValidationReport, Warning};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// How log lines are rendered.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, ValueEnum)]
@@ -120,9 +120,11 @@ enum Command {
         #[arg(long)]
         bind: Option<std::net::SocketAddr>,
 
-        /// Directory served at /assets/img/. Defaults to
-        /// `<config-dir>/assets/img/` if that path exists, otherwise
-        /// no image route is mounted (cards fall back to tint-only).
+        /// Directory served at /assets/img/. When omitted, auto-
+        /// discovered next to the config: `<config-dir>/assets/img/`,
+        /// then `<config-dir>/<template-path>/assets/img/` (the
+        /// ShinyProxy layout). If none exist, no image route is
+        /// mounted (cards fall back to tint-only covers).
         #[arg(long)]
         images_dir: Option<PathBuf>,
 
@@ -223,6 +225,38 @@ fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+/// Auto-discover the `/assets/img/` source directory beside a config
+/// when `--images-dir` isn't given. Tries, in order:
+///
+/// 1. `<config-dir>/assets/img/` — assets sitting next to the YAML.
+/// 2. `<config-dir>/<proxy.template-path>/assets/img/` — the ShinyProxy
+///    `template-path` layout (e.g. `templates/mlk`), so a config left
+///    in place after migration finds its card logos with no flag.
+///
+/// Returns the first existing directory, or `None`.
+fn discover_images_dir(config_path: &Path, config: &Config) -> Option<PathBuf> {
+    let base = config_path.parent().unwrap_or_else(|| Path::new("."));
+
+    let direct = base.join("assets/img");
+    if direct.is_dir() {
+        return Some(direct);
+    }
+
+    if let Some(tp) = config.proxy.template_path.as_ref() {
+        let tp_dir = if tp.is_absolute() {
+            tp.clone()
+        } else {
+            base.join(tp)
+        };
+        let candidate = tp_dir.join("assets/img");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
 fn cmd_serve(
     config_path: &PathBuf,
     bind_override: Option<std::net::SocketAddr>,
@@ -246,15 +280,14 @@ fn cmd_serve(
         }
     };
 
-    // Default-discover images: look next to the config under
-    // `assets/img/`. Matches the ShinyProxy templates/mlk/assets/img
-    // layout, just relative to the YAML location.
+    // Resolve the images dir: explicit flag wins, else auto-discover
+    // next to the config / under the ShinyProxy template-path.
     let images_dir = images_dir_override.or_else(|| {
-        let candidate = config_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."))
-            .join("assets/img");
-        candidate.is_dir().then_some(candidate)
+        let found = discover_images_dir(config_path, &config);
+        if let Some(dir) = &found {
+            tracing::info!(dir = %dir.display(), "auto-discovered images dir");
+        }
+        found
     });
 
     let rt = tokio::runtime::Builder::new_multi_thread()
@@ -545,5 +578,37 @@ mod tests {
         assert!(
             Cli::try_parse_from(["ruscker", "--log-format", "xml", "validate", "app.yml"]).is_err()
         );
+    }
+
+    #[test]
+    fn discovers_template_path_assets_img() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("ruscker-disc-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let cfg_dir = tmp.join("etc");
+        let tp_img = cfg_dir.join("templates/mlk/assets/img");
+        fs::create_dir_all(&tp_img).unwrap();
+        let cfg_path = cfg_dir.join("application.yml");
+        let config =
+            Config::from_yaml("proxy:\n  template-path: templates/mlk\n  specs: []\n").unwrap();
+
+        // Falls through to <config-dir>/<template-path>/assets/img.
+        assert_eq!(discover_images_dir(&cfg_path, &config), Some(tp_img));
+
+        // A direct <config-dir>/assets/img wins over the template-path.
+        let direct = cfg_dir.join("assets/img");
+        fs::create_dir_all(&direct).unwrap();
+        assert_eq!(discover_images_dir(&cfg_path, &config), Some(direct));
+
+        fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn discovers_none_when_no_assets() {
+        let tmp = std::env::temp_dir().join(format!("ruscker-disc-none-{}", std::process::id()));
+        let cfg_path = tmp.join("application.yml");
+        let config =
+            Config::from_yaml("proxy:\n  template-path: templates/x\n  specs: []\n").unwrap();
+        assert!(discover_images_dir(&cfg_path, &config).is_none());
     }
 }

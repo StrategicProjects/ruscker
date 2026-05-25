@@ -107,6 +107,7 @@ spec-form-desc = Descripción
 spec-form-visual = Visual
 spec-form-logo = Logo del card
 spec-form-logo-help = URL o ruta /assets/img/foo.png. Ver docs/IMAGES.md.
+spec-form-logo-pick-help = O elige una imagen ya subida en la biblioteca de medios.
 spec-form-access = Acceso
 spec-form-state = Estado
 spec-form-state-active = Activo

@@ -107,6 +107,7 @@ spec-form-desc = Description
 spec-form-visual = Visuel
 spec-form-logo = Logo de la carte
 spec-form-logo-help = URL ou chemin /assets/img/foo.png. Voir docs/IMAGES.md.
+spec-form-logo-pick-help = Ou choisissez une image déjà importée dans la médiathèque.
 spec-form-access = Accès
 spec-form-state = État
 spec-form-state-active = Actif

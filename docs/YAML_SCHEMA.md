@@ -49,6 +49,7 @@ ignored by Ruscker.
 | `heartbeat-timeout` | ms | `3600000` | Session expiry; `-1` = never |
 | `container-wait-time` | ms | `60000` | Max wait for container Ready |
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
+| `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
 | `container-log-path` | path | none | Directory for per-container logs |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |
@@ -174,6 +175,33 @@ every response for that API spec, and answer `OPTIONS` preflight
 requests itself (`204`) without touching the container. Headers an
 upstream app already set are never overwritten — an API that does
 its own CORS wins. CORS applies only to the `/api/` route family.
+
+### `max-body-size` — cap proxied request bodies
+
+Limits how large a request body the proxy will forward, for both
+`/app/` and `/api/` routes. Set it globally on `proxy.max-body-size`
+and/or override it per spec:
+
+```yaml
+proxy:
+  max-body-size: 10m          # global default
+  specs:
+    - id: upload_api
+      container-image: org/api:1
+      type: api
+      max-body-size: 100m     # this spec accepts larger uploads
+```
+
+Format is the Docker-style size string used elsewhere (`"512"` bytes,
+`"10m"`, `"1g"`; binary units). The effective limit is the spec's own
+value if set, otherwise the global default; unset everywhere means **no
+limit** (the default, preserving prior behaviour).
+
+A request whose `Content-Length` exceeds the limit is rejected with
+`413 Payload Too Large` before any container is touched. A chunked or
+under-declared body that grows past the cap mid-stream is also stopped
+(it surfaces as a `502`). A malformed size string is ignored (no limit
+applied) and flagged by `ruscker validate`.
 
 ### Load-balancing fields (any containerized spec)
 

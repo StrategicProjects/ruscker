@@ -90,6 +90,15 @@ pub enum Warning {
         spec_id: String,
         value: String,
     },
+    /// A `max-body-size` value (global `proxy.max-body-size` or a
+    /// per-spec override) doesn't parse as a Docker-style size
+    /// (`"10m"`, `"1g"`, plain bytes). The proxy falls back to "no
+    /// limit there", so the intended cap isn't enforced. `location`
+    /// is `"proxy"` for the global, or the spec id.
+    InvalidMaxBodySize {
+        location: String,
+        value: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -283,6 +292,15 @@ pub fn run(config: &Config) -> ValidationReport {
         }
     }
 
+    // Global max-body-size: set but unparseable means the intended
+    // cap silently does nothing.
+    if config.proxy.max_body_size.is_some() && config.proxy.max_body_bytes().is_none() {
+        warnings.push(Warning::InvalidMaxBodySize {
+            location: "proxy".to_string(),
+            value: config.proxy.max_body_size.clone().unwrap_or_default(),
+        });
+    }
+
     let stats = collect_stats(config);
 
     ValidationReport { warnings, stats }
@@ -364,6 +382,18 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
                     value: raw.clone(),
                 });
             }
+        }
+    }
+
+    // Per-spec max-body-size override that's set but unparseable —
+    // same hazard: the cap silently does nothing. Parsing with a
+    // `None` global isolates the spec's own value.
+    if let Some(raw) = &spec.max_body_size {
+        if spec.effective_max_body_bytes(None).is_none() {
+            warnings.push(Warning::InvalidMaxBodySize {
+                location: spec.id.clone(),
+                value: raw.clone(),
+            });
         }
     }
 }
@@ -482,6 +512,63 @@ proxy:
                 .iter()
                 .any(|w| matches!(w, Warning::InvalidRateLimit { .. })),
             "valid rate-limit should not warn, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn flags_malformed_global_max_body_size() {
+        let yaml = "proxy:\n  max-body-size: huge\n  specs: []\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidMaxBodySize { location, value }
+                    if location == "proxy" && value == "huge"
+            )),
+            "expected proxy InvalidMaxBodySize, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn flags_malformed_spec_max_body_size() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: api1
+      container-image: org/api:1
+      max-body-size: "500frogs"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidMaxBodySize { location, value }
+                    if location == "api1" && value == "500frogs"
+            )),
+            "expected spec InvalidMaxBodySize, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn accepts_valid_max_body_sizes() {
+        let yaml = r#"
+proxy:
+  max-body-size: 50m
+  specs:
+    - id: api1
+      container-image: org/api:1
+      max-body-size: "10m"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::InvalidMaxBodySize { .. })),
+            "valid sizes should not warn, got {:?}",
             report.warnings
         );
     }

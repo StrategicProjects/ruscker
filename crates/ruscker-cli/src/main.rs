@@ -476,6 +476,12 @@ fn format_warning(w: &Warning) -> String {
                  (expected `N/unit`, e.g. `100/min`) — no limit will be applied"
             )
         }
+        Warning::InvalidMaxBodySize { location, value } => {
+            format!(
+                "{location} has an invalid max-body-size `{value}` \
+                 (expected a size like `10m`, `1g`, or plain bytes) — no limit will be applied"
+            )
+        }
     }
 }
 

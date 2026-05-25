@@ -195,6 +195,22 @@
         <div class="spec-form-help">{{ self.t("admin-landing-og-image-help") }}</div>
       </div>
 
+      <div class="spec-form-section-title">{{ self.t("admin-landing-analytics") }}</div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-analytics-html") }}</label>
+        <textarea name="analytics_html" rows="3" x-model="form.analytics_html"
+                  placeholder="&lt;script defer data-domain=&quot;...&quot; src=&quot;https://plausible.io/js/script.js&quot;&gt;&lt;/script&gt;"
+                  class="spec-form-input spec-form-input--mono">{{ form.analytics_html }}</textarea>
+        <div class="spec-form-help">{{ self.t("admin-landing-analytics-html-help") }}</div>
+      </div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-analytics-origins") }}</label>
+        <input type="text" name="analytics_origins" x-model="form.analytics_origins"
+               placeholder="https://plausible.io"
+               class="spec-form-input spec-form-input--mono" value="{{ form.analytics_origins }}">
+        <div class="spec-form-help">{{ self.t("admin-landing-analytics-origins-help") }}</div>
+      </div>
+
       <div class="info-box">
         <i class="ti ti-info-circle" aria-hidden="true"></i>
         <div>

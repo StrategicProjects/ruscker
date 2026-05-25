@@ -200,8 +200,13 @@ admin-landing-seo-description-placeholder = Résumé pour les moteurs de recherc
 admin-landing-seo-description-help = Utilisé dans la meta description et og:description. Vide reprend le texte d'introduction.
 admin-landing-og-image = Image de partage (og:image)
 admin-landing-og-image-help = URL ou chemin (ex. /assets/img/og.png) affiché lors du partage sur les réseaux sociaux.
+admin-landing-analytics = Analytics
+admin-landing-analytics-html = Snippet analytics
+admin-landing-analytics-html-help = HTML injecté dans le <head> de la landing (ex. une balise <script> Plausible/Matomo/GA). Rendu sans échappement — n'utilisez que des sources de confiance.
+admin-landing-analytics-origins = Origines autorisées (CSP)
+admin-landing-analytics-origins-help = Domaines séparés par des espaces (ex. https://plausible.io) autorisés dans la CSP de la landing pour que le script se charge et envoie ses données.
 admin-landing-future-title = Bientôt
-admin-landing-future-help = Éditeur de logos, réorganisation des sections, blocs HTML personnalisés et analytics. Pour l'instant ces champs suivent le YAML.
+admin-landing-future-help = Réorganisation des sections et blocs HTML personnalisés. Pour l'instant ces champs suivent le YAML.
 
 # Admin audit log
 admin-audit-title = Journal d'audit

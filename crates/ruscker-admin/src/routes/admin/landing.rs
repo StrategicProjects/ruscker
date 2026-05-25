@@ -78,6 +78,8 @@ pub struct LandingForm {
     pub seo_title: String,
     pub seo_description: String,
     pub og_image: String,
+    pub analytics_html: String,
+    pub analytics_origins: String,
 }
 
 impl LandingForm {
@@ -94,6 +96,8 @@ impl LandingForm {
             seo_title: lc.seo_title.clone().unwrap_or_default(),
             seo_description: lc.seo_description.clone().unwrap_or_default(),
             og_image: lc.og_image.clone().unwrap_or_default(),
+            analytics_html: lc.analytics_html.clone().unwrap_or_default(),
+            analytics_origins: lc.analytics_origins.clone().unwrap_or_default(),
         }
     }
 
@@ -118,6 +122,8 @@ impl LandingForm {
             seo_title: empty_to_none(self.seo_title),
             seo_description: empty_to_none(self.seo_description),
             og_image: empty_to_none(self.og_image),
+            analytics_html: empty_to_none(self.analytics_html),
+            analytics_origins: empty_to_none(self.analytics_origins),
         }
     }
 }

@@ -261,6 +261,22 @@ pub struct LandingCustomization {
     /// or an absolute URL. Omitted from the head when unset.
     #[serde(default, rename = "og-image")]
     pub og_image: Option<String>,
+
+    /// Raw analytics snippet (e.g. a Plausible / Matomo / GA
+    /// `<script>` tag) injected verbatim into the public landing
+    /// `<head>`. Operator-authored and **admin-trusted** — rendered
+    /// unescaped, so only set it from a trusted source. External
+    /// scripts also need their origin listed in
+    /// [`Self::analytics_origins`] (the landing CSP blocks others).
+    #[serde(default, rename = "analytics-html")]
+    pub analytics_html: Option<String>,
+
+    /// Space-separated origins (e.g. `https://plausible.io`) added to
+    /// the landing's CSP `script-src` / `connect-src` / `img-src` so
+    /// the analytics script can load and report. Only widens the
+    /// public landing's policy, not the admin's.
+    #[serde(default, rename = "analytics-origins")]
+    pub analytics_origins: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

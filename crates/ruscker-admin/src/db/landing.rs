@@ -23,10 +23,13 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
         Option<String>, // seo_title
         Option<String>, // seo_description
         Option<String>, // og_image
+        Option<String>, // analytics_html
+        Option<String>, // analytics_origins
     );
     let row: Option<Row> = sqlx::query_as(
         "SELECT header_bg, header_fg, intro, intro_locales_json,
-                seo_title, seo_description, og_image
+                seo_title, seo_description, og_image,
+                analytics_html, analytics_origins
            FROM landing_customization WHERE id = 1",
     )
     .fetch_optional(pool)
@@ -34,7 +37,17 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
     .context("load landing_customization")?;
     match row {
         None => Ok(LandingCustomization::default()),
-        Some((bg, fg, intro, locales_json, seo_title, seo_description, og_image)) => {
+        Some((
+            bg,
+            fg,
+            intro,
+            locales_json,
+            seo_title,
+            seo_description,
+            og_image,
+            analytics_html,
+            analytics_origins,
+        )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
             Ok(LandingCustomization {
@@ -45,6 +58,8 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
                 seo_title,
                 seo_description,
                 og_image,
+                analytics_html,
+                analytics_origins,
             })
         }
     }
@@ -69,7 +84,8 @@ pub async fn update(
         "UPDATE landing_customization
             SET header_bg = ?, header_fg = ?, intro = ?,
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
-                og_image = ?, updated_at = ?
+                og_image = ?, analytics_html = ?, analytics_origins = ?,
+                updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -79,6 +95,8 @@ pub async fn update(
     .bind(none_if_empty(&lc.seo_title))
     .bind(none_if_empty(&lc.seo_description))
     .bind(none_if_empty(&lc.og_image))
+    .bind(none_if_empty(&lc.analytics_html))
+    .bind(none_if_empty(&lc.analytics_origins))
     .bind(now)
     .execute(&mut *tx)
     .await
@@ -161,6 +179,20 @@ mod tests {
             Some("Monitoramento estratégico do estado")
         );
         assert_eq!(got.og_image.as_deref(), Some("/assets/img/og.png"));
+    }
+
+    #[tokio::test]
+    async fn analytics_fields_roundtrip() {
+        let pool = open_memory().await.unwrap();
+        let snippet = "<script src=\"https://plausible.io/js/script.js\"></script>";
+        let origins = "https://plausible.io";
+        let mut lc = LandingCustomization::default();
+        lc.analytics_html = Some(snippet.into());
+        lc.analytics_origins = Some(origins.into());
+        update(&pool, &lc, Some("admin")).await.unwrap();
+        let got = fetch(&pool).await.unwrap();
+        assert_eq!(got.analytics_html.as_deref(), Some(snippet));
+        assert_eq!(got.analytics_origins.as_deref(), Some(origins));
     }
 
     #[tokio::test]

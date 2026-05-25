@@ -236,6 +236,36 @@ async fn forward(
         }
     }
 
+    // 2c. Max body size. Applies to both route families (`/app/` and
+    //     `/api/`). The effective limit is the spec's override or the
+    //     global `proxy.max-body-size`. We reject early on a declared
+    //     `Content-Length` over the cap (no backend work); the body is
+    //     *also* wrapped in `Limited` at the forward step (below) so a
+    //     chunked or under-declared body can't slip past the cap.
+    let max_body = spec.effective_max_body_bytes(state.config.proxy.max_body_bytes());
+    if let Some(limit) = max_body {
+        if let Some(len) = req
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<i64>().ok())
+        {
+            if len > limit {
+                tracing::debug!(spec = %spec.id, content_length = len, limit, "body too large");
+                return with_cors(
+                    (
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        format!("request body exceeds {limit} bytes\n"),
+                    )
+                        .into_response(),
+                    cors_on,
+                );
+            }
+        }
+    }
+    // Byte cap to hand to the forward step; `None` ⇒ unlimited.
+    let body_cap = max_body.map(|l| usize::try_from(l).unwrap_or(usize::MAX));
+
     // 3. Backend required to proxy.
     if state.backend.is_none() {
         return with_cors(
@@ -295,7 +325,7 @@ async fn forward(
         upstream = %replica.upstream, path = %upstream_path,
         "forwarding"
     );
-    let resp = match do_forward(&replica, upstream_path, req).await {
+    let resp = match do_forward(&replica, upstream_path, req, body_cap).await {
         Ok(r) => r,
         Err(err) => {
             tracing::error!(
@@ -699,6 +729,7 @@ async fn do_forward(
     replica: &Replica,
     upstream_path: String,
     mut req: Request,
+    max_body: Option<usize>,
 ) -> anyhow::Result<Response> {
     let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
     let new_uri: Uri = format!("http://{}{}{}", replica.upstream, upstream_path, query)
@@ -707,6 +738,17 @@ async fn do_forward(
     *req.uri_mut() = new_uri;
 
     strip_hop_headers(req.headers_mut());
+
+    // Hard cap on the streamed request body. The `Content-Length`
+    // fast-path in `forward` already rejected declared-oversize
+    // uploads with a clean 413; this catches a chunked / under-
+    // declared body that tries to slip past — it surfaces as a
+    // forward error (502) once the limit trips mid-stream.
+    if let Some(limit) = max_body {
+        let (parts, body) = req.into_parts();
+        let limited = http_body_util::Limited::new(body, limit);
+        req = Request::from_parts(parts, Body::new(limited));
+    }
 
     let client = http_client().clone();
     let upstream_resp = client.request(req).await?;

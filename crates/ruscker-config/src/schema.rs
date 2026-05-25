@@ -138,6 +138,16 @@ pub struct Proxy {
     #[serde(rename = "shutdown-grace-ms")]
     pub shutdown_grace_ms: u64,
 
+    /// Maximum request body accepted on proxied routes (`/app/*`,
+    /// `/api/*`), as a Docker-style size string (`"10m"`, `"1g"`,
+    /// or plain bytes). A request whose `Content-Length` exceeds
+    /// this — or whose streamed body grows past it — gets
+    /// `413 Payload Too Large`. `None` (the default) means no limit.
+    /// A per-spec `max-body-size` overrides this for that spec.
+    /// Ruscker extension — not present in ShinyProxy YAML.
+    #[serde(rename = "max-body-size")]
+    pub max_body_size: Option<String>,
+
     /// Directory to write per-container logs to.
     #[serde(rename = "container-log-path")]
     pub container_log_path: Option<PathBuf>,
@@ -178,6 +188,7 @@ impl Default for Proxy {
             heartbeat_timeout: 3_600_000,
             container_wait_time: 60_000,
             shutdown_grace_ms: 30_000,
+            max_body_size: None,
             container_log_path: None,
             port: 8080,
             bind_address: "0.0.0.0".to_string(),
@@ -185,6 +196,15 @@ impl Default for Proxy {
             specs: Vec::new(),
             landing_customization: LandingCustomization::default(),
         }
+    }
+}
+
+impl Proxy {
+    /// Global default max request-body size in bytes, parsed from
+    /// `proxy.max-body-size`. `None` (unset or malformed) means no
+    /// global default; the validator flags a malformed value.
+    pub fn max_body_bytes(&self) -> Option<i64> {
+        self.max_body_size.as_deref().and_then(parse_memory_string)
     }
 }
 
@@ -344,6 +364,13 @@ pub struct Spec {
     /// elsewhere.
     #[serde(rename = "container-memory-request")]
     pub container_memory_request: Option<String>,
+
+    /// Per-spec override of [`Proxy::max_body_size`]. Same Docker-
+    /// style size format (`"10m"`, plain bytes, …). Takes precedence
+    /// over the global default for this spec's proxied requests.
+    /// Resolved via [`Spec::effective_max_body_bytes`].
+    #[serde(rename = "max-body-size")]
+    pub max_body_size: Option<String>,
 
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
@@ -541,6 +568,19 @@ impl Spec {
             .as_deref()
             .and_then(parse_memory_string)
     }
+
+    /// Effective max request-body size in bytes for this spec's
+    /// proxied requests: the spec's own `max-body-size` if set,
+    /// otherwise the `global` default (already parsed from
+    /// `proxy.max-body-size`). A malformed spec value falls back to
+    /// the global — the validator flags the typo separately.
+    /// `None` means no limit.
+    pub fn effective_max_body_bytes(&self, global: Option<i64>) -> Option<i64> {
+        self.max_body_size
+            .as_deref()
+            .and_then(parse_memory_string)
+            .or(global)
+    }
 }
 
 /// Parse Docker-style memory strings: `"512"` (bytes), `"512m"`,
@@ -622,6 +662,63 @@ mod parse_memory_tests {
     #[test]
     fn whitespace_tolerated() {
         assert_eq!(parse_memory_string("  512m  "), Some(512 * 1024 * 1024));
+    }
+}
+
+#[cfg(test)]
+mod max_body_size_tests {
+    use super::*;
+
+    fn spec_with_max(max: Option<&str>) -> Spec {
+        let mut s: Spec =
+            serde_yaml_ng::from_str("id: x\ncontainer-image: a:1\n").expect("parse");
+        s.max_body_size = max.map(|m| m.to_string());
+        s
+    }
+
+    #[test]
+    fn spec_override_wins_over_global() {
+        let s = spec_with_max(Some("10m"));
+        assert_eq!(
+            s.effective_max_body_bytes(Some(1024)),
+            Some(10 * 1024 * 1024)
+        );
+    }
+
+    #[test]
+    fn falls_back_to_global_when_spec_unset() {
+        let s = spec_with_max(None);
+        assert_eq!(s.effective_max_body_bytes(Some(2048)), Some(2048));
+    }
+
+    #[test]
+    fn none_when_neither_set() {
+        let s = spec_with_max(None);
+        assert_eq!(s.effective_max_body_bytes(None), None);
+    }
+
+    #[test]
+    fn malformed_spec_value_falls_back_to_global() {
+        // A typo in the spec value isn't a hard error — it falls
+        // back to the global default (and is flagged by validate).
+        let s = spec_with_max(Some("500frogs"));
+        assert_eq!(s.effective_max_body_bytes(Some(4096)), Some(4096));
+    }
+
+    #[test]
+    fn proxy_global_parses() {
+        let cfg: Config =
+            serde_yaml_ng::from_str("proxy:\n  max-body-size: 1g\n").expect("parse");
+        assert_eq!(cfg.proxy.max_body_bytes(), Some(1024 * 1024 * 1024));
+    }
+
+    #[test]
+    fn proxy_global_malformed_is_none() {
+        let cfg: Config =
+            serde_yaml_ng::from_str("proxy:\n  max-body-size: huge\n").expect("parse");
+        assert_eq!(cfg.proxy.max_body_bytes(), None);
+        // ...but the field round-trips so the validator can flag it.
+        assert_eq!(cfg.proxy.max_body_size.as_deref(), Some("huge"));
     }
 }
 
@@ -850,6 +947,7 @@ proxy:
             container_cpu_request: None,
             container_memory_limit: None,
             container_memory_request: None,
+            max_body_size: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -886,6 +984,7 @@ proxy:
             container_cpu_request: None,
             container_memory_limit: None,
             container_memory_request: None,
+            max_body_size: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -922,6 +1021,7 @@ proxy:
             container_cpu_request: None,
             container_memory_limit: None,
             container_memory_request: None,
+            max_body_size: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,

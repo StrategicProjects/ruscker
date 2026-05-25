@@ -184,6 +184,7 @@ impl SpecForm {
             container_cpu_request: None,
             container_memory_limit: None,
             container_memory_request: None,
+            max_body_size: None,
             template_properties: TemplateProperties(tp_map),
             kind_override,
             api: None,

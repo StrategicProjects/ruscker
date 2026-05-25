@@ -1,0 +1,36 @@
+# Ruscker configuration — installed at /etc/ruscker/application.yml.
+#
+# This is a minimal, working starting point. Edit it for your apps,
+# then `systemctl restart ruscker`. Full schema reference:
+# https://github.com/StrategicProjects/ruscker/blob/main/docs/YAML_SCHEMA.md
+#
+# NEVER put secrets here. Use ${ENV_VAR} interpolation and set the
+# variables in /etc/ruscker/ruscker.env (read by the systemd unit).
+
+proxy:
+  title: Ruscker
+  # The admin panel is gated by RUSCKER_ADMIN_TOKEN (set it in
+  # /etc/ruscker/ruscker.env). With no token, admin routes return 503
+  # and only the public landing + proxy are served.
+  authentication: none
+
+  specs:
+    # A simple external-link card so the landing page isn't empty out
+    # of the box. Replace with your own apps / APIs.
+    - id: welcome
+      display-name: "Welcome to Ruscker"
+      description: "Edit /etc/ruscker/application.yml to add your apps."
+      template-properties:
+        type: package
+        state: active
+        link: https://github.com/StrategicProjects/ruscker
+
+    # Example containerized app (commented). Requires the --docker
+    # backend — add `--docker` to ExecStart in the systemd unit and
+    # give the `ruscker` user Docker access (see README.Debian).
+    #
+    # - id: my_shiny
+    #   display-name: "My Shiny App"
+    #   container-image: org/my-shiny-app:latest
+    #   type: shiny
+    #   seats-per-container: 10

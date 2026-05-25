@@ -190,8 +190,17 @@ admin-landing-intro-fr = Français
 admin-landing-preview = Aperçu du portail
 admin-landing-preview-help = Approximation visuelle de l'en-tête et de l'intro. Les cartes et filtres ressemblent au portail réel.
 admin-landing-preview-empty = (pas de texte d'introduction)
+admin-landing-seo = SEO et partage
+admin-landing-seo-title = Titre de la page (SEO)
+admin-landing-seo-title-placeholder = Par défaut : titre du portail
+admin-landing-seo-title-help = Définit le titre de l'onglet et og:title. Vide utilise le titre par défaut du portail.
+admin-landing-seo-description = Description (meta description)
+admin-landing-seo-description-placeholder = Résumé pour les moteurs de recherche et les réseaux sociaux
+admin-landing-seo-description-help = Utilisé dans la meta description et og:description. Vide reprend le texte d'introduction.
+admin-landing-og-image = Image de partage (og:image)
+admin-landing-og-image-help = URL ou chemin (ex. /assets/img/og.png) affiché lors du partage sur les réseaux sociaux.
 admin-landing-future-title = Bientôt
-admin-landing-future-help = Éditeur de logos, réorganisation des sections, blocs HTML personnalisés, SEO/analytics et meta tags. Pour l'instant ces champs suivent le YAML.
+admin-landing-future-help = Éditeur de logos, réorganisation des sections, blocs HTML personnalisés et analytics. Pour l'instant ces champs suivent le YAML.
 
 # Admin audit log
 admin-audit-title = Journal d'audit

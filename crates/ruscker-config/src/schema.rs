@@ -246,6 +246,21 @@ pub struct LandingCustomization {
     /// ```
     #[serde(default, rename = "intro-locales")]
     pub intro_locales: std::collections::HashMap<String, String>,
+
+    /// SEO / social-share meta tags for the public landing `<head>`.
+    /// Optional page-title override; falls back to `proxy.title`.
+    #[serde(default, rename = "seo-title")]
+    pub seo_title: Option<String>,
+
+    /// `<meta name="description">` and `og:description`. When empty,
+    /// the rendered head falls back to the resolved intro text.
+    #[serde(default, rename = "seo-description")]
+    pub seo_description: Option<String>,
+
+    /// `og:image` / social-share image — a path (`/assets/img/og.png`)
+    /// or an absolute URL. Omitted from the head when unset.
+    #[serde(default, rename = "og-image")]
+    pub og_image: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -925,6 +940,22 @@ proxy:
         assert_eq!(config.proxy.title, "Test");
         assert_eq!(config.proxy.specs.len(), 1);
         assert_eq!(config.proxy.specs[0].id, "hello");
+    }
+
+    #[test]
+    fn parses_landing_seo_fields() {
+        let yaml = r#"
+proxy:
+  landing-customization:
+    seo-title: My Portal
+    seo-description: A short summary
+    og-image: /assets/img/og.png
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let lc = &config.proxy.landing_customization;
+        assert_eq!(lc.seo_title.as_deref(), Some("My Portal"));
+        assert_eq!(lc.seo_description.as_deref(), Some("A short summary"));
+        assert_eq!(lc.og_image.as_deref(), Some("/assets/img/og.png"));
     }
 
     #[test]

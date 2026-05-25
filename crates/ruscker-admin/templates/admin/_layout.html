@@ -121,5 +121,36 @@ window.ruscker.bgMode = (value) =>
   {% block content %}{% endblock %}
 </main>
 
+{# Preference footer — same language + theme options as the public
+   portal. Posts to the shared /__set/* endpoints, which set the
+   cookie and redirect back here (Referer), so the admin re-renders
+   in the chosen locale/theme. #}
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex flex-wrap items-center gap-6">
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-language") }}:</span>
+    <form method="post" action="/__set/locale" class="contents">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="px-2 py-0.5 rounded {% if *loc == locale %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}"
+                aria-current="{% if *loc == locale %}true{% else %}false{% endif %}">
+          {{ loc.native_name() }}
+        </button>
+      {% endfor %}
+    </form>
+  </div>
+
+  <div class="flex items-center gap-2">
+    <span>{{ self.t("footer-theme") }}:</span>
+    <form method="post" action="/__set/theme" class="contents">
+      <button type="submit" name="theme" value="light"
+              class="px-2 py-0.5 rounded {% if theme.is_light() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-light") }}</button>
+      <button type="submit" name="theme" value="dark"
+              class="px-2 py-0.5 rounded {% if theme.is_dark() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-dark") }}</button>
+      <button type="submit" name="theme" value="auto"
+              class="px-2 py-0.5 rounded {% if theme.is_auto() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-auto") }}</button>
+    </form>
+  </div>
+</footer>
+
 </body>
 </html>

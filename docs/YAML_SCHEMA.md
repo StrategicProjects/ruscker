@@ -137,6 +137,44 @@ navigates to the link.
   routing-strategy: round-robin        # APIs don't need sticky
 ```
 
+#### `api.rate-limit` — per-client throttling
+
+Enforced at the proxy, **before** any container is spawned or woken,
+so a throttled caller costs nothing downstream. Format is
+`N/unit` where `unit` is one of `s`/`sec`/`second(s)`,
+`m`/`min`/`minute(s)`, or `h`/`hr`/`hour(s)` (case-insensitive):
+
+```yaml
+rate-limit: 100/min      # at most 100 requests per client per minute
+rate-limit: 5/s
+rate-limit: 1000/hour
+```
+
+A request over the limit gets `429 Too Many Requests` with a
+`Retry-After` header. The window is a sliding one, per
+`(spec, client)`.
+
+**Client identity.** The "client" is the caller's IP. When the
+operator opts into forwarded headers
+(`server.useForwardHeaders: true`, or a `forward-headers-strategy`
+other than `none`), the left-most `X-Forwarded-For` address is used
+— the right choice when Ruscker sits behind a reverse proxy.
+Otherwise the real TCP peer is used: `X-Forwarded-For` is **not**
+trusted unless opted in, since a direct client could otherwise spoof
+it to dodge the limit.
+
+A malformed `rate-limit` value is ignored (no limit applied) and
+flagged by `ruscker validate`.
+
+#### `api.cors` — permissive CORS headers
+
+`cors: true` makes the proxy add permissive CORS headers
+(`Access-Control-Allow-Origin: *`, common methods, `*` headers) to
+every response for that API spec, and answer `OPTIONS` preflight
+requests itself (`204`) without touching the container. Headers an
+upstream app already set are never overwritten — an API that does
+its own CORS wins. CORS applies only to the `/api/` route family.
+
 ### Load-balancing fields (any containerized spec)
 
 | Field | Type | Default | Notes |

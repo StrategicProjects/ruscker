@@ -625,6 +625,85 @@ mod parse_memory_tests {
     }
 }
 
+#[cfg(test)]
+mod parse_rate_limit_tests {
+    use super::{parse_rate_limit, RatePolicy};
+    use std::time::Duration;
+
+    #[test]
+    fn canonical_forms() {
+        assert_eq!(
+            parse_rate_limit("100/min"),
+            Some(RatePolicy {
+                max: 100,
+                window: Duration::from_secs(60)
+            })
+        );
+        assert_eq!(
+            parse_rate_limit("5/s"),
+            Some(RatePolicy {
+                max: 5,
+                window: Duration::from_secs(1)
+            })
+        );
+        assert_eq!(
+            parse_rate_limit("1000/hour"),
+            Some(RatePolicy {
+                max: 1000,
+                window: Duration::from_secs(3600)
+            })
+        );
+    }
+
+    #[test]
+    fn unit_aliases_and_case() {
+        for unit in ["s", "sec", "secs", "second", "seconds", "S", "SEC"] {
+            assert_eq!(
+                parse_rate_limit(&format!("3/{unit}")).map(|p| p.window),
+                Some(Duration::from_secs(1)),
+                "unit `{unit}`"
+            );
+        }
+        for unit in ["m", "min", "mins", "minute", "minutes", "Min"] {
+            assert_eq!(
+                parse_rate_limit(&format!("3/{unit}")).map(|p| p.window),
+                Some(Duration::from_secs(60)),
+                "unit `{unit}`"
+            );
+        }
+        for unit in ["h", "hr", "hrs", "hour", "hours", "HOUR"] {
+            assert_eq!(
+                parse_rate_limit(&format!("3/{unit}")).map(|p| p.window),
+                Some(Duration::from_secs(3600)),
+                "unit `{unit}`"
+            );
+        }
+    }
+
+    #[test]
+    fn whitespace_tolerated() {
+        assert_eq!(
+            parse_rate_limit("  100 / min  "),
+            Some(RatePolicy {
+                max: 100,
+                window: Duration::from_secs(60)
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_garbage() {
+        assert_eq!(parse_rate_limit(""), None);
+        assert_eq!(parse_rate_limit("100"), None); // no unit
+        assert_eq!(parse_rate_limit("/min"), None); // no count
+        assert_eq!(parse_rate_limit("0/min"), None); // zero is not a limit
+        assert_eq!(parse_rate_limit("-5/min"), None); // negative
+        assert_eq!(parse_rate_limit("ten/min"), None); // non-numeric
+        assert_eq!(parse_rate_limit("100/fortnight"), None); // unknown unit
+        assert_eq!(parse_rate_limit("100/"), None); // empty unit
+    }
+}
+
 /// Configuration block for `type: api` specs (Plumber, FastAPI, etc.).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -649,6 +728,61 @@ pub struct ApiSpec {
 
     /// Whether to add permissive CORS headers. Defaults to false.
     pub cors: bool,
+}
+
+impl ApiSpec {
+    /// Parsed `rate-limit` policy, or `None` if unset or malformed.
+    ///
+    /// Returning `None` for a malformed value means the proxy
+    /// silently applies *no* limit rather than failing the request;
+    /// the operator is told about the typo separately via
+    /// [`crate::validate`] (`Warning::InvalidRateLimit`), which is
+    /// the right place to surface authoring mistakes.
+    pub fn rate_policy(&self) -> Option<RatePolicy> {
+        self.rate_limit.as_deref().and_then(parse_rate_limit)
+    }
+}
+
+/// A parsed proxy-side rate limit: at most `max` requests per
+/// `window`. Produced from the `api.rate-limit` string (e.g.
+/// `100/min`) by [`parse_rate_limit`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RatePolicy {
+    /// Maximum number of requests allowed within `window`.
+    pub max: u32,
+    /// The sliding window the `max` count applies over.
+    pub window: std::time::Duration,
+}
+
+/// Parse a `"N/unit"` rate-limit string into a [`RatePolicy`].
+///
+/// The format mirrors what operators expect from API gateways:
+/// a positive integer, a slash, and a time unit. Accepted units
+/// (case-insensitive, with common aliases):
+///
+/// - `s`, `sec`, `secs`, `second`, `seconds`
+/// - `m`, `min`, `mins`, `minute`, `minutes`
+/// - `h`, `hr`, `hrs`, `hour`, `hours`
+///
+/// Whitespace around each part is tolerated (`"100 / min"` works).
+/// Returns `None` for anything malformed — an empty count, a zero
+/// or negative count, an unknown unit, or a missing slash — so the
+/// caller can treat "no valid limit" uniformly. The validator
+/// re-checks and warns so the operator learns about the typo.
+pub fn parse_rate_limit(raw: &str) -> Option<RatePolicy> {
+    use std::time::Duration;
+    let (count, unit) = raw.split_once('/')?;
+    let max: u32 = count.trim().parse().ok()?;
+    if max == 0 {
+        return None;
+    }
+    let window = match unit.trim().to_ascii_lowercase().as_str() {
+        "s" | "sec" | "secs" | "second" | "seconds" => Duration::from_secs(1),
+        "m" | "min" | "mins" | "minute" | "minutes" => Duration::from_secs(60),
+        "h" | "hr" | "hrs" | "hour" | "hours" => Duration::from_secs(3600),
+        _ => return None,
+    };
+    Some(RatePolicy { max, window })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

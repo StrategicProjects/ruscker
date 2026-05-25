@@ -29,8 +29,8 @@
 //! ```
 
 use axum::body::Body;
-use axum::extract::{FromRequestParts, Path, Request, State, WebSocketUpgrade};
-use axum::http::{header, request::Parts, HeaderMap, HeaderValue, StatusCode, Uri};
+use axum::extract::{ConnectInfo, FromRequestParts, Path, Request, State, WebSocketUpgrade};
+use axum::http::{header, request::Parts, HeaderMap, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::any;
 use axum::Router;
@@ -42,11 +42,13 @@ use ruscker_config::{Spec, SpecKind};
 use ruscker_core::Replica;
 use ruscker_proxy::sticky::{self, CookieKey, StickySession, COOKIE_NAME};
 use ruscker_proxy::ws;
+use std::net::SocketAddr;
 use std::sync::OnceLock;
 use tower_cookies::cookie::time::Duration;
 use tower_cookies::{Cookie, Cookies};
 
 use super::rewrite;
+use crate::ratelimit;
 use crate::AppState;
 
 /// Wrapper extractor: `WebSocketUpgrade::FromRequestParts` returns
@@ -60,6 +62,27 @@ impl<S: Send + Sync> FromRequestParts<S> for MaybeWs {
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         Ok(MaybeWs(
             WebSocketUpgrade::from_request_parts(parts, state).await.ok(),
+        ))
+    }
+}
+
+/// Optional TCP peer address. `ConnectInfo<SocketAddr>` is present
+/// only when the server is run via
+/// `into_make_service_with_connect_info` (production); under
+/// `Router::oneshot` (tests) there's no socket. axum 0.8 doesn't
+/// blanket-impl `Option<T: FromRequestParts>`, so — like `MaybeWs`
+/// — we provide our own infallible wrapper that yields `None`
+/// instead of rejecting.
+struct MaybePeer(Option<SocketAddr>);
+
+impl<S: Send + Sync> FromRequestParts<S> for MaybePeer {
+    type Rejection = std::convert::Infallible;
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Ok(MaybePeer(
+            ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
+                .await
+                .ok()
+                .map(|ci| ci.0),
         ))
     }
 }
@@ -89,50 +112,60 @@ fn http_client() -> &'static Client<HttpConnector, Body> {
 const APP_PREFIX: &str = "/app/";
 const API_PREFIX: &str = "/api/";
 
+// Each handler extracts `Option<ConnectInfo<SocketAddr>>`: it's
+// `Some` in production (the listener is served with connect-info)
+// and `None` under `Router::oneshot` tests, where there's no socket
+// — the client key then falls back to a trusted XFF or "unknown".
 #[axum::debug_handler]
 async fn forward_app(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
+    peer: MaybePeer,
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, APP_PREFIX, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, peer.0, APP_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_app_root(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
+    peer: MaybePeer,
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, APP_PREFIX, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, peer.0, APP_PREFIX, spec_id, "/".to_string(), req).await
 }
 async fn forward_api(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
+    peer: MaybePeer,
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, API_PREFIX, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, peer.0, API_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_api_root(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
+    peer: MaybePeer,
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, API_PREFIX, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, peer.0, API_PREFIX, spec_id, "/".to_string(), req).await
 }
 
 // ── Core forward ───────────────────────────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 async fn forward(
     State(state): State<AppState>,
     cookies: Cookies,
     ws_upgrade: MaybeWs,
+    peer: Option<SocketAddr>,
     route_prefix: &'static str,
     spec_id: String,
     upstream_path: String,
@@ -161,13 +194,58 @@ async fn forward(
             .into_response();
     }
 
+    // 2b. API policies (CORS + rate limit). These apply only to the
+    //     `/api/` route family and are configured under `spec.api`.
+    //     We run them *before* touching the backend so a preflight or
+    //     a throttled request never spawns or wakes a container.
+    //     `cors_on` is threaded to the exits below so every API
+    //     response a browser sees carries the headers (via `with_cors`).
+    let api = if route_prefix == API_PREFIX {
+        spec.api.clone()
+    } else {
+        None
+    };
+    let cors_on = api.as_ref().map(|a| a.cors).unwrap_or(false);
+
+    if let Some(api) = &api {
+        // CORS preflight: answer `OPTIONS` ourselves, no upstream.
+        if cors_on && *req.method() == Method::OPTIONS {
+            return cors_preflight_response();
+        }
+
+        // Per-client rate limit, if the spec configured a valid one.
+        if let Some(policy) = api.rate_policy() {
+            let client = client_key(&state, req.headers(), peer.as_ref());
+            if let ratelimit::RateDecision::Deny { retry_after_secs } =
+                state.api_limiter.check(&spec.id, &client, &policy)
+            {
+                tracing::debug!(
+                    spec = %spec.id, client = %client, retry_after_secs,
+                    "rate limit exceeded"
+                );
+                let mut resp = (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    format!("rate limit exceeded; retry after {retry_after_secs}s\n"),
+                )
+                    .into_response();
+                if let Ok(v) = HeaderValue::from_str(&retry_after_secs.to_string()) {
+                    resp.headers_mut().insert(header::RETRY_AFTER, v);
+                }
+                return with_cors(resp, cors_on);
+            }
+        }
+    }
+
     // 3. Backend required to proxy.
     if state.backend.is_none() {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "no container backend wired — start with --docker",
-        )
-            .into_response();
+        return with_cors(
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "no container backend wired — start with --docker",
+            )
+                .into_response(),
+            cors_on,
+        );
     }
 
     // 4. Resolve the replica: sticky-first, fall back to
@@ -179,11 +257,10 @@ async fn forward(
             Ok(triple) => triple,
             Err(err) => {
                 tracing::error!(spec = %spec.id, error = ?err, "resolve replica failed");
-                return (
-                    StatusCode::BAD_GATEWAY,
-                    format!("backend error: {err}"),
-                )
-                    .into_response();
+                return with_cors(
+                    (StatusCode::BAD_GATEWAY, format!("backend error: {err}")).into_response(),
+                    cors_on,
+                );
             }
         };
 
@@ -225,11 +302,10 @@ async fn forward(
                 spec = %spec.id, replica = %replica.id,
                 error = ?err, "forward failed"
             );
-            return (
-                StatusCode::BAD_GATEWAY,
-                format!("upstream error: {err}"),
-            )
-                .into_response();
+            return with_cors(
+                (StatusCode::BAD_GATEWAY, format!("upstream error: {err}")).into_response(),
+                cors_on,
+            );
         }
     };
 
@@ -259,11 +335,93 @@ async fn forward(
         set_sticky_cookie(&cookies, &state.cookie_key, &session, is_https);
     }
 
-    resp
+    with_cors(resp, cors_on)
 }
 
 fn spec_kind_needs_sticky(kind: SpecKind) -> bool {
     matches!(kind, SpecKind::Shiny | SpecKind::InteractiveApp)
+}
+
+// ── API policy helpers (rate limit + CORS) ─────────────────────────
+
+/// Whether to believe an inbound `X-Forwarded-For` header. We only
+/// do when the operator opted into forwarded headers (ShinyProxy's
+/// `server.useForwardHeaders`, or a `forward-headers-strategy` other
+/// than `none`). Without that opt-in, a direct client could spoof
+/// the header to dodge a per-IP rate limit — so we ignore it and key
+/// on the real TCP peer instead.
+fn forward_headers_trusted(server: &ruscker_config::Server) -> bool {
+    server.use_forward_headers
+        || server
+            .forward_headers_strategy
+            .as_deref()
+            .map(|s| !s.eq_ignore_ascii_case("none"))
+            .unwrap_or(false)
+}
+
+/// Derive the per-client key used for rate limiting.
+///
+/// Prefers the left-most `X-Forwarded-For` address *when the
+/// operator trusts forwarded headers* (the realistic deployment:
+/// Ruscker behind a reverse proxy). Otherwise falls back to the TCP
+/// peer IP, and finally to `"unknown"` when neither is available
+/// (e.g. `Router::oneshot` in tests).
+fn client_key(state: &AppState, headers: &HeaderMap, peer: Option<&SocketAddr>) -> String {
+    if forward_headers_trusted(&state.config.server) {
+        if let Some(first) = headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+        {
+            let ip = first.trim();
+            if !ip.is_empty() {
+                return ip.to_string();
+            }
+        }
+    }
+    peer.map(|a| a.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// Permissive CORS headers for API responses. Origin is `*` (no
+/// credentials) — appropriate for a public, token-or-internally-
+/// authenticated API where the browser just needs to read the
+/// response cross-origin. Never clobbers headers the upstream app
+/// already set, so an API that does its own CORS wins.
+fn apply_cors_headers(headers: &mut HeaderMap) {
+    let defaults: &[(header::HeaderName, &str)] = &[
+        (header::ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+        (
+            header::ACCESS_CONTROL_ALLOW_METHODS,
+            "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+        ),
+        (header::ACCESS_CONTROL_ALLOW_HEADERS, "*"),
+        (header::ACCESS_CONTROL_MAX_AGE, "86400"),
+    ];
+    for (name, value) in defaults {
+        headers
+            .entry(name.clone())
+            .or_insert_with(|| HeaderValue::from_static(value));
+    }
+}
+
+/// Apply CORS headers to `resp` when `enabled`; otherwise pass it
+/// through untouched. Centralises the "API spec + cors: true" check
+/// at every exit of `forward`.
+fn with_cors(mut resp: Response, enabled: bool) -> Response {
+    if enabled {
+        apply_cors_headers(resp.headers_mut());
+    }
+    resp
+}
+
+/// Synthetic `204 No Content` response for a CORS preflight
+/// (`OPTIONS`) on an API spec — answered by the proxy without ever
+/// reaching the upstream container.
+fn cors_preflight_response() -> Response {
+    let mut resp = StatusCode::NO_CONTENT.into_response();
+    apply_cors_headers(resp.headers_mut());
+    resp
 }
 
 fn find_spec<'a>(config: &'a ruscker_config::Config, id: &str) -> Option<&'a Spec> {
@@ -700,6 +858,7 @@ mod tests {
             ),
             admin_auth: Default::default(),
             login_limiter: StdArc::new(crate::auth::LoginRateLimiter::default_policy()),
+            api_limiter: StdArc::new(crate::ratelimit::ApiRateLimiter::new()),
             db: None,
             images_dir: None,
             master_key: Default::default(),

@@ -29,6 +29,7 @@ pub mod db;
 pub mod i18n;
 pub mod images;
 pub mod metrics_cache;
+pub mod ratelimit;
 pub mod routes;
 pub mod scaler;
 pub mod sessions;
@@ -47,6 +48,11 @@ pub struct AppState {
     /// force against the admin token. Shared (Arc) so every
     /// cloned `AppState` sees the same window.
     pub login_limiter: Arc<auth::LoginRateLimiter>,
+    /// Per-client, per-spec request limiter enforcing each API
+    /// spec's `api.rate-limit`. Shared (Arc) so every cloned
+    /// `AppState` sees the same sliding windows. Specs without a
+    /// configured limit never touch it.
+    pub api_limiter: Arc<ratelimit::ApiRateLimiter>,
     /// Optional SQLite pool. `None` ⇒ admin CRUD routes 503
     /// because they have no source of truth to read or write.
     pub db: Option<SqlitePool>,
@@ -134,6 +140,7 @@ impl AdminServer {
             locales: Arc::new(locales),
             admin_auth: auth::AdminAuth::from_env(),
             login_limiter: Arc::new(auth::LoginRateLimiter::default_policy()),
+            api_limiter: Arc::new(ratelimit::ApiRateLimiter::new()),
             db: None,
             images_dir: None,
             master_key: crypto::MasterKey::from_env().context("load master key")?,
@@ -276,7 +283,13 @@ impl AdminServer {
             .await
             .with_context(|| format!("bind {}", self.addr))?;
         info!(addr = %self.addr, images_dir = ?self.images_dir, "ruscker-admin listening");
-        axum::serve(listener, app)
+        // `into_make_service_with_connect_info` exposes the TCP peer
+        // address to handlers via `ConnectInfo<SocketAddr>` — the
+        // proxy uses it as the per-client key for API rate limiting
+        // when no trusted `X-Forwarded-For` is present.
+        let make_service =
+            app.into_make_service_with_connect_info::<SocketAddr>();
+        axum::serve(listener, make_service)
             .with_graceful_shutdown(shutdown_signal(self.state.clone()))
             .await
             .context("axum serve")?;

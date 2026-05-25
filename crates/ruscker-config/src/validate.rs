@@ -82,6 +82,14 @@ pub enum Warning {
     SpecLackingContainerHasContainerFields {
         spec_id: String,
     },
+    /// `api.rate-limit` is set but doesn't parse as `N/unit`
+    /// (e.g. `100/min`). The proxy ignores an unparseable limit
+    /// — applying no limit at all — so the operator should know
+    /// their intended cap isn't in effect.
+    InvalidRateLimit {
+        spec_id: String,
+        value: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -344,6 +352,20 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             });
         }
     }
+
+    // A rate-limit string that's present but unparseable means the
+    // operator intended a cap that won't actually be enforced. Flag
+    // it so the typo doesn't silently leave the API wide open.
+    if let Some(api) = &spec.api {
+        if let Some(raw) = &api.rate_limit {
+            if crate::schema::parse_rate_limit(raw).is_none() {
+                warnings.push(Warning::InvalidRateLimit {
+                    spec_id: spec.id.clone(),
+                    value: raw.clone(),
+                });
+            }
+        }
+    }
 }
 
 fn collect_stats(config: &Config) -> Stats {
@@ -417,6 +439,51 @@ mod tests {
             Warning::EmbeddedCredential { line, .. } => assert_eq!(*line, 3),
             _ => panic!("expected EmbeddedCredential"),
         }
+    }
+
+    #[test]
+    fn flags_unparseable_api_rate_limit() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: api1
+      container-image: org/api:1
+      type: api
+      api:
+        rate-limit: "lots/fortnight"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidRateLimit { spec_id, value }
+                    if spec_id == "api1" && value == "lots/fortnight"
+            )),
+            "expected InvalidRateLimit, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn accepts_valid_api_rate_limit() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: api1
+      container-image: org/api:1
+      type: api
+      api:
+        rate-limit: "100/min"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::InvalidRateLimit { .. })),
+            "valid rate-limit should not warn, got {:?}",
+            report.warnings
+        );
     }
 
     fn compat(yaml: &str) -> Vec<CompatWarning> {

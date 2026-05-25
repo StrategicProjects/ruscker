@@ -9,7 +9,7 @@
 //! `unchanged = total_specs` and `updated = 0`.
 
 use anyhow::{Context, Result};
-use ruscker_config::{Config, LandingCustomization, Logging, Proxy, Server, Spec};
+use ruscker_config::{Config, Logging, Proxy, Server, Spec};
 use sqlx::SqlitePool;
 
 /// Rebuild a full [`Config`] from everything currently in the
@@ -30,25 +30,10 @@ pub async fn reconstruct_config(pool: &SqlitePool) -> Result<Config> {
         specs.push(s);
     }
 
-    // 2. Landing customization singleton.
-    let lc_row: Option<(Option<String>, Option<String>, Option<String>, String)> =
-        sqlx::query_as(
-            "SELECT header_bg, header_fg, intro, intro_locales_json
-               FROM landing_customization WHERE id = 1",
-        )
-        .fetch_optional(pool)
-        .await
-        .context("load landing_customization")?;
-    let landing_customization = match lc_row {
-        Some((bg, fg, intro, locales_json)) => LandingCustomization {
-            header_bg: bg,
-            header_fg: fg,
-            intro,
-            intro_locales: serde_json::from_str(&locales_json)
-                .context("parse intro_locales_json")?,
-        },
-        None => LandingCustomization::default(),
-    };
+    // 2. Landing customization singleton — reuse the repository
+    //    loader so every field (incl. SEO) round-trips without
+    //    duplicating the column list here.
+    let landing_customization = super::landing::fetch(pool).await?;
 
     // 3. config_meta sections — start with default structs and let
     //    serde_json overlay whatever the import persisted. Falling

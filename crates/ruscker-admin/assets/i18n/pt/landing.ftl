@@ -194,8 +194,17 @@ admin-landing-intro-fr = Francês
 admin-landing-preview = Prévia do portal
 admin-landing-preview-help = Aproximação visual do cabeçalho e texto. Cards e filtros ficam como na landing real.
 admin-landing-preview-empty = (sem texto introdutório)
+admin-landing-seo = SEO e compartilhamento
+admin-landing-seo-title = Título da página (SEO)
+admin-landing-seo-title-placeholder = Padrão: título do portal
+admin-landing-seo-title-help = Define o título da aba e o og:title. Vazio usa o título padrão do portal.
+admin-landing-seo-description = Descrição (meta description)
+admin-landing-seo-description-placeholder = Resumo do portal para buscadores e redes sociais
+admin-landing-seo-description-help = Usada na meta description e no og:description. Vazio usa o texto de introdução.
+admin-landing-og-image = Imagem de compartilhamento (og:image)
+admin-landing-og-image-help = URL ou caminho (ex.: /assets/img/og.png) mostrado ao compartilhar em redes sociais.
 admin-landing-future-title = Em breve
-admin-landing-future-help = Editor de logos, reordenação de seções, blocos HTML customizados, SEO/analytics e meta tags. Por enquanto, esses campos seguem o YAML.
+admin-landing-future-help = Editor de logos, reordenação de seções, blocos HTML customizados e analytics. Por enquanto, esses campos seguem o YAML.
 
 # Admin audit log
 admin-audit-title = Auditoria

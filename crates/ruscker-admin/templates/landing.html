@@ -1,5 +1,16 @@
 {% extends "_layout.html" %}
 
+{% block title %}{{ page_title }}{% endblock %}
+
+{% block head_extra %}
+{% if !seo_description.is_empty() %}<meta name="description" content="{{ seo_description }}">{% endif %}
+<meta property="og:type" content="website">
+<meta property="og:title" content="{{ page_title }}">
+{% if !seo_description.is_empty() %}<meta property="og:description" content="{{ seo_description }}">{% endif %}
+{% if !og_image.is_empty() %}<meta property="og:image" content="{{ og_image }}">{% endif %}
+<meta name="twitter:card" content="{% if !og_image.is_empty() %}summary_large_image{% else %}summary{% endif %}">
+{% endblock %}
+
 {% block content %}
 
 <header class="border-b border-[color:var(--border)]"

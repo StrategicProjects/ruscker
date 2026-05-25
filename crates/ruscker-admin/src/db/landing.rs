@@ -15,17 +15,26 @@ use sqlx::SqlitePool;
 /// yet (which shouldn't normally happen — migration 0001 inserts
 /// it — but defensive code keeps tests with a fresh DB happy).
 pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
-    let row: Option<(Option<String>, Option<String>, Option<String>, String)> =
-        sqlx::query_as(
-            "SELECT header_bg, header_fg, intro, intro_locales_json
-               FROM landing_customization WHERE id = 1",
-        )
-        .fetch_optional(pool)
-        .await
-        .context("load landing_customization")?;
+    type Row = (
+        Option<String>, // header_bg
+        Option<String>, // header_fg
+        Option<String>, // intro
+        String,         // intro_locales_json
+        Option<String>, // seo_title
+        Option<String>, // seo_description
+        Option<String>, // og_image
+    );
+    let row: Option<Row> = sqlx::query_as(
+        "SELECT header_bg, header_fg, intro, intro_locales_json,
+                seo_title, seo_description, og_image
+           FROM landing_customization WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("load landing_customization")?;
     match row {
         None => Ok(LandingCustomization::default()),
-        Some((bg, fg, intro, locales_json)) => {
+        Some((bg, fg, intro, locales_json, seo_title, seo_description, og_image)) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
             Ok(LandingCustomization {
@@ -33,6 +42,9 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
                 header_fg: fg,
                 intro,
                 intro_locales,
+                seo_title,
+                seo_description,
+                og_image,
             })
         }
     }
@@ -56,13 +68,17 @@ pub async fn update(
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = ?, header_fg = ?, intro = ?,
-                intro_locales_json = ?, updated_at = ?
+                intro_locales_json = ?, seo_title = ?, seo_description = ?,
+                og_image = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
     .bind(none_if_empty(&lc.header_fg))
     .bind(none_if_empty(&lc.intro))
     .bind(&intro_locales_json)
+    .bind(none_if_empty(&lc.seo_title))
+    .bind(none_if_empty(&lc.seo_description))
+    .bind(none_if_empty(&lc.og_image))
     .bind(now)
     .execute(&mut *tx)
     .await
@@ -128,6 +144,23 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(n, 1);
+    }
+
+    #[tokio::test]
+    async fn seo_fields_roundtrip() {
+        let pool = open_memory().await.unwrap();
+        let mut lc = LandingCustomization::default();
+        lc.seo_title = Some("Portal SEPE".into());
+        lc.seo_description = Some("Monitoramento estratégico do estado".into());
+        lc.og_image = Some("/assets/img/og.png".into());
+        update(&pool, &lc, Some("admin")).await.unwrap();
+        let got = fetch(&pool).await.unwrap();
+        assert_eq!(got.seo_title.as_deref(), Some("Portal SEPE"));
+        assert_eq!(
+            got.seo_description.as_deref(),
+            Some("Monitoramento estratégico do estado")
+        );
+        assert_eq!(got.og_image.as_deref(), Some("/assets/img/og.png"));
     }
 
     #[tokio::test]

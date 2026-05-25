@@ -75,6 +75,9 @@ pub struct LandingForm {
     pub intro_en: String,
     pub intro_es: String,
     pub intro_fr: String,
+    pub seo_title: String,
+    pub seo_description: String,
+    pub og_image: String,
 }
 
 impl LandingForm {
@@ -88,6 +91,9 @@ impl LandingForm {
             intro_en: g("en"),
             intro_es: g("es"),
             intro_fr: g("fr"),
+            seo_title: lc.seo_title.clone().unwrap_or_default(),
+            seo_description: lc.seo_description.clone().unwrap_or_default(),
+            og_image: lc.og_image.clone().unwrap_or_default(),
         }
     }
 
@@ -109,6 +115,9 @@ impl LandingForm {
             header_fg: empty_to_none(self.header_fg),
             intro: empty_to_none(self.intro),
             intro_locales,
+            seo_title: empty_to_none(self.seo_title),
+            seo_description: empty_to_none(self.seo_description),
+            og_image: empty_to_none(self.og_image),
         }
     }
 }

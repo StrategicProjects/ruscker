@@ -1,0 +1,48 @@
+[Unit]
+Description=Ruscker — container portal, load balancer & admin
+Documentation=https://github.com/StrategicProjects/ruscker
+# Ruscker orchestrates containers via the Docker daemon, so prefer to
+# start after it. Both are soft deps: Ruscker still serves the landing
+# page and admin without a backend.
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=ruscker
+Group=ruscker
+# Secrets live here, NOT in application.yml: RUSCKER_ADMIN_TOKEN,
+# RUSCKER_MASTER_KEY, RUSCKER_COOKIE_KEY, DOCKER_REGISTRY_PASSWORD, …
+# The leading `-` makes systemd tolerate the file being absent/empty.
+EnvironmentFile=-/etc/ruscker/ruscker.env
+# Default command: landing + admin + proxy. Add `--docker` to enable
+# the container backend (see /usr/share/doc/ruscker/README.Debian),
+# and `--db /var/lib/ruscker/ruscker.db` to persist the admin catalog.
+ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080
+Restart=on-failure
+RestartSec=5s
+
+# Writable state (SQLite db, etc.) at /var/lib/ruscker.
+StateDirectory=ruscker
+WorkingDirectory=/var/lib/ruscker
+
+# --- Hardening -------------------------------------------------------
+# Ruscker needs very little of the host. If you enable the --docker
+# backend, the `ruscker` user also needs access to the Docker socket;
+# uncomment SupplementaryGroups below (note: docker group ≈ root).
+#SupplementaryGroups=docker
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/ruscker
+ProtectControlGroups=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

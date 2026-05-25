@@ -1,0 +1,7 @@
+#!/bin/sh
+# prerm — cargo-deb injects the systemd stop/disable logic at the marker.
+set -e
+
+#DEBHELPER#
+
+exit 0

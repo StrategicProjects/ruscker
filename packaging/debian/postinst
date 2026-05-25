@@ -1,0 +1,34 @@
+#!/bin/sh
+# postinst — create the service account and lock down the secrets file.
+# cargo-deb injects the systemd enable/start logic at the marker below.
+set -e
+
+case "$1" in
+    configure)
+        # System group + user the unit runs as. No login, no home dir
+        # of its own beyond the state directory.
+        if ! getent group ruscker >/dev/null; then
+            addgroup --system ruscker
+        fi
+        # Create the state directory before adduser so it doesn't warn
+        # about the home dir (/var/lib/ruscker) not existing yet.
+        mkdir -p /var/lib/ruscker
+        if ! getent passwd ruscker >/dev/null; then
+            adduser --system --ingroup ruscker --no-create-home \
+                --home /var/lib/ruscker --shell /usr/sbin/nologin \
+                --gecos "Ruscker service" ruscker
+        fi
+        chown ruscker:ruscker /var/lib/ruscker
+        chmod 750 /var/lib/ruscker
+
+        # The secrets file must not be world-readable.
+        if [ -f /etc/ruscker/ruscker.env ]; then
+            chown root:ruscker /etc/ruscker/ruscker.env || true
+            chmod 640 /etc/ruscker/ruscker.env || true
+        fi
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

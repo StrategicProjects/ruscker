@@ -124,6 +124,10 @@ impl LandingForm {
             og_image: empty_to_none(self.og_image),
             analytics_html: empty_to_none(self.analytics_html),
             analytics_origins: empty_to_none(self.analytics_origins),
+            // The landing editor doesn't manage blocks (their own
+            // screen does); `landing::update` ignores this field, so
+            // an empty Vec here never clobbers stored blocks.
+            blocks: Vec::new(),
         }
     }
 }

@@ -277,6 +277,38 @@ pub struct LandingCustomization {
     /// public landing's policy, not the admin's.
     #[serde(default, rename = "analytics-origins")]
     pub analytics_origins: Option<String>,
+
+    /// Custom HTML blocks rendered in the landing slots (`top` /
+    /// `bottom`). Admin-managed; this field exists so they survive
+    /// `import` / `export` (YAML round-trip). Array order within a
+    /// slot is the render order.
+    #[serde(default)]
+    pub blocks: Vec<LandingBlock>,
+}
+
+/// A custom HTML block on the public landing (admin-authored,
+/// rendered verbatim). See [`LandingCustomization::blocks`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LandingBlock {
+    /// Where it renders: `top` (after the header) or `bottom` (after
+    /// the card grid).
+    pub slot: String,
+    /// Internal label shown in the admin list (not rendered publicly).
+    pub title: String,
+    /// The HTML, injected verbatim — admin-trusted.
+    pub html: String,
+    /// Space-separated CSP origins this block's content needs.
+    #[serde(rename = "csp-origins")]
+    pub csp_origins: String,
+    /// Whether it renders. A block with no `enabled:` key defaults to
+    /// enabled (the common case when authoring YAML).
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

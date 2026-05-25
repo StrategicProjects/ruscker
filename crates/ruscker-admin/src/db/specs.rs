@@ -45,24 +45,12 @@ pub async fn import_all(pool: &SqlitePool, config: &Config) -> Result<ImportRepo
         }
     }
 
-    // Landing customization is a singleton — replace it whole.
+    // Landing customization is a singleton — replace it whole, incl.
+    // SEO/analytics columns (via the shared writer) and the custom
+    // HTML blocks, so the full landing config round-trips.
     let lc = &config.proxy.landing_customization;
-    let intro_locales_json = serde_json::to_string(&lc.intro_locales)
-        .context("serialize intro_locales")?;
-    sqlx::query(
-        "UPDATE landing_customization
-            SET header_bg = ?, header_fg = ?, intro = ?,
-                intro_locales_json = ?, updated_at = ?
-          WHERE id = 1",
-    )
-    .bind(&lc.header_bg)
-    .bind(&lc.header_fg)
-    .bind(&lc.intro)
-    .bind(&intro_locales_json)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .context("update landing_customization")?;
+    super::landing::update_in_tx(&mut tx, lc, now).await?;
+    super::landing_blocks::replace_all_in_tx(&mut tx, &lc.blocks, now).await?;
 
     // Persist the rest of `proxy` (everything except specs and
     // landing-customization) + the top-level server / logging

@@ -45,6 +45,15 @@ struct LandingPage<'a> {
     /// the operator set a custom background color. Empty string ⇒
     /// no override.
     header_style: String,
+    /// Effective page title — `landing-customization.seo-title` when
+    /// set, otherwise the localized `landing-title`. Drives both the
+    /// `<title>` tag and `og:title`.
+    page_title: String,
+    /// `<meta name="description">` / `og:description` — `seo-description`
+    /// when set, otherwise the resolved intro. Empty ⇒ tags omitted.
+    seo_description: String,
+    /// `og:image` URL, or empty ⇒ tag omitted.
+    og_image: String,
 }
 
 impl<'a> LandingPage<'a> {
@@ -105,6 +114,19 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         .or_else(|| lc.intro.clone())
         .unwrap_or_default();
 
+    // SEO: explicit overrides win; otherwise sensible fallbacks
+    // (title → localized `landing-title`, description → intro).
+    let not_blank = |s: &Option<String>| {
+        s.as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(str::to_string)
+    };
+    let page_title =
+        not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
+    let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
+    let og_image = not_blank(&lc.og_image).unwrap_or_default();
+
     let page = LandingPage {
         locale: loc,
         theme,
@@ -116,6 +138,9 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         counts,
         intro,
         header_style,
+        page_title,
+        seo_description,
+        og_image,
     };
     render(&page)
 }

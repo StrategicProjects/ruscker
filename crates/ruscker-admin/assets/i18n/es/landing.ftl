@@ -190,8 +190,17 @@ admin-landing-intro-fr = Francés
 admin-landing-preview = Vista previa
 admin-landing-preview-help = Aproximación visual del encabezado y la introducción. Cards y filtros como en la landing real.
 admin-landing-preview-empty = (sin texto de introducción)
+admin-landing-seo = SEO y compartir
+admin-landing-seo-title = Título de la página (SEO)
+admin-landing-seo-title-placeholder = Predeterminado: título del portal
+admin-landing-seo-title-help = Define el título de la pestaña y el og:title. Vacío usa el título por defecto del portal.
+admin-landing-seo-description = Descripción (meta description)
+admin-landing-seo-description-placeholder = Resumen para buscadores y redes sociales
+admin-landing-seo-description-help = Se usa en la meta description y el og:description. Vacío usa el texto de introducción.
+admin-landing-og-image = Imagen para compartir (og:image)
+admin-landing-og-image-help = URL o ruta (p. ej. /assets/img/og.png) que se muestra al compartir en redes sociales.
 admin-landing-future-title = Próximamente
-admin-landing-future-help = Editor de logos, reordenación de secciones, bloques HTML custom, SEO/analytics y meta tags. Por ahora siguen el YAML.
+admin-landing-future-help = Editor de logos, reordenación de secciones, bloques HTML custom y analytics. Por ahora siguen el YAML.
 
 # Admin audit log
 admin-audit-title = Auditoría

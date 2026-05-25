@@ -172,6 +172,29 @@
         </div>
       </div>
 
+      <div class="spec-form-section-title">{{ self.t("admin-landing-seo") }}</div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-seo-title") }}</label>
+        <input type="text" name="seo_title" x-model="form.seo_title"
+               placeholder="{{ self.t("admin-landing-seo-title-placeholder") }}"
+               class="spec-form-input" value="{{ form.seo_title }}">
+        <div class="spec-form-help">{{ self.t("admin-landing-seo-title-help") }}</div>
+      </div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-seo-description") }}</label>
+        <textarea name="seo_description" rows="2" x-model="form.seo_description"
+                  placeholder="{{ self.t("admin-landing-seo-description-placeholder") }}"
+                  class="spec-form-input">{{ form.seo_description }}</textarea>
+        <div class="spec-form-help">{{ self.t("admin-landing-seo-description-help") }}</div>
+      </div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-og-image") }}</label>
+        <input type="text" name="og_image" x-model="form.og_image"
+               placeholder="/assets/img/og.png"
+               class="spec-form-input" value="{{ form.og_image }}">
+        <div class="spec-form-help">{{ self.t("admin-landing-og-image-help") }}</div>
+      </div>
+
       <div class="info-box">
         <i class="ti ti-info-circle" aria-hidden="true"></i>
         <div>

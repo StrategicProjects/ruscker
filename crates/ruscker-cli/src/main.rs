@@ -470,6 +470,12 @@ fn format_warning(w: &Warning) -> String {
         Warning::SpecLackingContainerHasContainerFields { spec_id } => {
             format!("spec {spec_id} has no container-image but uses container-only fields")
         }
+        Warning::InvalidRateLimit { spec_id, value } => {
+            format!(
+                "spec {spec_id} has an invalid api.rate-limit `{value}` \
+                 (expected `N/unit`, e.g. `100/min`) — no limit will be applied"
+            )
+        }
     }
 }
 

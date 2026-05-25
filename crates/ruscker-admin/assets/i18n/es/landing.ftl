@@ -233,8 +233,8 @@ admin-landing-analytics-html = Snippet de analytics
 admin-landing-analytics-html-help = HTML inyectado en el <head> de la landing (p. ej. una etiqueta <script> de Plausible/Matomo/GA). Se renderiza sin escapar — usa solo fuentes de confianza.
 admin-landing-analytics-origins = Orígenes permitidos (CSP)
 admin-landing-analytics-origins-help = Dominios separados por espacios (p. ej. https://plausible.io) permitidos en la CSP de la landing para que el script cargue y reporte.
-admin-landing-future-title = Próximamente
-admin-landing-future-help = Reordenación de secciones y bloques HTML custom. Por ahora siguen el YAML.
+admin-landing-future-title = Bloques HTML
+admin-landing-future-help = Gestiona bloques HTML personalizados (banners, avisos) en la sección Bloques del menú.
 
 # Admin audit log
 admin-audit-title = Auditoría

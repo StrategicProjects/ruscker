@@ -57,6 +57,10 @@ struct LandingPage<'a> {
     /// Operator analytics snippet, injected verbatim into `<head>`
     /// (rendered with `|safe`). Empty ⇒ nothing injected.
     analytics_html: String,
+    /// Custom HTML blocks rendered after the header (`top` slot) and
+    /// after the card grid (`bottom` slot), in `position` order.
+    blocks_top: Vec<crate::db::landing_blocks::LandingBlock>,
+    blocks_bottom: Vec<crate::db::landing_blocks::LandingBlock>,
 }
 
 impl<'a> LandingPage<'a> {
@@ -130,7 +134,30 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
     let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
     let og_image = not_blank(&lc.og_image).unwrap_or_default();
     let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
-    let analytics_origins = not_blank(&lc.analytics_origins).unwrap_or_default();
+
+    // Custom HTML blocks (DB-only). Split into the two slots; collect
+    // their CSP origins alongside the analytics ones so embedded
+    // content can load.
+    let (mut blocks_top, mut blocks_bottom) = (Vec::new(), Vec::new());
+    let mut origins = not_blank(&lc.analytics_origins).unwrap_or_default();
+    if let Some(pool) = state.db.as_ref() {
+        match crate::db::landing_blocks::list_enabled(pool).await {
+            Ok(blocks) => {
+                for b in blocks {
+                    if !b.csp_origins.trim().is_empty() {
+                        origins.push(' ');
+                        origins.push_str(b.csp_origins.trim());
+                    }
+                    match b.slot.as_str() {
+                        "bottom" => blocks_bottom.push(b),
+                        _ => blocks_top.push(b),
+                    }
+                }
+            }
+            Err(err) => tracing::warn!(error = ?err, "landing blocks fetch failed"),
+        }
+    }
+    let analytics_origins = origins.trim().to_string();
 
     let page = LandingPage {
         locale: loc,
@@ -147,6 +174,8 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         seo_description,
         og_image,
         analytics_html,
+        blocks_top,
+        blocks_bottom,
     };
     let mut resp = render(&page);
     // Widen *this page's* CSP so the analytics script can load/report.

@@ -26,6 +26,13 @@
   </div>
 </header>
 
+{# Custom HTML blocks — `top` slot (after the header). Rendered
+   verbatim; admin-trusted (see /admin/blocks). Kept outside the
+   Alpine `<main>` so operator markup isn't interpreted. #}
+{% for b in blocks_top %}
+<section class="landing-block landing-block--top px-6 max-w-6xl mx-auto w-full">{{ b.html|safe }}</section>
+{% endfor %}
+
 <main class="flex-1 px-6 py-6 max-w-6xl mx-auto w-full"
       x-data="ruscker.landing()" x-cloak>
 
@@ -192,6 +199,11 @@
   </p>
 
 </main>
+
+{# Custom HTML blocks — `bottom` slot (after the card grid). #}
+{% for b in blocks_bottom %}
+<section class="landing-block landing-block--bottom px-6 max-w-6xl mx-auto w-full">{{ b.html|safe }}</section>
+{% endfor %}
 
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>

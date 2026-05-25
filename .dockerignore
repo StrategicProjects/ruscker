@@ -1,0 +1,28 @@
+# Keep the build context small and the image reproducible.
+# The biggest offender is target/ (multi-GB of build artifacts).
+target/
+**/target/
+
+# Version control + CI metadata
+.git/
+.github/
+
+# Local Claude Code memory/instructions (never shipped)
+CLAUDE.md
+**/CLAUDE.md
+.claude/
+
+# Editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+
+# Local databases, logs, scratch
+*.db
+*.db-*
+*.sqlite
+*.log
+/tmp/
+
+# Docs and mockups aren't needed to build the binary
+docs/

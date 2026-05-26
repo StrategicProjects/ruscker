@@ -163,6 +163,10 @@ spec-form-error-id-required = El ID es obligatorio.
 spec-form-error-id-shape = El ID debe empezar con una letra y contener solo letras, números, "_" y "-".
 spec-form-error-id-duplicate = Ya existe una aplicación con ese ID.
 spec-form-error-name-required = El nombre visible es obligatorio.
+spec-form-error-number = Un campo numérico tiene un valor no numérico.
+spec-form-error-cpu = El límite de CPU debe ser un número positivo (ej.: 0.5).
+spec-form-error-memory = El límite de memoria debe ser un tamaño como 512m o 1.5g.
+spec-form-error-replica-range = Réplicas máx. debe ser mayor o igual que réplicas mín.
 
 # Admin image library
 admin-images-title = Biblioteca multimedia

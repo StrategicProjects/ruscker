@@ -294,6 +294,51 @@ impl SpecForm {
         if matches!(mode, FormMode::New) && self.id.trim().is_empty() {
             // duplicate-id check happens later (needs DB access)
         }
+
+        // Numeric fields: a non-empty but unparseable value used to be
+        // silently dropped to None (= schema default). Flag it instead,
+        // so a pt-BR `0,5` CPU or a typo'd count doesn't quietly mean
+        // "no limit / default".
+        let int_fields = [
+            &self.seats_per_container,
+            &self.max_lifetime,
+            &self.heartbeat_timeout,
+            &self.min_replicas,
+            &self.max_replicas,
+            &self.concurrent_requests_per_replica,
+            &self.api_port,
+        ];
+        if int_fields
+            .iter()
+            .any(|v| !v.trim().is_empty() && v.trim().parse::<i64>().is_err())
+        {
+            errs.push("spec-form-error-number");
+        }
+
+        // CPU must be a positive, finite number of cores (catches `0,5`).
+        if !self.container_cpu_limit.trim().is_empty()
+            && !matches!(self.container_cpu_limit.trim().parse::<f64>(), Ok(v) if v.is_finite() && v > 0.0)
+        {
+            errs.push("spec-form-error-cpu");
+        }
+
+        // Memory must be a Docker-style size (catches the `512mb` typo).
+        if !self.container_memory_limit.trim().is_empty()
+            && !ruscker_config::is_valid_memory_size(self.container_memory_limit.trim())
+        {
+            errs.push("spec-form-error-memory");
+        }
+
+        // Replica pool: max must be >= min when both are given.
+        if let (Ok(min), Ok(max)) = (
+            self.min_replicas.trim().parse::<u32>(),
+            self.max_replicas.trim().parse::<u32>(),
+        ) {
+            if max < min {
+                errs.push("spec-form-error-replica-range");
+            }
+        }
+
         errs
     }
 }
@@ -680,5 +725,57 @@ proxy:
         assert_eq!(spec.container_lifetime, None);
         assert_eq!(spec.docker_registry_username, None);
         assert_eq!(spec.max_body_size, None);
+    }
+
+    fn valid_form() -> SpecForm {
+        SpecForm {
+            id: "ok".into(),
+            display_name: "Ok".into(),
+            display_type: "app".into(),
+            state: "active".into(),
+            access: "lock".into(),
+            ..Default::default()
+        }
+    }
+
+    // #79/#83: malformed numbers used to silently default; now they're
+    // form errors instead of "no limit / default".
+    #[test]
+    fn validate_rejects_malformed_numbers() {
+        let mut f = valid_form();
+        f.container_cpu_limit = "0,5".into(); // pt-BR comma
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-cpu"));
+
+        let mut f = valid_form();
+        f.container_memory_limit = "512mb".into(); // typo
+        assert!(f
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-memory"));
+
+        let mut f = valid_form();
+        f.seats_per_container = "ten".into();
+        assert!(f
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-number"));
+
+        let mut f = valid_form();
+        f.min_replicas = "5".into();
+        f.max_replicas = "2".into();
+        assert!(f
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-replica-range"));
+    }
+
+    #[test]
+    fn validate_accepts_good_numbers() {
+        let mut f = valid_form();
+        f.container_cpu_limit = "0.5".into();
+        f.container_memory_limit = "512m".into();
+        f.seats_per_container = "10".into();
+        f.min_replicas = "1".into();
+        f.max_replicas = "3".into();
+        f.heartbeat_timeout = "-1".into();
+        let errs = f.validate(FormMode::New);
+        assert!(errs.is_empty(), "expected no errors, got {errs:?}");
     }
 }

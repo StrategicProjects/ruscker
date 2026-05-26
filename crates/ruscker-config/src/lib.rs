@@ -42,8 +42,8 @@ pub mod validate;
 
 pub use error::{Error, Result};
 pub use schema::{
-    ApiSpec, Config, LandingBlock, LandingCustomization, Logging, Proxy, RatePolicy,
-    RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties,
+    is_valid_memory_size, ApiSpec, Config, LandingBlock, LandingCustomization, Logging, Proxy,
+    RatePolicy, RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties,
 };
 pub use validate::{CompatWarning, ValidationReport, Warning};
 

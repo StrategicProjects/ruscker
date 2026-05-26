@@ -61,7 +61,7 @@ pub struct SpecForm {
     pub state: String,
     /// "lock" (restricted) | "lock_open" (public)
     pub access: String,
-    pub tema: String,
+    pub subject: String,
     pub logo: String,
     /// Card-cover CSS background (`template-properties.cover`):
     /// a solid color or a gradient string. Empty ⇒ fall back to
@@ -97,7 +97,7 @@ impl SpecForm {
                 .get_str("icon")
                 .map(str::to_string)
                 .unwrap_or_else(|| "lock".into()),
-            tema: tp.get_str("tema").map(str::to_string).unwrap_or_default(),
+            subject: tp.get_str("subject").map(str::to_string).unwrap_or_default(),
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
             cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
             updated: tp.get_str("updated").map(str::to_string).unwrap_or_default(),
@@ -136,10 +136,10 @@ impl SpecForm {
         tp_map.insert("icon".into(), YamlValue::String(self.access.clone()));
         tp_map.insert("updated".into(), YamlValue::String(updated));
 
-        if !self.tema.trim().is_empty() {
+        if !self.subject.trim().is_empty() {
             tp_map.insert(
-                "tema".into(),
-                YamlValue::String(self.tema.trim().to_string()),
+                "subject".into(),
+                YamlValue::String(self.subject.trim().to_string()),
             );
         }
         if !self.logo.trim().is_empty() {

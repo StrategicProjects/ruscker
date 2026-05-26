@@ -54,12 +54,12 @@
       <span class="kbd-hint hidden md:inline">{{ self.t("search-shortcut") }}</span>
     </label>
 
-    <div class="select-wrap" :class="tema !== 'all' ? 'is-active' : ''">
-      <select x-model="tema"
+    <div class="select-wrap" :class="subject !== 'all' ? 'is-active' : ''">
+      <select x-model="subject"
               class="theme-select"
-              aria-label="{{ self.t("filter-theme-label") }}">
-        <option value="all">{{ self.t("filter-theme-all") }}</option>
-        {% for t in temas %}
+              aria-label="{{ self.t("filter-subject-label") }}">
+        <option value="all">{{ self.t("filter-subject-all") }}</option>
+        {% for t in subjects %}
           <option value="{{ t }}">{{ t }}</option>
         {% endfor %}
       </select>
@@ -124,8 +124,8 @@
   {# ── Meta row: count + clear filters ───────────────────────── #}
   <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
     <span><span x-text="visible"></span> / <span x-text="counts.all"></span></span>
-    <button x-show="type_ !== 'all' || access !== 'all' || search !== '' || tema !== 'all' || status_ !== 'active' || sort !== 'recent'"
-            @click="type_ = 'all'; access = 'all'; search = ''; tema = 'all'; status_ = 'active'; sort = 'recent'"
+    <button x-show="type_ !== 'all' || access !== 'all' || search !== '' || subject !== 'all' || status_ !== 'active' || sort !== 'recent'"
+            @click="type_ = 'all'; access = 'all'; search = ''; subject = 'all'; status_ = 'active'; sort = 'recent'"
             class="text-[10px] px-2 py-0.5 text-[color:var(--text-faint)] underline hover:text-[color:var(--text)]">
       {{ self.t("filter-clear") }}
     </button>
@@ -139,7 +139,7 @@
          data-type="{{ card.display_type.key() }}"
          data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
          data-active="{% if card.active %}active{% else %}inactive{% endif %}"
-         data-tema="{% if let Some(t) = card.tema %}{{ t }}{% endif %}"
+         data-subject="{% if let Some(t) = card.subject %}{{ t }}{% endif %}"
          data-name="{{ card.display_name|lower }}"
          data-desc="{{ card.description|lower }}"
          data-date="{% if let Some(d) = card.updated_date %}{{ d }}{% endif %}"
@@ -212,7 +212,7 @@ window.ruscker.landing = () => ({
   search: '',
   type_: 'all',
   access: 'all',
-  tema: 'all',
+  subject: 'all',
   // status filter: 'active' (default), 'all', or 'inactive'.
   // Inactive items are hidden by default so the landing only shows
   // things you can actually open.
@@ -228,7 +228,7 @@ window.ruscker.landing = () => ({
     this.$watch('search', () => this.recount());
     this.$watch('type_',  () => this.recount());
     this.$watch('access', () => this.recount());
-    this.$watch('tema',   () => this.recount());
+    this.$watch('subject',   () => this.recount());
     this.$watch('status_',() => this.recount());
     this.$nextTick(() => this.recount());
 
@@ -277,8 +277,8 @@ window.ruscker.landing = () => ({
     const okAccess = this.access === 'all' || el.dataset.access === this.access;
     if (!okAccess) return false;
 
-    const okTema = this.tema === 'all' || el.dataset.tema === this.tema;
-    if (!okTema) return false;
+    const okSubject = this.subject === 'all' || el.dataset.subject === this.subject;
+    if (!okSubject) return false;
 
     if (!this.search) return true;
     const q = this.search.toLowerCase();

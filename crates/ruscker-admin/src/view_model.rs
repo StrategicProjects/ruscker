@@ -195,9 +195,9 @@ pub struct CardCtx<'a> {
     pub access_open: bool,
     pub active: bool,
     /// Sector/theme classification (e.g. "Saúde Pública"). Read
-    /// verbatim from `template-properties.tema` and rendered as-is
+    /// verbatim from `template-properties.subject` and rendered as-is
     /// in the UI — operators choose their own taxonomy.
-    pub tema: Option<&'a str>,
+    pub subject: Option<&'a str>,
     pub logo: Option<&'a str>,
     /// Optional CSS background for the card cover, read verbatim
     /// from `template-properties.cover` (a solid color or a
@@ -229,7 +229,7 @@ impl<'a> CardCtx<'a> {
             .map(|s| s == "lock_open")
             .unwrap_or(false);
         let active = tp.is_active();
-        let tema = tp.get_str("tema");
+        let subject = tp.get_str("subject");
         let logo = tp.get_str("logo");
         // Empty string ⇒ treat as unset so the kind-tint fallback
         // kicks in rather than rendering `background: ;`.
@@ -249,7 +249,7 @@ impl<'a> CardCtx<'a> {
             display_type,
             access_open,
             active,
-            tema,
+            subject,
             logo,
             cover,
             updated_raw,
@@ -332,14 +332,14 @@ pub fn sort_by_recent(cards: &mut [CardCtx<'_>]) {
     cards.sort_by(|a, b| b.updated_date.cmp(&a.updated_date));
 }
 
-/// Unique `tema` values across all cards, alphabetically sorted.
-/// Powers the "Filtrar por tema" `<select>` on the landing. Cards
-/// with no tema contribute nothing — only the "Todos os temas"
+/// Unique `subject` values across all cards, alphabetically sorted.
+/// Powers the "Filtrar por subject" `<select>` on the landing. Cards
+/// with no subject contribute nothing — only the "Todos os subjects"
 /// option (always present) matches them.
-pub fn unique_temas<'a>(cards: &[CardCtx<'a>]) -> Vec<&'a str> {
+pub fn unique_subjects<'a>(cards: &[CardCtx<'a>]) -> Vec<&'a str> {
     let mut set: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
     for c in cards {
-        if let Some(t) = c.tema {
+        if let Some(t) = c.subject {
             set.insert(t);
         }
     }
@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn card_cover_absent_falls_back_to_tint() {
-        let spec = spec_with_tp("  tema: Saúde\n");
+        let spec = spec_with_tp("  subject: Saúde\n");
         let card = CardCtx::from_spec(&spec);
         assert_eq!(card.cover, None);
     }

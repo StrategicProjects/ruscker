@@ -17,7 +17,7 @@ use fluent_bundle::{FluentArgs, FluentValue};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::view_model::{
-    build_type_chips, sort_by_recent, unique_temas, CardCounts, CardCtx, TypeChip,
+    build_type_chips, sort_by_recent, unique_subjects, CardCounts, CardCtx, TypeChip,
 };
 use crate::AppState;
 
@@ -36,7 +36,7 @@ struct LandingPage<'a> {
     type_chips: Vec<TypeChip>,
     /// Unique themes present in this config, alphabetically. Drives
     /// the `<select>` filter at the top of the landing.
-    temas: Vec<&'a str>,
+    subjects: Vec<&'a str>,
     counts: CardCounts,
     /// Resolved per-locale intro text, or empty string when no
     /// `landing-customization.intro` is configured.
@@ -91,7 +91,7 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         .collect();
     sort_by_recent(&mut cards);
     let type_chips = build_type_chips(&cards);
-    let temas = unique_temas(&cards);
+    let subjects = unique_subjects(&cards);
     let counts = CardCounts {
         total: cards.iter().filter(|c| c.active).count(),
     };
@@ -166,7 +166,7 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         locales_all: &Locale::ALL,
         cards,
         type_chips,
-        temas,
+        subjects,
         counts,
         intro,
         header_style,

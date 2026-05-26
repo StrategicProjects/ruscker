@@ -53,7 +53,7 @@ proxy:
         type: app
         updated: "18/05/2025"
         state: active
-        tema: "Sales"
+        subject: "Sales"
 
     - id: ops-report
       display-name: Operations Report
@@ -68,7 +68,7 @@ proxy:
         icon: lock_open
         type: report
         state: active
-        tema: "Operations"
+        subject: "Operations"
 
     - id: survey
       display-name: Survey App
@@ -78,7 +78,7 @@ proxy:
       template-properties:
         type: app
         state: active
-        tema: "Research"
+        subject: "Research"
 
     - id: longrun-model
       display-name: Long-running Model
@@ -90,7 +90,7 @@ proxy:
       template-properties:
         type: app
         state: active
-        tema: "Research"
+        subject: "Research"
 
     - id: legacy-viewer
       display-name: Legacy Viewer
@@ -117,7 +117,7 @@ proxy:
       template-properties:
         type: api
         state: active
-        tema: "Data"
+        subject: "Data"
 
     # ── External links (no container) ────────────────────────────
     - id: handbook

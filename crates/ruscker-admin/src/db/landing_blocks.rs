@@ -216,6 +216,64 @@ pub async fn delete(pool: &SqlitePool, id: &str, actor: Option<&str>) -> Result<
     Ok(removed)
 }
 
+impl LandingBlock {
+    /// Map to the config-crate representation for YAML export.
+    pub fn to_config(&self) -> ruscker_config::LandingBlock {
+        ruscker_config::LandingBlock {
+            slot: self.slot.clone(),
+            title: self.title.clone(),
+            html: self.html.clone(),
+            csp_origins: self.csp_origins.clone(),
+            enabled: self.enabled,
+        }
+    }
+}
+
+/// Replace ALL blocks with `blocks` (used by the YAML import). Clears
+/// the table, then inserts each block with a per-slot `position` taken
+/// from its order of appearance. Runs inside the caller's transaction.
+pub(crate) async fn replace_all_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    blocks: &[ruscker_config::LandingBlock],
+    now: chrono::DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query("DELETE FROM landing_blocks")
+        .execute(&mut **tx)
+        .await
+        .context("clear landing_blocks")?;
+
+    let mut next: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for b in blocks {
+        // Guard the slot so a hand-edited YAML can't create an
+        // unrenderable block.
+        let slot = if SLOTS.contains(&b.slot.as_str()) {
+            b.slot.as_str()
+        } else {
+            "top"
+        };
+        let pos = next.entry(slot.to_owned()).or_insert(0);
+        sqlx::query(
+            "INSERT INTO landing_blocks
+               (id, slot, position, enabled, title, html, csp_origins, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(slot)
+        .bind(*pos)
+        .bind(b.enabled as i64)
+        .bind(&b.title)
+        .bind(&b.html)
+        .bind(&b.csp_origins)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .context("insert imported block")?;
+        *pos += 1;
+    }
+    Ok(())
+}
+
 /// Move a block one step within its slot by swapping `position` with
 /// the adjacent block (`up` = toward the front). No-op (returns
 /// `false`) when the block doesn't exist or is already at the slot

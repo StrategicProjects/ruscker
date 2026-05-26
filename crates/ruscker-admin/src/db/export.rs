@@ -32,8 +32,14 @@ pub async fn reconstruct_config(pool: &SqlitePool) -> Result<Config> {
 
     // 2. Landing customization singleton — reuse the repository
     //    loader so every field (incl. SEO) round-trips without
-    //    duplicating the column list here.
-    let landing_customization = super::landing::fetch(pool).await?;
+    //    duplicating the column list here. Then attach the custom
+    //    HTML blocks (ordered by slot, position) so they round-trip too.
+    let mut landing_customization = super::landing::fetch(pool).await?;
+    landing_customization.blocks = super::landing_blocks::list_all(pool)
+        .await?
+        .iter()
+        .map(|b| b.to_config())
+        .collect();
 
     // 3. config_meta sections — start with default structs and let
     //    serde_json overlay whatever the import persisted. Falling
@@ -137,6 +143,42 @@ mod tests {
             cfg_out.proxy.landing_customization.intro_locales,
             cfg_in.proxy.landing_customization.intro_locales
         );
+    }
+
+    #[tokio::test]
+    async fn round_trip_preserves_landing_blocks() {
+        let pool = open_memory().await.unwrap();
+        let yaml = r#"
+proxy:
+  landing-customization:
+    blocks:
+      - { slot: top, title: Banner, html: "<div>hi</div>", csp-origins: "https://cdn.x", enabled: true }
+      - { slot: top, title: Second, html: "<p>2</p>" }
+      - { slot: bottom, title: Foot, html: "<footer>f</footer>", enabled: false }
+  specs: []
+"#;
+        let cfg_in = Config::from_yaml(yaml).unwrap();
+        assert_eq!(cfg_in.proxy.landing_customization.blocks.len(), 3);
+        // `enabled` defaults to true when the key is omitted.
+        assert!(cfg_in.proxy.landing_customization.blocks[1].enabled);
+
+        import_all(&pool, &cfg_in).await.unwrap();
+        let cfg_out = reconstruct_config(&pool).await.unwrap();
+        let out = &cfg_out.proxy.landing_customization.blocks;
+
+        assert_eq!(out.len(), 3);
+        // Per-slot order + content preserved (export groups by slot:
+        // bottom sorts before top).
+        let top: Vec<_> = out.iter().filter(|b| b.slot == "top").collect();
+        assert_eq!(
+            top.iter().map(|b| b.title.as_str()).collect::<Vec<_>>(),
+            ["Banner", "Second"]
+        );
+        assert_eq!(top[0].html, "<div>hi</div>");
+        assert_eq!(top[0].csp_origins, "https://cdn.x");
+        let bottom: Vec<_> = out.iter().filter(|b| b.slot == "bottom").collect();
+        assert_eq!(bottom.len(), 1);
+        assert!(!bottom[0].enabled);
     }
 
     #[tokio::test]

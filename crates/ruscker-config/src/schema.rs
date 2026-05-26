@@ -494,6 +494,22 @@ pub struct Spec {
     /// Only meaningful for `type: api`. Defaults to 100.
     #[serde(rename = "concurrent-requests-per-replica")]
     pub concurrent_requests_per_replica: Option<u32>,
+
+    // -- Ruscker extensions: smart routing --
+    /// Whether to inject `<base href>` and rewrite root-relative URLs
+    /// in HTML responses on the `/app/{spec}` route — the transform
+    /// that lets an app whose templates assume they live at `/`
+    /// work behind Ruscker's sub-path mount. Defaults to `true`.
+    ///
+    /// Set `false` when the upstream app honours the smart-routing
+    /// headers Ruscker always forwards (`X-Forwarded-Prefix` /
+    /// `X-Script-Name`, plus `X-Forwarded-Proto` / `-Host`) and
+    /// builds its own base path — then the HTML rewriting is
+    /// redundant (and can interfere). Has no effect on `/api/{spec}`
+    /// responses, which are never rewritten. Resolved via
+    /// [`Spec::effective_inject_base_href`].
+    #[serde(rename = "inject-base-href")]
+    pub inject_base_href: Option<bool>,
 }
 
 /// Loose key-value bag for `template-properties`.
@@ -646,6 +662,16 @@ impl Spec {
             .as_deref()
             .and_then(parse_memory_string)
             .or(global)
+    }
+
+    /// Whether the `/app/{spec}` HTML transform (`<base href>` +
+    /// root-relative URL rewriting) runs for this spec. Defaults to
+    /// `true` — the historical behaviour, safe for apps that don't
+    /// understand the forwarded-prefix headers. Operators opt out
+    /// per spec once the upstream self-configures from
+    /// `X-Forwarded-Prefix`.
+    pub fn effective_inject_base_href(&self) -> bool {
+        self.inject_base_href.unwrap_or(true)
     }
 }
 
@@ -1049,6 +1075,7 @@ proxy:
             scale_down_grace: None,
             drain_timeout: None,
             routing_strategy: None,
+            inject_base_href: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::External);
@@ -1087,6 +1114,7 @@ proxy:
             scale_down_grace: None,
             drain_timeout: None,
             routing_strategy: None,
+            inject_base_href: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::Shiny);
@@ -1125,6 +1153,7 @@ proxy:
             scale_down_grace: None,
             drain_timeout: None,
             routing_strategy: None,
+            inject_base_href: None,
             concurrent_requests_per_replica: None,
         };
         spec.kind_override = Some(SpecKindOverride::Api);

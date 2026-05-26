@@ -98,6 +98,12 @@ pub struct SpecForm {
     pub api_rate_limit: String,
     /// Checkbox: non-empty ("on") ⇒ permissive CORS enabled.
     pub api_cors: String,
+    /// Checkbox: non-empty ("on") ⇒ inject `<base href>` + rewrite
+    /// root-relative URLs in `/app/{spec}` HTML (the default). Empty
+    /// (unchecked) ⇒ the app self-routes from the forwarded-prefix
+    /// headers, so the HTML transform is turned off. Defaults to
+    /// checked on a new form.
+    pub inject_base_href: String,
 }
 
 impl SpecForm {
@@ -172,6 +178,11 @@ impl SpecForm {
                 .and_then(|a| a.rate_limit.clone())
                 .unwrap_or_default(),
             api_cors: if spec.api.as_ref().map(|a| a.cors).unwrap_or(false) {
+                "on".into()
+            } else {
+                String::new()
+            },
+            inject_base_href: if spec.effective_inject_base_href() {
                 "on".into()
             } else {
                 String::new()
@@ -268,6 +279,13 @@ impl SpecForm {
             max_replicas: parse_opt(&self.max_replicas),
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
             volumes: lines_to_vec(&self.volumes),
+            // Checked ⇒ leave unset (the `true` default keeps the
+            // exported YAML clean); unchecked ⇒ explicit `false`.
+            inject_base_href: if self.inject_base_href.trim().is_empty() {
+                Some(false)
+            } else {
+                None
+            },
             // ── Not modelled by the form: preserve from `base` so an
             //    edit never silently drops YAML-imported config. ──────
             container_lifetime: base.and_then(|b| b.container_lifetime),
@@ -494,6 +512,9 @@ async fn new_form(
             display_type: "app".into(),
             state: "active".into(),
             access: "lock".into(),
+            // The HTML base-href transform is on by default — the
+            // safe behaviour for apps that don't self-route.
+            inject_base_href: "on".into(),
             ..Default::default()
         },
         errors: Vec::new(),

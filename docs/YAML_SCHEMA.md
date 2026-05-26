@@ -111,6 +111,46 @@ as needed; editable in the admin **Advanced** form (one per line).
 **Bind-mounting host paths is root-equivalent and admin-only** — see
 `SECURITY.md`.
 
+### Smart routing — sub-path context for the upstream
+
+Ruscker mounts each app under a sub-path (`/app/{id}`, `/api/{id}`) but
+the container usually assumes it lives at the server root. Two
+mechanisms bridge that gap:
+
+1. **Forwarded-prefix headers (always on).** Every proxied request
+   carries the public mount context to the upstream so a
+   prefix-aware app can self-route and emit correct absolute links:
+
+   | Header | Value | Consumed by |
+   |---|---|---|
+   | `X-Forwarded-Prefix` | `/app/{id}` (no trailing slash) | Spring, Traefik, FastAPI `root_path` |
+   | `X-Script-Name` | same mount path | WSGI, Dash, Plumber |
+   | `X-Forwarded-Proto` | `http` / `https` as seen by the client | absolute-URL builders behind TLS |
+   | `X-Forwarded-Host` | the public `Host` | absolute-URL builders |
+
+   Apps that ignore these headers are unaffected. To honour them you
+   typically point the framework at the prefix — e.g. uvicorn
+   `--root-path /app/my-api`, or Dash `requests_pathname_prefix`.
+
+2. **HTML rewriting (`inject-base-href`, default `true`).** For apps
+   that *can't* be told their prefix, Ruscker injects `<base href>`
+   and rewrites root-relative URLs in `/app/{id}` HTML responses (see
+   the rewriter in `routes::rewrite`). This is the safe default and
+   covers Shiny out of the box. Set it to `false` per spec once the
+   app self-routes from the headers above — then the rewriting is
+   redundant and best disabled:
+
+   ```yaml
+   - id: my_api
+     container-image: org/fastapi:tag
+     type: api
+     inject-base-href: false   # app reads X-Forwarded-Prefix itself
+   ```
+
+   `inject-base-href` only affects `/app/{id}` responses; `/api/{id}`
+   responses are never rewritten. Editable in the admin **Advanced**
+   form under **Routing**.
+
 ### External link specs (no container)
 
 ```yaml

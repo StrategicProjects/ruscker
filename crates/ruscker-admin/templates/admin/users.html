@@ -1,0 +1,100 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-users-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-users-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-users-subtitle") }}</p>
+  </div>
+</div>
+
+{% if flash != "" %}
+  <div class="admin-login-error mb-3" role="status"
+       style="{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" %}{% else %}background:rgba(29,158,117,0.12);color:var(--text-primary){% endif %}">
+    <i class="ti ti-info-circle" aria-hidden="true"></i>
+    {% if flash == "created" %}{{ self.t("admin-users-flash-created") }}
+    {% else if flash == "saved" %}{{ self.t("admin-users-flash-saved") }}
+    {% else if flash == "deleted" %}{{ self.t("admin-users-flash-deleted") }}
+    {% else if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
+    {% else if flash == "exists" %}{{ self.t("admin-users-flash-exists") }}
+    {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
+  </div>
+{% endif %}
+
+{# ── Create a new user ─────────────────────────────────────────── #}
+<form method="post" action="/admin/users" class="rcard" style="padding:16px;margin-bottom:20px" autocomplete="off">
+  <div class="text-sm font-medium mb-2">{{ self.t("admin-users-new") }}</div>
+  <div class="flex flex-wrap items-end gap-3">
+    <label class="admin-login-field" style="margin:0">
+      <span class="admin-login-label">{{ self.t("admin-login-username-label") }}</span>
+      <input type="text" name="username" required autocapitalize="none" placeholder="jane">
+    </label>
+    <label class="admin-login-field" style="margin:0">
+      <span class="admin-login-label">{{ self.t("admin-users-initial-password") }}</span>
+      <input type="text" name="password" required autocomplete="off" placeholder="••••••••">
+    </label>
+    <label class="admin-login-field" style="margin:0">
+      <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
+      <select name="role">
+        {% for r in self.all_roles() %}
+          <option value="{{ r.as_str() }}"{% if r == Role::Viewer %} selected{% endif %}>{{ self.role_label(r) }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <button type="submit" class="admin-login-btn" style="width:auto">
+      <i class="ti ti-user-plus" aria-hidden="true"></i>
+      {{ self.t("admin-users-create") }}
+    </button>
+  </div>
+  <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-initial-password-hint") }}</p>
+</form>
+
+{# ── Existing users ────────────────────────────────────────────── #}
+<table class="w-full text-sm" style="border-collapse:collapse">
+  <thead>
+    <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
+      <th class="py-2">{{ self.t("admin-users-col-user") }}</th>
+      <th>{{ self.t("admin-users-col-role") }}</th>
+      <th>{{ self.t("admin-users-col-created") }}</th>
+      <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+      <tr style="border-bottom:0.5px solid var(--border)">
+        <td class="py-2">
+          <span class="font-medium">{{ u.username }}</span>
+          {% if u.username == me %}<span class="text-xs text-[color:var(--text-faint)]"> ({{ self.t("admin-users-you") }})</span>{% endif %}
+          {% if u.must_change_password %}<i class="ti ti-alert-triangle" title="{{ self.t("admin-users-must-change") }}" style="color:var(--text-faint)"></i>{% endif %}
+        </td>
+        <td>
+          <form method="post" action="/admin/users/{{ u.username }}/role" style="display:flex;gap:6px;align-items:center">
+            <select name="role">
+              {% for r in self.all_roles() %}
+                <option value="{{ r.as_str() }}"{% if r == u.role %} selected{% endif %}>{{ self.role_label(r) }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-role") }}"><i class="ti ti-check"></i></button>
+          </form>
+        </td>
+        <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>
+        <td style="text-align:right;white-space:nowrap">
+          {# Reset password — reveals a tiny inline form. #}
+          <form method="post" action="/admin/users/{{ u.username }}/password"
+                style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
+            <input type="text" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
+                   style="width:120px" autocomplete="off">
+            <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
+          </form>
+          <form method="post" action="/admin/users/{{ u.username }}/delete" style="display:inline"
+                onsubmit="return confirm('{{ self.t("admin-users-confirm-delete") }}')">
+            <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

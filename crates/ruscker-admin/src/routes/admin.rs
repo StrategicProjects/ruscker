@@ -6,7 +6,7 @@
 
 use askama::Template;
 use axum::{
-    extract::{Form, State},
+    extract::{Form, Query, State},
     http::{header::REFERER, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -16,7 +16,8 @@ use serde::Deserialize;
 use tower_cookies::cookie::time::Duration;
 use tower_cookies::{Cookie, Cookies};
 
-use crate::auth::{AdminSession, MaybeAdminSession, COOKIE_NAME};
+use crate::auth::{AdminSession, MaybeAdminSession, RequireAdmin, Role, COOKIE_NAME};
+use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
@@ -30,12 +31,24 @@ pub mod landing;
 pub mod logs;
 pub mod spec_form;
 pub mod specs;
+pub mod users;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin", get(redirect_to_dashboard))
+        // Username/password login is the primary path; the admin token
+        // is a break-glass that always grants an Admin session (and
+        // bootstraps the first account).
         .route("/admin/login", get(login_form).post(login_submit))
+        .route("/admin/login/token", post(token_login))
         .route("/admin/logout", post(logout))
+        // First-admin bootstrap (only when no admin user exists).
+        .route("/admin/setup", get(setup_form).post(setup_submit))
+        // Self-service password change + first-login prompt.
+        .route(
+            "/admin/account/password",
+            get(password_form).post(password_submit),
+        )
         .merge(dashboard::routes())
         .merge(specs::routes())
         .merge(spec_form::routes())
@@ -45,6 +58,7 @@ pub fn routes() -> Router<AppState> {
         .merge(blocks::routes())
         .merge(audit::routes())
         .merge(logs::routes())
+        .merge(users::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────
@@ -56,12 +70,52 @@ struct LoginPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
-    /// "wrong-token" when the previous submit failed, otherwise empty.
-    /// Drives the inline error banner.
+    /// Inline error banner key: "" | "wrong-login" | "wrong-token".
     error: &'static str,
+    /// `true` ⇒ render the break-glass **token** form (bootstrap or
+    /// `?token=1`); `false` ⇒ the username/password form.
+    bootstrap: bool,
 }
 
 impl LoginPage<'_> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+#[derive(Template)]
+#[template(path = "admin/setup.html")]
+struct SetupPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    /// "" | "mismatch" | "short" | "exists" | "db".
+    error: &'static str,
+}
+
+impl SetupPage<'_> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+#[derive(Template)]
+#[template(path = "admin/account_password.html")]
+struct AccountPasswordPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    nav_section: &'static str,
+    role: Role,
+    /// First-login prompt — shows the "keep current password" skip.
+    first: bool,
+    /// "" | "wrong-current" | "mismatch" | "short".
+    error: &'static str,
+}
+
+impl AccountPasswordPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
@@ -73,26 +127,100 @@ async fn redirect_to_dashboard(_: AdminSession) -> Redirect {
     Redirect::to("/admin/dashboard")
 }
 
+/// Issue the admin session cookie. 24h lifetime; `Secure` only under
+/// TLS (signalled by `X-Forwarded-Proto`) so the plain-HTTP dev server
+/// doesn't make the browser drop it. The value is an opaque session id.
+fn issue_session_cookie(cookies: &Cookies, headers: &HeaderMap, session_id: String) {
+    let mut c = Cookie::new(COOKIE_NAME, session_id);
+    c.set_path("/");
+    c.set_http_only(true);
+    c.set_same_site(tower_cookies::cookie::SameSite::Strict);
+    c.set_secure(crate::auth::request_is_https(headers));
+    c.set_max_age(Duration::hours(24));
+    cookies.add(c);
+}
+
+/// 429 + Retry-After when the shared login rate-limit window is full.
+fn rate_limited() -> Response {
+    let mut resp = (
+        StatusCode::TOO_MANY_REQUESTS,
+        "too many login attempts — try again shortly",
+    )
+        .into_response();
+    resp.headers_mut()
+        .insert(axum::http::header::RETRY_AFTER, "60".parse().unwrap());
+    resp
+}
+
+/// Whether `/admin/login` should show the break-glass **token** form
+/// rather than username/password: forced via `?token=1`, or because
+/// there's no DB / no user accounts yet (fresh install).
+async fn show_token_form(state: &AppState, force_token: bool) -> bool {
+    if force_token {
+        return true;
+    }
+    match state.db.as_ref() {
+        Some(pool) => !db::users::any_user_exists(pool).await.unwrap_or(false),
+        None => true,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LoginQuery {
+    /// `?token=1` forces the break-glass token form.
+    pub token: Option<String>,
+}
+
 async fn login_form(
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
+    Query(q): Query<LoginQuery>,
 ) -> Response {
+    let bootstrap = show_token_form(&state, q.token.is_some()).await;
     let page = LoginPage {
         locale: loc,
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
         error: "",
+        bootstrap,
     };
     render(&page)
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LoginForm {
-    pub token: String,
+fn login_error(
+    state: &AppState,
+    loc: Locale,
+    theme: Theme,
+    error: &'static str,
+    bootstrap: bool,
+) -> Response {
+    let page = LoginPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        error,
+        bootstrap,
+    };
+    let body = match page.render() {
+        Ok(s) => s,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "render").into_response(),
+    };
+    let mut resp = (StatusCode::UNAUTHORIZED, Html(body)).into_response();
+    resp.headers_mut()
+        .insert("X-Ruscker-Login", "failed".parse().unwrap());
+    resp
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LoginForm {
+    pub username: String,
+    pub password: String,
+}
+
+/// Primary login: username + password against the `users` table.
 async fn login_submit(
     State(state): State<AppState>,
     cookies: Cookies,
@@ -108,83 +236,314 @@ async fn login_submit(
         )
             .into_response();
     }
-
-    // Rate limit: bound brute force against the token. Saturated
-    // window → 429 with Retry-After, before we even compare.
     if !state.login_limiter.allow() {
-        let mut resp = (
-            StatusCode::TOO_MANY_REQUESTS,
-            "too many login attempts — try again shortly",
-        )
-            .into_response();
-        resp.headers_mut()
-            .insert(axum::http::header::RETRY_AFTER, "60".parse().unwrap());
-        return resp;
+        return rate_limited();
     }
 
-    // Match the token against each configured role token. `None`
-    // ⇒ no token matched ⇒ failed login.
-    let Some(role) = state.admin_auth.role_for(&form.token) else {
-        // Count the failure toward the rate-limit window.
+    // Username/password login needs the user store. Without a DB the
+    // only way in is the break-glass token.
+    let Some(pool) = state.db.as_ref() else {
+        return login_error(&state, loc, theme, "wrong-login", false);
+    };
+
+    let user = match db::users::verify_login(pool, &form.username, &form.password).await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            state.login_limiter.record_failure();
+            return login_error(&state, loc, theme, "wrong-login", false);
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "login lookup failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "login error").into_response();
+        }
+    };
+
+    state.login_limiter.record_success();
+    let session_id = state
+        .admin_sessions
+        .create(user.role, Some(user.username.clone()));
+    issue_session_cookie(&cookies, &headers, session_id);
+
+    // First login with an admin-assigned password ⇒ ask whether to
+    // change it.
+    if user.must_change_password {
+        return Redirect::to("/admin/account/password").into_response();
+    }
+
+    let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
+    let path = super::same_origin_path(referer, user.role.home());
+    let target = if path.starts_with("/admin/")
+        && !path.starts_with("/admin/login")
+        && user.role.can_access_section(section_for_admin_path(&path))
+    {
+        path
+    } else {
+        user.role.home().to_string()
+    };
+    Redirect::to(&target).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TokenForm {
+    pub token: String,
+}
+
+/// Break-glass login with `RUSCKER_ADMIN_TOKEN`. Always grants an
+/// Admin session (actor = `None` ⇒ "token" in the audit log). If no
+/// admin account exists yet, it routes to the first-admin setup.
+async fn token_login(
+    State(state): State<AppState>,
+    cookies: Cookies,
+    loc: Locale,
+    theme: Theme,
+    headers: HeaderMap,
+    Form(form): Form<TokenForm>,
+) -> Response {
+    if !state.admin_auth.is_configured() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "RUSCKER_ADMIN_TOKEN is not set — admin disabled",
+        )
+            .into_response();
+    }
+    if !state.login_limiter.allow() {
+        return rate_limited();
+    }
+    if !state.admin_auth.matches_token(&form.token) {
         state.login_limiter.record_failure();
-        // Re-render the form with the error banner. 401 status so
-        // CLI clients / tests can distinguish.
-        let page = LoginPage {
+        cookies.remove(Cookie::new(COOKIE_NAME, ""));
+        return login_error(&state, loc, theme, "wrong-token", true);
+    }
+
+    state.login_limiter.record_success();
+    let session_id = state.admin_sessions.create(Role::Admin, None);
+    issue_session_cookie(&cookies, &headers, session_id);
+
+    // No admin account yet (and a DB to create one in) ⇒ run setup.
+    let need_setup = match state.db.as_ref() {
+        Some(pool) => !db::users::any_admin_exists(pool).await.unwrap_or(false),
+        None => false,
+    };
+    if need_setup {
+        Redirect::to("/admin/setup").into_response()
+    } else {
+        Redirect::to("/admin/dashboard").into_response()
+    }
+}
+
+/// Minimum length for an admin-set or self-chosen password.
+const MIN_PASSWORD_LEN: usize = 8;
+
+// ── First-admin setup ────────────────────────────────────────────
+
+async fn setup_form(
+    _: RequireAdmin,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+) -> Response {
+    // Setup is admin-gated and only meaningful before the first admin
+    // account exists. Once one does, send the operator to the dashboard.
+    if let Some(pool) = state.db.as_ref() {
+        if db::users::any_admin_exists(pool).await.unwrap_or(false) {
+            return Redirect::to("/admin/dashboard").into_response();
+        }
+    } else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    }
+    render(&SetupPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        error: "",
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetupForm {
+    pub username: String,
+    pub password: String,
+    pub confirm: String,
+}
+
+async fn setup_submit(
+    _: RequireAdmin,
+    State(state): State<AppState>,
+    cookies: Cookies,
+    loc: Locale,
+    theme: Theme,
+    headers: HeaderMap,
+    Form(form): Form<SetupForm>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    };
+    // Guard re-setup: only valid while no admin exists.
+    if db::users::any_admin_exists(pool).await.unwrap_or(false) {
+        return Redirect::to("/admin/dashboard").into_response();
+    }
+
+    let setup_err = |error: &'static str| {
+        render(&SetupPage {
             locale: loc,
             theme,
             locales: &state.locales,
             locales_all: &Locale::ALL,
-            error: "wrong-token",
-        };
-        let body = match page.render() {
-            Ok(s) => s,
-            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "render").into_response(),
-        };
-        let mut resp = (StatusCode::UNAUTHORIZED, Html(body)).into_response();
-        // Failed login also clears any stale cookie.
-        cookies.remove(Cookie::new(COOKIE_NAME, ""));
-        // 401 keeps the URL at /admin/login so the user can retry.
-        resp.headers_mut()
-            .insert("X-Ruscker-Login", "failed".parse().unwrap());
-        return resp;
+            error,
+        })
     };
+    let username = db::users::normalize_username(&form.username);
+    if username.is_empty() {
+        return setup_err("exists"); // empty username reuses the generic field error
+    }
+    if form.password.len() < MIN_PASSWORD_LEN {
+        return setup_err("short");
+    }
+    if form.password != form.confirm {
+        return setup_err("mismatch");
+    }
 
-    // Success — clear the failure window so a few fat-fingered
-    // attempts before getting it right don't linger.
-    state.login_limiter.record_success();
-
-    // Set the cookie. 24h lifetime; re-login required after that.
-    // `Secure` is set only when the original request came over
-    // HTTPS (signalled by the reverse proxy via X-Forwarded-Proto)
-    // — setting it unconditionally would make the browser drop the
-    // cookie on the plain-HTTP dev server.
-    // Store an opaque session id in the cookie — never the token.
-    // The session carries the matched role.
-    let session_id = state.admin_sessions.create(role);
-    let mut c = Cookie::new(COOKIE_NAME, session_id);
-    c.set_path("/");
-    c.set_http_only(true);
-    c.set_same_site(tower_cookies::cookie::SameSite::Strict);
-    c.set_secure(crate::auth::request_is_https(&headers));
-    c.set_max_age(Duration::hours(24));
-    cookies.add(c);
-
-    // Redirect to the page the operator was trying to reach, reduced
-    // to a same-origin path (no open redirect) — but only if this
-    // role can actually reach it; otherwise land on the role's home
-    // (the dashboard, which every role can see). This avoids bouncing
-    // a Viewer straight into a 403.
-    let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
-    let path = super::same_origin_path(referer, role.home());
-    let target = if path.starts_with("/admin/")
-        && !path.starts_with("/admin/login")
-        && role.can_access_section(section_for_admin_path(&path))
+    if let Err(e) = db::users::create(
+        pool,
+        &username,
+        &form.password,
+        Role::Admin,
+        false,
+        Some("token"),
+    )
+    .await
     {
-        path
-    } else {
-        role.home().to_string()
+        tracing::error!(error = ?e, "create first admin failed");
+        return setup_err("exists");
+    }
+
+    // Swap the break-glass token session for a real account session.
+    if let Some(c) = cookies.get(COOKIE_NAME) {
+        state.admin_sessions.remove(c.value());
+    }
+    let session_id = state.admin_sessions.create(Role::Admin, Some(username));
+    issue_session_cookie(&cookies, &headers, session_id);
+    Redirect::to("/admin/dashboard").into_response()
+}
+
+// ── Self-service password change + first-login prompt ─────────────
+
+async fn password_form(
+    session: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+) -> Response {
+    // Break-glass token sessions have no account to change.
+    let Some(actor) = session.actor.clone() else {
+        return Redirect::to("/admin/dashboard").into_response();
     };
-    Redirect::to(&target).into_response()
+    let first = match state.db.as_ref() {
+        Some(pool) => db::users::fetch(pool, &actor)
+            .await
+            .ok()
+            .flatten()
+            .map(|u| u.must_change_password)
+            .unwrap_or(false),
+        None => false,
+    };
+    render(&AccountPasswordPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        nav_section: "",
+        role: session.role,
+        first,
+        error: "",
+    })
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PasswordForm {
+    pub current: String,
+    pub new_password: String,
+    pub confirm: String,
+    /// Present (any value) when the user clicked "keep current" on the
+    /// first-login prompt.
+    pub skip: Option<String>,
+}
+
+async fn password_submit(
+    session: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    Form(form): Form<PasswordForm>,
+) -> Response {
+    let Some(actor) = session.actor.clone() else {
+        return Redirect::to("/admin/dashboard").into_response();
+    };
+    let Some(pool) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    };
+
+    // First-login "keep current password" — just clear the prompt.
+    if form.skip.is_some() {
+        let _ = db::users::clear_must_change(pool, &actor).await;
+        return Redirect::to("/admin/dashboard").into_response();
+    }
+
+    let first = db::users::fetch(pool, &actor)
+        .await
+        .ok()
+        .flatten()
+        .map(|u| u.must_change_password)
+        .unwrap_or(false);
+    let pw_err = |error: &'static str| {
+        render(&AccountPasswordPage {
+            locale: loc,
+            theme,
+            locales: &state.locales,
+            locales_all: &Locale::ALL,
+            nav_section: "",
+            role: session.role,
+            first,
+            error,
+        })
+    };
+
+    if form.new_password.len() < MIN_PASSWORD_LEN {
+        return pw_err("short");
+    }
+    if form.new_password != form.confirm {
+        return pw_err("mismatch");
+    }
+    // Verify the current password before allowing a change.
+    if db::users::verify_login(pool, &actor, &form.current)
+        .await
+        .ok()
+        .flatten()
+        .is_none()
+    {
+        return pw_err("wrong-current");
+    }
+
+    if let Err(e) =
+        db::users::set_password(pool, &actor, &form.new_password, false, Some(&actor)).await
+    {
+        tracing::error!(error = ?e, "password change failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
+    }
+    Redirect::to("/admin/dashboard").into_response()
 }
 
 /// Map an `/admin/...` path to the `nav_section` it belongs to, for

@@ -101,7 +101,7 @@ pub struct CredentialForm {
 }
 
 async fn create_or_update(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -148,7 +148,7 @@ async fn create_or_update(
         &registry,
         form.username.trim(),
         &form.password,
-        Some("admin"),
+        Some(admin.actor()),
     )
     .await
     {
@@ -161,14 +161,14 @@ async fn create_or_update(
 }
 
 async fn delete(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    match db::credentials::delete_one(pool, &name, Some("admin")).await {
+    match db::credentials::delete_one(pool, &name, Some(admin.actor())).await {
         Ok(_) => Redirect::to("/admin/credentials").into_response(),
         Err(err) => {
             tracing::error!(error = ?err, name, "credential delete failed");

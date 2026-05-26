@@ -1,26 +1,26 @@
-//! Admin authentication — env-var token model with three roles.
+//! Admin authentication — per-user accounts + a break-glass token.
 //!
-//! Threat model: the operator runs Ruscker on a private network
-//! (or behind a reverse proxy with mTLS). Up to three long random
-//! secrets — `RUSCKER_ADMIN_TOKEN` (required), `RUSCKER_EDITOR_TOKEN`
-//! and `RUSCKER_VIEWER_TOKEN` (both optional) — are entered once on
-//! `/admin/login`. The server constant-time-compares the submitted
-//! token against each and issues an HttpOnly + Strict-SameSite cookie
-//! holding an opaque session id; the session carries the matched
-//! [`Role`].
+//! Threat model: the operator runs Ruscker on a private network (or
+//! behind a reverse proxy with mTLS). Each person signs in with a
+//! **username + password** backed by the `users` table (see
+//! [`crate::db::users`]; passwords are argon2id-hashed). The session
+//! carries the user's [`Role`] and username.
 //!
-//! Roles (see [`Role`]): **Viewer** (dashboard only), **Editor**
-//! (apps + media + dashboard), **Admin** (everything). With only
-//! `RUSCKER_ADMIN_TOKEN` set the install behaves exactly as before
-//! — one token, full admin — so this is backward-compatible.
+//! `RUSCKER_ADMIN_TOKEN` is the **break-glass** path: it always grants
+//! an Admin session and, on a fresh install with no accounts, drives
+//! the first-admin setup. It's the recovery route so an operator can
+//! never be locked out — treat it as a sensitive secret. When it isn't
+//! set, admin routes 503.
 //!
-//! Full multi-user auth (OIDC, SAML, LDAP, per-app ACLs) lands in
-//! Phase 8; this is a lightweight role layer on the token/session
-//! model.
+//! Roles (see [`Role`]): **Viewer** (dashboard only), **Editor** (apps
+//! + media + dashboard), **Admin** (everything, incl. user
+//! management). External IdPs (OIDC/SAML/LDAP) and per-app ACLs land
+//! in Phase 8.
 //!
 //! Cookie: the value is an opaque server-side session id (never the
-//! token), bound by `HttpOnly`, `Secure` (when TLS terminated), and
-//! `SameSite=Strict`. Logout and server restart both revoke it.
+//! token or password), bound by `HttpOnly`, `Secure` (when TLS
+//! terminated), and `SameSite=Strict`. Logout and server restart both
+//! revoke it.
 
 use anyhow::Result;
 use axum::extract::FromRequestParts;
@@ -95,83 +95,90 @@ impl Role {
             Role::Admin => "role-admin",
         }
     }
+
+    /// Lowercase wire/DB form (`users.role`, form values).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Role::Viewer => "viewer",
+            Role::Editor => "editor",
+            Role::Admin => "admin",
+        }
+    }
+
+    /// Parse the lowercase form back to a [`Role`]. Unknown ⇒ `None`.
+    pub fn parse(s: &str) -> Option<Role> {
+        match s {
+            "viewer" => Some(Role::Viewer),
+            "editor" => Some(Role::Editor),
+            "admin" => Some(Role::Admin),
+            _ => None,
+        }
+    }
 }
 
-/// Held in `AppState`. One token per [`Role`]; `admin` is required
-/// (when it's `None`, admin routes 503 with a hint to set
-/// `RUSCKER_ADMIN_TOKEN`), `editor` and `viewer` are optional. Each
-/// token is wrapped in `Arc<str>` so cloning [`AppState`] (per
-/// request) doesn't copy the string.
+/// The break-glass admin token, held in `AppState`. `RUSCKER_ADMIN_TOKEN`
+/// always grants an emergency Admin session (and bootstraps the first
+/// account when no admin user exists yet — see [`crate::db::users`]).
+/// `None` means admin routes are disabled (503). The token is wrapped
+/// in `Arc<str>` so cloning [`AppState`] (per request) doesn't copy it.
+///
+/// Per-user Editor/Viewer access lives in the `users` table, not here —
+/// this is purely the bootstrap / break-glass path.
 #[derive(Clone, Debug, Default)]
 pub struct AdminAuth {
     pub admin: Option<Arc<str>>,
-    pub editor: Option<Arc<str>>,
-    pub viewer: Option<Arc<str>>,
 }
 
 impl AdminAuth {
     pub fn from_env() -> Self {
-        let read = |var: &str| {
-            std::env::var(var)
+        Self {
+            admin: std::env::var("RUSCKER_ADMIN_TOKEN")
                 .ok()
                 .filter(|s| !s.is_empty())
-                .map(Arc::from)
-        };
-        Self {
-            admin: read("RUSCKER_ADMIN_TOKEN"),
-            editor: read("RUSCKER_EDITOR_TOKEN"),
-            viewer: read("RUSCKER_VIEWER_TOKEN"),
+                .map(Arc::from),
         }
     }
 
-    /// Configure the admin token only (used by tests / programmatic
-    /// setup). Editor and viewer stay unset ⇒ single-admin behaviour.
+    /// Configure the admin token (used by tests / the CLI flag).
     pub fn with_token(token: impl Into<String>) -> Self {
         Self {
             admin: Some(Arc::from(token.into())),
-            editor: None,
-            viewer: None,
         }
     }
 
-    /// Admin auth is usable iff the admin token is set. The optional
-    /// editor/viewer tokens layer on top but never replace it.
+    /// Admin auth is usable iff the break-glass token is set.
     pub fn is_configured(&self) -> bool {
         self.admin.is_some()
     }
 
-    /// Constant-time-compare `candidate` against each configured
-    /// token and return the matched [`Role`], or `None` if it matches
-    /// none. Checked most-privileged first so a token reused across
-    /// levels (a misconfiguration) resolves to the higher role.
-    ///
-    /// Every comparison uses [`ct_eq`]: mismatched lengths short-
-    /// circuit (the length leak is intentional and standard), and the
-    /// XOR-fold over equal-length bytes is data-independent.
-    pub fn role_for(&self, candidate: &str) -> Option<Role> {
-        let matches = |tok: &Option<Arc<str>>| {
-            tok.as_deref()
-                .is_some_and(|t| ct_eq(t.as_bytes(), candidate.as_bytes()))
-        };
-        if matches(&self.admin) {
-            Some(Role::Admin)
-        } else if matches(&self.editor) {
-            Some(Role::Editor)
-        } else if matches(&self.viewer) {
-            Some(Role::Viewer)
-        } else {
-            None
-        }
+    /// Constant-time compare `candidate` against the break-glass token.
+    /// `true` ⇒ grant an Admin session. [`ct_eq`] short-circuits on a
+    /// length mismatch (intentional, standard) and is data-independent
+    /// over equal-length bytes.
+    pub fn matches_token(&self, candidate: &str) -> bool {
+        self.admin
+            .as_deref()
+            .is_some_and(|t| ct_eq(t.as_bytes(), candidate.as_bytes()))
     }
 }
 
-/// One live admin session: when it expires and the [`Role`] it was
-/// minted with. Copy-cheap so lookups can read it out of the map by
-/// value without holding the shard lock.
-#[derive(Clone, Copy, Debug)]
+/// One live admin session: when it expires, the [`Role`] it was minted
+/// with, and the acting identity. `actor` is the DB username for a
+/// password login, or `None` for a break-glass token session (no user
+/// account behind it).
+#[derive(Clone, Debug)]
 struct SessionEntry {
     expiry: Instant,
     role: Role,
+    actor: Option<String>,
+}
+
+/// What [`AdminSessions::validate`] yields for a live session — the
+/// role and acting identity carried by the extractors.
+#[derive(Clone, Debug)]
+pub struct SessionInfo {
+    pub role: Role,
+    pub actor: Option<String>,
 }
 
 /// Server-side store of opaque admin session ids → (expiry, role).
@@ -200,10 +207,11 @@ impl AdminSessions {
         Self::new(Duration::from_secs(24 * 60 * 60))
     }
 
-    /// Mint a new session for `role` and return its opaque id (244
-    /// bits of random, unguessable). Caller stores the id in the
-    /// cookie.
-    pub fn create(&self, role: Role) -> String {
+    /// Mint a new session for `role`/`actor` and return its opaque id
+    /// (244 bits of random, unguessable). Caller stores the id in the
+    /// cookie. `actor` is the DB username (or `None` for a break-glass
+    /// token session).
+    pub fn create(&self, role: Role, actor: Option<String>) -> String {
         let id = format!(
             "{}{}",
             uuid::Uuid::new_v4().simple(),
@@ -214,17 +222,24 @@ impl AdminSessions {
             SessionEntry {
                 expiry: Instant::now() + self.ttl,
                 role,
+                actor,
             },
         );
         id
     }
 
-    /// The [`Role`] of a live (non-expired) session named by `id`, or
-    /// `None` if the id is unknown or expired. Expired entries are
-    /// pruned lazily on lookup.
-    pub fn validate(&self, id: &str) -> Option<Role> {
-        match self.sessions.get(id).map(|e| *e.value()) {
-            Some(entry) if entry.expiry > Instant::now() => Some(entry.role),
+    /// The [`SessionInfo`] of a live (non-expired) session named by
+    /// `id`, or `None` if the id is unknown or expired. Expired entries
+    /// are pruned lazily on lookup.
+    pub fn validate(&self, id: &str) -> Option<SessionInfo> {
+        let info = self.sessions.get(id).map(|e| {
+            let v = e.value();
+            (v.expiry, v.role, v.actor.clone())
+        });
+        match info {
+            Some((expiry, role, actor)) if expiry > Instant::now() => {
+                Some(SessionInfo { role, actor })
+            }
             Some(_) => {
                 self.sessions.remove(id);
                 None
@@ -359,6 +374,17 @@ pub fn request_is_https(headers: &axum::http::HeaderMap) -> bool {
 /// without a token to compare against.
 pub struct AdminSession {
     pub role: Role,
+    /// DB username for a password login, or `None` for a break-glass
+    /// token session. Use [`AdminSession::actor`] for audit logging.
+    pub actor: Option<String>,
+}
+
+impl AdminSession {
+    /// The actor string to record in the audit log: the username, or
+    /// `"token"` for a break-glass token session.
+    pub fn actor(&self) -> &str {
+        self.actor.as_deref().unwrap_or("token")
+    }
 }
 
 impl FromRequestParts<crate::AppState> for AdminSession {
@@ -385,10 +411,13 @@ impl FromRequestParts<crate::AppState> for AdminSession {
         };
         // The cookie carries an opaque session id, validated against
         // the server-side store — not the token itself. A live session
-        // yields its role.
+        // yields its role + actor.
         match cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) {
             Some(c) => match state.admin_sessions.validate(&c) {
-                Some(role) => Ok(AdminSession { role }),
+                Some(info) => Ok(AdminSession {
+                    role: info.role,
+                    actor: info.actor,
+                }),
                 None => Err(Redirect::to("/admin/login").into_response()),
             },
             None => Err(Redirect::to("/admin/login").into_response()),
@@ -414,6 +443,13 @@ fn forbidden() -> Response {
 /// template.
 pub struct RequireEditor {
     pub role: Role,
+    pub actor: Option<String>,
+}
+
+impl RequireEditor {
+    pub fn actor(&self) -> &str {
+        self.actor.as_deref().unwrap_or("token")
+    }
 }
 
 impl FromRequestParts<crate::AppState> for RequireEditor {
@@ -425,7 +461,10 @@ impl FromRequestParts<crate::AppState> for RequireEditor {
     ) -> Result<Self, Self::Rejection> {
         let session = AdminSession::from_request_parts(parts, state).await?;
         if session.role >= Role::Editor {
-            Ok(RequireEditor { role: session.role })
+            Ok(RequireEditor {
+                role: session.role,
+                actor: session.actor,
+            })
         } else {
             Err(forbidden())
         }
@@ -437,6 +476,13 @@ impl FromRequestParts<crate::AppState> for RequireEditor {
 /// rejected with 403. Carries the role for the handler / template.
 pub struct RequireAdmin {
     pub role: Role,
+    pub actor: Option<String>,
+}
+
+impl RequireAdmin {
+    pub fn actor(&self) -> &str {
+        self.actor.as_deref().unwrap_or("token")
+    }
 }
 
 impl FromRequestParts<crate::AppState> for RequireAdmin {
@@ -448,7 +494,10 @@ impl FromRequestParts<crate::AppState> for RequireAdmin {
     ) -> Result<Self, Self::Rejection> {
         let session = AdminSession::from_request_parts(parts, state).await?;
         if session.role == Role::Admin {
-            Ok(RequireAdmin { role: session.role })
+            Ok(RequireAdmin {
+                role: session.role,
+                actor: session.actor,
+            })
         } else {
             Err(forbidden())
         }
@@ -483,17 +532,17 @@ mod tests {
     #[test]
     fn admin_sessions_create_validate_remove() {
         let s = AdminSessions::default_policy();
-        let id = s.create(Role::Editor);
-        assert_eq!(
-            s.validate(&id),
-            Some(Role::Editor),
-            "freshly created session is valid and carries its role"
+        let id = s.create(Role::Editor, Some("alice".into()));
+        let info = s.validate(&id).expect("freshly created session is valid");
+        assert_eq!(info.role, Role::Editor);
+        assert_eq!(info.actor.as_deref(), Some("alice"));
+        assert!(
+            s.validate("not-a-real-id").is_none(),
+            "unknown id is invalid"
         );
-        assert_eq!(s.validate("not-a-real-id"), None, "unknown id is invalid");
         s.remove(&id);
-        assert_eq!(
-            s.validate(&id),
-            None,
+        assert!(
+            s.validate(&id).is_none(),
             "removed (logged-out) session is invalid"
         );
     }
@@ -501,16 +550,16 @@ mod tests {
     #[test]
     fn admin_sessions_expire() {
         let s = AdminSessions::new(Duration::from_millis(0));
-        let id = s.create(Role::Admin);
+        let id = s.create(Role::Admin, None);
         std::thread::sleep(Duration::from_millis(2));
-        assert_eq!(s.validate(&id), None, "expired session is invalid");
+        assert!(s.validate(&id).is_none(), "expired session is invalid");
     }
 
     #[test]
     fn admin_session_ids_are_distinct_and_not_the_token() {
         let s = AdminSessions::default_policy();
-        let a = s.create(Role::Viewer);
-        let b = s.create(Role::Viewer);
+        let a = s.create(Role::Viewer, None);
+        let b = s.create(Role::Viewer, None);
         assert_ne!(a, b, "each session gets a fresh id");
         assert!(
             a.len() >= 32,
@@ -519,37 +568,15 @@ mod tests {
     }
 
     #[test]
-    fn role_for_resolves_each_token_and_rejects_others() {
-        let auth = AdminAuth {
-            admin: Some(Arc::from("admin-secret")),
-            editor: Some(Arc::from("editor-secret")),
-            viewer: Some(Arc::from("viewer-secret")),
-        };
-        assert_eq!(auth.role_for("admin-secret"), Some(Role::Admin));
-        assert_eq!(auth.role_for("editor-secret"), Some(Role::Editor));
-        assert_eq!(auth.role_for("viewer-secret"), Some(Role::Viewer));
-        assert_eq!(auth.role_for("nope"), None);
-        assert_eq!(auth.role_for(""), None);
-    }
-
-    #[test]
-    fn role_for_admin_only_is_backward_compatible() {
-        // Only RUSCKER_ADMIN_TOKEN set ⇒ single-admin behaviour.
-        let auth = AdminAuth::with_token("only-admin");
+    fn matches_token_is_constant_time_exact() {
+        let auth = AdminAuth::with_token("admin-secret");
         assert!(auth.is_configured());
-        assert_eq!(auth.role_for("only-admin"), Some(Role::Admin));
-        assert_eq!(auth.role_for("anything-else"), None);
-    }
-
-    #[test]
-    fn role_for_prefers_higher_privilege_on_token_reuse() {
-        // A token reused across levels resolves to the higher role.
-        let auth = AdminAuth {
-            admin: Some(Arc::from("shared")),
-            editor: Some(Arc::from("shared")),
-            viewer: None,
-        };
-        assert_eq!(auth.role_for("shared"), Some(Role::Admin));
+        assert!(auth.matches_token("admin-secret"));
+        assert!(!auth.matches_token("admin-secre")); // length mismatch
+        assert!(!auth.matches_token("nope"));
+        assert!(!auth.matches_token(""));
+        // Unconfigured never matches.
+        assert!(!AdminAuth::default().matches_token("anything"));
     }
 
     #[test]

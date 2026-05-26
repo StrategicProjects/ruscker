@@ -178,7 +178,7 @@ async fn upload(
             }
         };
         let stored_name = processed.filename.clone();
-        match db::images::insert(pool, processed, Some("admin")).await {
+        match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_id) => {
                 last_uploaded_name = Some(stored_name);
             }
@@ -201,14 +201,14 @@ async fn upload(
 }
 
 async fn delete(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    match db::images::delete_one(pool, &id, Some("admin")).await {
+    match db::images::delete_one(pool, &id, Some(editor.actor())).await {
         Ok(_) => Redirect::to("/admin/media").into_response(),
         Err(err) => {
             tracing::error!(error = ?err, id, "image delete failed");

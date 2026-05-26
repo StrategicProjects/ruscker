@@ -35,11 +35,9 @@ fn state() -> AppState {
     AppState {
         config: Arc::new(config),
         locales: Arc::new(locales),
-        // Three distinct role tokens configured.
+        // Break-glass admin token configured.
         admin_auth: AdminAuth {
             admin: Some("admin-tok".into()),
-            editor: Some("editor-tok".into()),
-            viewer: Some("viewer-tok".into()),
         },
         admin_sessions: Default::default(),
         log_buffer: None,
@@ -62,7 +60,7 @@ fn state() -> AppState {
 /// cookie header value to send it back. The store is behind an `Arc`
 /// shared with the router built from the same `state`.
 fn cookie_for(state: &AppState, role: Role) -> String {
-    let id = state.admin_sessions.create(role);
+    let id = state.admin_sessions.create(role, Some("test-user".into()));
     format!("{COOKIE_NAME}={id}")
 }
 

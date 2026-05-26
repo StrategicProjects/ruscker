@@ -73,10 +73,10 @@ which need to be async-capable for impls).
 ### A Shiny session lifecycle
 
 ```
-1. Visitor hits  https://portal/app/auroraprime/
+1. Visitor hits  https://portal/app/sales-dashboard/
 2. Proxy reads cookie  __ruscker_session
 3. Cookie missing → Proxy.create_session:
-     a. Look up spec 'auroraprime' in config
+     a. Look up spec 'sales-dashboard' in config
      b. Ask ContainerBackend.list() for current replicas
      c. Router.pick(replicas) → ReplicaDecision::Use(R2)  (least-conn)
      d. If Saturated:
@@ -87,7 +87,7 @@ which need to be async-capable for impls).
      f. Sign and set cookie  __ruscker_session
 4. Forward GET /  to  http://127.0.0.1:<R2_port>/   (path rewrite)
 5. Stream response back
-6. Browser opens WebSocket  ws://portal/app/auroraprime/websocket
+6. Browser opens WebSocket  ws://portal/app/sales-dashboard/websocket
 7. Proxy upgrades, opens parallel WS to  ws://127.0.0.1:<R2_port>/websocket
 8. Bidirectional frame pump
 9. On heartbeat: SessionStore.touch()
@@ -97,7 +97,7 @@ which need to be async-capable for impls).
 ### An API request lifecycle
 
 ```
-1. Client hits  https://portal/api/bigdatape_api/v1/data
+1. Client hits  https://portal/api/data-api/v1/data
 2. Spec.kind() == Api  → no sticky cookie path
 3. Router.pick() with RoundRobin → R3
 4. Forward request, stream response

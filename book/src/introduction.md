@@ -14,6 +14,19 @@ landing page and a real admin panel.
 It ships as a **single static binary, no JVM** — so the idle footprint
 is megabytes, not hundreds of megabytes, and startup is instant.
 
+## How it works
+
+Visitors and API clients hit one Ruscker process. It serves the landing
+page and admin UI, and reverse-proxies each request to the right app
+container — picking a replica, keeping Shiny sessions sticky, upgrading
+WebSockets, and rewriting URLs. When no replica can take the load (and
+the spec allows it), Ruscker asks the Docker daemon to spawn one; idle
+containers are reaped automatically.
+
+<p align="center">
+  <img src="images/architecture.svg" alt="How Ruscker works: browsers and API clients reach one Ruscker binary, which reverse-proxies to app containers it spawns on demand through the Docker daemon." width="640">
+</p>
+
 ## Why
 
 ShinyProxy is mature but heavy: a JVM that idles at hundreds of MB,
@@ -24,16 +37,16 @@ proper admin panel, a monitoring dashboard, and load balancing.
 
 ## In production
 
-Ruscker runs in production at the Pernambuco state government (SEPE),
-serving the **Monitoramento Estratégico** portal. Migrated side-by-side
-with the existing ShinyProxy (now reachable at `/sp/` for comparison),
-the idle footprint dropped from:
+Ruscker runs in production today, migrated side-by-side with an existing
+ShinyProxy (kept reachable at `/sp/` for an apples-to-apples comparison).
+On the same machine, serving the same apps, the idle footprint dropped
+from:
 
 > **540 MB (ShinyProxy / JVM) → ~16 MB (Ruscker)** — roughly a 30×
-> reduction, on the same machine, serving the same 31 apps.
+> reduction.
 
-The real 31-spec ShinyProxy 3.2.0 config parsed with **no unsupported
-features** and apps spawn on demand.
+A real 31-spec ShinyProxy 3.2.0 config parsed with **no unsupported
+features**, and apps spawn on demand.
 
 ## What's in the box
 

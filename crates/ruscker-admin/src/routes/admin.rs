@@ -154,7 +154,9 @@ async fn login_submit(
     // HTTPS (signalled by the reverse proxy via X-Forwarded-Proto)
     // — setting it unconditionally would make the browser drop the
     // cookie on the plain-HTTP dev server.
-    let mut c = Cookie::new(COOKIE_NAME, form.token);
+    // Store an opaque session id in the cookie — never the token.
+    let session_id = state.admin_sessions.create();
+    let mut c = Cookie::new(COOKIE_NAME, session_id);
     c.set_path("/");
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Strict);
@@ -176,8 +178,12 @@ async fn login_submit(
     Redirect::to(&target).into_response()
 }
 
-async fn logout(_: MaybeAdminSession, cookies: Cookies) -> Redirect {
-    // Remove sets an expired cookie with the same name+path.
+async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Cookies) -> Redirect {
+    // Invalidate the session server-side so a copied cookie is dead too,
+    // then clear the browser's copy.
+    if let Some(c) = cookies.get(COOKIE_NAME) {
+        state.admin_sessions.remove(c.value());
+    }
     let mut c = Cookie::new(COOKIE_NAME, "");
     c.set_path("/");
     cookies.remove(c);

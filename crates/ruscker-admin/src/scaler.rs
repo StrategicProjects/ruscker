@@ -415,11 +415,7 @@ async fn spawn_one(
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("spec {} has no container-image", spec.id))?;
 
-    let inner_port = spec
-        .api
-        .as_ref()
-        .and_then(|a| a.port)
-        .or_else(|| infer_inner_port(spec));
+    let inner_port = spec.effective_inner_port();
 
     let creds = crate::routes::proxy::resolve_creds(state, spec).await;
     let limits = crate::routes::proxy::limits_from_spec(spec);
@@ -443,20 +439,6 @@ async fn spawn_one(
 
     state.replicas.write().await.add(replica);
     Ok(())
-}
-
-/// Best-guess inner port for a spec. Mirrors the helper in
-/// `routes::proxy` — pulled into a small free function here to
-/// avoid taking a dependency on the routes module from the
-/// scaler. Kept private and minimal; if a third caller appears,
-/// promote to a shared module.
-fn infer_inner_port(spec: &Spec) -> Option<u16> {
-    match spec.kind() {
-        SpecKind::Api => Some(8000),
-        SpecKind::Shiny => Some(3838),
-        SpecKind::InteractiveApp => Some(8080),
-        SpecKind::External => None,
-    }
 }
 
 #[cfg(test)]

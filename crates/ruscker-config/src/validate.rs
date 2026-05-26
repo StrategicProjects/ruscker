@@ -211,10 +211,9 @@ pub enum CompatWarning {
 /// invisible in the parsed model (serde drops unknown keys), so the
 /// scan walks the raw YAML tree.
 const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
-    (
-        "port",
-        "explicit upstream port is ignored — Ruscker auto-detects (use `api.port` for APIs)",
-    ),
+    // NOTE: ShinyProxy's spec-level `port` IS now supported — it maps
+    // to Ruscker's `container-port` (see schema). So it's intentionally
+    // absent here.
     (
         "minimum-seats-available",
         "pre-warm pool not implemented — use `min-replicas`",
@@ -241,7 +240,7 @@ const UNSUPPORTED_PROXY_FIELDS: &[(&str, &str)] = &[(
 /// Two sources, because the unsupported surface splits cleanly:
 /// - `proxy.authentication` is a typed field, so it's read from the
 ///   parsed `config` (post env-interpolation).
-/// - Everything else (`kubernetes-*`, `port`, `volumes`, …) is
+/// - Everything else (`kubernetes-*`, `minimum-seats-available`, …) is
 ///   dropped by serde at parse time, so it's only visible by walking
 ///   the raw YAML tree. Keys survive interpolation untouched, so the
 ///   raw text is parsed as-is (no env vars required).
@@ -831,6 +830,7 @@ proxy:
   - id: legacy
     container-image: rocker/shiny
     port: 3838
+    minimum-seats-available: 2
     volumes:
     - /data:/data
     kubernetes-pod-patches: '[]'
@@ -846,11 +846,20 @@ proxy:
                 _ => None,
             })
             .collect();
-        assert!(fields.contains(&"port"), "fields: {fields:?}");
-        // `volumes` is now a supported field — it must NOT be flagged.
+        // A still-unsupported field is flagged.
+        assert!(
+            fields.contains(&"minimum-seats-available"),
+            "fields: {fields:?}"
+        );
+        // `volumes` (#99) and `port`→`container-port` (#120) are
+        // supported now — they must NOT be flagged.
         assert!(
             !fields.contains(&"volumes"),
-            "volumes is supported now, should not be flagged: {fields:?}"
+            "volumes is supported now: {fields:?}"
+        );
+        assert!(
+            !fields.contains(&"port"),
+            "port maps to container-port now: {fields:?}"
         );
         assert!(
             fields.contains(&"kubernetes-pod-patches"),

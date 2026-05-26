@@ -356,6 +356,16 @@ pub struct Spec {
     #[serde(rename = "container-image")]
     pub container_image: Option<String>,
 
+    /// Port the app listens on **inside** the container. Needed for
+    /// frameworks that don't use Shiny's 3838 default — Streamlit
+    /// (8501), Dash (8050), Bokeh/Panel (5006), Voilà (8866), … .
+    /// Accepts ShinyProxy's `port:` as an alias for friction-free
+    /// migration. Resolved via [`Spec::effective_inner_port`]; when
+    /// unset the runtime falls back to `api.port`, then a kind default
+    /// (8080 for APIs), then the backend's 3838.
+    #[serde(rename = "container-port", alias = "port")]
+    pub container_port: Option<u16>,
+
     /// Maximum number of concurrent sessions on a single container.
     /// When all containers in a spec's pool reach this limit, the
     /// auto-scaler spawns a new replica (if `max_replicas` allows).
@@ -681,6 +691,22 @@ impl Spec {
     /// `X-Forwarded-Prefix`.
     pub fn effective_inject_base_href(&self) -> bool {
         self.inject_base_href.unwrap_or(true)
+    }
+
+    /// The port to forward to **inside** the container, or `None` to
+    /// let the backend use its default (3838, the Shiny Server port).
+    ///
+    /// Precedence: explicit `container-port` (or ShinyProxy `port`) →
+    /// `api.port` → a per-kind default (8080 for APIs) → `None`
+    /// (backend default). Centralises what the proxy + scaler used to
+    /// resolve by hand.
+    pub fn effective_inner_port(&self) -> Option<u16> {
+        self.container_port
+            .or_else(|| self.api.as_ref().and_then(|a| a.port))
+            .or_else(|| match self.kind() {
+                SpecKind::Api => Some(8080),
+                _ => None,
+            })
     }
 }
 
@@ -1085,6 +1111,7 @@ proxy:
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,
+            container_port: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::External);
@@ -1124,6 +1151,7 @@ proxy:
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,
+            container_port: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::Shiny);
@@ -1163,11 +1191,49 @@ proxy:
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,
+            container_port: None,
             concurrent_requests_per_replica: None,
         };
         spec.kind_override = Some(SpecKindOverride::Api);
         assert_eq!(spec.kind(), SpecKind::Api);
         assert_eq!(spec.effective_routing(), RoutingStrategy::RoundRobin);
         assert!(!spec.needs_sticky_sessions());
+    }
+
+    fn parse_spec(yaml: &str) -> Spec {
+        serde_yaml_ng::from_str(yaml).expect("parse spec")
+    }
+
+    #[test]
+    fn container_port_explicit_wins() {
+        let s = parse_spec("id: st\ncontainer-image: x:1\ntype: streamlit\ncontainer-port: 8501\n");
+        assert_eq!(s.container_port, Some(8501));
+        assert_eq!(s.effective_inner_port(), Some(8501));
+    }
+
+    #[test]
+    fn shinyproxy_port_aliases_to_container_port() {
+        // ShinyProxy's spec-level `port:` migrates cleanly.
+        let s = parse_spec("id: legacy\ncontainer-image: rocker/shiny\nport: 3838\n");
+        assert_eq!(s.container_port, Some(3838));
+        assert_eq!(s.effective_inner_port(), Some(3838));
+    }
+
+    #[test]
+    fn effective_inner_port_precedence_and_defaults() {
+        // container-port beats api.port.
+        let s = parse_spec(
+            "id: a\ncontainer-image: x:1\ntype: api\ncontainer-port: 9000\napi:\n  port: 8000\n",
+        );
+        assert_eq!(s.effective_inner_port(), Some(9000));
+        // api.port when no container-port.
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: api\napi:\n  port: 8000\n");
+        assert_eq!(s.effective_inner_port(), Some(8000));
+        // API kind with nothing set → 8080 default.
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: api\n");
+        assert_eq!(s.effective_inner_port(), Some(8080));
+        // A Shiny-ish app with nothing set → None (backend default 3838).
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: shiny\n");
+        assert_eq!(s.effective_inner_port(), None);
     }
 }

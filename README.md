@@ -88,10 +88,12 @@ What's in the box:
   rewriting so unmodified Shiny/Streamlit apps work behind a subpath.
 - **Container backend** (Docker) that spawns app containers on demand,
   applies per-container CPU/memory limits, and reaps idle ones.
-- **Admin panel** — apps CRUD, image/media library, encrypted
-  credentials store, a landing-page editor (colors, intros, SEO, social
-  meta, analytics, custom HTML blocks), an audit log, and a live SSE
-  dashboard (CPU/memory, logs, stop/restart).
+- **Admin panel** — full apps CRUD (every spec field editable from the
+  form, including API/scaling/resource/lifecycle settings, with inline
+  help), image/media library, encrypted credentials store, a
+  landing-page editor (colors, intros, SEO, social meta, analytics,
+  custom HTML blocks), an audit log, and a live SSE dashboard
+  (CPU/memory, logs, stop/restart).
 - **Operations** — `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
   body-size limits, `validate --strict-compat` migration pre-flight.

@@ -4,6 +4,11 @@ The admin panel is Ruscker's main advantage over editing YAML by hand.
 It lives at `/admin`, is gated by a token, and needs a SQLite database
 (`serve --db <file>`).
 
+**Everything is configurable from the web UI** — every spec field
+(including API, scaling, resource and lifecycle settings), the media
+library, encrypted credentials, and the whole landing page. YAML
+import/export exists for migration and backups, not as a requirement.
+
 ## Logging in
 
 Set `RUSCKER_ADMIN_TOKEN` (the `.deb` generates one on first install
@@ -24,10 +29,24 @@ replica; open its logs. Shows a banner when started without
 `--docker`.
 
 ### Apps
-The list of specs (apps, APIs, external links). The add/edit form has a
-type selector, a live card preview, resource limits, registry
-credentials, and a **logo picker** that pulls from the media library
-(no need to type `/assets/img/...` by hand).
+The list of specs — apps, APIs and external links — with create, edit
+and delete. The add/edit form has a type selector, a **live card
+preview**, and a **logo picker** that pulls from the media library (no
+need to type `/assets/img/...` by hand). A **"?" help popover** on every
+field explains what it does.
+
+Under a collapsible **Advanced** section, every remaining spec option is
+editable too — so an app can be configured end-to-end from the web UI,
+without touching YAML:
+
+- **API** (for `type: api`) — container port, rate limit, docs/health
+  paths, permissive CORS.
+- **Scaling** — min/max replicas and concurrent requests per replica.
+- **Resources** — per-container CPU and memory limits.
+- **Lifecycle** — the heartbeat (idle-session) timeout.
+
+Every advanced field is optional; leaving it blank keeps Ruscker's
+default, so the section stays out of the way until you need it.
 
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These

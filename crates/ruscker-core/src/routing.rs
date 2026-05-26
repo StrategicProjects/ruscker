@@ -31,7 +31,7 @@ impl Router {
     }
 
     /// Pick a replica for a new session.
-    pub fn pick<'a>(&self, replicas: &'a [Replica]) -> RoutingDecision {
+    pub fn pick(&self, replicas: &[Replica]) -> RoutingDecision {
         let accepting: Vec<&Replica> = replicas.iter().filter(|r| r.is_accepting()).collect();
         if accepting.is_empty() {
             return if replicas.is_empty() {

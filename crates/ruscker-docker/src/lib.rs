@@ -419,7 +419,7 @@ impl ContainerBackend for LocalDockerBackend {
                 ports
                     .iter()
                     .find(|p| p.private_port == inner_port)
-                    .and_then(|p| p.public_port.map(|n| n as u16))
+                    .and_then(|p| p.public_port.map(|n| n))
             });
             let upstream: SocketAddr = match host_port {
                 Some(p) => format!("127.0.0.1:{p}").parse().unwrap(),

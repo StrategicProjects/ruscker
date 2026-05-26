@@ -260,7 +260,7 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
             .proxy
             .specs
             .iter()
-            .flat_map(|s| reg.replicas_of(&s.id).iter().cloned().collect::<Vec<_>>())
+            .flat_map(|s| reg.replicas_of(&s.id).to_vec())
             .collect()
     };
 
@@ -805,7 +805,7 @@ mod tests {
     #[test]
     fn renders_empty_state_when_no_replicas() {
         let html = render_with(vec![], true);
-        assert!(html.contains("admin-dashboard-no-replicas") == false,
+        assert!(!html.contains("admin-dashboard-no-replicas"),
             "raw key must be translated, not echoed");
         // pt-BR empty-state line is present
         assert!(html.contains("Nenhuma réplica em execução"));

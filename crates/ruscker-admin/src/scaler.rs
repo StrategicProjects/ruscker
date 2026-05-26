@@ -170,7 +170,7 @@ async fn tick(
             .proxy
             .specs
             .iter()
-            .flat_map(|s| reg.replicas_of(&s.id).iter().cloned().collect::<Vec<_>>())
+            .flat_map(|s| reg.replicas_of(&s.id).to_vec())
             .collect()
     };
     update_idle_ticks(idle_ticks, &registry_snap);
@@ -888,7 +888,7 @@ proxy:
         // A: saturated (1/1). B: idle (0/1). count=2, min=1.
         let busy = replica_with_sessions("flappy", 1, 1);
         let idle = replica_with_sessions("flappy", 0, 1);
-        let idle_id = idle.id.clone();
+        let _idle_id = idle.id.clone();
         {
             let mut reg = state.replicas.write().await;
             reg.add(busy);

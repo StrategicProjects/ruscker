@@ -346,6 +346,39 @@ pub fn unique_subjects<'a>(cards: &[CardCtx<'a>]) -> Vec<&'a str> {
     set.into_iter().collect()
 }
 
+/// Build the chip bar with live counts. Only chips that have at
+/// least one matching card are emitted, so the UI never shows
+/// "Reports (0)" — that signal is more useful than the chip itself.
+/// Order matches the mockup's visual order: app, talk, report,
+/// package, api, link.
+pub fn build_type_chips(cards: &[CardCtx<'_>]) -> Vec<TypeChip> {
+    let mut counts: BTreeMap<DisplayType, usize> = BTreeMap::new();
+    for c in cards {
+        *counts.entry(c.display_type).or_default() += 1;
+    }
+    [
+        DisplayType::App,
+        DisplayType::Talk,
+        DisplayType::Report,
+        DisplayType::Package,
+        DisplayType::Api,
+        DisplayType::Link,
+    ]
+    .into_iter()
+    .filter_map(|dt| {
+        let count = *counts.get(&dt).unwrap_or(&0);
+        if count == 0 {
+            None
+        } else {
+            Some(TypeChip {
+                display_type: dt,
+                count,
+            })
+        }
+    })
+    .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,37 +455,4 @@ mod tests {
         let card = CardCtx::from_spec(&spec);
         assert_eq!(card.cover, None);
     }
-}
-
-/// Build the chip bar with live counts. Only chips that have at
-/// least one matching card are emitted, so the UI never shows
-/// "Reports (0)" — that signal is more useful than the chip itself.
-/// Order matches the mockup's visual order: app, talk, report,
-/// package, api, link.
-pub fn build_type_chips(cards: &[CardCtx<'_>]) -> Vec<TypeChip> {
-    let mut counts: BTreeMap<DisplayType, usize> = BTreeMap::new();
-    for c in cards {
-        *counts.entry(c.display_type).or_default() += 1;
-    }
-    [
-        DisplayType::App,
-        DisplayType::Talk,
-        DisplayType::Report,
-        DisplayType::Package,
-        DisplayType::Api,
-        DisplayType::Link,
-    ]
-    .into_iter()
-    .filter_map(|dt| {
-        let count = *counts.get(&dt).unwrap_or(&0);
-        if count == 0 {
-            None
-        } else {
-            Some(TypeChip {
-                display_type: dt,
-                count,
-            })
-        }
-    })
-    .collect()
 }

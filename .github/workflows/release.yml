@@ -280,7 +280,10 @@ jobs:
           install on Debian/Ubuntu via \`apt install ./ruscker_*.deb\`.
           Each asset ships a matching \`.sha256\`.
           EOF
+          # --repo targets the API directly: this job has no checkout,
+          # so gh can't infer the repo from a local git remote.
           gh release create "${GITHUB_REF_NAME}" dist/* \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Ruscker ${GITHUB_REF_NAME}" \
             --notes-file notes.md \
             --generate-notes \

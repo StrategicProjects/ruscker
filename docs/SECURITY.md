@@ -272,7 +272,14 @@ Blocking-for-prod (all done):
 Non-blocking follow-ups:
 - [x] SVG script neutralization (CSP+sandbox at serve time) (§4)
 - [x] Encoded path-traversal tests for `/assets/img` (§4)
+- [x] Opaque server-side admin sessions — cookie no longer holds the
+      token; logout revokes server-side (#77)
+- [x] Operator CSP origins (blocks/analytics) sanitized before use (#82)
+- [x] `proxy-connection` in hop-by-hop strip (§6, #84)
+- [x] WS pump backpressure: independent tasks + idle watchdog (§6, #81)
+- [x] `audit_log.diff_json` verified to record metadata only — never a
+      password/token/cookie (regression test in `db::credentials`)
+- [x] Automated `cargo audit` in CI (`.github/workflows/security.yml`,
+      weekly + on dependency changes)
 - [ ] Nonce-based CSP, drop `unsafe-inline` (§7)
-- [ ] `proxy-connection` in hop-by-hop strip (§6)
-- [ ] WS pump backpressure bound (§6)
-- [ ] Automated `cargo audit` + `semgrep` in CI
+- [ ] `semgrep` in CI (cargo-audit is wired; semgrep deferred)

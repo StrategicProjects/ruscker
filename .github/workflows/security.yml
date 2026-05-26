@@ -1,0 +1,34 @@
+name: security
+
+# Audits the locked dependency tree against the RustSec advisory DB.
+# Runs on dependency changes, on every PR, and weekly — the schedule is
+# the important part: a vulnerability can be disclosed against a crate
+# we already depend on long after it was merged.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/security.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.toml"
+      - "Cargo.lock"
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit dependencies
+        # Fails the job on any unpatched advisory in Cargo.lock.
+        run: cargo audit

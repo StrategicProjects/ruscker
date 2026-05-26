@@ -239,6 +239,36 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn audit_log_never_records_the_password() {
+        let pool = open_memory().await.unwrap();
+        let key = fixed_key();
+        upsert(
+            &pool,
+            &key,
+            "dh",
+            "docker.io",
+            "acme",
+            "p@ss-w0rd-SECRET",
+            Some("admin"),
+        )
+        .await
+        .unwrap();
+        // The audit diff for a credential change records only metadata
+        // (registry/username); the plaintext password must appear in no
+        // audit_log row.
+        let diffs: Vec<Option<String>> = sqlx::query_scalar("SELECT diff_json FROM audit_log")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        for d in diffs.into_iter().flatten() {
+            assert!(
+                !d.contains("p@ss-w0rd-SECRET"),
+                "password leaked into audit diff_json: {d}"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn upsert_replaces_password() {
         let pool = open_memory().await.unwrap();
         let key = fixed_key();

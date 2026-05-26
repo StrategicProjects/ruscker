@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -35,6 +35,8 @@ struct CredentialsPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (always Admin here) - drives nav gating.
+    role: Role,
     credentials: Vec<db::credentials::CredentialMeta>,
     /// Banner shown when the master key isn't configured. When
     /// true, the form is disabled and a hint is rendered.
@@ -50,7 +52,7 @@ impl<'a> CredentialsPage<'a> {
 }
 
 async fn index(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -81,6 +83,7 @@ async fn render_index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "credentials",
+        role: Role::Admin,
         credentials,
         key_missing: !state.master_key.is_configured(),
         flash_saved,
@@ -98,7 +101,7 @@ pub struct CredentialForm {
 }
 
 async fn create_or_update(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -158,7 +161,7 @@ async fn create_or_update(
 }
 
 async fn delete(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {

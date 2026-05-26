@@ -16,7 +16,7 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use sqlx::FromRow;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireEditor, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
@@ -83,6 +83,8 @@ struct SpecsPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (Editor or Admin) — drives nav gating.
+    role: Role,
     specs: Vec<SpecRow>,
     flash: Option<Flash>,
 }
@@ -128,7 +130,7 @@ fn build_flash(locales: &Locales, loc: Locale, q: &SpecsQuery) -> Option<Flash> 
 }
 
 async fn index(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -164,6 +166,7 @@ async fn index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "specs",
+        role: editor.role,
         specs,
         flash,
     };
@@ -180,7 +183,7 @@ async fn index(
 /// import is idempotent and never deletes, so re-importing is
 /// safe; a preview is a follow-up.
 async fn import(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {

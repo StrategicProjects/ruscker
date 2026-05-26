@@ -30,42 +30,66 @@
     <span>ruscker · admin</span>
   </a>
 
+  {# Nav links are gated by the current session's role — a link is
+     only rendered if `role.can_access_section(...)` allows it. The
+     server-side route guards enforce the same matrix, so hiding a
+     link here is UX, not the security boundary. #}
   <div class="admin-nav-links">
+    {% if role.can_access_section("dashboard") %}
     <a href="/admin/dashboard" class="admin-nav-link {% if nav_section == "dashboard" %}is-active{% endif %}">
       <i class="ti ti-chart-line" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-dashboard") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("specs") %}
     <a href="/admin/specs" class="admin-nav-link {% if nav_section == "specs" %}is-active{% endif %}">
       <i class="ti ti-apps" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-apps") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("images") %}
     <a href="/admin/media" class="admin-nav-link {% if nav_section == "images" %}is-active{% endif %}">
       <i class="ti ti-photo" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-images") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("credentials") %}
     <a href="/admin/credentials" class="admin-nav-link {% if nav_section == "credentials" %}is-active{% endif %}">
       <i class="ti ti-key" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-credentials") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("landing") %}
     <a href="/admin/landing" class="admin-nav-link {% if nav_section == "landing" %}is-active{% endif %}">
       <i class="ti ti-layout" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-landing") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("blocks") %}
     <a href="/admin/blocks" class="admin-nav-link {% if nav_section == "blocks" %}is-active{% endif %}">
       <i class="ti ti-code" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-blocks") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("audit") %}
     <a href="/admin/audit" class="admin-nav-link {% if nav_section == "audit" %}is-active{% endif %}">
       <i class="ti ti-history" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-audit") }}</span>
     </a>
+    {% endif %}
+    {% if role.can_access_section("logs") %}
     <a href="/admin/logs" class="admin-nav-link {% if nav_section == "logs" %}is-active{% endif %}">
       <i class="ti ti-terminal-2" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-logs") }}</span>
     </a>
+    {% endif %}
   </div>
 
   <div class="admin-nav-actions">
+    <span class="admin-nav-role" title="{{ self.t("role-current") }}">
+      <i class="ti ti-user-shield" aria-hidden="true"></i>
+      <span>{{ self.t(role.label_key()) }}</span>
+    </span>
     <a href="/" class="admin-nav-link" title="{{ self.t("admin-nav-portal") }}">
       <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-portal") }}</span>

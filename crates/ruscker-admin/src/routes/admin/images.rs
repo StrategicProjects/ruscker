@@ -20,7 +20,7 @@ use axum::{
     Router,
 };
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireEditor, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::images;
@@ -54,6 +54,8 @@ struct ImagesPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (Editor or Admin) — drives nav gating.
+    role: Role,
     images: Vec<db::images::ImageMeta>,
     /// Set on successful upload — drives a one-shot toast.
     flash_uploaded: Option<String>,
@@ -81,18 +83,19 @@ impl<'a> ImagesPage<'a> {
 }
 
 async fn index(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
 ) -> Response {
-    render_index(&state, loc, theme, None, None).await
+    render_index(&state, loc, theme, editor.role, None, None).await
 }
 
 async fn render_index(
     state: &AppState,
     loc: Locale,
     theme: Theme,
+    role: Role,
     flash_uploaded: Option<String>,
     flash_error: Option<String>,
 ) -> Response {
@@ -116,6 +119,7 @@ async fn render_index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "images",
+        role,
         images,
         flash_uploaded,
         flash_error,
@@ -124,7 +128,7 @@ async fn render_index(
 }
 
 async fn upload(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -185,11 +189,19 @@ async fn upload(
         }
     }
 
-    render_index(&state, loc, theme, last_uploaded_name, last_error).await
+    render_index(
+        &state,
+        loc,
+        theme,
+        editor.role,
+        last_uploaded_name,
+        last_error,
+    )
+    .await
 }
 
 async fn delete(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {

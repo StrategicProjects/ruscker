@@ -18,7 +18,27 @@ landing + proxy are served. Rotate the token any time by changing the
 value and restarting.
 
 The footer has the same **language** (pt-BR / en-US / es-ES / fr-FR)
-and **theme** (light / dark / auto) pickers as the public portal.
+and **theme** (light / dark / auto) pickers as the public portal. The
+top-right corner shows your current **access level**.
+
+## Access levels (roles)
+
+Ruscker supports three roles, each with its own token. Set only the
+ones you need — with just `RUSCKER_ADMIN_TOKEN` you get the classic
+single-admin setup.
+
+| Token | Role | Can do |
+|---|---|---|
+| `RUSCKER_ADMIN_TOKEN` (required) | **Admin** | everything |
+| `RUSCKER_EDITOR_TOKEN` (optional) | **Editor** | view + manage Apps and Media; view the Dashboard and stop/restart replicas |
+| `RUSCKER_VIEWER_TOKEN` (optional) | **Viewer** | view the Dashboard only (read-only) |
+
+You log in with whichever token you were given; the panel then shows
+only the sections your role can reach. Enforcement is server-side —
+hiding a nav link is just UX, the routes themselves return `403` for a
+role that isn't allowed. Use **distinct** tokens per role (a token
+shared across roles resolves to the highest one). Credentials, the
+landing editor, custom blocks and the audit log are Admin-only.
 
 ## Screens
 

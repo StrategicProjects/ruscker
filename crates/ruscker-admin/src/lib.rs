@@ -471,7 +471,10 @@ async fn security_headers(
 /// still required by the inline landing/dashboard scripts (a
 /// nonce-based CSP is a tracked follow-up).
 pub(crate) fn content_security_policy(extra_origins: &str) -> String {
-    let e = extra_origins.trim();
+    // Sanitize operator-supplied origins before they reach the header:
+    // a stray `*`, `'unsafe-eval'`, or a `;`-smuggled directive would
+    // otherwise neuter the whole policy for every visitor.
+    let e = sanitize_csp_origins(extra_origins);
     let extra = if e.is_empty() {
         String::new()
     } else {
@@ -488,6 +491,51 @@ pub(crate) fn content_security_policy(extra_origins: &str) -> String {
          base-uri 'self'; \
          form-action 'self'"
     )
+}
+
+/// Keep only space-separated tokens that are safe CSP *host/scheme
+/// sources*, dropping anything that could subvert the policy.
+fn sanitize_csp_origins(raw: &str) -> String {
+    raw.split_whitespace()
+        .filter(|t| is_safe_csp_source(t))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A token is accepted only if it's a plain host source
+/// (`[scheme://][*.]host[:port][/path]`, must contain a `.` or `:`) or a
+/// scheme-only source (`https:`, `data:`). Rejected: the bare wildcard
+/// `*`, any `'...'` keyword (`'unsafe-inline'`/`'unsafe-eval'`/…), and
+/// anything carrying `;`/`,`/quotes/whitespace — i.e. directive
+/// smuggling or policy-loosening keywords.
+fn is_safe_csp_source(t: &str) -> bool {
+    if t.is_empty()
+        || t == "*"
+        || t.contains(|c: char| c == ';' || c == ',' || c == '\'' || c.is_whitespace())
+    {
+        return false;
+    }
+    if let Some(scheme) = t.strip_suffix(':') {
+        return !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    }
+    let body = t
+        .strip_prefix("https://")
+        .or_else(|| t.strip_prefix("http://"))
+        .unwrap_or(t);
+    let body = body.strip_prefix("*.").unwrap_or(body);
+    let valid = !body.is_empty()
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '/' | '_'))
+        && body
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphanumeric());
+    // Must look like a host (has a dot or a port) — rejects bare words.
+    valid && (body.contains('.') || body.contains(':'))
 }
 
 #[cfg(test)]
@@ -511,5 +559,30 @@ mod csp_tests {
         // Directives that must NOT be widened.
         assert!(csp.contains("style-src 'self' 'unsafe-inline';"));
         assert!(csp.contains("frame-ancestors 'none';"));
+    }
+
+    // #82: unsafe origin tokens must be stripped before reaching the
+    // header so a careless/hostile entry can't neuter the landing CSP.
+    #[test]
+    fn dangerous_origins_are_dropped() {
+        let csp = content_security_policy(
+            "* 'unsafe-eval' 'unsafe-inline' evil.com;script-src https://ok.example.com",
+        );
+        // Only the one clean host source survives.
+        assert!(csp.contains("https://ok.example.com"));
+        assert!(!csp.contains('*'));
+        assert!(!csp.contains("unsafe-eval"));
+        // The `evil.com;script-src` token (directive smuggling) is gone.
+        assert!(!csp.contains("evil.com"));
+        // The base policy is intact.
+        assert!(csp.contains("default-src 'self';"));
+    }
+
+    #[test]
+    fn safe_sources_are_kept() {
+        let csp = content_security_policy("https://a.example.com data: *.cdn.example.org");
+        assert!(csp.contains("https://a.example.com"));
+        assert!(csp.contains("data:"));
+        assert!(csp.contains("*.cdn.example.org"));
     }
 }

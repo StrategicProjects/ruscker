@@ -80,3 +80,4 @@ pub mod images;
 pub mod landing;
 pub mod landing_blocks;
 pub mod specs;
+pub mod users;

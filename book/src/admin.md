@@ -11,34 +11,38 @@ import/export exists for migration and backups, not as a requirement.
 
 ## Logging in
 
-Set `RUSCKER_ADMIN_TOKEN` (the `.deb` generates one on first install
-and prints it once). Browse to `/admin/login` and paste the token.
-Until a token is set, `/admin/*` returns `503` and only the public
-landing + proxy are served. Rotate the token any time by changing the
-value and restarting.
+On first run, set `RUSCKER_ADMIN_TOKEN` (the `.deb` generates one on
+install and prints it once) and browse to `/admin/login`: with no
+accounts yet you're asked for the **token**, then walked through
+creating the first **admin account** (username + password). After that
+everyone signs in with their account at `/admin/login`. The token stays
+as a **break-glass** login (`/admin/login?token=1`) so you can never be
+locked out. Until a token is set, `/admin/*` returns `503` and only the
+public landing + proxy are served.
 
 The footer has the same **language** (pt-BR / en-US / es-ES / fr-FR)
 and **theme** (light / dark / auto) pickers as the public portal. The
 top-right corner shows your current **access level**.
 
-## Access levels (roles)
+## Users and access levels (roles)
 
-Ruscker supports three roles, each with its own token. Set only the
-ones you need — with just `RUSCKER_ADMIN_TOKEN` you get the classic
-single-admin setup.
+Each person gets their own account (username + password). Admins manage
+accounts under **Users** (`/admin/users`): create one, assign a role,
+reset a password, or remove it. A new user gets an initial password you
+choose and is asked — once, on first login — whether to change it.
 
-| Token | Role | Can do |
-|---|---|---|
-| `RUSCKER_ADMIN_TOKEN` (required) | **Admin** | everything |
-| `RUSCKER_EDITOR_TOKEN` (optional) | **Editor** | view + manage Apps and Media; view the Dashboard and stop/restart replicas |
-| `RUSCKER_VIEWER_TOKEN` (optional) | **Viewer** | view the Dashboard only (read-only) |
+| Role | Can do |
+|---|---|
+| **Viewer** | view the Dashboard only (read-only) |
+| **Editor** | view + manage Apps and Media; view the Dashboard and stop/restart replicas |
+| **Admin** | everything, including managing users, credentials, the landing editor, custom blocks and the audit log |
 
-You log in with whichever token you were given; the panel then shows
-only the sections your role can reach. Enforcement is server-side —
-hiding a nav link is just UX, the routes themselves return `403` for a
-role that isn't allowed. Use **distinct** tokens per role (a token
-shared across roles resolves to the highest one). Credentials, the
-landing editor, custom blocks and the audit log are Admin-only.
+The panel shows only the sections your role can reach. Enforcement is
+server-side — hiding a nav link is just UX; the routes themselves
+return `403` for a role that isn't allowed. The audit log records the
+acting username. A **last-admin guard** stops you deleting or demoting
+the only remaining admin (so the portal can't be locked out); the
+`RUSCKER_ADMIN_TOKEN` break-glass login is the other safety net.
 
 ## Screens
 

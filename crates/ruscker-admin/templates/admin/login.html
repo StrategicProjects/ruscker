@@ -12,7 +12,8 @@
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center px-4">
 
-<form method="post" action="/admin/login" class="admin-login-card" autocomplete="off">
+<form method="post" action="{% if bootstrap %}/admin/login/token{% else %}/admin/login{% endif %}"
+      class="admin-login-card" autocomplete="off">
 
   <div class="admin-login-brand">
     <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
@@ -24,20 +25,37 @@
   </div>
 
   <h1 class="text-lg font-medium tracking-tight">{{ self.t("admin-login-title") }}</h1>
-  <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-login-help") }}</p>
+  <p class="text-xs text-[color:var(--text-muted)]">
+    {% if bootstrap %}{{ self.t("admin-login-help") }}{% else %}{{ self.t("admin-login-help-user") }}{% endif %}
+  </p>
 
-  {% if error == "wrong-token" %}
+  {% if error == "wrong-token" || error == "wrong-login" %}
     <div class="admin-login-error" role="alert">
       <i class="ti ti-alert-circle" aria-hidden="true"></i>
-      {{ self.t("admin-login-error-wrong") }}
+      {% if error == "wrong-login" %}{{ self.t("admin-login-error-credentials") }}{% else %}{{ self.t("admin-login-error-wrong") }}{% endif %}
     </div>
   {% endif %}
 
-  <label class="admin-login-field">
-    <span class="admin-login-label">{{ self.t("admin-login-token-label") }}</span>
-    <input type="password" name="token" required autofocus
-           placeholder="{{ self.t("admin-login-token-placeholder") }}">
-  </label>
+  {% if bootstrap %}
+    {# Break-glass / first-run: authenticate with the admin token. #}
+    <label class="admin-login-field">
+      <span class="admin-login-label">{{ self.t("admin-login-token-label") }}</span>
+      <input type="password" name="token" required autofocus
+             placeholder="{{ self.t("admin-login-token-placeholder") }}">
+    </label>
+  {% else %}
+    {# Normal: per-user account. #}
+    <label class="admin-login-field">
+      <span class="admin-login-label">{{ self.t("admin-login-username-label") }}</span>
+      <input type="text" name="username" required autofocus autocapitalize="none"
+             autocomplete="username" placeholder="{{ self.t("admin-login-username-placeholder") }}">
+    </label>
+    <label class="admin-login-field">
+      <span class="admin-login-label">{{ self.t("admin-login-password-label") }}</span>
+      <input type="password" name="password" required autocomplete="current-password"
+             placeholder="{{ self.t("admin-login-password-placeholder") }}">
+    </label>
+  {% endif %}
 
   <button type="submit" class="admin-login-btn">
     <i class="ti ti-login" aria-hidden="true"></i>
@@ -45,6 +63,11 @@
   </button>
 
   <div class="admin-login-footer">
+    {% if bootstrap %}
+      <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
+    {% else %}
+      <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
+    {% endif %}
     <a href="/">{{ self.t("admin-login-back-portal") }}</a>
     <form method="post" action="/__set/locale" class="contents">
       {% for loc in locales_all %}

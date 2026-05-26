@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="robots" content="noindex,nofollow">
+<title>{{ self.t("admin-setup-title") }} · Ruscker</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/assets/styles.css">
+<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css">
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center px-4">
+
+<form method="post" action="/admin/setup" class="admin-login-card" autocomplete="off">
+
+  <div class="admin-login-brand">
+    <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <div class="brand-wordmark text-base">ruscker · admin</div>
+  </div>
+
+  <h1 class="text-lg font-medium tracking-tight">{{ self.t("admin-setup-title") }}</h1>
+  <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-setup-help") }}</p>
+
+  {% if error != "" %}
+    <div class="admin-login-error" role="alert">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      {% if error == "mismatch" %}{{ self.t("admin-pw-error-mismatch") }}
+      {% else if error == "short" %}{{ self.t("admin-pw-error-short") }}
+      {% else %}{{ self.t("admin-setup-error") }}{% endif %}
+    </div>
+  {% endif %}
+
+  <label class="admin-login-field">
+    <span class="admin-login-label">{{ self.t("admin-login-username-label") }}</span>
+    <input type="text" name="username" required autofocus autocapitalize="none"
+           autocomplete="username" placeholder="admin">
+  </label>
+  <label class="admin-login-field">
+    <span class="admin-login-label">{{ self.t("admin-setup-password-label") }}</span>
+    <input type="password" name="password" required autocomplete="new-password">
+  </label>
+  <label class="admin-login-field">
+    <span class="admin-login-label">{{ self.t("admin-pw-confirm-label") }}</span>
+    <input type="password" name="confirm" required autocomplete="new-password">
+  </label>
+
+  <button type="submit" class="admin-login-btn">
+    <i class="ti ti-user-check" aria-hidden="true"></i>
+    {{ self.t("admin-setup-submit") }}
+  </button>
+
+  <div class="admin-login-footer">
+    <form method="post" action="/__set/locale" class="contents">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="admin-login-locale {% if *loc == locale %}is-active{% endif %}">
+          {{ loc.code()|upper }}
+        </button>
+      {% endfor %}
+    </form>
+  </div>
+</form>
+
+</body>
+</html>

@@ -67,6 +67,60 @@ role-viewer = Lecteur
 role-editor = Éditeur
 role-admin = Administrateur
 
+# — Connexion identifiant/mot de passe + bootstrap par token (#107)
+admin-login-help-user = Connectez-vous avec votre identifiant et votre mot de passe.
+admin-login-username-label = Identifiant
+admin-login-username-placeholder = votre identifiant
+admin-login-password-label = Mot de passe
+admin-login-password-placeholder = votre mot de passe
+admin-login-error-credentials = Identifiant ou mot de passe invalide.
+admin-login-use-token = Se connecter avec le token administrateur
+admin-login-use-password = Revenir à la connexion par mot de passe
+# — Configuration du premier admin
+admin-setup-title = Créez le compte administrateur
+admin-setup-help = C'est le premier lancement. Choisissez un identifiant et un mot de passe pour l'administrateur.
+admin-setup-error = Impossible de créer le compte. Vérifiez les informations.
+admin-setup-password-label = Mot de passe
+admin-setup-submit = Créer l'administrateur
+# — Changement de mot de passe / première connexion
+admin-pw-title = Changer le mot de passe
+admin-pw-help = Définissez un nouveau mot de passe pour votre compte.
+admin-pw-first-prompt = Vous utilisez un mot de passe défini par un administrateur. Voulez-vous le changer maintenant ?
+admin-pw-current-label = Mot de passe actuel
+admin-pw-new-label = Nouveau mot de passe
+admin-pw-confirm-label = Confirmer le mot de passe
+admin-pw-error-current = Le mot de passe actuel est incorrect.
+admin-pw-error-mismatch = Les mots de passe ne correspondent pas.
+admin-pw-error-short = Le mot de passe doit comporter au moins 8 caractères.
+admin-pw-submit = Enregistrer le mot de passe
+admin-pw-keep = Conserver le mot de passe actuel
+# — Gestion des utilisateurs (admin)
+admin-nav-users = Utilisateurs
+admin-users-title = Utilisateurs
+admin-users-subtitle = Créez et gérez qui peut se connecter, et à quel niveau.
+admin-users-new = Nouvel utilisateur
+admin-users-create = Créer
+admin-users-initial-password = Mot de passe initial
+admin-users-initial-password-hint = Il lui sera demandé s'il veut le changer à la première connexion.
+admin-users-role = Niveau
+admin-users-col-user = Utilisateur
+admin-users-col-role = Niveau
+admin-users-col-created = Créé le
+admin-users-col-actions = Actions
+admin-users-you = vous
+admin-users-must-change = Utilise encore le mot de passe initial
+admin-users-save-role = Enregistrer le niveau
+admin-users-new-password = nouveau mot de passe
+admin-users-reset-password = Réinitialiser le mot de passe
+admin-users-delete = Supprimer l'utilisateur
+admin-users-confirm-delete = Supprimer cet utilisateur ?
+admin-users-flash-created = Utilisateur créé.
+admin-users-flash-saved = Modifications enregistrées.
+admin-users-flash-deleted = Utilisateur supprimé.
+admin-users-flash-last-admin = Impossible de supprimer ou rétrograder le dernier administrateur.
+admin-users-flash-bad-input = Données invalides (identifiant vide ou mot de passe de moins de 8 caractères).
+admin-users-flash-exists = Un utilisateur portant ce nom existe déjà.
+
 # Admin dashboard
 admin-dashboard-title = Tableau de bord
 admin-dashboard-subtitle = État des conteneurs et des sessions en temps réel

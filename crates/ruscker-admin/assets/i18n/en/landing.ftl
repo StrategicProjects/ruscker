@@ -67,6 +67,60 @@ role-viewer = Viewer
 role-editor = Editor
 role-admin = Admin
 
+# — Username/password login + token bootstrap (#107)
+admin-login-help-user = Sign in with your username and password.
+admin-login-username-label = Username
+admin-login-username-placeholder = your username
+admin-login-password-label = Password
+admin-login-password-placeholder = your password
+admin-login-error-credentials = Invalid username or password.
+admin-login-use-token = Sign in with admin token
+admin-login-use-password = Back to password sign-in
+# — First-admin setup
+admin-setup-title = Create the admin account
+admin-setup-help = This is the first run. Choose a username and password for the administrator.
+admin-setup-error = Could not create the account. Check the details.
+admin-setup-password-label = Password
+admin-setup-submit = Create admin
+# — Password change / first login
+admin-pw-title = Change password
+admin-pw-help = Set a new password for your account.
+admin-pw-first-prompt = You're using a password set by an administrator. Would you like to change it now?
+admin-pw-current-label = Current password
+admin-pw-new-label = New password
+admin-pw-confirm-label = Confirm password
+admin-pw-error-current = Current password is incorrect.
+admin-pw-error-mismatch = Passwords don't match.
+admin-pw-error-short = Password must be at least 8 characters.
+admin-pw-submit = Save password
+admin-pw-keep = Keep current password
+# — User management (admin)
+admin-nav-users = Users
+admin-users-title = Users
+admin-users-subtitle = Create and manage who can sign in, and at which level.
+admin-users-new = New user
+admin-users-create = Create
+admin-users-initial-password = Initial password
+admin-users-initial-password-hint = The user is asked whether to change it on first login.
+admin-users-role = Role
+admin-users-col-user = User
+admin-users-col-role = Role
+admin-users-col-created = Created
+admin-users-col-actions = Actions
+admin-users-you = you
+admin-users-must-change = Still using the initial password
+admin-users-save-role = Save role
+admin-users-new-password = new password
+admin-users-reset-password = Reset password
+admin-users-delete = Remove user
+admin-users-confirm-delete = Remove this user?
+admin-users-flash-created = User created.
+admin-users-flash-saved = Changes saved.
+admin-users-flash-deleted = User removed.
+admin-users-flash-last-admin = Can't remove or demote the last administrator.
+admin-users-flash-bad-input = Invalid input (empty username or password under 8 characters).
+admin-users-flash-exists = A user with that name already exists.
+
 # Admin dashboard
 admin-dashboard-title = Monitoring dashboard
 admin-dashboard-subtitle = Live container and session state

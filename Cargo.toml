@@ -91,6 +91,9 @@ base64 = "0.22"
 aes-gcm = "0.10"
 zeroize = "1.8"
 hex = "0.4"
+# Password hashing for admin user accounts (argon2id). `std` pulls in
+# the OsRng salt generator via password-hash.
+argon2 = { version = "0.5", features = ["std"] }
 
 # Testing
 pretty_assertions = "1.4"

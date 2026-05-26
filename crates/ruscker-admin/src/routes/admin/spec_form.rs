@@ -606,7 +606,7 @@ async fn create(
         }
     };
 
-    match db::specs::upsert_one(pool, &spec, Some("admin")).await {
+    match db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
         Ok(_) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "save failed");
@@ -665,7 +665,7 @@ async fn update(
         }
     };
 
-    match db::specs::upsert_one(pool, &spec, Some("admin")).await {
+    match db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
         Ok(_) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "save failed");
@@ -675,14 +675,14 @@ async fn update(
 }
 
 async fn delete(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    match db::specs::delete_one(pool, &id, Some("admin")).await {
+    match db::specs::delete_one(pool, &id, Some(editor.actor())).await {
         Ok(_) => Redirect::to("/admin/specs").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "delete failed");

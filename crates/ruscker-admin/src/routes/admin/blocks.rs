@@ -222,14 +222,14 @@ impl BlockForm {
 }
 
 async fn create(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Form(form): Form<BlockForm>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    match landing_blocks::insert(pool, &form.into_input(), Some("admin")).await {
+    match landing_blocks::insert(pool, &form.into_input(), Some(admin.actor())).await {
         Ok(_) => Redirect::to("/admin/blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "create block failed");
@@ -239,7 +239,7 @@ async fn create(
 }
 
 async fn update(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Form(form): Form<BlockForm>,
@@ -247,7 +247,7 @@ async fn update(
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    match landing_blocks::update(pool, &id, &form.into_input(), Some("admin")).await {
+    match landing_blocks::update(pool, &id, &form.into_input(), Some(admin.actor())).await {
         Ok(true) => Redirect::to("/admin/blocks").into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "block not found").into_response(),
         Err(e) => {
@@ -258,14 +258,14 @@ async fn update(
 }
 
 async fn delete(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    match landing_blocks::delete(pool, &id, Some("admin")).await {
+    match landing_blocks::delete(pool, &id, Some(admin.actor())).await {
         Ok(_) => Redirect::to("/admin/blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "delete block failed");
@@ -275,7 +275,7 @@ async fn delete(
 }
 
 async fn move_block(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Path((id, dir)): Path<(String, String)>,
 ) -> Response {
@@ -287,7 +287,7 @@ async fn move_block(
         "down" => false,
         _ => return (StatusCode::BAD_REQUEST, "dir must be up|down").into_response(),
     };
-    match landing_blocks::move_block(pool, &id, up, Some("admin")).await {
+    match landing_blocks::move_block(pool, &id, up, Some(admin.actor())).await {
         Ok(_) => Redirect::to("/admin/blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "move block failed");
@@ -307,14 +307,14 @@ struct ReorderReq {
 /// origin + the `SameSite=Strict` admin cookie cover CSRF. Returns
 /// `204` so the client keeps the DOM order it already rendered.
 async fn reorder(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     Json(req): Json<ReorderReq>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    match landing_blocks::reorder(pool, &req.slot, &req.ids, Some("admin")).await {
+    match landing_blocks::reorder(pool, &req.slot, &req.ids, Some(admin.actor())).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => (StatusCode::BAD_REQUEST, "unknown slot").into_response(),
         Err(e) => {

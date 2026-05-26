@@ -71,6 +71,60 @@ role-viewer = Visualizador
 role-editor = Editor
 role-admin = Administrador
 
+# — Login por usuário/senha + bootstrap por token (#107)
+admin-login-help-user = Entre com seu usuário e senha.
+admin-login-username-label = Usuário
+admin-login-username-placeholder = seu usuário
+admin-login-password-label = Senha
+admin-login-password-placeholder = sua senha
+admin-login-error-credentials = Usuário ou senha inválidos.
+admin-login-use-token = Entrar com token de administrador
+admin-login-use-password = Voltar ao login por senha
+# — Configuração do primeiro admin
+admin-setup-title = Crie a conta de administrador
+admin-setup-help = Esta é a primeira vez. Escolha um usuário e uma senha para o administrador.
+admin-setup-error = Não foi possível criar a conta. Verifique os dados.
+admin-setup-password-label = Senha
+admin-setup-submit = Criar administrador
+# — Troca de senha / primeiro acesso
+admin-pw-title = Alterar senha
+admin-pw-help = Defina uma nova senha para a sua conta.
+admin-pw-first-prompt = Você está usando uma senha definida pelo administrador. Deseja trocá-la agora?
+admin-pw-current-label = Senha atual
+admin-pw-new-label = Nova senha
+admin-pw-confirm-label = Confirme a senha
+admin-pw-error-current = Senha atual incorreta.
+admin-pw-error-mismatch = As senhas não coincidem.
+admin-pw-error-short = A senha deve ter ao menos 8 caracteres.
+admin-pw-submit = Salvar senha
+admin-pw-keep = Manter a senha atual
+# — Gestão de usuários (admin)
+admin-nav-users = Usuários
+admin-users-title = Usuários
+admin-users-subtitle = Crie e gerencie quem acessa o painel e com qual nível.
+admin-users-new = Novo usuário
+admin-users-create = Criar
+admin-users-initial-password = Senha inicial
+admin-users-initial-password-hint = O usuário será consultado se quer trocá-la no primeiro acesso.
+admin-users-role = Nível
+admin-users-col-user = Usuário
+admin-users-col-role = Nível
+admin-users-col-created = Criado em
+admin-users-col-actions = Ações
+admin-users-you = você
+admin-users-must-change = Ainda usa a senha inicial
+admin-users-save-role = Salvar nível
+admin-users-new-password = nova senha
+admin-users-reset-password = Redefinir senha
+admin-users-delete = Remover usuário
+admin-users-confirm-delete = Remover este usuário?
+admin-users-flash-created = Usuário criado.
+admin-users-flash-saved = Alterações salvas.
+admin-users-flash-deleted = Usuário removido.
+admin-users-flash-last-admin = Não é possível remover ou rebaixar o último administrador.
+admin-users-flash-bad-input = Dados inválidos (usuário vazio ou senha com menos de 8 caracteres).
+admin-users-flash-exists = Já existe um usuário com esse nome.
+
 # Admin dashboard
 admin-dashboard-title = Painel de monitoramento
 admin-dashboard-subtitle = Estado dos containers e sessões em tempo real

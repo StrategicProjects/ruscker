@@ -149,7 +149,7 @@ async fn index(
 }
 
 async fn save(
-    _: RequireAdmin,
+    admin: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -159,7 +159,7 @@ async fn save(
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let lc = form.into_customization();
-    match db::landing::update(pool, &lc, Some("admin")).await {
+    match db::landing::update(pool, &lc, Some(admin.actor())).await {
         Ok(_) => render(&state, loc, theme, Some(LandingForm::from_customization(&lc)), true, None).await,
         Err(err) => {
             tracing::error!(error = ?err, "landing update failed");

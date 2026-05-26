@@ -17,7 +17,7 @@ Ruscker does **not** honour (e.g. Kubernetes backend, per-spec
 `volumes`/`environment`, non-`none` authentication) and exits non-zero
 if it finds any. A clean run means a drop-in migration.
 
-> At SEPE, the real 31-spec ShinyProxy 3.2.0 config reported
+> In production, a real 31-spec ShinyProxy 3.2.0 config reported
 > **"no unsupported features"**.
 
 The validator also flags **plaintext credentials** in the YAML — move
@@ -37,8 +37,8 @@ So a config left in place finds its logos with no extra flags.
 
 ## 3. Side-by-side cutover (recommended)
 
-You don't have to flip everything at once. A safe pattern (used at
-SEPE) keeps ShinyProxy reachable while Ruscker takes the root:
+You don't have to flip everything at once. A safe pattern (proven in
+production) keeps ShinyProxy reachable while Ruscker takes the root:
 
 - Run Ruscker on a spare port (e.g. `127.0.0.1:8090`).
 - In nginx, route `/` → Ruscker and `/sp/` → ShinyProxy (give
@@ -61,5 +61,5 @@ probes, graceful shutdown, and a tiny footprint. See
 Authentication schemes other than `none`, the Kubernetes backend, and
 a few per-spec fields (`volumes`, `environment`, `labels`, …) are
 parsed but ignored — `validate --strict-compat` is the source of
-truth. For apps that handle their own auth (the SEPE case), `none` is
+truth. For apps that handle their own auth (a common case), `none` is
 correct: Ruscker just routes traffic.

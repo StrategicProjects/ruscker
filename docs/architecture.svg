@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="How Ruscker works: browsers and API clients hit a single Ruscker binary, which proxies to app containers it spawns on demand via the Docker daemon.">
+  <title>Ruscker — how it works</title>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1D9E75"/>
+    </marker>
+  </defs>
+
+  <!-- ── Clients ───────────────────────────────────────────── -->
+  <rect x="200" y="22" width="320" height="46" rx="23" fill="#FFFFFF" stroke="#1D9E75" stroke-width="2"/>
+  <text x="360" y="51" text-anchor="middle" font-size="15" font-weight="600" fill="#1A1A1A">Browsers · API clients</text>
+
+  <!-- arrow 1 -->
+  <line x1="360" y1="68" x2="360" y2="100" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="372" y="89" font-size="12" fill="#5B6B66">HTTPS · /app/{spec} · /api/{spec}</text>
+
+  <!-- ── Ruscker process ───────────────────────────────────── -->
+  <rect x="40" y="104" width="640" height="300" rx="14" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
+  <!-- title bar (top corners rounded) -->
+  <path d="M40,146 L40,118 Q40,104 54,104 L666,104 Q680,104 680,118 L680,146 Z" fill="#0F6E56"/>
+  <!-- brand mark, white knockout -->
+  <g transform="translate(54.4,110) scale(0.34)">
+    <polygon points="14,52 40,40 66,52 40,64" fill="#FFFFFF" opacity="0.45"/>
+    <polygon points="14,40 40,28 66,40 40,52" fill="#FFFFFF" opacity="0.72"/>
+    <polygon points="14,28 40,16 66,28 40,40" fill="#FFFFFF"/>
+  </g>
+  <text x="92" y="131" font-size="15" font-weight="600" fill="#FFFFFF">Ruscker — single static binary · ~14 MB · no JVM</text>
+
+  <!-- component boxes -->
+  <!-- (1) Landing -->
+  <rect x="60" y="158" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+  <text x="205" y="186" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Landing page</text>
+  <text x="205" y="205" text-anchor="middle" font-size="11" fill="#5B6B66">Askama · Tailwind 4 · i18n (pt/en/es/fr)</text>
+  <!-- (2) Admin -->
+  <rect x="370" y="158" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+  <text x="515" y="186" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Admin · live dashboard</text>
+  <text x="515" y="205" text-anchor="middle" font-size="11" fill="#5B6B66">HTMX · SSE · image library · audit log</text>
+  <!-- (3) Proxy -->
+  <rect x="60" y="232" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+  <text x="205" y="260" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Reverse proxy</text>
+  <text x="205" y="279" text-anchor="middle" font-size="11" fill="#5B6B66">sticky · WebSocket · URL rewrite · rate-limit</text>
+  <!-- (4) Router -->
+  <rect x="370" y="232" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+  <text x="515" y="260" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Router · auto-scaler</text>
+  <text x="515" y="279" text-anchor="middle" font-size="11" fill="#5B6B66">least-conn / round-robin · min–max replicas</text>
+  <!-- state -->
+  <rect x="60" y="312" width="600" height="56" rx="10" fill="#E8F3EE" stroke="#1D9E75" stroke-width="1.5"/>
+  <text x="360" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">SQLite — source of truth</text>
+  <text x="360" y="356" text-anchor="middle" font-size="11" fill="#5B6B66">specs · images · encrypted credentials · audit log</text>
+
+  <!-- arrow 2 -->
+  <line x1="360" y1="404" x2="360" y2="436" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="372" y="425" font-size="12" fill="#5B6B66">Docker API · spawn / stop / stats / logs</text>
+
+  <!-- ── Docker daemon ─────────────────────────────────────── -->
+  <rect x="40" y="440" width="640" height="148" rx="14" fill="#FFFFFF" stroke="#D7E5E0" stroke-width="2"/>
+  <text x="60" y="464" font-size="13" font-weight="600" fill="#5B6B66">Docker daemon</text>
+
+  <!-- replicas -->
+  <g>
+    <rect x="64" y="474" width="180" height="74" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+    <g transform="translate(154,486) scale(0.42)">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </g>
+    <text x="154" y="538" text-anchor="middle" font-size="12" font-weight="600" fill="#085041">App replica · R1</text>
+  </g>
+  <g>
+    <rect x="270" y="474" width="180" height="74" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+    <g transform="translate(360,486) scale(0.42)">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </g>
+    <text x="360" y="538" text-anchor="middle" font-size="12" font-weight="600" fill="#085041">App replica · R2</text>
+  </g>
+  <g>
+    <rect x="476" y="474" width="180" height="74" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
+    <g transform="translate(566,486) scale(0.42)">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </g>
+    <text x="566" y="538" text-anchor="middle" font-size="12" font-weight="600" fill="#085041">App replica · R3</text>
+  </g>
+
+  <text x="360" y="574" text-anchor="middle" font-size="11" fill="#5B6B66">spawned on demand · reaped when idle · per-container CPU and memory limits</text>
+</svg>

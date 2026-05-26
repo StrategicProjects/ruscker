@@ -148,14 +148,36 @@ pub async fn inject_base_href(resp: Response<Body>, base_path: &str) -> Response
     }
 
     let (mut parts, body) = resp.into_parts();
+
+    // Decide *before* consuming the body. A declared Content-Length over
+    // the transform cap streams the original through untouched — we
+    // can't buffer-then-fail, because `to_bytes` would have already
+    // consumed bytes we can no longer hand back. (This is the case the
+    // module doc promises: "past that we pass through untouched.")
+    let declared_len = parts
+        .headers
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<usize>().ok());
+    if declared_len.is_some_and(|n| n > MAX_HTML_BYTES) {
+        return Response::from_parts(parts, body);
+    }
+
     let bytes = match to_bytes(body, MAX_HTML_BYTES).await {
         Ok(b) => b,
         Err(e) => {
+            // Unknown-length (chunked) body that overran the cap mid-
+            // stream: it's already partially consumed, so we can neither
+            // transform nor hand it back. Fail loudly with a 502 rather
+            // than serve a broken empty 200 with a stale Content-Length.
             tracing::warn!(
                 error = ?e,
-                "could not collect HTML body for transform; passing through empty"
+                "HTML body exceeded the transform cap and can't be streamed back"
             );
-            return Response::from_parts(parts, Body::empty());
+            return Response::builder()
+                .status(502)
+                .body(Body::from("upstream HTML too large to transform"))
+                .unwrap_or_else(|_| Response::new(Body::empty()));
         }
     };
 
@@ -651,5 +673,38 @@ mod tests {
         let out = inject_base_href(resp, "/app/foo/").await;
         let s = body_string(out).await;
         assert!(!s.contains("<base"));
+    }
+
+    // Regression for #75: an HTML page whose declared Content-Length is
+    // over the cap is streamed through untouched (not emptied, not
+    // transformed) instead of served as a broken empty body.
+    #[tokio::test]
+    async fn oversize_content_length_passes_through_untouched() {
+        let body = "<html><head></head><body>big</body></html>";
+        let resp = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/html")
+            .header(header::CONTENT_LENGTH, (MAX_HTML_BYTES + 1).to_string())
+            .body(Body::from(body))
+            .unwrap();
+        let out = inject_base_href(resp, "/app/foo/").await;
+        assert_eq!(out.status(), StatusCode::OK);
+        let s = body_string(out).await;
+        assert_eq!(s, body, "body must pass through verbatim");
+        assert!(!s.contains("<base"), "no transform on oversize body");
+    }
+
+    // A chunked (no Content-Length) body that overruns the cap mid-stream
+    // can't be recovered → fail loudly with 502, never a silent empty 200.
+    #[tokio::test]
+    async fn oversize_chunked_body_returns_502() {
+        let big = "x".repeat(MAX_HTML_BYTES + 1);
+        let resp = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/html")
+            .body(Body::from(big))
+            .unwrap();
+        let out = inject_base_href(resp, "/app/foo/").await;
+        assert_eq!(out.status(), StatusCode::BAD_GATEWAY);
     }
 }

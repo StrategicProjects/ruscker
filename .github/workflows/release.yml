@@ -1,0 +1,287 @@
+name: release
+
+# Cut a release by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+#
+# Produces, for amd64 + arm64 (built natively — no QEMU, no cross):
+#   - a multi-arch Docker image on ghcr.io (pushed by digest, then
+#     stitched into one manifest list);
+#   - static musl tarballs (ruscker-<ver>-linux-<arch>.tar.gz);
+#   - Debian packages (.deb), built from the same static binary so they
+#     install on any glibc Debian/Ubuntu without libc version pins;
+# and attaches the tarballs + .debs to a GitHub Release.
+#
+# A pre-release tag (anything with a hyphen, e.g. v0.2.0-rc1) is marked
+# as a GitHub pre-release and does NOT move the Docker `latest` tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release + upload assets
+  packages: write # push the image to ghcr.io
+
+jobs:
+  # --------------------------------------------------------------------
+  # Shared, lowercased metadata. ghcr requires a lowercase image path,
+  # but the org slug ("StrategicProjects") is mixed-case — normalize once.
+  # --------------------------------------------------------------------
+  meta:
+    runs-on: ubuntu-24.04
+    outputs:
+      image: ${{ steps.m.outputs.image }}
+      version: ${{ steps.m.outputs.version }}
+      prerelease: ${{ steps.m.outputs.prerelease }}
+    steps:
+      - id: m
+        run: |
+          repo="${GITHUB_REPOSITORY,,}"
+          tag="${GITHUB_REF_NAME}"
+          echo "image=ghcr.io/${repo}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          if [[ "$tag" == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # --------------------------------------------------------------------
+  # Per-arch native build of the static musl binary, then the tarball
+  # and the .deb (cargo-deb, reusing that same binary via --no-build).
+  # --------------------------------------------------------------------
+  artifacts:
+    needs: meta
+    name: artifacts (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools pkg-config
+
+      - name: Install Rust toolchain + musl target
+        run: |
+          if ! command -v rustup >/dev/null; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+              | sh -s -- -y --default-toolchain none --profile minimal
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+            . "$HOME/.cargo/env"
+          fi
+          rustup show                       # installs the pin from rust-toolchain.toml
+          rustup target add ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Fetch host Tailwind CLI
+        run: |
+          # build.rs runs Tailwind to compile the admin CSS. It's a
+          # build-time tool, so it must be the HOST arch + glibc — the
+          # musl/target build of Tailwind mis-links libstdc++ and won't
+          # run. TAILWIND_BIN short-circuits build.rs's own download.
+          ver=$(grep -oE 'TAILWIND_VERSION: &str = "[^"]+"' \
+                crates/ruscker-admin/build.rs | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+          case "$(uname -m)" in
+            x86_64)  asset=tailwindcss-linux-x64 ;;
+            aarch64) asset=tailwindcss-linux-arm64 ;;
+            *) echo "unsupported host arch $(uname -m)"; exit 1 ;;
+          esac
+          curl -fsSL -o "$RUNNER_TEMP/tailwindcss" \
+            "https://github.com/tailwindlabs/tailwindcss/releases/download/v${ver}/${asset}"
+          chmod +x "$RUNNER_TEMP/tailwindcss"
+          echo "TAILWIND_BIN=$RUNNER_TEMP/tailwindcss" >> "$GITHUB_ENV"
+
+      - name: Build static binary
+        env:
+          # sqlite (sqlx) and ring need a musl C compiler; on a native
+          # runner musl-tools provides the matching-arch musl-gcc.
+          CC_x86_64_unknown_linux_musl: musl-gcc
+          CC_aarch64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --target ${{ matrix.target }} --bin ruscker
+
+      - name: Smoke the binary
+        run: ./target/${{ matrix.target }}/release/ruscker --help >/dev/null
+
+      - name: Package tarball
+        run: |
+          v="${{ needs.meta.outputs.version }}"
+          dir="ruscker-${v}-linux-${{ matrix.arch }}"
+          mkdir -p "dist/${dir}"
+          cp "target/${{ matrix.target }}/release/ruscker" "dist/${dir}/"
+          cp README.md "dist/${dir}/" 2>/dev/null || true
+          cp LICENSE* "dist/${dir}/" 2>/dev/null || true
+          cp examples/application.yml "dist/${dir}/application.example.yml"
+          tar -C dist -czf "dist/${dir}.tar.gz" "${dir}"
+          rm -rf "dist/${dir}"
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build .deb from the static binary
+        run: |
+          # --no-build reuses the musl binary above; cargo-deb rewrites
+          # the asset path target/release -> target/<triple>/release.
+          # --deb-version pins the package version to the git tag so the
+          # .deb doesn't drift from the workspace Cargo.toml version.
+          cargo deb -p ruscker-cli --target ${{ matrix.target }} --no-build \
+            --deb-version "${{ needs.meta.outputs.version }}-1"
+          find "target/${{ matrix.target }}/debian" -name '*.deb' -exec cp {} dist/ \;
+
+      - name: Checksums
+        run: |
+          cd dist
+          for f in *.tar.gz *.deb; do sha256sum "$f" > "$f.sha256"; done
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  # --------------------------------------------------------------------
+  # Per-arch native Docker build, pushed to ghcr by digest (no tag yet).
+  # --------------------------------------------------------------------
+  docker-build:
+    needs: meta
+    name: docker (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          # provenance off keeps the manifest a single platform entry so
+          # imagetools can stitch the list cleanly.
+          provenance: false
+          outputs: type=image,name=${{ needs.meta.outputs.image }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${digest#sha256:}"
+        env:
+          digest: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # --------------------------------------------------------------------
+  # Stitch the per-arch digests into one multi-arch manifest list and
+  # apply the human tags (:X.Y.Z, :X.Y, and :latest for stable tags).
+  # --------------------------------------------------------------------
+  docker-merge:
+    needs: [meta, docker-build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create and push the manifest list
+        working-directory: /tmp/digests
+        run: |
+          image="${{ needs.meta.outputs.image }}"
+          v="${{ needs.meta.outputs.version }}"
+          mm="${v%.*}"
+          tags=(-t "${image}:${v}" -t "${image}:${mm}")
+          if [ "${{ needs.meta.outputs.prerelease }}" = "false" ]; then
+            tags+=(-t "${image}:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" \
+            $(printf "${image}@sha256:%s " *)
+          docker buildx imagetools inspect "${image}:${v}"
+
+  # --------------------------------------------------------------------
+  # Publish the GitHub Release with the tarballs + .debs + checksums.
+  # --------------------------------------------------------------------
+  release:
+    needs: [meta, artifacts, docker-merge]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: artifacts-*
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          image="${{ needs.meta.outputs.image }}"
+          v="${{ needs.meta.outputs.version }}"
+          pre=""
+          [ "${{ needs.meta.outputs.prerelease }}" = "true" ] && pre="--prerelease"
+          cat > notes.md <<EOF
+          ## Container image
+
+          \`\`\`
+          docker pull ${image}:${v}
+          \`\`\`
+
+          Multi-arch (\`linux/amd64\`, \`linux/arm64\`). The attached
+          \`.tar.gz\` files are static musl binaries; the \`.deb\` files
+          install on Debian/Ubuntu via \`apt install ./ruscker_*.deb\`.
+          Each asset ships a matching \`.sha256\`.
+          EOF
+          gh release create "${GITHUB_REF_NAME}" dist/* \
+            --title "Ruscker ${GITHUB_REF_NAME}" \
+            --notes-file notes.md \
+            --generate-notes \
+            $pre

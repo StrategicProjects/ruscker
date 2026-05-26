@@ -1,543 +1,138 @@
+# Ruscker example configuration — a generic, comprehensive reference.
+#
+# It uses the ShinyProxy `application.yml` schema (so existing configs
+# migrate as-is) plus Ruscker extensions (type: api, min/max-replicas,
+# landing-customization, …). See docs/YAML_SCHEMA.md for the full
+# reference. NEVER put secrets here — use ${ENV_VAR} interpolation.
+
 server:
   useForwardHeaders: true
-  secure-cookies: true  
+  secure-cookies: true
   forward-headers-strategy: native
-  servlet.session.timeout: 3600  
+  servlet.session.timeout: 3600
 
 proxy:
-  title: Monitoramento Estratégico 
+  title: Ruscker Demo Portal
   landing-page: /
   hide-navbar: true
-  template-path: templates/mlk  
+  template-path: templates/default
   heartbeat-rate: 10000
   heartbeat-timeout: 3600000
-  container-wait-time: 360000
-  container-log-path: ./logs  
+  container-wait-time: 60000
+  container-log-path: ./logs
   port: 8080
-  bind-address: 127.0.0.1 # Add this under the proxy entry  
-  authentication: none  # use openid auth framework
+  bind-address: 127.0.0.1
+  authentication: none   # MVP: apps handle their own auth
 
-  # Ruscker extension — visual customization of the public landing.
-  # The same knobs are exposed in the admin landing-page editor in
-  # Phase 2 (docs/mockups/admin-landing-editor.html).
+  # Ruscker extension — customize the public landing without a custom
+  # template. The same knobs are exposed in the admin landing editor.
   landing-customization:
     header-bg: "#0f6e56"
     header-fg: "#ffffff"
+    seo-title: "Ruscker Demo Portal"
+    seo-description: "Demo portal serving Shiny apps, an API and external links."
     intro-locales:
-      pt: "Portal oficial das aplicações, painéis, relatórios, apresentações e APIs do Monitoramento Estratégico do Governo de Pernambuco. Use os filtros abaixo para encontrar o que precisa."
-      en: "Official portal for applications, dashboards, reports, presentations and APIs of the Pernambuco State Government's Strategic Monitoring. Use the filters below to find what you need."
-      es: "Portal oficial de las aplicaciones, paneles, informes, presentaciones y APIs del Monitoreo Estratégico del Gobierno de Pernambuco. Use los filtros abajo para encontrar lo que necesita."
-      fr: "Portail officiel des applications, tableaux de bord, rapports, présentations et APIs de la Surveillance Stratégique du Gouvernement de Pernambouc. Utilisez les filtres ci-dessous pour trouver ce dont vous avez besoin."
+      pt: "Portal de demonstração do Ruscker. Use os filtros abaixo para encontrar apps, APIs e links."
+      en: "Ruscker demo portal. Use the filters below to find apps, APIs and links."
+      es: "Portal de demostración de Ruscker. Use los filtros para encontrar apps, APIs y enlaces."
+      fr: "Portail de démonstration de Ruscker. Utilisez les filtres pour trouver apps, APIs et liens."
 
   specs:
 
-    - id: auroraprime
-      display-name: Aurora Prime
-      description: Painel de monitoramento das iniciativas estratégicas do Governo de Pernambuco. Desenvolvimento e manutenção do aurora foi transferido para a <a href="https://resultados.seplag.pe.gov.br/" style="text-decoration:none;color:#1a1a1a;font-weight:500;letter-spacing:0.3px;transition:color 0.2s ease;" onmouseover="this.style.color='#0056b3'" onmouseout="this.style.color='#1a1a1a'"><span style="font-weight:600;">Secretaria Executiva de Gestão para Resultados – SEGPR</span></a>
-      container-image: milkway/auroraprime-app:latest
-      #minimum-seats-available: 1
+    # ── Shiny / interactive apps ─────────────────────────────────
+    - id: sales-dashboard
+      display-name: Sales Dashboard
+      description: A Shiny dashboard. Maintained by the <a href="https://example.com/team" style="color:#0f6e56;font-weight:600;">Data Team</a>.
+      container-image: org/sales-dashboard:latest
       seats-per-container: 10
       max-lifetime: 360
-      container-lifetime: 360        
+      container-lifetime: 360
       template-properties:
-        logo: "/assets/img/auroraprime.png"
+        logo: "/assets/img/sales.png"
         icon: lock
         type: app
         updated: "18/05/2025"
         state: active
-        tema: "Gestão"
-        link: https://resultados.seplag.pe.gov.br/app/aurora  
-          
-    - id: creches
-      display-name: Painel Creches
-      description: "Painel de monitoramento da iniciativa de construção de 250 creches."
-      container-image: milkway/creches-app:latest
-      docker-registry-username: milkway
+        tema: "Sales"
+
+    - id: ops-report
+      display-name: Operations Report
+      description: "Weekly operations report (private image — credentials via env var)."
+      container-image: registry.example.com/acme/ops-report:latest
+      docker-registry-username: acme
       docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
-      #minimum-seats-available: 1
+      docker-registry-domain: registry.example.com
       seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
       template-properties:
-        logo: "/assets/img/creches_painel.png"
-        icon: lock
-        type: app
-        updated: "01/12/2024"  
-        link: https://apps.sepe.pe.gov.br/cl/creches
-        state: active  
-        tema: "Políticas Públicas"
-
-          #    - id: epti
-          # display-name: EPTI
-          # description: "Painel para avalização da rede intermunicipal de transporte."
-          # container-image: milkway/epti-app:latest  
-          # seats-per-container: 5
-          # docker-registry-username: milkway
-          # docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-          #  docker-registry-domain: docker.io  
-          # template-properties:
-          #  logo: "/assets/img/epti_1.png"
-          #  icon: lock
-          #  type: app
-          #  updated: "03/12/2024"
-          #  state: active
-
-    - id: hortensias
-      display-name: Hortensias
-      description: "Aplicativo para monitoramento de contratos."
-      container-image: milkway/hortensias-app:latest
-      heartbeat-timeout: -1
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io  
-      template-properties:
-        logo: "/assets/img/hortensias_1.png"
-        icon: lock
-        type: app
-        updated: "29/01/2025"
-        state: active  
-        tema: "Gestão"
-
-    - id: mulungu
-      display-name: Mulungu
-      description: Mulungu é um aplicativo de monitoramento das obras do DER-PE. Desenvolvimento e manutenção do mulungu foi transferido para a <a href="https://resultados.seplag.pe.gov.br/" style="text-decoration:none;color:#1a1a1a;font-weight:500;letter-spacing:0.3px;transition:color 0.2s ease;" onmouseover="this.style.color='#0056b3'" onmouseout="this.style.color='#1a1a1a'"><span style="font-weight:600;">Secretaria Executiva de Gestão para Resultados – SEGPR</span></a>  #que permite acompanhar em tempo real o progresso, os custos e o status das intervenções de infraestrutura em Pernambuco. Inspirado em um verbo de raiz –ng–, que sugere “se corrigir” ou “se endireitar”, e também na tradição banto de designar “companheiro de viagem” ou “irmão de jornada”, 
-      container-image: milkway/mulungu-app:latest
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/mulungu.png"
-        icon: lock
-        type: app
-        updated: "18/05/2025"
-        state: active          
-        tema: "Infraestrutura e Mobilidade"
-        link: https://resultados.seplag.pe.gov.br/app/mulungu  
-
-    - id: nassau
-      display-name: Nassau
-      description: "Painel para administração de usuários e acessos aos aplicativos da Secretaria Executiva de Monitoramento Estratégico."
-      container-image: milkway/nassau-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
-      template-properties:
-        logo: "/assets/img/nassau_3.png"
-        icon: lock
-        type: app
-        updated: "29/01/2025"
-        state: active  
-        tema: "Gestão"
-
-    - id: peabiru
-      display-name: Peabiru
-      description: "Aplicativo que monitora, em tempo real, os alertas do Waze para as rodovias estaduais e federais de Pernambuco, oferecendo informações atualizadas sobre trânsito, incidentes e condições das vias."
-      container-image: milkway/peabiru-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
-      template-properties:
-        logo: "/assets/img/waze_rodovias.png"
+        logo: "/assets/img/ops.png"
         icon: lock_open
-        type: app
-        updated: "17/03/2025"
-        state: active  
-        tema: "Infraestrutura e Mobilidade"
-
-
-    - id: pikup
-      display-name: Pikup
-      description: "Aplicativo para construção de diagramas em SVG para apresentações e relatórios usando o pikchr, interpretador desenvolvido por D. Richard Hipp tendo como referência a linguagem PIC criada por Brian Kernighan."
-      container-image: milkway/pikup-app:latest
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      stop-on-logout: false
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io  
-      template-properties:
-        logo: "/assets/img/pikup_1.png"
-        icon: lock_open
-        type: app
-        updated: "19/02/2025"
-        state: active
-        tema: "Gestão"
-
-    # ======== PACKAGES ========
-    - id: bigdatape
-      display-name: "BigDataPE"
-      description: "Pacote com funções para acessar os dados no portal BigDataPE."
-      template-properties:
-        logo: "/assets/img/bigdatape.png"
-        icon: lock_open
-        type: package
-        updated: "14/12/2024"
-        link: https://monitoramento.sepe.pe.gov.br/bigdatape
-        state: active          
-        tema: "Gestão"
-
-    - id: diario
-      display-name: "diario"
-      description: "Pacote em R que fornece um conjunto de funções para armazenar tokens de API de maneira segura e interagir com a API do sistema diariodeobras.net."
-      template-properties:
-        logo: "/assets/img/diario.png"
-        icon: lock_open
-        type: package
-        updated: "30/12/2024"
-        link: https://monitoramento.sepe.pe.gov.br/diario
-        state: active
-        tema: "Gestão"
-    
-    - id: cardargus
-      display-name: "cardargus"
-      description: "Pacote R para criação de cards visuais em SVG e PNG, com tipografia moderna, layout responsivo e integração com knitr e R Markdown. Ideal para relatórios, dashboards e visualizações institucionais com identidade visual consistente."
-      template-properties:
-        logo: "/assets/img/cardargus.png"
-        icon: lock_open
-        type: package
-        updated: "03/02/2026"
-        link: https://monitoramento.sepe.pe.gov.br/cardargus
-        state: active
-        tema: "Gestão"
-
-    - id: evolution
-      display-name: "evolution"
-      description: "Pacote R para integrar com a API do Evolution Cloud, permitindo enviar e receber mensagens no WhatsApp e construir respostas automáticas em apps com plumber."
-      template-properties:
-        logo: "/assets/img/logo_evolution.png"
-        icon: lock_open
-        type: package
-        updated: "12/11/2025"
-        link: https://monitoramento.sepe.pe.gov.br/evolution
-        state: active
-        tema: "Gestão"
-
-    - id: ibger
-      display-name: "ibger"
-      description: "Interface moderna e intuitiva para a API SIDRA do IBGE, no estilo tidyverse com httr2 e cli. Permite baixar dados do IPCA e outras tabelas com filtros naturais por localização, item e período."
-      template-properties:
-        logo: "/assets/img/ibger_logo.png"
-        icon: lock_open
-        type: package
-        updated: "20/02/2026"
-        link: https://monitoramento.sepe.pe.gov.br/ibger
-        state: active       
-        tema: "Gestão"
-
-    - id: pikchr
-      display-name: Pikchr
-      description: "Pacote para construção de diagramas em linguagem PIC/Pikchr no R."
-      template-properties:
-        logo: "/assets/img/pikchr_1.png"
-        icon: lock_open
-        type: package
-        updated: "30/11/2024"
-        link: https://monitoramento.sepe.pe.gov.br/pikchr
-        state: active          
-        tema: "Gestão"
-
-    - id: pixr
-      display-name: "pixr"
-      description: "Pacote R para acesso à API de Dados Abertos do PIX do Banco Central do Brasil. Permite consultar estatísticas de chaves PIX, transações por município, volume de transações e dados de fraudes. Suporta filtros OData, retorna tibbles e integra-se ao tidyverse."
-      template-properties:
-        logo: "/assets/img/pixr.png"
-        icon: lock_open
-        type: package
-        updated: "03/02/2026"
-        link: https://monitoramento.sepe.pe.gov.br/pixr
-        state: active
-        tema: "Gestão"
-
-
-    - id: plug
-      display-name: "Plug"
-      description: "Pacote R que fornece uma interface simples e segura para integração com o Plug, permitindo o gerenciamento de credenciais, autenticação automática via tokens e execução de consultas SQL personalizadas."
-      template-properties:
-        logo: "/assets/img/plug.png"
-        icon: lock_open
-        type: package
-        updated: "26/12/2024"
-        link: https://monitoramento.sepe.pe.gov.br/plug
-        state: active      
-        tema: "Gestão"
-
-    - id: rapidfuzz
-      display-name: RapidFuzz
-      description: "Pacote para cálculo de similaridades e distâncias entre textos."
-      template-properties:
-        logo: "/assets/img/rapidfuzz_1.png"
-        icon: lock_open
-        type: package 
-        updated: "01/12/2023"  
-        link: https://monitoramento.sepe.pe.gov.br/rapidfuzz
-        state: active  
-        tema: "Gestão"
-
-    - id: signer
-      display-name: SigneR
-      description: "Pacote para assinatura digital de arquivos PDF no R."
-      template-properties:
-        logo: "/assets/img/signer.png"
-        icon: lock
-        type: package
-        updated: "01/09/2024"  
-        link: https://monitoramento.sepe.pe.gov.br/signer
-        state: active  
-        tema: "Gestão"
-
-    - id: vialactea
-      display-name: "Vialáctea"
-      description: "Pacote com conjunto de modelos e funções utilizadas pela Secretaria Executiva de Monitoramento Estratégico."
-      template-properties:
-        logo: "/assets/img/vialactea.png"
-        icon: lock
-        type: package
-        updated: "01/12/2024"  
-        link: https://monitoramento.sepe.pe.gov.br/vialactea
-        state: active  
-        tema: "Gestão"
-
-    - id: webdav
-      display-name: WebDAV
-      description: "Pacote para gerenciamento de arquivos em servidores do tipo OwnCloud (Drive PE)."
-      template-properties:
-        logo: "/assets/img/webdav_1.png"
-        icon: lock_open
-        type: package
-        updated: "30/11/2024"  
-        link: https://monitoramento.sepe.pe.gov.br/webdav
-        state: active
-        tema: "Gestão"
-
-    - id: whapi
-      display-name: whapi
-      description: "Pacote R para integrar com a API Whapi.Cloud, permitindo enviar e receber mensagens no WhatsApp e construir respostas automáticas em apps com plumber."
-      template-properties:
-        logo: "/assets/img/logo_whapi_2.png" 
-        icon: lock_open
-        type: package
-        updated: "11/09/2025"
-        link: https://monitoramento.sepe.pe.gov.br/whapi
-        state: active
-        tema: "Gestão"
-
-    # ======== TALKS ========
-    - id: contratos_sers_talk
-      display-name: Diagnóstico Contratos SERS
-      description: "Apresentação diagnóstico dos contratos SERS - Secretaria de Saúde"
-      container-image: milkway/tk_contratos_sers-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/contratos_sers.png"
-        icon: lock
-        type: talk
-        updated: "18/02/2025"
-        state: active  
-        tema: "Saúde Pública"
-
-    - id: hortensias_conseplan
-      display-name: Hortensias – CONSEPLAN
-      description: "Apresentação do projeto Hortensias no 1. Congresso CONSEPLAN, Brasília – DF, 2025."
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/hortensias_3.png"
-        icon: lock_open
-        type: talk
-        updated: "15/05/2025"
-        link: https://monitoramento.sepe.pe.gov.br/talks/hortensias/
-        state: active  
-        tema: "Gestão"
-
-    - id: maternidades_talk
-      display-name: Localização de Maternidades
-      description: "Apresentação do relatório de localização de maternidades para o Estado de Pernambuco."
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      container-image: milkway/tkmat-app:latest  
-      template-properties:
-        logo: "/assets/img/maternidades_1.png"
-        icon: lock
-        type: talk
-        updated: "01/11/2023"
-        state: active
-        tema: "Saúde Pública"
-
-    - id: produtividade_talk
-      display-name: Produtividade Médica
-      description: "Apresentação sobre novo modelo de gratificação por produtividade para médicos."
-      container-image: milkway/tkprod-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/grat.png"
-        icon: lock
-        type: talk
-        updated: "23/12/2024"
-        state: active      
-        tema: "Saúde Pública"
-
-    - id: redipe_talk
-      display-name: REDIPPE
-      description: "Apresentação sobre a REDIPPE (Rede Estadual de Dados de Investimentos Públicos de Pernambuco), uma plataforma que integra, padroniza e divulga informações sobre recursos aplicados pelo Estado, promovendo transparência, eficiência e controle social dos gastos públicos."
-      container-image: milkway/tkredippe-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/redippe.jpeg"
-        icon: lock
-        type: talk
-        updated: "18/03/2025"
-        state: active
-        tema: "Gestão"
-
-    - id: tarifa_talk
-      display-name: Tarifa Única
-      description: "Apresentação do relatório sobre Bilhete Único para a RMR."
-      container-image: milkway/tktarifa-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/tarifa.png"
-        icon: lock
-        type: talk
-        updated: "01/11/2023"
-        state: active      
-        tema: "Infraestrutura e Mobilidade"
-
-    # ======== REPORTS ========
-    - id: creches_report
-      display-name: "Creches"
-      description: "Relatório sobre a necessidade de creches nos municípios de Pernambuco."
-      container-image: milkway/rpcreches-app:latest  
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/creches_1.png"
-        icon: lock
         type: report
-        updated: "10/12/2023"
-        state: active        
-        tema: "Políticas Públicas"
-
-    - id: maternidades_report
-      display-name: "Localização de Maternidades"
-      description: "Relatório sobre o problema de localização de maternidades no Estado de Pernambuco."
-      container-image: milkway/rpmat-app:latest
-      stop-on-logout: false
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      template-properties:
-        logo: "/assets/img/maternidades_2.png"
-        icon: lock
-        type: report
-        updated: "01/11/2023"
         state: active
-        tema: "Saúde Pública"
+        tema: "Operations"
 
-    # ======== INACTIVES ========
-
-    - id: amparo
-      display-name: Amparo
-      description: "Painel para monitoramento das obras do DER-PE."
-      container-image: milkway/amparo-app:latest
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
+    - id: survey
+      display-name: Survey App
+      description: "A respondent survey."
+      container-image: org/survey:latest
+      seats-per-container: 5
       template-properties:
-        logo: "/assets/img/der2_1.png"
-        icon: lock
         type: app
-        updated: "27/01/2025"
+        state: active
+        tema: "Research"
+
+    - id: longrun-model
+      display-name: Long-running Model
+      description: "A session that should never be reaped while open."
+      container-image: org/longrun-model:latest
+      heartbeat-timeout: -1            # never expire
+      container-memory-limit: 512m
+      container-cpu-limit: 1.0
+      template-properties:
+        type: app
+        state: active
+        tema: "Research"
+
+    - id: legacy-viewer
+      display-name: Legacy Viewer
+      description: "Kept around but hidden from the landing."
+      container-image: org/legacy-viewer:latest
+      template-properties:
+        type: app
         state: inactive
-        tema: "Infraestrutura e Mobilidade"
 
-    - id: aurora
-      display-name: Aurora
-      description: "Painel de monitoramento das iniciativas estratégicas do Governo de Pernambuco."
-      container-image: milkway/aurora-app:latest
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
+    # ── Stateless API (Plumber / FastAPI) ────────────────────────
+    - id: data-api
+      display-name: Data API
+      description: "A Plumber API with proxy-side rate limiting + CORS."
+      container-image: org/data-api:latest
+      type: api
+      api:
+        port: 8000
+        docs-path: /__docs__
+        health-path: /__healthz__
+        rate-limit: 100/min
+        cors: true
+      min-replicas: 1
+      max-replicas: 3
       template-properties:
-        logo: "/assets/img/aurora_1.png"
-        icon: lock
-        type: app
-        updated: "01/04/2025"
-        state: inactive   
-        tema: "Gestão"
-      
-    - id: epti
-      display-name: EPTI
-      description: "Painel para avalização da rede intermunicipal de transporte."
-      container-image: milkway/epti-app:latest
-      #minimum-seats-available: 1
-      seats-per-container: 10
-      max-lifetime: 360
-      container-lifetime: 360  
-      docker-registry-username: milkway
-      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
-      docker-registry-domain: docker.io
+        type: api
+        state: active
+        tema: "Data"
+
+    # ── External links (no container) ────────────────────────────
+    - id: handbook
+      display-name: Handbook
+      description: "Team handbook (external site)."
       template-properties:
-        logo: "/assets/img/epti_1.png"
-        icon: lock
-        type: app
-        updated: "03/12/2024"
-        state: inactive
-        tema: "Infraestrutura e Mobilidade"
+        type: package
+        icon: lock_open
+        state: active
+        link: https://example.com/handbook
 
-
-logging:
-  file:
-    name: logs/shinyproxy.log
+    - id: status-page
+      display-name: Status Page
+      description: "Service status (external)."
+      template-properties:
+        type: talk
+        state: active
+        link: https://status.example.com

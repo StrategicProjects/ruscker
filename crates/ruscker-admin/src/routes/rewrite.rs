@@ -22,10 +22,10 @@
 //! <img src="/img/spinner.gif">
 //! ```
 //!
-//! All three are root-relative; behind `/app/auroraprime/` the
+//! All three are root-relative; behind `/app/sales-dashboard/` the
 //! browser dispatches them as `/sockjs/info` etc. and hits
 //! Ruscker, which has no route for those paths. With this
-//! pass they become `/app/auroraprime/sockjs/info` and route
+//! pass they become `/app/sales-dashboard/sockjs/info` and route
 //! back through the same proxy handler that served the page.
 //!
 //! ## Runtime URL interception (JS shim)
@@ -137,7 +137,7 @@ fn rewrite_url(value: &str, base_path: &str) -> Option<String> {
 ///
 /// `base_path` should be the user-visible URL prefix the app
 /// is mounted at, **with a trailing slash** — e.g.
-/// `/app/auroraprime/`.
+/// `/app/sales-dashboard/`.
 ///
 /// Name kept as `inject_base_href` for source-compat with the
 /// proxy handler that calls this; the function now does both
@@ -390,8 +390,8 @@ mod tests {
             Some("/app/x/lib/foo.css")
         );
         assert_eq!(
-            rewrite_url("/sockjs/info", "/app/auroraprime/").as_deref(),
-            Some("/app/auroraprime/sockjs/info")
+            rewrite_url("/sockjs/info", "/app/sales-dashboard/").as_deref(),
+            Some("/app/sales-dashboard/sockjs/info")
         );
     }
 

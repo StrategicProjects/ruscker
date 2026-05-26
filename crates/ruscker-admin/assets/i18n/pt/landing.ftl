@@ -1,7 +1,7 @@
 ### Landing page — pt-BR
 ### Português brasileiro. Idioma de referência (fallback dos demais).
 
-landing-title = Monitoramento Estratégico
+landing-title = Ruscker
 landing-subtitle = Portal de aplicações e APIs
 
 filter-search-placeholder = Buscar aplicação…
@@ -253,7 +253,7 @@ admin-audit-family-credential = Credenciais
 admin-audit-family-landing = Portal
 admin-audit-actor = Autor
 admin-audit-actor-all = Todos os autores
-admin-audit-target-placeholder = Buscar por alvo (ex: spec:auroraprime)
+admin-audit-target-placeholder = Buscar por alvo (ex: spec:sales-dashboard)
 admin-audit-apply = Aplicar
 admin-audit-empty = Nenhuma alteração ainda — ou o filtro não bate em nada.
 admin-audit-limit-hint = Mostrando os 100 mais recentes que batem com o filtro. Ajuste os filtros para refinar.

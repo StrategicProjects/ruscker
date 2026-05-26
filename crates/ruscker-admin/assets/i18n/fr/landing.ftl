@@ -1,6 +1,6 @@
 ### Landing page — fr-FR
 
-landing-title = Surveillance Stratégique
+landing-title = Ruscker
 landing-subtitle = Portail d'applications et d'APIs
 
 filter-search-placeholder = Rechercher une application…
@@ -249,7 +249,7 @@ admin-audit-family-credential = Identifiants
 admin-audit-family-landing = Portail
 admin-audit-actor = Auteur
 admin-audit-actor-all = Tous les auteurs
-admin-audit-target-placeholder = Rechercher une cible (ex : spec:auroraprime)
+admin-audit-target-placeholder = Rechercher une cible (ex : spec:sales-dashboard)
 admin-audit-apply = Appliquer
 admin-audit-empty = Aucun changement — ou le filtre ne correspond à rien.
 admin-audit-limit-hint = Affichage des 100 plus récents. Affinez le filtre pour réduire.

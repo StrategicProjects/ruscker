@@ -241,8 +241,8 @@ pub struct LandingCustomization {
     /// ```yaml
     /// landing-customization:
     ///   intro-locales:
-    ///     pt: "Bem-vindo ao Monitoramento Estratégico..."
-    ///     en: "Welcome to Strategic Monitoring..."
+    ///     pt: "Bem-vindo ao portal..."
+    ///     en: "Welcome to the portal..."
     /// ```
     #[serde(default, rename = "intro-locales")]
     pub intro_locales: std::collections::HashMap<String, String>,

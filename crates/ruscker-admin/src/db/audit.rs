@@ -22,7 +22,7 @@ pub struct AuditEntry {
     pub actor: Option<String>,
     /// e.g. `spec.update`, `image.upload`, `credential.delete`.
     pub action: String,
-    /// e.g. `spec:auroraprime`, `image:abc-123`. `None` for
+    /// e.g. `spec:sales-dashboard`, `image:abc-123`. `None` for
     /// global events (system imports).
     pub target: Option<String>,
     /// Parsed `diff_json`. `None` when the column was NULL or
@@ -191,16 +191,16 @@ mod tests {
     #[tokio::test]
     async fn target_substring_filter() {
         let pool = open_memory().await.unwrap();
-        seed(&pool, "spec.update", Some("spec:auroraprime"), None).await;
-        seed(&pool, "spec.update", Some("spec:creches"), None).await;
+        seed(&pool, "spec.update", Some("spec:sales-dashboard"), None).await;
+        seed(&pool, "spec.update", Some("spec:ops-report"), None).await;
 
         let f = AuditFilter {
-            target_contains: Some("aurora".into()),
+            target_contains: Some("sales".into()),
             ..AuditFilter::new()
         };
         let v = list(&pool, &f).await.unwrap();
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].target.as_deref(), Some("spec:auroraprime"));
+        assert_eq!(v[0].target.as_deref(), Some("spec:sales-dashboard"));
     }
 
     #[tokio::test]

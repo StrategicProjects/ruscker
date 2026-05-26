@@ -338,19 +338,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn imports_31_specs_then_roundtrip_is_unchanged() {
+    async fn imports_all_specs_then_roundtrip_is_unchanged() {
         let pool = open_memory().await.unwrap();
         let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
+        let n = cfg.proxy.specs.len();
 
         let r1 = import_all(&pool, &cfg).await.unwrap();
-        assert_eq!(r1.created, 31, "first import inserts all");
+        assert_eq!(r1.created, n, "first import inserts all");
         assert_eq!(r1.updated, 0);
         assert_eq!(r1.unchanged, 0);
 
         let r2 = import_all(&pool, &cfg).await.unwrap();
         assert_eq!(r2.created, 0, "second import sees them as existing");
         assert_eq!(r2.updated, 0, "no changes → no version bumps");
-        assert_eq!(r2.unchanged, 31);
+        assert_eq!(r2.unchanged, n);
 
         // Audit log got both import events.
         let audit_count: (i64,) = sqlx::query_as(
@@ -372,7 +373,7 @@ mod tests {
         cfg.proxy.specs[0].description = Some("Updated description".to_string());
         let r = import_all(&pool, &cfg).await.unwrap();
         assert_eq!(r.updated, 1);
-        assert_eq!(r.unchanged, 30);
+        assert_eq!(r.unchanged, cfg.proxy.specs.len() - 1);
 
         let (version,): (i64,) = sqlx::query_as("SELECT version FROM specs WHERE id = ?")
             .bind(&cfg.proxy.specs[0].id)

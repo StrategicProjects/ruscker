@@ -59,18 +59,24 @@ async fn landing_renders_default_locale() {
     let (status, body) = get_with_cookie(None).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains(r#"<html lang="pt""#), "default locale is pt-BR");
-    assert!(body.contains("Monitoramento Estratégico"));
-    // 31 specs in examples/application.yml → 31 cards rendered.
+    // seo-title from the example landing-customization drives <title>.
+    assert!(body.contains("Ruscker Demo Portal"));
+    // Per-locale intro (pt) from landing-customization.intro-locales.
+    assert!(body.contains("demonstração"), "pt intro should render");
+    // 8 specs in examples/application.yml → 8 cards rendered.
     // Cards are <a class="rcard"> in the v2 layout.
-    assert_eq!(body.matches(r#"class="rcard"#).count(), 31);
+    assert_eq!(body.matches(r#"class="rcard"#).count(), 8);
 }
 
 #[tokio::test]
 async fn landing_honors_locale_cookie() {
-    for (cookie, lang, title) in [
-        ("ruscker_locale=en", "en", "Strategic Monitoring"),
-        ("ruscker_locale=es", "es", "Monitoreo Estratégico"),
-        ("ruscker_locale=fr", "fr", "Surveillance Stratégique"),
+    // Distinctive substrings from the per-locale intro in the example's
+    // landing-customization.intro-locales — proves the locale cookie
+    // drives the rendered copy.
+    for (cookie, lang, intro) in [
+        ("ruscker_locale=en", "en", "filters below"),
+        ("ruscker_locale=es", "es", "demostración"),
+        ("ruscker_locale=fr", "fr", "démonstration"),
     ] {
         let (status, body) = get_with_cookie(Some(cookie)).await;
         assert_eq!(status, StatusCode::OK, "locale {lang}");
@@ -79,8 +85,8 @@ async fn landing_honors_locale_cookie() {
             "{lang}: html lang attribute missing"
         );
         assert!(
-            body.contains(title),
-            "{lang}: title {title:?} not in body"
+            body.contains(intro),
+            "{lang}: intro {intro:?} not in body"
         );
     }
 }

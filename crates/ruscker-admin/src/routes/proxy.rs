@@ -391,26 +391,42 @@ fn forward_headers_trusted(server: &ruscker_config::Server) -> bool {
 
 /// Derive the per-client key used for rate limiting.
 ///
-/// Prefers the left-most `X-Forwarded-For` address *when the
-/// operator trusts forwarded headers* (the realistic deployment:
-/// Ruscker behind a reverse proxy). Otherwise falls back to the TCP
-/// peer IP, and finally to `"unknown"` when neither is available
-/// (e.g. `Router::oneshot` in tests).
+/// Derives the per-client key for rate limiting.
+///
+/// When the operator trusts forwarded headers (Ruscker behind a reverse
+/// proxy), this takes the **right-most** `X-Forwarded-For` entry — the
+/// address our own trusted proxy appended (nginx
+/// `proxy_add_x_forwarded_for`). The *left-most* entry is whatever the
+/// client sent and is trivially spoofable, so keying on it would let a
+/// caller dodge the limit by rotating an injected value. The chosen
+/// entry must parse as an IP; otherwise we fall back to the TCP peer,
+/// and finally to `"unknown"` (e.g. `Router::oneshot` in tests).
+///
+/// This assumes a single trusted proxy in front (the documented
+/// deployment). With a chain of N proxies the real client is N-from-the-
+/// right; a configurable trusted-hop count is a future refinement.
 fn client_key(state: &AppState, headers: &HeaderMap, peer: Option<&SocketAddr>) -> String {
     if forward_headers_trusted(&state.config.server) {
-        if let Some(first) = headers
+        if let Some(ip) = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.split(',').next())
+            .and_then(rightmost_forwarded_ip)
         {
-            let ip = first.trim();
-            if !ip.is_empty() {
-                return ip.to_string();
-            }
+            return ip.to_string();
         }
     }
     peer.map(|a| a.ip().to_string())
         .unwrap_or_else(|| "unknown".to_string())
+}
+
+/// The right-most parseable IP in an `X-Forwarded-For` value — the hop
+/// our trusted proxy appended. Returns `None` if no entry parses as an
+/// IP (so the caller falls back to the TCP peer).
+fn rightmost_forwarded_ip(xff: &str) -> Option<std::net::IpAddr> {
+    xff.rsplit(',')
+        .map(str::trim)
+        .find(|p| !p.is_empty())
+        .and_then(|p| p.parse().ok())
 }
 
 /// Permissive CORS headers for API responses. Origin is `*` (no
@@ -945,6 +961,28 @@ mod tests {
             rep(ReplicaState::Draining, 0, 5),
         ];
         assert!(pick_replica(&reps, RoutingStrategy::RoundRobin).is_none());
+    }
+
+    // #80: the rate-limit client key must come from the right-most XFF
+    // entry (the one a trusted proxy appended), not the spoofable left.
+    #[test]
+    fn rightmost_forwarded_ip_ignores_spoofed_left() {
+        assert_eq!(
+            rightmost_forwarded_ip("9.9.9.9, 203.0.113.7"),
+            Some("203.0.113.7".parse().unwrap())
+        );
+        // A client-injected left-most value is ignored.
+        assert_eq!(
+            rightmost_forwarded_ip("evil-spoof, 203.0.113.7"),
+            Some("203.0.113.7".parse().unwrap())
+        );
+        assert_eq!(
+            rightmost_forwarded_ip("  10.0.0.1  "),
+            Some("10.0.0.1".parse().unwrap())
+        );
+        // Right-most doesn't parse as an IP → None (caller uses peer).
+        assert_eq!(rightmost_forwarded_ip("203.0.113.7, junk"), None);
+        assert_eq!(rightmost_forwarded_ip(""), None);
     }
 
     // -------------------------------------------------------------

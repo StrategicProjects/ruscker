@@ -44,6 +44,10 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub locales: Arc<i18n::Locales>,
     pub admin_auth: auth::AdminAuth,
+    /// Opaque server-side admin session store. The cookie holds a
+    /// random session id (not the token); shared so every cloned
+    /// `AppState` sees the same live sessions.
+    pub admin_sessions: Arc<auth::AdminSessions>,
     /// Global rate limiter for `/admin/login` — bounds brute
     /// force against the admin token. Shared (Arc) so every
     /// cloned `AppState` sees the same window.
@@ -139,6 +143,7 @@ impl AdminServer {
             config: Arc::new(config),
             locales: Arc::new(locales),
             admin_auth: auth::AdminAuth::from_env(),
+            admin_sessions: Arc::new(auth::AdminSessions::default_policy()),
             login_limiter: Arc::new(auth::LoginRateLimiter::default_policy()),
             api_limiter: Arc::new(ratelimit::ApiRateLimiter::new()),
             db: None,

@@ -27,6 +27,7 @@ fn base_state() -> AppState {
         config: Arc::new(config),
         locales: Arc::new(locales),
         admin_auth: Default::default(),
+        admin_sessions: Default::default(),
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
         db: None,

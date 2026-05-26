@@ -20,8 +20,10 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Redirect, Response};
+use dashmap::DashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tower_cookies::Cookies;
 
 /// Cookie name. Distinct prefix `ruscker_admin_` keeps it from
@@ -66,6 +68,68 @@ impl AdminAuth {
             return false;
         };
         ct_eq(expected.as_bytes(), candidate.as_bytes())
+    }
+}
+
+/// Server-side store of opaque admin session ids → expiry.
+///
+/// The cookie holds a random session id, **not** the admin token. That
+/// way a stolen cookie can be revoked (logout, or a server restart) and
+/// never exposes the master token, and logout actually invalidates the
+/// session instead of just clearing the browser's copy.
+#[derive(Debug)]
+pub struct AdminSessions {
+    sessions: DashMap<String, Instant>,
+    ttl: Duration,
+}
+
+impl AdminSessions {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            sessions: DashMap::new(),
+            ttl,
+        }
+    }
+
+    /// 24h default lifetime — matches the cookie's `Max-Age`.
+    pub fn default_policy() -> Self {
+        Self::new(Duration::from_secs(24 * 60 * 60))
+    }
+
+    /// Mint a new session and return its opaque id (244 bits of random,
+    /// unguessable). Caller stores the id in the cookie.
+    pub fn create(&self) -> String {
+        let id = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
+        self.sessions.insert(id.clone(), Instant::now() + self.ttl);
+        id
+    }
+
+    /// Whether `id` names a live (non-expired) session. Expired entries
+    /// are pruned lazily on lookup.
+    pub fn validate(&self, id: &str) -> bool {
+        match self.sessions.get(id).map(|e| *e.value()) {
+            Some(expiry) if expiry > Instant::now() => true,
+            Some(_) => {
+                self.sessions.remove(id);
+                false
+            }
+            None => false,
+        }
+    }
+
+    /// Invalidate a session (logout).
+    pub fn remove(&self, id: &str) {
+        self.sessions.remove(id);
+    }
+}
+
+impl Default for AdminSessions {
+    fn default() -> Self {
+        Self::default_policy()
     }
 }
 
@@ -203,7 +267,9 @@ impl FromRequestParts<crate::AppState> for AdminSession {
         };
         let candidate = cookies.get(COOKIE_NAME).map(|c| c.value().to_string());
         match candidate {
-            Some(c) if state.admin_auth.matches(&c) => Ok(AdminSession),
+            // The cookie carries an opaque session id, validated against
+            // the server-side store — not the token itself.
+            Some(c) if state.admin_sessions.validate(&c) => Ok(AdminSession),
             _ => Err(Redirect::to("/admin/login").into_response()),
         }
     }
@@ -233,6 +299,36 @@ mod tests {
     use super::*;
     use axum::http::HeaderMap;
     use std::time::Duration;
+
+    #[test]
+    fn admin_sessions_create_validate_remove() {
+        let s = AdminSessions::default_policy();
+        let id = s.create();
+        assert!(s.validate(&id), "freshly created session is valid");
+        assert!(!s.validate("not-a-real-id"), "unknown id is invalid");
+        s.remove(&id);
+        assert!(!s.validate(&id), "removed (logged-out) session is invalid");
+    }
+
+    #[test]
+    fn admin_sessions_expire() {
+        let s = AdminSessions::new(Duration::from_millis(0));
+        let id = s.create();
+        std::thread::sleep(Duration::from_millis(2));
+        assert!(!s.validate(&id), "expired session is invalid");
+    }
+
+    #[test]
+    fn admin_session_ids_are_distinct_and_not_the_token() {
+        let s = AdminSessions::default_policy();
+        let a = s.create();
+        let b = s.create();
+        assert_ne!(a, b, "each session gets a fresh id");
+        assert!(
+            a.len() >= 32,
+            "id is high-entropy, not a short/guessable value"
+        );
+    }
 
     #[test]
     fn ct_eq_basics() {

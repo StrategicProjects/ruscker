@@ -430,6 +430,14 @@ pub struct Spec {
     #[serde(rename = "max-body-size")]
     pub max_body_size: Option<String>,
 
+    /// Bind-mount volumes for the container, in Docker syntax —
+    /// `"/host:/container"` or `"/host:/container:ro"`. ShinyProxy-
+    /// compatible (`volumes:` is a list of such strings). The local
+    /// Docker backend maps these to `HostConfig.binds`. Bind-mounting
+    /// host paths is powerful and admin-only — see SECURITY.md.
+    #[serde(default)]
+    pub volumes: Option<Vec<String>>,
+
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
     #[serde(rename = "template-properties", default)]
@@ -1030,6 +1038,7 @@ proxy:
             container_memory_limit: None,
             container_memory_request: None,
             max_body_size: None,
+            volumes: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -1067,6 +1076,7 @@ proxy:
             container_memory_limit: None,
             container_memory_request: None,
             max_body_size: None,
+            volumes: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -1104,6 +1114,7 @@ proxy:
             container_memory_limit: None,
             container_memory_request: None,
             max_body_size: None,
+            volumes: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,

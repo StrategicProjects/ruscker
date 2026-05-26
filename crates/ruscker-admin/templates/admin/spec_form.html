@@ -449,6 +449,19 @@
             </div>
           </div>
 
+          {# Volumes — one bind per line, as many as needed #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-volumes-section") }}</div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-volumes" class="spec-form-label">{{ self.t("spec-form-volumes") }}</label>
+              {% call help(self.t("spec-help-volumes")) %}{% endcall %}
+            </div>
+            <textarea id="f-volumes" name="volumes" rows="3"
+                      placeholder="/srv/myapp/data:/data&#10;/srv/myapp/www:/www:ro"
+                      class="spec-form-input spec-form-input--mono">{{ form.volumes }}</textarea>
+            <div class="spec-form-help">{{ self.t("spec-form-volumes-help") }}</div>
+          </div>
+
           {# Lifecycle #}
           <div class="spec-form-subsection">{{ self.t("spec-form-lifecycle-section") }}</div>
           <div class="spec-form-field">

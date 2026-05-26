@@ -642,7 +642,9 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         with_limits = !limits.is_empty(),
         "spawning first replica"
     );
-    let mut req = ruscker_core::SpawnRequest::new(&spec.id, image).with_limits(limits);
+    let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
+        .with_limits(limits)
+        .with_volumes(spec.volumes.clone().unwrap_or_default());
     if let Some(port) = inner_port {
         req = req.with_port(port);
     }

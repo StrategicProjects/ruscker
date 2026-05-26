@@ -373,3 +373,8 @@ spec-help-memory-limit = Memoria máxima, p. ej. 512m o 1.5g. Vacío = ilimitado
 spec-help-heartbeat = Tiempo de sesión inactiva en milisegundos; -1 nunca expira. Vacío = usa el valor global.
 admin-blocks-slot-empty = Aún no hay bloques en este slot.
 admin-blocks-drag-hint = Arrastra desde el asa para reordenar los bloques dentro del slot.
+spec-form-volumes-section = Volúmenes
+spec-form-volumes = Montajes de volumen
+spec-form-volumes-help = Un bind por línea — /host:/contenedor (usa :ro para solo lectura). Añade tantos como necesites.
+spec-help-volumes = Monta directorios del host en el contenedor (p. ej. datos persistentes, o estáticos que sirve la app). Solo admin; montar rutas del host equivale a root.
+spec-form-error-volume = Cada volumen debe ser /host:/contenedor (opcional :ro).

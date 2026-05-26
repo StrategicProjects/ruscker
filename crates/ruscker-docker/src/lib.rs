@@ -166,6 +166,9 @@ impl LocalDockerBackend {
 
         let mut host_config = HostConfig {
             port_bindings: Some(port_bindings),
+            // Bind-mount volumes, in Docker's "/host:/container[:ro]"
+            // syntax — passed straight through. Empty → no binds.
+            binds: (!req.volumes.is_empty()).then(|| req.volumes.clone()),
             ..Default::default()
         };
         // Apply resource limits if the spec set any. Empty limits

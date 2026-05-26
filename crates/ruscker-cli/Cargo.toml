@@ -57,3 +57,12 @@ serde_yaml_ng = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[features]
+# Live end-to-end test against a real container (needs Docker + network).
+# Off by default; run with `cargo test -p ruscker-cli --features e2e`.
+e2e = []
+
+[dev-dependencies]
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }

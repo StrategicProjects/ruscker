@@ -187,7 +187,7 @@ impl SpecForm {
         // visual, so keep whatever run-kind override `base` carried.
         let kind_override = match dt {
             DisplayType::App => Some(SpecKindOverride::Shiny),
-            DisplayType::Talk | DisplayType::Report => base.and_then(|b| b.kind_override.clone()),
+            DisplayType::Talk | DisplayType::Report => base.and_then(|b| b.kind_override),
             DisplayType::Package | DisplayType::Link => Some(SpecKindOverride::External),
             DisplayType::Api => Some(SpecKindOverride::Api),
         };
@@ -275,7 +275,7 @@ impl SpecForm {
             scale_down_threshold: base.and_then(|b| b.scale_down_threshold),
             scale_down_grace: base.and_then(|b| b.scale_down_grace),
             drain_timeout: base.and_then(|b| b.drain_timeout),
-            routing_strategy: base.and_then(|b| b.routing_strategy.clone()),
+            routing_strategy: base.and_then(|b| b.routing_strategy),
         })
     }
 
@@ -631,7 +631,7 @@ async fn render_form_with_errors(
         mode,
         form,
         errors,
-        logo_images: logo_filenames(&state).await,
+        logo_images: logo_filenames(state).await,
     };
     let body = match page.render() {
         Ok(s) => s,

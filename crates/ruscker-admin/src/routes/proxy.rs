@@ -825,7 +825,7 @@ async fn do_forward(
     let upstream_resp = client.request(req).await?;
 
     let (parts, body) = upstream_resp.into_parts();
-    let body = Body::new(body.map_err(|e| std::io::Error::other(e)));
+    let body = Body::new(body.map_err(std::io::Error::other));
     let mut resp = Response::from_parts(parts, body);
     strip_hop_headers(resp.headers_mut());
     Ok(resp)

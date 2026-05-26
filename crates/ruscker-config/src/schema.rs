@@ -311,21 +311,16 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum AuthScheme {
+    #[default]
     None,
     #[serde(rename = "openid")]
     OpenId,
     Ldap,
     Saml,
     Simple,
-}
-
-impl Default for AuthScheme {
-    fn default() -> Self {
-        AuthScheme::None
-    }
 }
 
 /// A single spec — an app, API, or external link surfaced on the landing

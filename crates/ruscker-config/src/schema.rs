@@ -655,6 +655,14 @@ impl Spec {
 /// We deliberately use binary (1024-based) units to match the
 /// ShinyProxy / Docker convention. Operators who type `512m`
 /// expect ~512 MiB, not ~512 MB.
+/// Whether `s` parses as a Docker-style memory size (`"512m"`, `"1.5g"`,
+/// plain bytes). Public so the admin form can validate the field with
+/// the same rules the runtime uses, instead of silently accepting a
+/// typo like `512mb`.
+pub fn is_valid_memory_size(s: &str) -> bool {
+    parse_memory_string(s).is_some()
+}
+
 fn parse_memory_string(s: &str) -> Option<i64> {
     let s = s.trim();
     if s.is_empty() {

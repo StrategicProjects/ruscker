@@ -642,6 +642,58 @@ body {
 }
 textarea.spec-form-input { resize: vertical; min-height: 64px; }
 
+/* Inline field help — a small "?" that toggles a popover with a
+   plain-language explanation of the parameter. Used on every field. */
+.spec-form-label-row {
+  display: flex; align-items: center; gap: 5px; margin-bottom: 4px;
+}
+.spec-form-label-row .spec-form-label { margin-bottom: 0; }
+.field-help { position: relative; display: inline-flex; line-height: 1; }
+.field-help-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 15px; height: 15px; padding: 0;
+  border: 0.5px solid var(--border); border-radius: 50%;
+  background: var(--surface-soft); color: var(--text-faint);
+  font-size: 10px; font-weight: 600; cursor: help;
+}
+.field-help-btn:hover {
+  color: var(--color-teal-600); border-color: var(--color-teal-600);
+}
+.field-help-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 40;
+  width: 250px; max-width: 72vw;
+  background: var(--surface); color: var(--text);
+  border: 0.5px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  padding: 9px 11px;
+  font-size: 11.5px; font-weight: 400; line-height: 1.5;
+  text-transform: none; letter-spacing: normal;
+}
+
+/* Advanced (collapsible) section: API, scaling, resources, lifecycle. */
+.spec-form-advanced {
+  margin-top: 18px; padding-top: 4px;
+  border-top: 0.5px solid var(--border);
+}
+.spec-form-advanced-toggle {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; padding: 8px 0;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-muted);
+  font-size: 11px; font-weight: 500;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.spec-form-advanced-toggle .chevron { transition: transform 0.15s ease; }
+.spec-form-advanced-toggle.is-open .chevron { transform: rotate(90deg); }
+.spec-form-subsection {
+  font-size: 11px; font-weight: 500; color: var(--text-faint);
+  margin: 14px 0 8px;
+}
+.spec-form-check {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--text);
+}
+
 /* Type picker — 6 cards, equal columns */
 .kind-picker {
   display: grid;

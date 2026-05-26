@@ -323,3 +323,47 @@ admin-grad-remove-stop = Quitar color
 spec-form-cover = Cover de la tarjeta
 spec-form-cover-auto = Auto (color del tipo)
 spec-form-cover-auto-help = Usa el tono por defecto del tipo. Elija Sólido o Degradado para personalizar.
+
+# ── Formulario de spec: sección avanzada + ayuda por campo (#2) ────
+spec-form-advanced = Avanzado
+spec-form-advanced-hint = Todo opcional — déjalo vacío para mantener el valor por defecto.
+spec-form-api-section = API
+spec-form-scaling-section = Escalado
+spec-form-resources-section = Recursos
+spec-form-lifecycle-section = Ciclo de vida
+spec-form-api-port = Puerto del contenedor
+spec-form-api-rate-limit = Límite de tasa
+spec-form-api-docs-path = Ruta de docs
+spec-form-api-health-path = Ruta de health
+spec-form-api-cors = Habilitar CORS permisivo
+spec-form-min-replicas = Réplicas mín.
+spec-form-max-replicas = Réplicas máx.
+spec-form-concurrent = Solicitudes por réplica
+spec-form-cpu-limit = Límite de CPU
+spec-form-memory-limit = Límite de memoria
+spec-form-heartbeat = Tiempo de heartbeat (ms)
+spec-help-kind = Qué tipo de elemento es. Define el enrutamiento, la insignia de la tarjeta y si se inicia un contenedor.
+spec-help-id = Identificador estable usado en la URL (/app/<id>). Minúsculas, dígitos, "-" y "_"; no se puede cambiar tras crearlo.
+spec-help-name = El título mostrado en la tarjeta.
+spec-help-desc = Descripción breve en la tarjeta. Se permite HTML en línea (p. ej. un enlace).
+spec-help-logo = Imagen de la tarjeta — una ruta en /assets/img/ o una URL externa. Vacío usa un tono generado.
+spec-help-cover = Fondo de la tarjeta: tono automático por tipo, color sólido o degradado.
+spec-help-access = Muestra un candado (restringido) o abierto (público). Solo visual — el MVP no aplica autenticación.
+spec-help-state = Las tarjetas activas se muestran; las inactivas se ocultan.
+spec-help-subject = Tema/área usada por el filtro Asunto de la portada (p. ej. "Ventas", "Investigación").
+spec-help-image = Imagen Docker a ejecutar, como repositorio:tag (p. ej. org/app:latest).
+spec-help-seats = Cuántas sesiones simultáneas atiende un contenedor antes de crear otro.
+spec-help-lifetime = Límite rígido, en minutos, de cuánto puede ejecutarse un contenedor antes de reciclarse.
+spec-help-link = URL de destino para tarjetas de enlace externo — al hacer clic se navega aquí.
+spec-help-updated = Fecha mostrada en la tarjeta (DD/MM/AAAA). Vacío estampa la fecha de hoy.
+spec-help-api-port = Puerto en el que la API escucha dentro del contenedor. Por defecto 8080.
+spec-help-api-rate-limit = Límite por cliente en el proxy, como N/unidad (p. ej. 100/min, 5/s). Por encima devuelve 429. Vacío = sin límite.
+spec-help-api-docs-path = Ruta donde la API sirve la documentación OpenAPI/Swagger. Por defecto /__docs__.
+spec-help-api-health-path = Ruta consultada para readiness antes de que la réplica entre al pool. Por defecto /__healthz__.
+spec-help-api-cors = Añade cabeceras CORS permisivas y responde al preflight. Desactivado por defecto.
+spec-help-min-replicas = Contenedores siempre activos — el pool nunca baja de aquí. Por defecto 0.
+spec-help-max-replicas = Tope hasta donde el auto-escalado puede crecer. Vacío = ilimitado.
+spec-help-concurrent = Solicitudes que atiende una réplica de API antes de que el escalado añada otra.
+spec-help-cpu-limit = CPU máxima en núcleos fraccionarios (p. ej. 0,5 = medio núcleo). Vacío = ilimitado.
+spec-help-memory-limit = Memoria máxima, p. ej. 512m o 1.5g. Vacío = ilimitado.
+spec-help-heartbeat = Tiempo de sesión inactiva en milisegundos; -1 nunca expira. Vacío = usa el valor global.

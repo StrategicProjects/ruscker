@@ -323,3 +323,47 @@ admin-grad-remove-stop = Remove stop
 spec-form-cover = Card cover
 spec-form-cover-auto = Auto (type tint)
 spec-form-cover-auto-help = Uses the card type default tint. Pick Solid or Gradient to customize.
+
+# ── Spec form: advanced section + per-field help (#2) ──────────────
+spec-form-advanced = Advanced
+spec-form-advanced-hint = All optional — leave blank to keep the default.
+spec-form-api-section = API
+spec-form-scaling-section = Scaling
+spec-form-resources-section = Resources
+spec-form-lifecycle-section = Lifecycle
+spec-form-api-port = Container port
+spec-form-api-rate-limit = Rate limit
+spec-form-api-docs-path = Docs path
+spec-form-api-health-path = Health path
+spec-form-api-cors = Enable permissive CORS
+spec-form-min-replicas = Min replicas
+spec-form-max-replicas = Max replicas
+spec-form-concurrent = Requests per replica
+spec-form-cpu-limit = CPU limit
+spec-form-memory-limit = Memory limit
+spec-form-heartbeat = Heartbeat timeout (ms)
+spec-help-kind = What kind of thing this is. Drives routing, the card badge, and whether a container is started.
+spec-help-id = Stable identifier used in the URL (/app/<id>). Lowercase letters, digits, "-" and "_"; can't change after creation.
+spec-help-name = The title shown on the landing card.
+spec-help-desc = Short description on the card. Inline HTML (e.g. a link) is allowed.
+spec-help-logo = Card image — a path under /assets/img/ or an external URL. Blank uses a generated tint.
+spec-help-cover = Card background: an automatic per-kind tint, a solid color, or a gradient.
+spec-help-access = Shows a closed (restricted) or open (public) lock badge. Visual only — the MVP doesn't enforce auth.
+spec-help-state = Active cards show on the landing; inactive ones are hidden.
+spec-help-subject = Topic/area used by the landing's Subject filter (e.g. "Sales", "Research").
+spec-help-image = Docker image to run, as repository:tag (e.g. org/app:latest).
+spec-help-seats = How many concurrent sessions one container serves before another is spawned.
+spec-help-lifetime = Hard cap, in minutes, on how long a container runs before it is recycled.
+spec-help-link = Destination URL for external-link cards — clicking the card navigates here.
+spec-help-updated = Display date on the card (DD/MM/YYYY). Blank stamps today's date.
+spec-help-api-port = Port the API listens on inside the container. Default 8080.
+spec-help-api-rate-limit = Per-client limit at the proxy, as N/unit (e.g. 100/min, 5/s). Over the limit returns 429. Blank = no limit.
+spec-help-api-docs-path = Path where the API serves its OpenAPI/Swagger docs. Default /__docs__.
+spec-help-api-health-path = Path probed for readiness before a replica joins the pool. Default /__healthz__.
+spec-help-api-cors = Add permissive CORS headers and answer preflight requests. Off by default.
+spec-help-min-replicas = Containers kept warm at all times — the pool never scales below this. Default 0.
+spec-help-max-replicas = Upper bound the auto-scaler may spawn up to. Blank = unlimited.
+spec-help-concurrent = Requests one API replica handles before the scaler adds another.
+spec-help-cpu-limit = Max CPU as fractional cores (e.g. 0.5 = half a core). Blank = unlimited.
+spec-help-memory-limit = Max memory, e.g. 512m or 1.5g. Blank = unlimited.
+spec-help-heartbeat = Idle session timeout in milliseconds; -1 never expires. Blank = use the global default.

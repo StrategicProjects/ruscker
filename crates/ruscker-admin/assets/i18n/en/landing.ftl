@@ -378,3 +378,7 @@ spec-form-volumes = Volume mounts
 spec-form-volumes-help = One bind per line — /host/path:/container/path (append :ro for read-only). Add as many as you need.
 spec-help-volumes = Bind-mount host directories into the container (e.g. a persistent data dir, or a static assets dir the app serves). Admin-only; mounting host paths is root-equivalent.
 spec-form-error-volume = Each volume must be /host:/container (optionally :ro).
+admin-nav-logs = Logs
+admin-proclog-title = Logs
+admin-proclog-subtitle = Recent Ruscker process log (live).
+admin-proclog-unavailable = Log buffer not wired (the server started without the logging layer).

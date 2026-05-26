@@ -155,7 +155,7 @@ enum Command {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    init_tracing(cli.verbose, cli.log_format);
+    let log_buffer = init_tracing(cli.verbose, cli.log_format);
 
     match cli.command {
         Command::Validate {
@@ -169,7 +169,7 @@ fn main() -> Result<()> {
         Command::Import { path, db } => cmd_import(&path, &db),
         Command::Export { db } => cmd_export(&db),
         Command::Serve { config, bind, images_dir, db, admin_token, master_key, docker } => {
-            cmd_serve(&config, bind, images_dir, db, admin_token, master_key, docker)
+            cmd_serve(&config, bind, images_dir, db, admin_token, master_key, docker, log_buffer)
         }
     }
 }
@@ -265,6 +265,7 @@ fn cmd_serve(
     admin_token: Option<String>,
     master_key: Option<String>,
     docker: bool,
+    log_buffer: ruscker_admin::logbuf::LogBuffer,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
@@ -295,7 +296,7 @@ fn cmd_serve(
         .build()?;
 
     rt.block_on(async {
-        let mut server = ruscker_admin::AdminServer::new(addr, config)?;
+        let mut server = ruscker_admin::AdminServer::new(addr, config)?.with_log_buffer(log_buffer);
         if let Some(dir) = images_dir {
             server = server.with_images_dir(dir);
         }
@@ -318,7 +319,15 @@ fn cmd_serve(
     })
 }
 
-fn init_tracing(verbosity: u8, format: LogFormat) {
+/// Initialise tracing and return the in-memory log buffer feeding the
+/// admin "Logs" tab. Logs go to stdout (text or JSON) **and** to a
+/// bounded ring buffer (always plain text), both behind the same
+/// `EnvFilter`. Only `serve` consumes the returned buffer; other
+/// commands just let it collect harmlessly.
+fn init_tracing(verbosity: u8, format: LogFormat) -> ruscker_admin::logbuf::LogBuffer {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
     let level = match verbosity {
         0 => "warn",
         1 => "info",
@@ -328,20 +337,91 @@ fn init_tracing(verbosity: u8, format: LogFormat) {
     // `RUST_LOG` always wins when set (operators expect it); the
     // verbosity flag only sets the default filter.
     let env = std::env::var("RUST_LOG").unwrap_or_else(|_| format!("ruscker={level}"));
-    let builder = tracing_subscriber::fmt().with_env_filter(env);
+    let filter = tracing_subscriber::EnvFilter::new(env);
+
+    let buffer = ruscker_admin::logbuf::LogBuffer::new(2000);
+    let registry = tracing_subscriber::registry().with(filter);
+    // The ring-buffer layer is inlined per arm: the two stdout formats
+    // give the layered subscriber different types, so its `S` parameter
+    // must be inferred independently at each call site.
     match format {
-        // `.json()` and the default formatter return different
-        // builder types, so each arm must call `.init()` itself.
-        LogFormat::Text => builder.with_target(false).init(),
-        LogFormat::Json => builder
-            // Keep the module target in structured logs — it's a
-            // cheap, high-value field for filtering in a shipper.
-            .json()
-            // Lift the event's fields to the top level instead of
-            // nesting them under `"fields"`, so queries like
-            // `addr="…"` work without a path prefix.
-            .flatten_event(true)
+        LogFormat::Text => registry
+            .with(tracing_subscriber::fmt::layer().with_target(false))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_writer(BufMakeWriter(buffer.clone())),
+            )
             .init(),
+        LogFormat::Json => registry
+            // Keep the module target + lift fields to the top level so
+            // `addr="…"` queries work without a path prefix in a shipper.
+            .with(tracing_subscriber::fmt::layer().json().flatten_event(true))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_target(false)
+                    .with_writer(BufMakeWriter(buffer.clone())),
+            )
+            .init(),
+    }
+    buffer
+}
+
+/// `MakeWriter` that funnels formatted log lines into the [`LogBuffer`].
+#[derive(Clone)]
+struct BufMakeWriter(ruscker_admin::logbuf::LogBuffer);
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for BufMakeWriter {
+    type Writer = BufLineWriter;
+    fn make_writer(&'a self) -> Self::Writer {
+        BufLineWriter {
+            buf: self.0.clone(),
+            pending: Vec::new(),
+        }
+    }
+}
+
+/// Per-event writer: accumulates bytes and pushes each complete line
+/// (the fmt layer writes one newline-terminated line per event).
+struct BufLineWriter {
+    buf: ruscker_admin::logbuf::LogBuffer,
+    pending: Vec<u8>,
+}
+
+impl BufLineWriter {
+    fn drain_lines(&mut self) {
+        while let Some(pos) = self.pending.iter().position(|&b| b == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=pos).collect();
+            let s = String::from_utf8_lossy(&line);
+            let s = s.trim_end();
+            if !s.is_empty() {
+                self.buf.push_line(s.to_string());
+            }
+        }
+    }
+}
+
+impl std::io::Write for BufLineWriter {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.pending.extend_from_slice(data);
+        self.drain_lines();
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for BufLineWriter {
+    fn drop(&mut self) {
+        // Flush a trailing line with no newline (defensive).
+        let s = String::from_utf8_lossy(&self.pending);
+        let s = s.trim_end();
+        if !s.is_empty() {
+            self.buf.push_line(s.to_string());
+        }
     }
 }
 

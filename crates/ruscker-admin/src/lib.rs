@@ -28,6 +28,7 @@ pub mod crypto;
 pub mod db;
 pub mod i18n;
 pub mod images;
+pub mod logbuf;
 pub mod metrics_cache;
 pub mod ratelimit;
 pub mod routes;
@@ -75,6 +76,10 @@ pub struct AppState {
     /// 503 with a hint that no backend is wired (Phase 1/2 mode,
     /// landing-only).
     pub backend: Option<std::sync::Arc<dyn ruscker_core::ContainerBackend>>,
+
+    /// Recent Ruscker log lines for the admin "Logs" tab. `None` when no
+    /// log buffer was wired (e.g. tests, or non-`serve` commands).
+    pub log_buffer: Option<logbuf::LogBuffer>,
 
     /// Live registry of running replicas, keyed by spec id.
     /// Shared across handlers via an RwLock; writes happen only
@@ -150,6 +155,7 @@ impl AdminServer {
             images_dir: None,
             master_key: crypto::MasterKey::from_env().context("load master key")?,
             backend: None,
+            log_buffer: None,
             replicas: std::sync::Arc::new(tokio::sync::RwLock::new(
                 ruscker_core::ReplicaRegistry::new(),
             )),
@@ -192,6 +198,13 @@ impl AdminServer {
     pub fn with_master_key(mut self, raw: impl AsRef<str>) -> Result<Self> {
         self.state.master_key = crypto::MasterKey::from_str(raw.as_ref())?;
         Ok(self)
+    }
+
+    /// Wire the in-memory log buffer feeding the admin "Logs" tab.
+    /// Created and populated by a `tracing` layer in `ruscker-cli`.
+    pub fn with_log_buffer(mut self, buffer: logbuf::LogBuffer) -> Self {
+        self.state.log_buffer = Some(buffer);
+        self
     }
 
     /// Attach a container backend (e.g. `LocalDockerBackend`).

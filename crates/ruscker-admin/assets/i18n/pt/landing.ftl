@@ -382,3 +382,7 @@ spec-form-volumes = Montagens de volume
 spec-form-volumes-help = Um bind por linha — /host:/container (use :ro para somente leitura). Adicione quantos precisar.
 spec-help-volumes = Monta diretórios do host no container (ex.: dados persistentes, ou estáticos que o app serve). Só admin; montar caminhos do host equivale a root.
 spec-form-error-volume = Cada volume deve ser /host:/container (opcional :ro).
+admin-nav-logs = Logs
+admin-proclog-title = Logs
+admin-proclog-subtitle = Log recente do processo Ruscker (ao vivo).
+admin-proclog-unavailable = Buffer de log não disponível (o servidor iniciou sem a camada de logging).

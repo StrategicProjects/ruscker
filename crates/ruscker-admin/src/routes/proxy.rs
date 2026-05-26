@@ -288,7 +288,8 @@ async fn forward(
             Err(err) => {
                 tracing::error!(spec = %spec.id, error = ?err, "resolve replica failed");
                 return with_cors(
-                    (StatusCode::BAD_GATEWAY, format!("backend error: {err}")).into_response(),
+                    // Detail is logged above; don't leak it to the client.
+                    (StatusCode::BAD_GATEWAY, "backend unavailable").into_response(),
                     cors_on,
                 );
             }
@@ -333,7 +334,8 @@ async fn forward(
                 error = ?err, "forward failed"
             );
             return with_cors(
-                (StatusCode::BAD_GATEWAY, format!("upstream error: {err}")).into_response(),
+                // Detail is logged above; keep the client-facing body generic.
+                (StatusCode::BAD_GATEWAY, "upstream error").into_response(),
                 cors_on,
             );
         }
@@ -841,6 +843,9 @@ const HOP_BY_HOP: &[&str] = &[
     "transfer-encoding",
     "upgrade",
     "host",
+    // Non-standard but widely sent; strip so it can't confuse a
+    // request-smuggling-aware upstream.
+    "proxy-connection",
 ];
 
 fn strip_hop_headers(headers: &mut HeaderMap) {

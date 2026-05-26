@@ -175,6 +175,14 @@ pub struct Proxy {
     /// through a UI (see `docs/mockups/admin-landing-editor.html`).
     #[serde(default, rename = "landing-customization")]
     pub landing_customization: LandingCustomization,
+
+    /// Expose a Prometheus `/metrics` endpoint. **Off by default.**
+    /// When enabled, `/metrics` is served *unauthenticated* (like
+    /// `/healthz`), so only turn it on where the endpoint is reachable
+    /// only by your scraper (private network / firewall). Ruscker
+    /// extension — not present in ShinyProxy YAML.
+    #[serde(rename = "metrics-enabled")]
+    pub metrics_enabled: bool,
 }
 
 impl Default for Proxy {
@@ -195,6 +203,7 @@ impl Default for Proxy {
             authentication: AuthScheme::None,
             specs: Vec::new(),
             landing_customization: LandingCustomization::default(),
+            metrics_enabled: false,
         }
     }
 }

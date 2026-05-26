@@ -216,6 +216,13 @@ Status: living document. Tracks the Phase 5 security audit
   PII.
 - **[accepted limitation]** No PII is collected today; revisit if
   auth/user features land.
+- **[opt-in]** Prometheus `/metrics` (`proxy.metrics-enabled`, off by
+  default). When enabled it's served **unauthenticated** — it exposes
+  operational gauges (replica counts/states, per-spec sessions,
+  per-replica CPU/memory), no secrets. Only enable it where the
+  endpoint is reachable solely by your scraper (private network /
+  firewall / bound behind the reverse proxy); don't expose it to the
+  public alongside the landing page.
 
 ---
 

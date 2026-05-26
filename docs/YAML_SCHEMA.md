@@ -50,6 +50,7 @@ ignored by Ruscker.
 | `container-wait-time` | ms | `60000` | Max wait for container Ready |
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
+| `metrics-enabled` | bool | `false` | Expose a Prometheus `/metrics` endpoint (**unauthenticated** when on — firewall it). Ruscker extension |
 | `container-log-path` | path | none | Directory for per-container logs |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |

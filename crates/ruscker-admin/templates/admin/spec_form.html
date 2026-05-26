@@ -4,6 +4,17 @@
   {% if mode.is_new() %}{{ self.t("spec-form-title-new") }}{% else %}{{ form.id }} · Ruscker{% endif %}
 {% endblock %}
 
+{# Reusable inline help: a "?" that toggles a popover explaining the
+   field. `text` is the already-localized explanation (macros can't
+   reach `self.t`, so the caller resolves it). #}
+{% macro help(text) %}
+<span class="field-help" x-data="{ o: false }" @keydown.escape.window="o = false">
+  <button type="button" class="field-help-btn" @click="o = !o" @click.outside="o = false"
+          :aria-expanded="o" aria-label="{{ text }}">?</button>
+  <span class="field-help-pop" x-show="o" x-cloak x-transition.opacity>{{ text }}</span>
+</span>
+{% endmacro %}
+
 {% block content %}
 
 <div x-data="ruscker.specForm({{ form_initial_json() }})" x-cloak>
@@ -46,9 +57,12 @@
           class="spec-form-fields"
           autocomplete="off">
 
-      {# Type picker — 4 cards #}
+      {# Type picker — 6 cards #}
       <div class="spec-form-section">
-        <div class="spec-form-label">{{ self.t("spec-form-kind") }}</div>
+        <div class="spec-form-label-row">
+          <div class="spec-form-label">{{ self.t("spec-form-kind") }}</div>
+          {% call help(self.t("spec-help-kind")) %}{% endcall %}
+        </div>
         <div class="kind-picker">
           {% for k in display_type_options() %}
             <label class="kind-picker-card" :class="form.display_type === '{{ k.0 }}' ? 'is-active' : ''">
@@ -63,7 +77,10 @@
       <div class="spec-form-section-title">{{ self.t("spec-form-identity") }}</div>
 
       <div class="spec-form-field">
-        <label for="f-id" class="spec-form-label">{{ self.t("spec-form-id") }}</label>
+        <div class="spec-form-label-row">
+          <label for="f-id" class="spec-form-label">{{ self.t("spec-form-id") }}</label>
+          {% call help(self.t("spec-help-id")) %}{% endcall %}
+        </div>
         <input id="f-id" type="text" name="id"
                value="{{ form.id }}"
                x-model="form.id"
@@ -76,7 +93,10 @@
       </div>
 
       <div class="spec-form-field">
-        <label for="f-name" class="spec-form-label">{{ self.t("spec-form-name") }}</label>
+        <div class="spec-form-label-row">
+          <label for="f-name" class="spec-form-label">{{ self.t("spec-form-name") }}</label>
+          {% call help(self.t("spec-help-name")) %}{% endcall %}
+        </div>
         <input id="f-name" type="text" name="display_name"
                value="{{ form.display_name }}"
                x-model="form.display_name"
@@ -85,7 +105,10 @@
       </div>
 
       <div class="spec-form-field">
-        <label for="f-desc" class="spec-form-label">{{ self.t("spec-form-desc") }}</label>
+        <div class="spec-form-label-row">
+          <label for="f-desc" class="spec-form-label">{{ self.t("spec-form-desc") }}</label>
+          {% call help(self.t("spec-help-desc")) %}{% endcall %}
+        </div>
         <textarea id="f-desc" name="description"
                   x-model="form.description"
                   rows="3"
@@ -95,7 +118,10 @@
       <div class="spec-form-section-title">{{ self.t("spec-form-visual") }}</div>
 
       <div class="spec-form-field">
-        <label for="f-logo" class="spec-form-label">{{ self.t("spec-form-logo") }}</label>
+        <div class="spec-form-label-row">
+          <label for="f-logo" class="spec-form-label">{{ self.t("spec-form-logo") }}</label>
+          {% call help(self.t("spec-help-logo")) %}{% endcall %}
+        </div>
         <input id="f-logo" type="text" name="logo"
                value="{{ form.logo }}"
                x-model="form.logo"
@@ -124,7 +150,10 @@
 
       {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}
       <div class="spec-form-field">
-        <label class="spec-form-label">{{ self.t("spec-form-cover") }}</label>
+        <div class="spec-form-label-row">
+          <label class="spec-form-label">{{ self.t("spec-form-cover") }}</label>
+          {% call help(self.t("spec-help-cover")) %}{% endcall %}
+        </div>
         <div class="grad-modes" role="tablist">
           <button type="button" class="grad-mode" :class="coverMode === 'auto' ? 'is-active' : ''"
                   @click="setCoverMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
@@ -185,21 +214,30 @@
 
       <div class="grid grid-cols-3 gap-3">
         <div class="spec-form-field">
-          <label for="f-access" class="spec-form-label">{{ self.t("spec-form-access") }}</label>
+          <div class="spec-form-label-row">
+            <label for="f-access" class="spec-form-label">{{ self.t("spec-form-access") }}</label>
+            {% call help(self.t("spec-help-access")) %}{% endcall %}
+          </div>
           <select id="f-access" name="access" x-model="form.access" class="spec-form-input">
             <option value="lock">🔒 {{ self.t("filter-access-restricted") }}</option>
             <option value="lock_open">🔓 {{ self.t("filter-access-public") }}</option>
           </select>
         </div>
         <div class="spec-form-field">
-          <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
+          <div class="spec-form-label-row">
+            <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
+            {% call help(self.t("spec-help-state")) %}{% endcall %}
+          </div>
           <select id="f-state" name="state" x-model="form.state" class="spec-form-input">
             <option value="active">{{ self.t("spec-form-state-active") }}</option>
             <option value="inactive">{{ self.t("spec-form-state-inactive") }}</option>
           </select>
         </div>
         <div class="spec-form-field">
-          <label for="f-subject" class="spec-form-label">{{ self.t("spec-form-subject") }}</label>
+          <div class="spec-form-label-row">
+            <label for="f-subject" class="spec-form-label">{{ self.t("spec-form-subject") }}</label>
+            {% call help(self.t("spec-help-subject")) %}{% endcall %}
+          </div>
           <input id="f-subject" type="text" name="subject"
                  value="{{ form.subject }}"
                  x-model="form.subject"
@@ -220,7 +258,10 @@
           <div class="spec-form-section-title">{{ self.t("spec-form-container") }}</div>
 
           <div class="spec-form-field">
-            <label for="f-img" class="spec-form-label">{{ self.t("spec-form-image") }}</label>
+            <div class="spec-form-label-row">
+              <label for="f-img" class="spec-form-label">{{ self.t("spec-form-image") }}</label>
+              {% call help(self.t("spec-help-image")) %}{% endcall %}
+            </div>
             <input id="f-img" type="text" name="container_image"
                    value="{{ form.container_image }}"
                    x-model="form.container_image"
@@ -230,7 +271,10 @@
 
           <div class="grid grid-cols-2 gap-3">
             <div class="spec-form-field">
-              <label for="f-seats" class="spec-form-label">{{ self.t("spec-form-seats") }}</label>
+              <div class="spec-form-label-row">
+                <label for="f-seats" class="spec-form-label">{{ self.t("spec-form-seats") }}</label>
+                {% call help(self.t("spec-help-seats")) %}{% endcall %}
+              </div>
               <input id="f-seats" type="number" name="seats_per_container"
                      value="{{ form.seats_per_container }}"
                      min="1"
@@ -238,7 +282,10 @@
                      class="spec-form-input">
             </div>
             <div class="spec-form-field">
-              <label for="f-lifetime" class="spec-form-label">{{ self.t("spec-form-lifetime") }}</label>
+              <div class="spec-form-label-row">
+                <label for="f-lifetime" class="spec-form-label">{{ self.t("spec-form-lifetime") }}</label>
+                {% call help(self.t("spec-help-lifetime")) %}{% endcall %}
+              </div>
               <input id="f-lifetime" type="number" name="max_lifetime"
                      value="{{ form.max_lifetime }}"
                      min="1"
@@ -254,7 +301,10 @@
         <div>
           <div class="spec-form-section-title">{{ self.t("spec-form-link-section") }}</div>
           <div class="spec-form-field">
-            <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
+            <div class="spec-form-label-row">
+              <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
+              {% call help(self.t("spec-help-link")) %}{% endcall %}
+            </div>
             <input id="f-link" type="url" name="link"
                    value="{{ form.link }}"
                    x-model="form.link"
@@ -266,7 +316,10 @@
 
       <div class="spec-form-section-title">{{ self.t("spec-form-meta") }}</div>
       <div class="spec-form-field">
-        <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
+        <div class="spec-form-label-row">
+          <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
+          {% call help(self.t("spec-help-updated")) %}{% endcall %}
+        </div>
         <input id="f-updated" type="text" name="updated"
                value="{{ form.updated }}"
                x-model="form.updated"
@@ -274,6 +327,139 @@
                pattern="\d{2}/\d{2}/\d{4}"
                class="spec-form-input spec-form-input--mono">
         <div class="spec-form-help">{{ self.t("spec-form-updated-help") }}</div>
+      </div>
+
+      {# ── Advanced (collapsible): API, scaling, resources, lifecycle.
+           Every field is optional — leaving it blank keeps the schema
+           default, so casual operators never have to open this. ──── #}
+      <div class="spec-form-advanced">
+        <button type="button" class="spec-form-advanced-toggle"
+                :class="advancedOpen ? 'is-open' : ''"
+                @click="advancedOpen = !advancedOpen"
+                :aria-expanded="advancedOpen">
+          <i class="ti ti-chevron-right chevron" aria-hidden="true"></i>
+          {{ self.t("spec-form-advanced") }}
+        </button>
+
+        <div x-show="advancedOpen" x-cloak x-transition>
+          <div class="spec-form-help" style="margin:0 0 4px">{{ self.t("spec-form-advanced-hint") }}</div>
+
+          {# API — only relevant for type: api #}
+          <template x-if="isApi()">
+            <div>
+              <div class="spec-form-subsection">{{ self.t("spec-form-api-section") }}</div>
+
+              <div class="grid grid-cols-2 gap-3">
+                <div class="spec-form-field">
+                  <div class="spec-form-label-row">
+                    <label for="f-api-port" class="spec-form-label">{{ self.t("spec-form-api-port") }}</label>
+                    {% call help(self.t("spec-help-api-port")) %}{% endcall %}
+                  </div>
+                  <input id="f-api-port" type="number" name="api_port" min="1" max="65535"
+                         value="{{ form.api_port }}" placeholder="8080" class="spec-form-input">
+                </div>
+                <div class="spec-form-field">
+                  <div class="spec-form-label-row">
+                    <label for="f-api-rate" class="spec-form-label">{{ self.t("spec-form-api-rate-limit") }}</label>
+                    {% call help(self.t("spec-help-api-rate-limit")) %}{% endcall %}
+                  </div>
+                  <input id="f-api-rate" type="text" name="api_rate_limit"
+                         value="{{ form.api_rate_limit }}" placeholder="100/min"
+                         class="spec-form-input spec-form-input--mono">
+                </div>
+                <div class="spec-form-field">
+                  <div class="spec-form-label-row">
+                    <label for="f-api-docs" class="spec-form-label">{{ self.t("spec-form-api-docs-path") }}</label>
+                    {% call help(self.t("spec-help-api-docs-path")) %}{% endcall %}
+                  </div>
+                  <input id="f-api-docs" type="text" name="api_docs_path"
+                         value="{{ form.api_docs_path }}" placeholder="/__docs__"
+                         class="spec-form-input spec-form-input--mono">
+                </div>
+                <div class="spec-form-field">
+                  <div class="spec-form-label-row">
+                    <label for="f-api-health" class="spec-form-label">{{ self.t("spec-form-api-health-path") }}</label>
+                    {% call help(self.t("spec-help-api-health-path")) %}{% endcall %}
+                  </div>
+                  <input id="f-api-health" type="text" name="api_health_path"
+                         value="{{ form.api_health_path }}" placeholder="/__healthz__"
+                         class="spec-form-input spec-form-input--mono">
+                </div>
+              </div>
+
+              <div class="spec-form-field">
+                <label class="spec-form-check">
+                  <input type="checkbox" name="api_cors" value="on"
+                         {% if !form.api_cors.is_empty() %}checked{% endif %}>
+                  {{ self.t("spec-form-api-cors") }}
+                  {% call help(self.t("spec-help-api-cors")) %}{% endcall %}
+                </label>
+              </div>
+            </div>
+          </template>
+
+          {# Scaling — replica pool #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-scaling-section") }}</div>
+          <div class="grid grid-cols-3 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-min-rep" class="spec-form-label">{{ self.t("spec-form-min-replicas") }}</label>
+                {% call help(self.t("spec-help-min-replicas")) %}{% endcall %}
+              </div>
+              <input id="f-min-rep" type="number" name="min_replicas" min="0"
+                     value="{{ form.min_replicas }}" placeholder="0" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-max-rep" class="spec-form-label">{{ self.t("spec-form-max-replicas") }}</label>
+                {% call help(self.t("spec-help-max-replicas")) %}{% endcall %}
+              </div>
+              <input id="f-max-rep" type="number" name="max_replicas" min="1"
+                     value="{{ form.max_replicas }}" placeholder="3" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-concurrent" class="spec-form-label">{{ self.t("spec-form-concurrent") }}</label>
+                {% call help(self.t("spec-help-concurrent")) %}{% endcall %}
+              </div>
+              <input id="f-concurrent" type="number" name="concurrent_requests_per_replica" min="1"
+                     value="{{ form.concurrent_requests_per_replica }}" placeholder="100" class="spec-form-input">
+            </div>
+          </div>
+
+          {# Resources — per-container limits #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-resources-section") }}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-cpu" class="spec-form-label">{{ self.t("spec-form-cpu-limit") }}</label>
+                {% call help(self.t("spec-help-cpu-limit")) %}{% endcall %}
+              </div>
+              <input id="f-cpu" type="text" name="container_cpu_limit"
+                     value="{{ form.container_cpu_limit }}" placeholder="0.5" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-mem" class="spec-form-label">{{ self.t("spec-form-memory-limit") }}</label>
+                {% call help(self.t("spec-help-memory-limit")) %}{% endcall %}
+              </div>
+              <input id="f-mem" type="text" name="container_memory_limit"
+                     value="{{ form.container_memory_limit }}" placeholder="512m"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+          </div>
+
+          {# Lifecycle #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-lifecycle-section") }}</div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-heartbeat" class="spec-form-label">{{ self.t("spec-form-heartbeat") }}</label>
+              {% call help(self.t("spec-help-heartbeat")) %}{% endcall %}
+            </div>
+            <input id="f-heartbeat" type="number" name="heartbeat_timeout" min="-1"
+                   value="{{ form.heartbeat_timeout }}" placeholder="3600000" class="spec-form-input">
+          </div>
+        </div>
       </div>
     </form>
 
@@ -338,6 +524,21 @@
 window.ruscker = window.ruscker || {};
 window.ruscker.specForm = (initial) => ({
   form: initial,
+  // Open the Advanced section on load if it already carries any value,
+  // so edits to existing advanced config are visible.
+  advancedOpen: !!(
+    (initial.heartbeat_timeout || '').toString().trim() ||
+    (initial.container_cpu_limit || '').toString().trim() ||
+    (initial.container_memory_limit || '').trim() ||
+    (initial.min_replicas || '').toString().trim() ||
+    (initial.max_replicas || '').toString().trim() ||
+    (initial.concurrent_requests_per_replica || '').toString().trim() ||
+    (initial.api_port || '').toString().trim() ||
+    (initial.api_rate_limit || '').trim() ||
+    (initial.api_docs_path || '').trim() ||
+    (initial.api_health_path || '').trim() ||
+    (initial.api_cors || '').trim()
+  ),
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder). Seeded from any
   // existing `cover` value.
@@ -372,6 +573,9 @@ window.ruscker.specForm = (initial) => ({
   },
   needsLink() {
     return ['link', 'package'].includes(this.form.display_type);
+  },
+  isApi() {
+    return this.form.display_type === 'api';
   },
   badgeText() {
     const map = {

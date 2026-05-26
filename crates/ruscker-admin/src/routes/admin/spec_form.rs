@@ -19,7 +19,7 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use ruscker_config::{Spec, SpecKindOverride, TemplateProperties};
+use ruscker_config::{ApiSpec, Spec, SpecKindOverride, TemplateProperties};
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;
@@ -75,6 +75,27 @@ pub struct SpecForm {
     pub link: String,
     pub seats_per_container: String,
     pub max_lifetime: String,
+
+    // ── Advanced (collapsible). Empty string ⇒ keep the schema
+    //    default; nothing here is required. ──────────────────────
+    /// `heartbeat-timeout` override in ms; `-1` = never expire.
+    pub heartbeat_timeout: String,
+    /// Fractional CPUs, e.g. `0.5` (`container-cpu-limit`).
+    pub container_cpu_limit: String,
+    /// Memory cap, e.g. `512m` / `1.5g` (`container-memory-limit`).
+    pub container_memory_limit: String,
+    /// Replica pool floor / ceiling (`min`/`max-replicas`).
+    pub min_replicas: String,
+    pub max_replicas: String,
+    /// API: concurrent requests a replica handles before scale-up.
+    pub concurrent_requests_per_replica: String,
+    /// API sub-fields (only meaningful for `type: api`).
+    pub api_port: String,
+    pub api_docs_path: String,
+    pub api_health_path: String,
+    pub api_rate_limit: String,
+    /// Checkbox: non-empty ("on") ⇒ permissive CORS enabled.
+    pub api_cors: String,
 }
 
 impl SpecForm {
@@ -107,6 +128,47 @@ impl SpecForm {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             max_lifetime: spec.max_lifetime.map(|n| n.to_string()).unwrap_or_default(),
+            heartbeat_timeout: spec
+                .heartbeat_timeout
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            container_cpu_limit: spec
+                .container_cpu_limit
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            container_memory_limit: spec.container_memory_limit.clone().unwrap_or_default(),
+            min_replicas: spec.min_replicas.map(|n| n.to_string()).unwrap_or_default(),
+            max_replicas: spec.max_replicas.map(|n| n.to_string()).unwrap_or_default(),
+            concurrent_requests_per_replica: spec
+                .concurrent_requests_per_replica
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            api_port: spec
+                .api
+                .as_ref()
+                .and_then(|a| a.port)
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            api_docs_path: spec
+                .api
+                .as_ref()
+                .and_then(|a| a.docs_path.clone())
+                .unwrap_or_default(),
+            api_health_path: spec
+                .api
+                .as_ref()
+                .and_then(|a| a.health_path.clone())
+                .unwrap_or_default(),
+            api_rate_limit: spec
+                .api
+                .as_ref()
+                .and_then(|a| a.rate_limit.clone())
+                .unwrap_or_default(),
+            api_cors: if spec.api.as_ref().map(|a| a.cors).unwrap_or(false) {
+                "on".into()
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -166,6 +228,30 @@ impl SpecForm {
             _ => empty_to_none(&self.container_image),
         };
 
+        // Advanced API block: built for API specs, or whenever any
+        // API field was filled in (empty otherwise ⇒ schema defaults).
+        let cors = !self.api_cors.trim().is_empty();
+        let api_filled = cors
+            || [
+                &self.api_port,
+                &self.api_docs_path,
+                &self.api_health_path,
+                &self.api_rate_limit,
+            ]
+            .iter()
+            .any(|s| !s.trim().is_empty());
+        let api = if matches!(dt, DisplayType::Api) || api_filled {
+            Some(ApiSpec {
+                port: parse_opt(&self.api_port),
+                docs_path: empty_to_none(&self.api_docs_path),
+                health_path: empty_to_none(&self.api_health_path),
+                rate_limit: empty_to_none(&self.api_rate_limit),
+                cors,
+            })
+        } else {
+            None
+        };
+
         Ok(Spec {
             id: self.id.trim().to_string(),
             display_name: empty_to_none(&self.display_name),
@@ -174,28 +260,28 @@ impl SpecForm {
             seats_per_container: parse_opt(&self.seats_per_container),
             max_lifetime: parse_opt(&self.max_lifetime),
             container_lifetime: None,
-            heartbeat_timeout: None,
+            heartbeat_timeout: parse_opt(&self.heartbeat_timeout),
             stop_on_logout: None,
             docker_registry_username: None,
             docker_registry_password: None,
             docker_registry_domain: None,
             docker_registry_credential: None,
-            container_cpu_limit: None,
+            container_cpu_limit: parse_opt(&self.container_cpu_limit),
             container_cpu_request: None,
-            container_memory_limit: None,
+            container_memory_limit: empty_to_none(&self.container_memory_limit),
             container_memory_request: None,
             max_body_size: None,
             template_properties: TemplateProperties(tp_map),
             kind_override,
-            api: None,
-            min_replicas: None,
-            max_replicas: None,
+            api,
+            min_replicas: parse_opt(&self.min_replicas),
+            max_replicas: parse_opt(&self.max_replicas),
             scale_up_threshold: None,
             scale_down_threshold: None,
             scale_down_grace: None,
             drain_timeout: None,
             routing_strategy: None,
-            concurrent_requests_per_replica: None,
+            concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
         })
     }
 

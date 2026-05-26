@@ -327,3 +327,47 @@ admin-grad-remove-stop = Remover cor
 spec-form-cover = Cover do card
 spec-form-cover-auto = Auto (cor do tipo)
 spec-form-cover-auto-help = Usa o tom padrão do tipo do card. Escolha Sólida ou Gradiente para personalizar.
+
+# ── Formulário de spec: seção avançada + ajuda por campo (#2) ──────
+spec-form-advanced = Avançado
+spec-form-advanced-hint = Tudo opcional — deixe em branco para manter o padrão.
+spec-form-api-section = API
+spec-form-scaling-section = Escala
+spec-form-resources-section = Recursos
+spec-form-lifecycle-section = Ciclo de vida
+spec-form-api-port = Porta do container
+spec-form-api-rate-limit = Limite de taxa
+spec-form-api-docs-path = Caminho dos docs
+spec-form-api-health-path = Caminho de health
+spec-form-api-cors = Habilitar CORS permissivo
+spec-form-min-replicas = Réplicas mín.
+spec-form-max-replicas = Réplicas máx.
+spec-form-concurrent = Requisições por réplica
+spec-form-cpu-limit = Limite de CPU
+spec-form-memory-limit = Limite de memória
+spec-form-heartbeat = Timeout de heartbeat (ms)
+spec-help-kind = Que tipo de coisa é. Define o roteamento, o selo do card e se um container é iniciado.
+spec-help-id = Identificador estável usado na URL (/app/<id>). Minúsculas, dígitos, "-" e "_"; não pode mudar após criado.
+spec-help-name = O título exibido no card da landing.
+spec-help-desc = Descrição curta no card. HTML inline (ex.: um link) é permitido.
+spec-help-logo = Imagem do card — um caminho em /assets/img/ ou uma URL externa. Em branco, usa um tom gerado.
+spec-help-cover = Fundo do card: tom automático por tipo, cor sólida ou gradiente.
+spec-help-access = Mostra um cadeado (restrito) ou aberto (público). Apenas visual — o MVP não impõe autenticação.
+spec-help-state = Cards ativos aparecem na landing; inativos ficam ocultos.
+spec-help-subject = Assunto/área usado pelo filtro Assunto da landing (ex.: "Vendas", "Pesquisa").
+spec-help-image = Imagem Docker a executar, como repositório:tag (ex.: org/app:latest).
+spec-help-seats = Quantas sessões simultâneas um container atende antes de subir outro.
+spec-help-lifetime = Limite rígido, em minutos, de quanto tempo um container roda antes de ser reciclado.
+spec-help-link = URL de destino para cards de link externo — clicar no card navega para cá.
+spec-help-updated = Data exibida no card (DD/MM/AAAA). Em branco, carimba a data de hoje.
+spec-help-api-port = Porta em que a API escuta dentro do container. Padrão 8080.
+spec-help-api-rate-limit = Limite por cliente no proxy, como N/unidade (ex.: 100/min, 5/s). Acima do limite retorna 429. Vazio = sem limite.
+spec-help-api-docs-path = Caminho onde a API serve a documentação OpenAPI/Swagger. Padrão /__docs__.
+spec-help-api-health-path = Caminho consultado para readiness antes da réplica entrar no pool. Padrão /__healthz__.
+spec-help-api-cors = Adiciona cabeçalhos CORS permissivos e responde ao preflight. Desligado por padrão.
+spec-help-min-replicas = Containers mantidos sempre quentes — o pool nunca desce abaixo disso. Padrão 0.
+spec-help-max-replicas = Teto até onde o auto-scaler pode subir. Vazio = ilimitado.
+spec-help-concurrent = Requisições que uma réplica de API atende antes do scaler adicionar outra.
+spec-help-cpu-limit = CPU máxima em núcleos fracionários (ex.: 0,5 = meio núcleo). Vazio = ilimitado.
+spec-help-memory-limit = Memória máxima, ex.: 512m ou 1.5g. Vazio = ilimitado.
+spec-help-heartbeat = Timeout de sessão ociosa em milissegundos; -1 nunca expira. Vazio = usa o padrão global.

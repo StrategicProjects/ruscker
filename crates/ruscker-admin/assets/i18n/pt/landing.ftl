@@ -371,3 +371,5 @@ spec-help-concurrent = Requisições que uma réplica de API atende antes do sca
 spec-help-cpu-limit = CPU máxima em núcleos fracionários (ex.: 0,5 = meio núcleo). Vazio = ilimitado.
 spec-help-memory-limit = Memória máxima, ex.: 512m ou 1.5g. Vazio = ilimitado.
 spec-help-heartbeat = Timeout de sessão ociosa em milissegundos; -1 nunca expira. Vazio = usa o padrão global.
+admin-blocks-slot-empty = Nenhum bloco neste slot ainda.
+admin-blocks-drag-hint = Arraste pela alça para reordenar os blocos dentro do slot.

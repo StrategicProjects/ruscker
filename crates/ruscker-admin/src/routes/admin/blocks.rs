@@ -7,7 +7,7 @@
 
 use askama::Template;
 use axum::{
-    extract::{Form, Path, State},
+    extract::{Form, Json, Path, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -28,6 +28,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/blocks/{id}", get(edit_form).post(update))
         .route("/admin/blocks/{id}/delete", post(delete))
         .route("/admin/blocks/{id}/move/{dir}", post(move_block))
+        .route("/admin/blocks/reorder", post(reorder))
 }
 
 // ── List ─────────────────────────────────────────────────────────
@@ -40,6 +41,14 @@ struct BlocksPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Blocks grouped per slot (in `SLOTS` order) so the template can
+    /// render one drag-reorder list per slot.
+    groups: Vec<SlotGroup>,
+}
+
+/// One slot's blocks, in render (position) order.
+struct SlotGroup {
+    slot: &'static str,
     blocks: Vec<LandingBlock>,
 }
 
@@ -65,13 +74,22 @@ async fn index(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // `list_all` already orders by (slot, position); split it into one
+    // group per known slot for the per-slot reorder lists.
+    let groups: Vec<SlotGroup> = SLOTS
+        .iter()
+        .map(|&slot| SlotGroup {
+            slot,
+            blocks: blocks.iter().filter(|b| b.slot == slot).cloned().collect(),
+        })
+        .collect();
     super::render(&BlocksPage {
         locale: loc,
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "blocks",
-        blocks,
+        groups,
     })
 }
 
@@ -266,6 +284,34 @@ async fn move_block(
         Ok(_) => Redirect::to("/admin/blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "move block failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
+        }
+    }
+}
+
+/// New within-slot order, posted by the drag-and-drop handler as JSON.
+#[derive(Debug, Deserialize)]
+struct ReorderReq {
+    slot: String,
+    ids: Vec<String>,
+}
+
+/// `POST /admin/blocks/reorder` — persist a drag-reordered slot. Same
+/// origin + the `SameSite=Strict` admin cookie cover CSRF. Returns
+/// `204` so the client keeps the DOM order it already rendered.
+async fn reorder(
+    _: AdminSession,
+    State(state): State<AppState>,
+    Json(req): Json<ReorderReq>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return no_db();
+    };
+    match landing_blocks::reorder(pool, &req.slot, &req.ids, Some("admin")).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => (StatusCode::BAD_REQUEST, "unknown slot").into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, slot = req.slot, "reorder blocks failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
         }
     }

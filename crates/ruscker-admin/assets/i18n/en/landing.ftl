@@ -367,3 +367,5 @@ spec-help-concurrent = Requests one API replica handles before the scaler adds a
 spec-help-cpu-limit = Max CPU as fractional cores (e.g. 0.5 = half a core). Blank = unlimited.
 spec-help-memory-limit = Max memory, e.g. 512m or 1.5g. Blank = unlimited.
 spec-help-heartbeat = Idle session timeout in milliseconds; -1 never expires. Blank = use the global default.
+admin-blocks-slot-empty = No blocks in this slot yet.
+admin-blocks-drag-hint = Drag the handle to reorder blocks within a slot.

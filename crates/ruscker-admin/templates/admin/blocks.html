@@ -15,31 +15,29 @@
   </a>
 </div>
 
-{% if blocks.is_empty() %}
-  <p class="text-sm text-[color:var(--text-muted)] py-8 text-center">{{ self.t("admin-blocks-empty") }}</p>
-{% else %}
-  <table class="w-full text-sm">
-    <thead>
-      <tr class="text-left text-xs text-[color:var(--text-muted)]">
-        <th class="py-2 font-medium">{{ self.t("admin-blocks-col-slot") }}</th>
-        <th class="py-2 font-medium">{{ self.t("admin-blocks-col-title") }}</th>
-        <th class="py-2 font-medium">{{ self.t("admin-blocks-col-status") }}</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for b in blocks %}
-      <tr class="border-t border-[color:var(--border)]">
-        <td class="py-2"><code class="text-xs">{{ b.slot }}</code></td>
-        <td class="py-2">{% if b.title.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ b.title }}{% endif %}</td>
-        <td class="py-2">
-          {% if b.enabled %}
-            <span class="text-xs text-[#0f6e56]">● {{ self.t("admin-blocks-enabled") }}</span>
-          {% else %}
-            <span class="text-xs text-[color:var(--text-faint)]">○ {{ self.t("admin-blocks-disabled") }}</span>
-          {% endif %}
-        </td>
-        <td class="py-2 text-right whitespace-nowrap">
+<p class="text-xs text-[color:var(--text-faint)] mb-4">
+  <i class="ti ti-arrows-move" aria-hidden="true"></i> {{ self.t("admin-blocks-drag-hint") }}
+</p>
+
+{% for g in groups %}
+  <section class="mb-6">
+    <h2 class="text-xs font-medium uppercase tracking-wide text-[color:var(--text-muted)] mb-2">
+      {% if g.slot == "top" %}{{ self.t("admin-blocks-slot-top") }}{% else %}{{ self.t("admin-blocks-slot-bottom") }}{% endif %}
+    </h2>
+
+    <div class="block-list" data-slot="{{ g.slot }}">
+      {% for b in g.blocks %}
+      <div class="block-row" draggable="true" data-id="{{ b.id }}">
+        <i class="ti ti-grip-vertical block-grip" aria-hidden="true"></i>
+        <span class="block-row-title">
+          {% if b.title.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ b.title }}{% endif %}
+        </span>
+        {% if b.enabled %}
+          <span class="text-xs text-[#0f6e56] whitespace-nowrap">● {{ self.t("admin-blocks-enabled") }}</span>
+        {% else %}
+          <span class="text-xs text-[color:var(--text-faint)] whitespace-nowrap">○ {{ self.t("admin-blocks-disabled") }}</span>
+        {% endif %}
+        <span class="block-row-actions whitespace-nowrap">
           <form method="post" action="/admin/blocks/{{ b.id }}/move/up" class="inline">
             <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-1"
                     title="{{ self.t("admin-blocks-move-up") }}" aria-label="{{ self.t("admin-blocks-move-up") }}">
@@ -57,11 +55,66 @@
                 onsubmit="return confirm('{{ self.t("admin-blocks-delete-confirm") }}')">
             <button type="submit" class="text-[color:var(--text-faint)] hover:text-red-500">{{ self.t("admin-blocks-delete") }}</button>
           </form>
-        </td>
-      </tr>
+        </span>
+      </div>
+      {% else %}
+      <p class="text-sm text-[color:var(--text-faint)] py-3 px-2">{{ self.t("admin-blocks-slot-empty") }}</p>
       {% endfor %}
-    </tbody>
-  </table>
-{% endif %}
+    </div>
+  </section>
+{% endfor %}
+
+<script>
+// Drag-and-drop reorder, scoped per slot. On drop we read the slot's
+// DOM order and PATCH it server-side; the ↑/↓ buttons remain as an
+// accessible, JS-free fallback.
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.block-list').forEach((list) => {
+    let dragEl = null;
+
+    list.addEventListener('dragstart', (e) => {
+      dragEl = e.target.closest('.block-row');
+      if (dragEl) { dragEl.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+    });
+
+    list.addEventListener('dragend', () => {
+      if (!dragEl) return;
+      dragEl.classList.remove('dragging');
+      dragEl = null;
+      persist(list);
+    });
+
+    list.addEventListener('dragover', (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      const after = afterElement(list, e.clientY);
+      if (after == null) list.appendChild(dragEl);
+      else list.insertBefore(dragEl, after);
+    });
+  });
+
+  function afterElement(list, y) {
+    const rows = [...list.querySelectorAll('.block-row:not(.dragging)')];
+    let best = { offset: -Infinity, el: null };
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > best.offset) best = { offset, el: row };
+    }
+    return best.el;
+  }
+
+  function persist(list) {
+    const slot = list.dataset.slot;
+    const ids = [...list.querySelectorAll('.block-row')].map((r) => r.dataset.id);
+    fetch('/admin/blocks/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot, ids }),
+    }).then((r) => { if (!r.ok) location.reload(); })
+      .catch(() => location.reload());
+  }
+});
+</script>
 
 {% endblock %}

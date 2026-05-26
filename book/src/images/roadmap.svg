@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" width="720" height="520" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Roadmap timeline. Phases 0 through 5 are shipped (scaffolding, landing page, persistence and admin CRUD, proxy and Docker backend, monitoring dashboard, production polish — v0.1.0). Phases 6 to 8 are planned and optional: multi-host scheduling, high availability, and external auth.">
+  <title>Ruscker — roadmap</title>
+
+  <!-- rail: solid teal through the shipped phases, dashed grey after -->
+  <line x1="60" y1="52" x2="60" y2="312" stroke="#1D9E75" stroke-width="3"/>
+  <line x1="60" y1="312" x2="60" y2="476" stroke="#B9CDC6" stroke-width="3" stroke-dasharray="3 6"/>
+
+  <!-- done phases -->
+  <g font-size="13">
+    <!-- 0 -->
+    <circle cx="60" cy="52" r="9" fill="#0F6E56"/>
+    <path d="M55.5,52 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="49" font-weight="700" fill="#085041">Phase 0 · Scaffolding</text>
+    <text x="86" y="65" font-size="11" fill="#5B6B66">workspace · YAML schema · validation · CLI</text>
+
+    <!-- 1 -->
+    <circle cx="60" cy="104" r="9" fill="#0F6E56"/>
+    <path d="M55.5,104 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="101" font-weight="700" fill="#085041">Phase 1 · Landing page</text>
+    <text x="86" y="117" font-size="11" fill="#5B6B66">Askama · Tailwind 4 · i18n (pt/en/es/fr)</text>
+
+    <!-- 2 -->
+    <circle cx="60" cy="156" r="9" fill="#0F6E56"/>
+    <path d="M55.5,156 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="153" font-weight="700" fill="#085041">Phase 2 · Persistence + admin CRUD</text>
+    <text x="86" y="169" font-size="11" fill="#5B6B66">SQLite · import/export · forms · credentials</text>
+
+    <!-- 3 -->
+    <circle cx="60" cy="208" r="9" fill="#0F6E56"/>
+    <path d="M55.5,208 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="205" font-weight="700" fill="#085041">Phase 3 · Proxy + Docker backend</text>
+    <text x="86" y="221" font-size="11" fill="#5B6B66">sticky · WebSocket · auto-scaler · URL rewrite</text>
+
+    <!-- 4 -->
+    <circle cx="60" cy="260" r="9" fill="#0F6E56"/>
+    <path d="M55.5,260 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="257" font-weight="700" fill="#085041">Phase 4 · Monitoring dashboard</text>
+    <text x="86" y="273" font-size="11" fill="#5B6B66">live SSE · per-replica CPU/mem · logs · actions</text>
+
+    <!-- 5 -->
+    <circle cx="60" cy="312" r="9" fill="#0F6E56"/>
+    <path d="M55.5,312 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="309" font-weight="700" fill="#085041">Phase 5 · Production polish</text>
+    <text x="86" y="325" font-size="11" fill="#5B6B66">probes · graceful shutdown · RBAC · signed releases</text>
+    <rect x="520" y="298" width="120" height="22" rx="11" fill="#0F6E56"/>
+    <text x="580" y="313" text-anchor="middle" font-size="11" font-weight="700" fill="#FFFFFF">shipped · v0.1.0</text>
+  </g>
+
+  <!-- planned phases -->
+  <g font-size="13">
+    <!-- 6 -->
+    <circle cx="60" cy="368" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
+    <text x="86" y="365" font-weight="700" fill="#5B6B66">Phase 6 · Multi-host scheduling</text>
+    <text x="86" y="381" font-size="11" fill="#90A39C">multiple Docker hosts · bin-pack / spread · anti-affinity</text>
+
+    <!-- 7 -->
+    <circle cx="60" cy="420" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
+    <text x="86" y="417" font-weight="700" fill="#5B6B66">Phase 7 · HA / multi-instance</text>
+    <text x="86" y="433" font-size="11" fill="#90A39C">Postgres session store · advisory locks · failover</text>
+
+    <!-- 8 -->
+    <circle cx="60" cy="472" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
+    <text x="86" y="469" font-weight="700" fill="#5B6B66">Phase 8 · External auth</text>
+    <text x="86" y="485" font-size="11" fill="#90A39C">OIDC · SAML · LDAP · per-app ACLs (RBAC already shipped)</text>
+    <rect x="520" y="458" width="120" height="22" rx="11" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="1.5"/>
+    <text x="580" y="473" text-anchor="middle" font-size="11" font-weight="600" fill="#5B6B66">planned · optional</text>
+  </g>
+</svg>

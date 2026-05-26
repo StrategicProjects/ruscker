@@ -1,7 +1,15 @@
 # Roadmap
 
-Phased plan from "config parsing only" (today) to "production-ready
-ShinyProxy replacement" (~8-10 weeks of focused work).
+> **Status: Phases 0–5 shipped — `v0.1.0` is out and production-ready.**
+> Phases 6–8 below are optional and demand-driven. For the narrative,
+> up-to-date version with a timeline diagram, see the
+> [Roadmap chapter](https://strategicprojects.github.io/ruscker/roadmap.html)
+> on the docs site. The phase checklists below are the original
+> planning detail (they predate v0.1.0; treat the per-item boxes as
+> historical scope, not live status).
+
+Phased plan from "config parsing only" to "production-ready ShinyProxy
+replacement".
 
 Each phase has a clear deliverable. Skip ahead if a phase doesn't
 apply to your use case (e.g. skip phase 4 if you don't need a

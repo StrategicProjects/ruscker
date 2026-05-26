@@ -216,7 +216,7 @@ mod tests {
     async fn upsert_then_fetch_round_trip() {
         let pool = open_memory().await.unwrap();
         let key = fixed_key();
-        upsert(&pool, &key, "docker-hub", "docker.io", "milkway", "hunter2", Some("admin"))
+        upsert(&pool, &key, "docker-hub", "docker.io", "acme", "hunter2", Some("admin"))
             .await
             .unwrap();
         let pw = fetch_password(&pool, &key, "docker-hub").await.unwrap();
@@ -227,13 +227,13 @@ mod tests {
     async fn list_does_not_contain_passwords() {
         let pool = open_memory().await.unwrap();
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "milkway", "topsecret", None)
+        upsert(&pool, &key, "dh", "docker.io", "acme", "topsecret", None)
             .await
             .unwrap();
         let metas = list_all(&pool).await.unwrap();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].name, "dh");
-        assert_eq!(metas[0].username, "milkway");
+        assert_eq!(metas[0].username, "acme");
         // (No way to access the password field — CredentialMeta
         // doesn't have one. Compile-time guarantee.)
     }
@@ -242,8 +242,8 @@ mod tests {
     async fn upsert_replaces_password() {
         let pool = open_memory().await.unwrap();
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "milkway", "old", None).await.unwrap();
-        let replaced = upsert(&pool, &key, "dh", "docker.io", "milkway", "new", None).await.unwrap();
+        upsert(&pool, &key, "dh", "docker.io", "acme", "old", None).await.unwrap();
+        let replaced = upsert(&pool, &key, "dh", "docker.io", "acme", "new", None).await.unwrap();
         assert!(replaced);
         let pw = fetch_password(&pool, &key, "dh").await.unwrap().unwrap();
         assert_eq!(pw.as_str(), "new");
@@ -253,7 +253,7 @@ mod tests {
     async fn delete_then_fetch_returns_none() {
         let pool = open_memory().await.unwrap();
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "milkway", "x", None).await.unwrap();
+        upsert(&pool, &key, "dh", "docker.io", "acme", "x", None).await.unwrap();
         assert!(delete_one(&pool, "dh", None).await.unwrap());
         assert!(fetch_password(&pool, &key, "dh").await.unwrap().is_none());
     }

@@ -182,15 +182,15 @@ mod tests {
     async fn seo_fields_roundtrip() {
         let pool = open_memory().await.unwrap();
         let mut lc = LandingCustomization::default();
-        lc.seo_title = Some("Portal SEPE".into());
-        lc.seo_description = Some("Monitoramento estratégico do estado".into());
+        lc.seo_title = Some("Demo Portal".into());
+        lc.seo_description = Some("Demo portal description".into());
         lc.og_image = Some("/assets/img/og.png".into());
         update(&pool, &lc, Some("admin")).await.unwrap();
         let got = fetch(&pool).await.unwrap();
-        assert_eq!(got.seo_title.as_deref(), Some("Portal SEPE"));
+        assert_eq!(got.seo_title.as_deref(), Some("Demo Portal"));
         assert_eq!(
             got.seo_description.as_deref(),
-            Some("Monitoramento estratégico do estado")
+            Some("Demo portal description")
         );
         assert_eq!(got.og_image.as_deref(), Some("/assets/img/og.png"));
     }

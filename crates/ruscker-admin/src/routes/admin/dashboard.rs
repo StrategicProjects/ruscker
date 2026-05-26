@@ -743,7 +743,7 @@ mod tests {
             locales_all: &Locale::ALL,
             nav_section: "dashboard",
             display_name: "Aurora Prime".into(),
-            spec_id: "auroraprime".into(),
+            spec_id: "sales-dashboard".into(),
             replica_id: "11111111-2222-3333-4444-555555555555".into(),
             lines,
         };
@@ -757,7 +757,7 @@ mod tests {
             "worker process 1 started".into(),
         ]);
         assert!(html.contains("Aurora Prime"));
-        assert!(html.contains("auroraprime"));
+        assert!(html.contains("sales-dashboard"));
         assert!(html.contains("11111111-2222-3333-4444-555555555555"));
         assert!(html.contains("starting nginx"));
         assert!(html.contains("worker process 1 started"));

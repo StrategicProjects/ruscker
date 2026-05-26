@@ -97,7 +97,7 @@ A spec describes one app, API, or external link. Every spec has an
   container-lifetime: 360             # minutes — soft cap
   heartbeat-timeout: 3600000          # ms — per-spec override
   stop-on-logout: false               # auth-related
-  docker-registry-username: milkway
+  docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
   docker-registry-domain: docker.io
 ```
@@ -267,8 +267,10 @@ Free-form key-value bag. The current landing template uses:
 | Key | Type | Notes |
 |---|---|---|
 | `logo` | string | Path or URL to card image |
+| `cover` | string (CSS) | Card-cover background — a solid color or gradient. Empty ⇒ a per-kind tint |
 | `icon` | `lock` \| `lock_open` | Access level |
 | `type` | `app` \| `package` \| `talk` \| `report` \| `api` | Badge category |
+| `subject` | string | Subject/topic of the app — drives the **Subject** filter facet on the landing |
 | `updated` | string | Display date (DD/MM/YYYY) |
 | `state` | `active` \| `inactive` | Whether to enable card |
 | `link` | URL | External URL for non-container specs |

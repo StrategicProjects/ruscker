@@ -1,0 +1,55 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-proclog-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<style>
+  .proclog-pre {
+    background: var(--surface-soft, #1113);
+    border: 0.5px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--text);
+    height: 70vh;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+</style>
+
+<div class="flex items-end justify-between mb-1">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-proclog-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-proclog-subtitle") }}</p>
+  </div>
+</div>
+
+{% if !available %}
+  <p class="text-sm text-[color:var(--text-faint)] py-8 text-center">{{ self.t("admin-proclog-unavailable") }}</p>
+{% else %}
+  <pre id="proclog" class="proclog-pre">{% for line in lines %}{{ line }}
+{% endfor %}</pre>
+
+  <script>
+  (function () {
+    const box = document.getElementById('proclog');
+    const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 48;
+    box.scrollTop = box.scrollHeight; // start pinned to the newest line
+    const es = new EventSource('/admin/logs/stream');
+    es.onmessage = (e) => {
+      const stick = nearBottom();
+      // Append as text nodes — never parse log content as HTML.
+      box.appendChild(document.createTextNode(e.data + '\n'));
+      if (stick) box.scrollTop = box.scrollHeight;
+    };
+    es.onerror = () => { /* EventSource auto-reconnects */ };
+  })();
+  </script>
+{% endif %}
+
+{% endblock %}

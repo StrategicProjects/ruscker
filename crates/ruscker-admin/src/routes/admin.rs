@@ -27,6 +27,7 @@ pub mod credentials;
 pub mod dashboard;
 pub mod images;
 pub mod landing;
+pub mod logs;
 pub mod spec_form;
 pub mod specs;
 
@@ -43,6 +44,7 @@ pub fn routes() -> Router<AppState> {
         .merge(landing::routes())
         .merge(blocks::routes())
         .merge(audit::routes())
+        .merge(logs::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────

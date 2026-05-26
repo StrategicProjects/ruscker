@@ -14,6 +14,7 @@ arquivo, regras de aplicação e proporções de lockup.
 | `ruscker-mark-knockout.svg` | Versão branca para uso sobre fundos escuros |
 | `ruscker-app-icon.svg` | Ícone de app (quadrado arredondado, fundo teal 600, marca branca) |
 | `ruscker-lockup-horizontal.svg` | Marca + wordmark lado a lado — uso em headers, papelaria |
+| `ruscker-lockup-horizontal-dark.svg` | Igual, com o wordmark branco — uso sobre fundos escuros (README dark, tema escuro da doc) |
 | `ruscker-lockup-vertical.svg` | Marca acima do wordmark — uso em avatares, social, app store |
 | `ruscker-wordmark.svg` | Só o texto — uso quando o ícone seria redundante (em watermarks, footer minimalista) |
 

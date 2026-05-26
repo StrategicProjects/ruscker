@@ -8,6 +8,7 @@ src = "src"
 [output.html]
 default-theme = "rust"
 preferred-dark-theme = "ayu"
+additional-css = ["theme/ruscker.css"]
 git-repository-url = "https://github.com/StrategicProjects/ruscker"
 edit-url-template = "https://github.com/StrategicProjects/ruscker/edit/main/book/{path}"
 # Project Pages live under /ruscker/ — set so links/assets resolve there.

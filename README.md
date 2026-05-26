@@ -1,6 +1,6 @@
 <picture>
   <source media="(prefers-color-scheme: dark)"
-          srcset="crates/ruscker-admin/assets/brand/ruscker-mark-knockout.svg">
+          srcset="crates/ruscker-admin/assets/brand/ruscker-lockup-horizontal-dark.svg">
   <img src="crates/ruscker-admin/assets/brand/ruscker-lockup-horizontal.svg"
        alt="Ruscker" height="56">
 </picture>

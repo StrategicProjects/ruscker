@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::db::audit::{ActionFamily, AuditEntry, AuditFilter};
 use crate::i18n::{Locale, Locales};
@@ -48,6 +48,8 @@ struct AuditPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (always Admin here) - drives nav gating.
+    role: Role,
     entries: Vec<AuditEntry>,
     filter: AuditQuery,
     /// Distinct actors ever seen — populates the actor select.
@@ -96,7 +98,7 @@ impl<'a> AuditPage<'a> {
 }
 
 async fn index(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -140,6 +142,7 @@ async fn index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "audit",
+        role: Role::Admin,
         entries,
         filter: q,
         distinct_actors,

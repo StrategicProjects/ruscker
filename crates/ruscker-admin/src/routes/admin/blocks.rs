@@ -15,7 +15,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireAdmin, Role};
 use crate::db::landing_blocks::{self, BlockInput, LandingBlock, SLOTS};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -41,6 +41,8 @@ struct BlocksPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role - drives nav gating.
+    role: Role,
     /// Blocks grouped per slot (in `SLOTS` order) so the template can
     /// render one drag-reorder list per slot.
     groups: Vec<SlotGroup>,
@@ -59,7 +61,7 @@ impl BlocksPage<'_> {
 }
 
 async fn index(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -89,6 +91,7 @@ async fn index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "blocks",
+        role: Role::Admin,
         groups,
     })
 }
@@ -103,6 +106,8 @@ struct BlockFormPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role - drives nav gating.
+    role: Role,
     /// "new" or "edit" — drives the form action + heading.
     mode: &'static str,
     /// Empty for a new block.
@@ -122,7 +127,7 @@ impl BlockFormPage<'_> {
 }
 
 async fn new_form(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -136,6 +141,7 @@ async fn new_form(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "blocks",
+        role: Role::Admin,
         mode: "new",
         id: String::new(),
         slot: "top".into(),
@@ -148,7 +154,7 @@ async fn new_form(
 }
 
 async fn edit_form(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -171,6 +177,7 @@ async fn edit_form(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "blocks",
+        role: Role::Admin,
         mode: "edit",
         id: block.id,
         slot: block.slot,
@@ -215,7 +222,7 @@ impl BlockForm {
 }
 
 async fn create(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Form(form): Form<BlockForm>,
 ) -> Response {
@@ -232,7 +239,7 @@ async fn create(
 }
 
 async fn update(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Form(form): Form<BlockForm>,
@@ -251,7 +258,7 @@ async fn update(
 }
 
 async fn delete(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -268,7 +275,7 @@ async fn delete(
 }
 
 async fn move_block(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Path((id, dir)): Path<(String, String)>,
 ) -> Response {
@@ -300,7 +307,7 @@ struct ReorderReq {
 /// origin + the `SameSite=Strict` admin cookie cover CSRF. Returns
 /// `204` so the client keeps the DOM order it already rendered.
 async fn reorder(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     Json(req): Json<ReorderReq>,
 ) -> Response {

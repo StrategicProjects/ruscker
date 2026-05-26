@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireEditor, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -446,6 +446,8 @@ struct SpecFormPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (Editor or Admin) — drives nav gating.
+    role: Role,
     mode: FormMode,
     form: SpecForm,
     /// Pre-validation errors (Fluent keys) shown above the form.
@@ -495,7 +497,7 @@ async fn logo_filenames(state: &AppState) -> Vec<String> {
 }
 
 async fn new_form(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -506,6 +508,7 @@ async fn new_form(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "specs",
+        role: editor.role,
         mode: FormMode::New,
         form: SpecForm {
             // Sensible defaults for a new app
@@ -524,7 +527,7 @@ async fn new_form(
 }
 
 async fn edit_form(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -547,6 +550,7 @@ async fn edit_form(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "specs",
+        role: editor.role,
         mode: FormMode::Edit,
         form: SpecForm::from_spec(&spec),
         errors: Vec::new(),
@@ -556,7 +560,7 @@ async fn edit_form(
 }
 
 async fn create(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -581,7 +585,16 @@ async fn create(
     }
 
     if !errors.is_empty() {
-        return render_form_with_errors(&state, loc, theme, FormMode::New, form, errors).await;
+        return render_form_with_errors(
+            &state,
+            loc,
+            theme,
+            editor.role,
+            FormMode::New,
+            form,
+            errors,
+        )
+        .await;
     }
 
     let id = form.id.trim().to_string();
@@ -603,7 +616,7 @@ async fn create(
 }
 
 async fn update(
-    _: AdminSession,
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -621,7 +634,16 @@ async fn update(
 
     let errors = form.validate(FormMode::Edit);
     if !errors.is_empty() {
-        return render_form_with_errors(&state, loc, theme, FormMode::Edit, form, errors).await;
+        return render_form_with_errors(
+            &state,
+            loc,
+            theme,
+            editor.role,
+            FormMode::Edit,
+            form,
+            errors,
+        )
+        .await;
     }
 
     // Load the existing spec as the merge base so fields the form
@@ -653,7 +675,7 @@ async fn update(
 }
 
 async fn delete(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -673,6 +695,7 @@ async fn render_form_with_errors(
     state: &AppState,
     loc: Locale,
     theme: Theme,
+    role: Role,
     mode: FormMode,
     form: SpecForm,
     errors: Vec<&'static str>,
@@ -683,6 +706,7 @@ async fn render_form_with_errors(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "specs",
+        role,
         mode,
         form,
         errors,

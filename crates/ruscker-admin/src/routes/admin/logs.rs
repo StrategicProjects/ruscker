@@ -15,7 +15,7 @@ use axum::routing::get;
 use axum::Router;
 use futures_util::Stream;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireAdmin, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
@@ -37,6 +37,8 @@ struct LogsPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (always Admin here) - drives nav gating.
+    role: Role,
     /// Current buffered lines, oldest-first. Empty when no buffer is
     /// wired (e.g. started without the CLI's tracing layer).
     lines: Vec<String>,
@@ -51,7 +53,7 @@ impl LogsPage<'_> {
 }
 
 async fn index(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -66,6 +68,7 @@ async fn index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "logs",
+        role: Role::Admin,
         lines,
         available,
     })
@@ -75,7 +78,7 @@ async fn index(
 /// already rendered the snapshot, so we start from the live cursor and
 /// only stream what's new.
 async fn stream(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     use async_stream::stream;

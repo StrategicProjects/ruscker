@@ -19,6 +19,8 @@ Status: living document. Tracks the Phase 5 security audit
 | Asset | Why it matters |
 |-------|----------------|
 | `RUSCKER_ADMIN_TOKEN` | full admin access — create/edit specs, read audit log, stop containers |
+| `RUSCKER_EDITOR_TOKEN` | (optional) Editor role — apps + media + dashboard actions |
+| `RUSCKER_VIEWER_TOKEN` | (optional) Viewer role — dashboard read-only |
 | `RUSCKER_MASTER_KEY` | decrypts the registry-credential store |
 | `RUSCKER_COOKIE_KEY` | forges sticky-session cookies |
 | Registry credentials (DB) | pull access to private images |
@@ -41,8 +43,9 @@ Status: living document. Tracks the Phase 5 security audit
 
 - Defending against a hostile operator (they own the host +
   Docker daemon + all keys).
-- Multi-tenant isolation between admin roles (one token = full
-  admin).
+- Per-app ACLs and external identity providers (OIDC/SAML/LDAP).
+  Coarse RBAC (Viewer/Editor/Admin) exists (§2); fine-grained,
+  per-spec authorization is Phase 8.
 - TLS termination (delegated to the reverse proxy).
 
 ---
@@ -50,8 +53,10 @@ Status: living document. Tracks the Phase 5 security audit
 ## 2. Authentication & authorization
 
 - **[implemented]** Constant-time token compare —
-  `auth::AdminAuth::matches` → `ct_eq` (XOR-fold, length-checked).
-  Time depends only on the public length, not the bytes.
+  `auth::AdminAuth::role_for` → `ct_eq` (XOR-fold, length-checked).
+  Time depends only on the public length, not the bytes. The
+  candidate is compared against each configured role token
+  (most-privileged first) and resolves to the matched [`Role`].
 - **[implemented]** Login rate limiting —
   `auth::LoginRateLimiter` (global sliding window, default 10
   failures / 60 s). Saturated → `429` + `Retry-After`. Wired in
@@ -61,14 +66,23 @@ Status: living document. Tracks the Phase 5 security audit
   evaded by rotating source addresses.
 - **[implemented]** Admin cookie is `HttpOnly` + `SameSite=Strict`
   + `Secure` (under TLS, see §7) — `routes::admin::login_submit`.
-- **[accepted limitation]** The admin cookie value **is** the
-  token literal (not a signed/opaque session id). An attacker who
-  exfiltrates the cookie has the token. Mitigated by `HttpOnly`
-  (no JS access) + `Secure` + `SameSite=Strict`. A server-side
-  session store is a Phase 2.5 refinement.
-- **[accepted limitation]** No RBAC — one token = full admin.
-  Fine for a single operator; do not share the token across a
-  team.
+- **[implemented]** Opaque server-side sessions (#77) — the cookie
+  carries a random 244-bit session id (`auth::AdminSessions`), never
+  the token. Logout and server restart revoke it; a stolen cookie
+  never exposes the token.
+- **[implemented]** Role-based access control (#101) — three roles
+  with separate env tokens: `RUSCKER_ADMIN_TOKEN` (required ⇒
+  **Admin**, full access), and optional `RUSCKER_EDITOR_TOKEN`
+  (**Editor**: apps + media + dashboard incl. stop/restart) and
+  `RUSCKER_VIEWER_TOKEN` (**Viewer**: dashboard read-only). The
+  matched role rides in the session. Enforcement is **server-side**
+  via the `AdminSession` / `RequireEditor` / `RequireAdmin`
+  extractors on each route group — the permission matrix lives in
+  `Role::can_access_section` / `can_manage`, and the nav only *hides*
+  links it can't reach (UX, not the boundary). Denied → `403`. With
+  only the admin token set, behaviour is identical to the previous
+  single-token model (backward-compatible). Per-app ACLs and external
+  IdPs (OIDC/SAML/LDAP) remain Phase 8.
 - **[accepted limitation]** Login lockout can be triggered by a
   flood of bad attempts (the global limiter's trade-off). Self-
   heals within the 60 s window.
@@ -243,10 +257,16 @@ ruscker serve --bind 127.0.0.1:8080 ...
 ### Secrets (env vars — never in YAML)
 
 ```bash
-export RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32)   # 256-bit
+export RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32)   # 256-bit — Admin
 export RUSCKER_MASTER_KEY=$(openssl rand -hex 32)    # AES-256 key
 export RUSCKER_COOKIE_KEY=$(openssl rand -hex 32)    # sticky HMAC key
+# Optional extra roles (RBAC, §2) — omit for the single-admin model:
+export RUSCKER_EDITOR_TOKEN=$(openssl rand -hex 32)  # Editor: apps + media
+export RUSCKER_VIEWER_TOKEN=$(openssl rand -hex 32)  # Viewer: dashboard only
 ```
+
+Use **distinct** tokens per role; sharing one across roles resolves
+to the highest privilege.
 
 - Set `RUSCKER_COOKIE_KEY` explicitly in prod — without it the
   sticky key is randomized per process, invalidating all sessions

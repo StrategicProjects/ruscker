@@ -122,7 +122,9 @@ async fn login_submit(
         return resp;
     }
 
-    if !state.admin_auth.matches(&form.token) {
+    // Match the token against each configured role token. `None`
+    // ⇒ no token matched ⇒ failed login.
+    let Some(role) = state.admin_auth.role_for(&form.token) else {
         // Count the failure toward the rate-limit window.
         state.login_limiter.record_failure();
         // Re-render the form with the error banner. 401 status so
@@ -145,7 +147,7 @@ async fn login_submit(
         resp.headers_mut()
             .insert("X-Ruscker-Login", "failed".parse().unwrap());
         return resp;
-    }
+    };
 
     // Success — clear the failure window so a few fat-fingered
     // attempts before getting it right don't linger.
@@ -157,7 +159,8 @@ async fn login_submit(
     // — setting it unconditionally would make the browser drop the
     // cookie on the plain-HTTP dev server.
     // Store an opaque session id in the cookie — never the token.
-    let session_id = state.admin_sessions.create();
+    // The session carries the matched role.
+    let session_id = state.admin_sessions.create(role);
     let mut c = Cookie::new(COOKIE_NAME, session_id);
     c.set_path("/");
     c.set_http_only(true);
@@ -166,18 +169,50 @@ async fn login_submit(
     c.set_max_age(Duration::hours(24));
     cookies.add(c);
 
-    // Redirect to the page the operator was trying to reach,
-    // reduced to a same-origin path (no open redirect). Only
-    // honor admin paths; anything else (or the login page
-    // itself) falls back to the dashboard.
+    // Redirect to the page the operator was trying to reach, reduced
+    // to a same-origin path (no open redirect) — but only if this
+    // role can actually reach it; otherwise land on the role's home
+    // (the dashboard, which every role can see). This avoids bouncing
+    // a Viewer straight into a 403.
     let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
-    let path = super::same_origin_path(referer, "/admin/dashboard");
-    let target = if path.starts_with("/admin/") && !path.starts_with("/admin/login") {
+    let path = super::same_origin_path(referer, role.home());
+    let target = if path.starts_with("/admin/")
+        && !path.starts_with("/admin/login")
+        && role.can_access_section(section_for_admin_path(&path))
+    {
         path
     } else {
-        "/admin/dashboard".to_string()
+        role.home().to_string()
     };
     Redirect::to(&target).into_response()
+}
+
+/// Map an `/admin/...` path to the `nav_section` it belongs to, for
+/// role-gating the post-login redirect. Order matters: the per-replica
+/// logs live under `/admin/dashboard/logs`, so that prefix must be
+/// checked before the standalone daemon-log `/admin/logs`.
+fn section_for_admin_path(path: &str) -> &'static str {
+    if path.starts_with("/admin/dashboard") {
+        "dashboard"
+    } else if path.starts_with("/admin/specs") {
+        "specs"
+    } else if path.starts_with("/admin/media") {
+        "images"
+    } else if path.starts_with("/admin/credentials") {
+        "credentials"
+    } else if path.starts_with("/admin/landing") {
+        "landing"
+    } else if path.starts_with("/admin/blocks") {
+        "blocks"
+    } else if path.starts_with("/admin/audit") {
+        "audit"
+    } else if path.starts_with("/admin/logs") {
+        "logs"
+    } else {
+        // /admin root and anything unrecognised → dashboard (every
+        // role can reach it).
+        "dashboard"
+    }
 }
 
 async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Cookies) -> Redirect {

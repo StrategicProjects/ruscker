@@ -185,11 +185,16 @@ impl AdminServer {
         self
     }
 
-    /// Override the admin token (default: pulled from
+    /// Override the **admin** token (default: pulled from
     /// `RUSCKER_ADMIN_TOKEN` env var). Useful for tests that need
     /// a known token without touching the process environment.
+    ///
+    /// Only the admin token is replaced — the optional `editor` /
+    /// `viewer` tokens that [`auth::AdminAuth::from_env`] already read
+    /// stay intact, so the CLI's `--admin-token` flag (which clap also
+    /// feeds from `RUSCKER_ADMIN_TOKEN`) doesn't wipe the other roles.
     pub fn with_admin_token(mut self, token: impl Into<String>) -> Self {
-        self.state.admin_auth = auth::AdminAuth::with_token(token);
+        self.state.admin_auth.admin = Some(Arc::from(token.into()));
         self
     }
 

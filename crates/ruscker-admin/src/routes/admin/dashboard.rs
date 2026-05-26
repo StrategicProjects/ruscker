@@ -35,7 +35,7 @@ use ruscker_core::{Replica, ReplicaId, ReplicaState};
 use std::convert::Infallible;
 use std::time::Duration;
 
-use crate::auth::AdminSession;
+use crate::auth::{AdminSession, RequireEditor, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
@@ -137,6 +137,9 @@ struct DashboardPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role — drives nav gating and whether the
+    /// per-replica stop/restart action buttons render.
+    role: Role,
     /// Inline copy of `DashboardSnapshot` fields. Could be a
     /// nested `snapshot:` field but askama doesn't auto-flatten
     /// and rewriting all `{{ foo }}` to `{{ snapshot.foo }}`
@@ -170,6 +173,8 @@ struct LogsPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role — drives nav gating.
+    role: Role,
     /// Display name resolved from the spec config (or spec_id
     /// fallback) for the page heading.
     display_name: String,
@@ -214,7 +219,7 @@ fn state_label_key(s: ReplicaState) -> &'static str {
 }
 
 async fn index(
-    _: AdminSession,
+    session: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -227,6 +232,7 @@ async fn index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "dashboard",
+        role: session.role,
         backend_connected: snap.backend_connected,
         total_containers: snap.total_containers,
         total_sessions: snap.total_sessions,
@@ -401,7 +407,7 @@ async fn events(
 /// that no longer maps to a container → the backend returns an
 /// error which we surface as 404.
 async fn logs(
-    _: AdminSession,
+    session: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -464,6 +470,7 @@ async fn logs(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "dashboard",
+        role: session.role,
         display_name,
         spec_id,
         replica_id,
@@ -527,7 +534,7 @@ fn parse_replica_id(s: &str) -> Result<ReplicaId, Response> {
 /// Redirects back to the dashboard so the browser lands on a
 /// fresh render.
 async fn stop_replica(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -556,7 +563,7 @@ async fn stop_replica(
 /// respawn ~one tick later), restart brings capacity back
 /// right away.
 async fn restart_replica(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -717,6 +724,7 @@ mod tests {
             locales: &locales,
             locales_all: &Locale::ALL,
             nav_section: "dashboard",
+            role: Role::Admin,
             backend_connected,
             total_containers: rows.len(),
             total_sessions: rows.iter().map(|r| r.sessions_active).sum(),
@@ -742,6 +750,7 @@ mod tests {
             locales: &locales,
             locales_all: &Locale::ALL,
             nav_section: "dashboard",
+            role: Role::Admin,
             display_name: "Aurora Prime".into(),
             spec_id: "sales-dashboard".into(),
             replica_id: "11111111-2222-3333-4444-555555555555".into(),

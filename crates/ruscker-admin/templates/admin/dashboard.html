@@ -165,7 +165,8 @@
            data-stop-label="{{ self.t("admin-dashboard-action-stop") }}"
            data-restart-label="{{ self.t("admin-dashboard-action-restart") }}"
            data-confirm-stop="{{ self.t("admin-dashboard-confirm-stop") }}"
-           data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}">
+           data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}"
+           data-can-manage="{% if role.can_manage() %}1{% endif %}">
       {% for row in rows %}
         <tr data-replica-id="{{ row.replica_id }}">
           <td><span class="dash-dot {{ row.state_dot }}"></span></td>
@@ -192,6 +193,9 @@
           <td style="white-space: nowrap;">
             <a href="/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
                class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
+            {# stop/restart are operational actions — Editor and Admin
+               only (matched by the RequireEditor route guard). #}
+            {% if role.can_manage() %}
             <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/restart"
                   style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
               <button type="submit" class="dash-action" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh"></i></button>
@@ -200,6 +204,7 @@
                   style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
               <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop"></i></button>
             </form>
+            {% endif %}
           </td>
         </tr>
       {% endfor %}
@@ -221,6 +226,10 @@
   var restartLabel = ds.restartLabel || 'Restart';
   var confirmStop = ds.confirmStop || 'Stop this replica?';
   var confirmRestart = ds.confirmRestart || 'Restart this replica?';
+  // Only Editor/Admin sessions get the stop/restart action buttons.
+  // The server route guard enforces it regardless; this keeps the
+  // SSE-patched rows consistent with the initial server render.
+  var canManage = !!ds.canManage;
 
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
@@ -240,6 +249,15 @@
     var mem = row.memory_display !== null && row.memory_display !== undefined
       ? escapeHtml(row.memory_display)
       : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
+    var actions = !canManage ? '' : ''
+      + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+        + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
+        + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
+      + '</form>'
+      + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+        + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
+        + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
+      + '</form>';
     return ''
       + '<td><span class="dash-dot ' + escapeHtml(row.state_dot) + '"></span></td>'
       + '<td>'
@@ -256,14 +274,7 @@
         + '<a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
           + '" title="' + escapeHtml(logsTitle)
           + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
-        + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
-          + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
-          + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
-        + '</form>'
-        + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
-          + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
-          + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
-        + '</form>'
+        + actions
       + '</td>';
   }
 

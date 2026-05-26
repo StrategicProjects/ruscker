@@ -22,7 +22,7 @@ use ruscker_config::LandingCustomization;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::auth::AdminSession;
+use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -40,6 +40,8 @@ struct LandingPage<'a> {
     locales: &'a Locales,
     locales_all: &'static [Locale],
     nav_section: &'static str,
+    /// Current session role (always Admin here) - drives nav gating.
+    role: Role,
     form: LandingForm,
     flash_saved: bool,
     flash_error: Option<String>,
@@ -138,7 +140,7 @@ fn empty_to_none(s: String) -> Option<String> {
 }
 
 async fn index(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -147,7 +149,7 @@ async fn index(
 }
 
 async fn save(
-    _: AdminSession,
+    _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -201,6 +203,7 @@ async fn render(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "landing",
+        role: Role::Admin,
         form,
         flash_saved,
         flash_error,

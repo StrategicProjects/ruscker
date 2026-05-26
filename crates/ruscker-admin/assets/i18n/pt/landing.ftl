@@ -66,6 +66,10 @@ admin-blocks-cancel = Cancelar
 admin-nav-audit = Auditoria
 admin-nav-portal = Voltar ao portal
 admin-nav-logout = Sair
+role-current = Seu nível de acesso
+role-viewer = Visualizador
+role-editor = Editor
+role-admin = Administrador
 
 # Admin dashboard
 admin-dashboard-title = Painel de monitoramento

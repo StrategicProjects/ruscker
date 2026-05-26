@@ -20,6 +20,7 @@ on:
 permissions:
   contents: write # create the release + upload assets
   packages: write # push the image to ghcr.io
+  id-token: write # cosign keyless (OIDC) signing of artifacts + image
 
 jobs:
   # --------------------------------------------------------------------
@@ -230,6 +231,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push the manifest list
+        id: manifest
         working-directory: /tmp/digests
         run: |
           image="${{ needs.meta.outputs.image }}"
@@ -242,6 +244,21 @@ jobs:
           docker buildx imagetools create "${tags[@]}" \
             $(printf "${image}@sha256:%s " *)
           docker buildx imagetools inspect "${image}:${v}"
+          # Capture the manifest-list digest so cosign signs the exact
+          # image by digest (signing by tag is discouraged).
+          digest=$(docker buildx imagetools inspect "${image}:${v}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image (keyless)
+        env:
+          COSIGN_YES: "true"
+        run: |
+          image="${{ needs.meta.outputs.image }}"
+          cosign sign "${image}@${{ steps.manifest.outputs.digest }}"
 
   # --------------------------------------------------------------------
   # Publish the GitHub Release with the tarballs + .debs + checksums.
@@ -259,6 +276,25 @@ jobs:
 
       - name: List assets
         run: ls -la dist
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign release blobs (keyless)
+        working-directory: dist
+        env:
+          COSIGN_YES: "true"
+        run: |
+          # Sign every shipped artifact (tarballs + .debs). Each gets a
+          # detached `.sig` + signing-cert `.pem` alongside its `.sha256`.
+          for f in *.tar.gz *.deb; do
+            [ -e "$f" ] || continue
+            cosign sign-blob \
+              --output-signature "$f.sig" \
+              --output-certificate "$f.pem" \
+              "$f"
+          done
+          ls -la
 
       - name: Create GitHub Release
         env:
@@ -279,6 +315,29 @@ jobs:
           \`.tar.gz\` files are static musl binaries; the \`.deb\` files
           install on Debian/Ubuntu via \`apt install ./ruscker_*.deb\`.
           Each asset ships a matching \`.sha256\`.
+
+          ## Verifying signatures (cosign, keyless)
+
+          All artifacts are signed with [cosign](https://docs.sigstore.dev/)
+          via GitHub Actions OIDC — no keys to distribute.
+
+          Container image:
+
+          \`\`\`
+          cosign verify ${image}:${v} \\
+            --certificate-identity-regexp '^https://github.com/${GITHUB_REPOSITORY}/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
+
+          A release asset (\`.sig\` + \`.pem\` are attached next to each file):
+
+          \`\`\`
+          cosign verify-blob ruscker-linux-amd64.tar.gz \\
+            --signature ruscker-linux-amd64.tar.gz.sig \\
+            --certificate ruscker-linux-amd64.tar.gz.pem \\
+            --certificate-identity-regexp '^https://github.com/${GITHUB_REPOSITORY}/' \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          \`\`\`
           EOF
           # --repo targets the API directly: this job has no checkout,
           # so gh can't infer the repo from a local git remote.

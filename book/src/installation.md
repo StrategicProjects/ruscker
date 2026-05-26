@@ -66,6 +66,29 @@ cargo build --release --bin ruscker
 ./target/release/ruscker --help
 ```
 
+## Verifying release artifacts
+
+Every tagged release is signed with [cosign](https://docs.sigstore.dev/)
+using GitHub Actions OIDC (keyless — no public key to fetch). Each
+asset ships a `.sha256` plus a `.sig` + `.pem` (signing certificate);
+the container image is signed by digest.
+
+```sh
+# Container image
+cosign verify ghcr.io/strategicprojects/ruscker:<version> \
+  --certificate-identity-regexp '^https://github.com/StrategicProjects/ruscker/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# A downloaded asset
+cosign verify-blob ruscker-linux-amd64.tar.gz \
+  --signature ruscker-linux-amd64.tar.gz.sig \
+  --certificate ruscker-linux-amd64.tar.gz.pem \
+  --certificate-identity-regexp '^https://github.com/StrategicProjects/ruscker/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+The exact commands are also printed in each release's notes.
+
 ## The `serve` command
 
 ```text

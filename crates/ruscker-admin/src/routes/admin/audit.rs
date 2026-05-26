@@ -31,7 +31,7 @@ pub struct AuditQuery {
     /// "spec" | "image" | "credential" | "landing" | "" (all)
     #[serde(default)]
     pub family: String,
-    /// Substring match against target (`spec:auroraprime`,
+    /// Substring match against target (`spec:sales-dashboard`,
     /// `image:abc-123`, …).
     #[serde(default)]
     pub target: String,

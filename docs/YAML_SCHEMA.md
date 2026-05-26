@@ -63,7 +63,7 @@ parser (so existing YAML doesn't fail) but Ruscker will warn at boot
 that auth is unimplemented and continue as if `none`. Phase 8 adds
 real auth support.
 
-For applications that handle their own auth internally (the SEPE
+For applications that handle their own auth internally (a common
 case), `none` is the correct choice — Ruscker just routes traffic.
 
 ## Specs

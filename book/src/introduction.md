@@ -37,16 +37,14 @@ proper admin panel, a monitoring dashboard, and load balancing.
 
 ## In production
 
-Ruscker runs in production today, migrated side-by-side with an existing
-ShinyProxy (kept reachable at `/sp/` for an apples-to-apples comparison).
-On the same machine, serving the same apps, the idle footprint dropped
-from:
+Ruscker runs in production today. Where the JVM-based stack it replaced
+idled at hundreds of megabytes, Ruscker idles in the low tens:
 
-> **540 MB (ShinyProxy / JVM) → ~16 MB (Ruscker)** — roughly a 30×
-> reduction.
+> **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
+> serving the same apps.
 
-A real 31-spec ShinyProxy 3.2.0 config parsed with **no unsupported
-features**, and apps spawn on demand.
+A real 31-spec config migrated with **no unsupported features**, and
+apps spawn on demand.
 
 ## What's in the box
 
@@ -66,6 +64,8 @@ features**, and apps spawn on demand.
 
 ## Where to next
 
+- [What Ruscker can serve](./use-cases.md) — Shiny, Streamlit, Dash,
+  FastAPI, JupyterLab, LLM UIs, BI tools, and more.
 - [Installation](./installation.md) — Docker or the `.deb`.
 - [Migrating from ShinyProxy](./migrating.md) — point Ruscker at your
   existing `application.yml`.

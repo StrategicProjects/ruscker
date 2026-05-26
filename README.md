@@ -41,14 +41,44 @@ Ruscker keeps ShinyProxy's `application.yml` schema (so migration is
 friction-free) and adds a real admin panel, a live monitoring
 dashboard, and load balancing on top.
 
+|                        | ShinyProxy   | Shiny Server Free | **Ruscker**          |
+|------------------------|--------------|-------------------|----------------------|
+| Runtime                | JVM          | R process         | single Rust binary   |
+| Idle memory            | 300–500 MB   | —                 | **~16 MB**           |
+| Dependencies           | JVM          | R                 | none (static binary) |
+| Web admin panel        | ✗            | ✗                 | ✓                    |
+| Live monitoring dashboard | ✗         | ✗                 | ✓                    |
+| Session isolation      | ✓            | ✗                 | ✓                    |
+| Auto-scaling           | manual       | ✗                 | automatic            |
+| Native HTTP APIs       | limited      | ✗                 | ✓ (Plumber/FastAPI)  |
+| ShinyProxy YAML        | —            | —                 | 100% compatible      |
+
+## What it can serve
+
+Ruscker runs **one container per session** for stateful apps and **one
+per replica** for stateless APIs — so anything that runs in a container
+and speaks HTTP or WebSocket fits, not just Shiny:
+
+- **Interactive apps** — Shiny, Streamlit, Dash, Gradio, Panel, Voilà,
+  Marimo, Pluto.jl.
+- **APIs & model serving** — Plumber/Plumber2, FastAPI, Flask, plus
+  BentoML, MLflow, vLLM, Ollama, Text Generation Inference.
+- **Notebooks & IDEs** — JupyterLab, RStudio Server, `code-server`.
+- **BI & GenAI UIs** — Superset, Metabase, Datasette, Stable Diffusion
+  WebUI, Open WebUI.
+
+The full catalogue (with the "works-with-caveats" and "not the right
+tool" cases) is in
+[**What Ruscker can serve**](https://strategicprojects.github.io/ruscker/use-cases.html).
+
 ## Status
 
-**Production-ready and running in production.** Migrated side-by-side
-with an existing ShinyProxy (kept reachable at `/sp/` for comparison),
-on the same machine serving the same apps, the idle footprint dropped:
+**Production-ready and running in production.** Where the JVM-based
+stack it replaced idled at hundreds of megabytes, Ruscker idles in the
+low tens:
 
-> **540 MB (ShinyProxy / JVM) → ~16 MB (Ruscker)** — roughly a 30×
-> reduction. A real 31-spec ShinyProxy 3.2.0 config parsed with **no
+> **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
+> serving the same apps. A real 31-spec config migrated with **no
 > unsupported features**, and apps spawn on demand.
 
 What's in the box:

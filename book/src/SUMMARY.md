@@ -1,6 +1,7 @@
 # Summary
 
 [Introduction](./introduction.md)
+[What Ruscker can serve](./use-cases.md)
 
 # User guide
 

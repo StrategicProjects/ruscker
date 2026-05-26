@@ -60,6 +60,9 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
                 og_image,
                 analytics_html,
                 analytics_origins,
+                // Blocks live in their own table; callers that render
+                // or export them load via `landing_blocks`.
+                blocks: Vec::new(),
             })
         }
     }
@@ -75,11 +78,34 @@ pub async fn update(
     actor: Option<&str>,
 ) -> Result<()> {
     let now = Utc::now();
+    let mut tx = pool.begin().await.context("begin landing update tx")?;
+    update_in_tx(&mut tx, lc, now).await?;
+
+    sqlx::query(
+        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+         VALUES (?, 'landing.update', 'landing:customization', NULL, ?)",
+    )
+    .bind(actor)
+    .bind(now)
+    .execute(&mut *tx)
+    .await
+    .context("audit landing.update")?;
+
+    tx.commit().await.context("commit landing update")?;
+    Ok(())
+}
+
+/// Write the singleton's columns inside an existing transaction
+/// (shared by [`update`] and the YAML import). Empty strings collapse
+/// to NULL so they vanish from the exported YAML rather than
+/// serializing as `""`.
+pub(crate) async fn update_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    lc: &LandingCustomization,
+    now: chrono::DateTime<Utc>,
+) -> Result<()> {
     let intro_locales_json =
         serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
-
-    let mut tx = pool.begin().await.context("begin landing update tx")?;
-
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = ?, header_fg = ?, intro = ?,
@@ -98,21 +124,9 @@ pub async fn update(
     .bind(none_if_empty(&lc.analytics_html))
     .bind(none_if_empty(&lc.analytics_origins))
     .bind(now)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await
     .context("update landing_customization")?;
-
-    sqlx::query(
-        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-         VALUES (?, 'landing.update', 'landing:customization', NULL, ?)",
-    )
-    .bind(actor)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .context("audit landing.update")?;
-
-    tx.commit().await.context("commit landing update")?;
     Ok(())
 }
 

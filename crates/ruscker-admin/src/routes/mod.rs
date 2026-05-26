@@ -4,6 +4,7 @@ pub mod admin;
 pub mod assets;
 pub mod health;
 pub mod landing;
+pub mod metrics;
 pub mod prefs;
 pub mod proxy;
 pub mod rewrite;

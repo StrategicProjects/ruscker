@@ -431,6 +431,10 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
     // outer level.
     own.merge(routes::proxy::routes())
         .merge(routes::health::routes())
+        // `/metrics` (opt-in via proxy.metrics-enabled) is likewise
+        // unauthenticated and outside `security_headers` — it serves
+        // Prometheus text for a scraper, not HTML for a browser.
+        .merge(routes::metrics::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

@@ -515,6 +515,26 @@ fn format_warning(w: &Warning) -> String {
                  (expected a size like `10m`, `1g`, or plain bytes) — no limit will be applied"
             )
         }
+        Warning::InvalidCpuLimit {
+            spec_id,
+            field,
+            value,
+        } => {
+            format!(
+                "spec {spec_id} has an invalid container-cpu-{field} `{value}` \
+                 (expected a positive number of CPUs, e.g. `0.5`) — no CPU limit will be applied"
+            )
+        }
+        Warning::InvalidMemoryLimit {
+            spec_id,
+            field,
+            value,
+        } => {
+            format!(
+                "spec {spec_id} has an invalid container-memory-{field} `{value}` \
+                 (expected a size like `512m`, `1.5g`, or plain bytes) — no memory limit will be applied"
+            )
+        }
     }
 }
 

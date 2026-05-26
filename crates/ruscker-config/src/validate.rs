@@ -99,6 +99,25 @@ pub enum Warning {
         location: String,
         value: String,
     },
+    /// `container-cpu-limit` / `container-cpu-request` is set but isn't
+    /// a positive, finite number of CPUs (e.g. `0,5` with a comma, `-1`,
+    /// `abc`). The backend applies *no* CPU limit in that case, so the
+    /// intended cap silently isn't enforced. `field` is the offending
+    /// key (`limit`/`request`).
+    InvalidCpuLimit {
+        spec_id: String,
+        field: String,
+        value: String,
+    },
+    /// `container-memory-limit` / `container-memory-request` is set but
+    /// doesn't parse as a Docker-style size (`"512m"`, `"1.5g"`, plain
+    /// bytes) — e.g. the `"512mb"` typo. The backend applies *no* memory
+    /// cap, the opposite of intent.
+    InvalidMemoryLimit {
+        spec_id: String,
+        field: String,
+        value: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -396,6 +415,49 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             });
         }
     }
+
+    // CPU limit/request set but not a positive, finite number of CPUs →
+    // the backend applies no CPU cap, so the intended limit silently
+    // does nothing.
+    for (field, val) in [
+        ("limit", spec.container_cpu_limit),
+        ("request", spec.container_cpu_request),
+    ] {
+        if let Some(v) = val {
+            if !(v.is_finite() && v > 0.0) {
+                warnings.push(Warning::InvalidCpuLimit {
+                    spec_id: spec.id.clone(),
+                    field: field.to_string(),
+                    value: v.to_string(),
+                });
+            }
+        }
+    }
+
+    // Memory limit/request set but unparseable (e.g. the `512mb` typo) →
+    // no memory cap applied, the opposite of intent.
+    for (field, raw, parsed) in [
+        (
+            "limit",
+            &spec.container_memory_limit,
+            spec.effective_memory_limit_bytes(),
+        ),
+        (
+            "request",
+            &spec.container_memory_request,
+            spec.effective_memory_request_bytes(),
+        ),
+    ] {
+        if let Some(s) = raw {
+            if parsed.is_none() {
+                warnings.push(Warning::InvalidMemoryLimit {
+                    spec_id: spec.id.clone(),
+                    field: field.to_string(),
+                    value: s.clone(),
+                });
+            }
+        }
+    }
 }
 
 fn collect_stats(config: &Config) -> Stats {
@@ -548,6 +610,70 @@ proxy:
                     if location == "api1" && value == "500frogs"
             )),
             "expected spec InvalidMaxBodySize, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn flags_malformed_memory_limit() {
+        // `512mb` is the classic typo — only `512m` is valid.
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      container-memory-limit: "512mb"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidMemoryLimit { spec_id, field, value }
+                    if spec_id == "app1" && field == "limit" && value == "512mb"
+            )),
+            "expected InvalidMemoryLimit, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn flags_nonpositive_cpu_limit() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      container-cpu-limit: -1
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidCpuLimit { spec_id, field, .. }
+                    if spec_id == "app1" && field == "limit"
+            )),
+            "expected InvalidCpuLimit, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn accepts_valid_cpu_and_memory_limits() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      container-cpu-limit: 0.5
+      container-memory-limit: "512m"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            !report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::InvalidCpuLimit { .. } | Warning::InvalidMemoryLimit { .. }
+            )),
+            "valid cpu/memory should not warn, got {:?}",
             report.warnings
         );
     }

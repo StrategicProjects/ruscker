@@ -38,8 +38,8 @@ use http_body_util::BodyExt;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use ruscker_config::{Spec, SpecKind};
-use ruscker_core::Replica;
+use ruscker_config::{RoutingStrategy, Spec, SpecKind};
+use ruscker_core::{Replica, ReplicaState};
 use ruscker_proxy::sticky::{self, CookieKey, StickySession, COOKIE_NAME};
 use ruscker_proxy::ws;
 use std::net::SocketAddr;
@@ -478,8 +478,15 @@ async fn resolve_replica(
                     .iter()
                     .find(|r| r.id == session.replica_id)
                     .cloned();
+                // Keep the session pinned to its replica while that
+                // replica can still serve it: `Ready`, or `Draining`
+                // (let an in-flight session finish during shutdown). A
+                // Failed/Stopped/Starting one falls through to a fresh
+                // pick + new session rather than 502-ing the visitor.
                 if let Some(r) = alive {
-                    return Ok((r, session.session_id, true));
+                    if matches!(r.state, ReplicaState::Ready | ReplicaState::Draining) {
+                        return Ok((r, session.session_id, true));
+                    }
                 }
             }
         }
@@ -538,13 +545,16 @@ fn set_sticky_cookie(
 /// dozen bytes per spec and `Mutex<()>` has no payload to
 /// matter. Phase 4 GC sweeps them when a spec is deleted.
 async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica> {
-    // Fast path: read lock, no spawn coordination needed.
+    let routing = spec.effective_routing();
+
+    // Fast path: read lock, no spawn coordination needed. Route to a
+    // replica that's actually `Ready` (preferably with a free seat) per
+    // the spec's strategy; only fall through to spawn when none is
+    // usable — never hand traffic to a Starting/Draining/Failed one.
     {
         let reg = state.replicas.read().await;
-        let replicas = reg.replicas_of(&spec.id);
-        if !replicas.is_empty() {
-            let idx = pick_index(replicas.len());
-            return Ok(replicas[idx].clone());
+        if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing) {
+            return Ok(r);
         }
     }
 
@@ -565,9 +575,14 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     {
         let reg = state.replicas.read().await;
         let replicas = reg.replicas_of(&spec.id);
-        if !replicas.is_empty() {
-            let idx = pick_index(replicas.len());
-            return Ok(replicas[idx].clone());
+        if let Some(r) = pick_replica(replicas, routing) {
+            return Ok(r);
+        }
+        // A sibling may have spawned one that's still coming up (not yet
+        // `Ready`): reuse it rather than spawning a duplicate — that's
+        // the whole point of the coalescer.
+        if let Some(r) = replicas.first() {
+            return Ok(r.clone());
         }
     }
 
@@ -725,6 +740,46 @@ fn pick_index(n: usize) -> usize {
     N.fetch_add(1, Ordering::Relaxed) % n
 }
 
+/// Choose a replica to route a (non-sticky) request to, honoring the
+/// spec's [`RoutingStrategy`] and the replicas' state/capacity.
+///
+/// Preference order: a `Ready` replica with a free seat (per strategy);
+/// failing that, any `Ready` replica (soft over-subscription — still
+/// serves, better than a 503 or routing to a non-`Ready` container; the
+/// scaler adds real capacity on sustained saturation). Returns `None`
+/// only when no `Ready` replica exists, so the caller spawns.
+fn pick_replica(replicas: &[Replica], routing: RoutingStrategy) -> Option<Replica> {
+    select(replicas.iter().filter(|r| r.is_accepting()), routing).or_else(|| {
+        select(
+            replicas.iter().filter(|r| r.state == ReplicaState::Ready),
+            routing,
+        )
+    })
+}
+
+/// Pick one replica from `candidates` per `routing`. Round-robin spreads
+/// across the candidates; least-connections (and, for now, weighted-
+/// random) favor the replica with the most free seats.
+fn select<'a>(
+    candidates: impl Iterator<Item = &'a Replica>,
+    routing: RoutingStrategy,
+) -> Option<Replica> {
+    let cands: Vec<&Replica> = candidates.collect();
+    if cands.is_empty() {
+        return None;
+    }
+    let chosen = match routing {
+        RoutingStrategy::RoundRobin => cands[pick_index(cands.len())],
+        RoutingStrategy::LeastConnections
+        | RoutingStrategy::WeightedRandom
+        | RoutingStrategy::ResourceAware => {
+            // Most free seats wins; ties break on the first seen.
+            cands.iter().copied().max_by_key(|r| r.available_seats())?
+        }
+    };
+    Some(chosen.clone())
+}
+
 async fn do_forward(
     replica: &Replica,
     upstream_path: String,
@@ -817,6 +872,79 @@ mod tests {
         assert_eq!((b + 3 - a) % 3, 1);
         assert_eq!((c + 3 - b) % 3, 1);
         assert_eq!((d + 3 - c) % 3, 1);
+    }
+
+    // ── pick_replica: state- and seat-aware routing (#76) ───────
+    fn rep(state: ReplicaState, active: u32, max: u32) -> Replica {
+        Replica {
+            id: ruscker_core::ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "s".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse().unwrap(),
+            state,
+            started_at: chrono::Utc::now(),
+            sessions_active: active,
+            sessions_max: max,
+        }
+    }
+
+    #[test]
+    fn pick_replica_prefers_ready_with_a_free_seat() {
+        let reps = vec![
+            rep(ReplicaState::Starting, 0, 5), // not ready
+            rep(ReplicaState::Ready, 5, 5),    // ready but full
+            rep(ReplicaState::Ready, 1, 5),    // ready, has seats ✓
+        ];
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        assert_eq!(chosen.sessions_active, 1);
+    }
+
+    #[test]
+    fn pick_replica_least_connections_picks_most_free() {
+        let reps = vec![
+            rep(ReplicaState::Ready, 3, 10), // 7 free
+            rep(ReplicaState::Ready, 1, 10), // 9 free ✓
+            rep(ReplicaState::Ready, 8, 10), // 2 free
+        ];
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        assert_eq!(chosen.sessions_active, 1);
+    }
+
+    #[test]
+    fn pick_replica_never_routes_to_a_lone_non_ready_replica() {
+        for st in [
+            ReplicaState::Starting,
+            ReplicaState::Draining,
+            ReplicaState::Failed,
+            ReplicaState::Stopped,
+        ] {
+            let reps = vec![rep(st, 0, 5)];
+            assert!(
+                pick_replica(&reps, RoutingStrategy::LeastConnections).is_none(),
+                "must not route a new session to {st:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pick_replica_oversubscribes_a_ready_replica_when_all_full() {
+        // All Ready but saturated → still serve via a Ready replica
+        // (not None, not the Starting one).
+        let reps = vec![
+            rep(ReplicaState::Ready, 5, 5),
+            rep(ReplicaState::Starting, 0, 5),
+        ];
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        assert_eq!(chosen.state, ReplicaState::Ready);
+    }
+
+    #[test]
+    fn pick_replica_none_when_no_ready_replica() {
+        let reps = vec![
+            rep(ReplicaState::Starting, 0, 5),
+            rep(ReplicaState::Draining, 0, 5),
+        ];
+        assert!(pick_replica(&reps, RoutingStrategy::RoundRobin).is_none());
     }
 
     // -------------------------------------------------------------

@@ -11,6 +11,9 @@ Free**. Serves and load-balances containerized interactive web apps
 FastAPI) behind a single proxy, with a custom landing page and an
 admin panel.
 
+📖 **Documentation: <https://strategicprojects.github.io/ruscker/>**
+(install · migrating from ShinyProxy · configuration · admin · deploy).
+
 ```
                 ┌──────────────────────┐
                 │       Visitors       │

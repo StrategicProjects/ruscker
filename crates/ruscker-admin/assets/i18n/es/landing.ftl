@@ -367,3 +367,5 @@ spec-help-concurrent = Solicitudes que atiende una réplica de API antes de que 
 spec-help-cpu-limit = CPU máxima en núcleos fraccionarios (p. ej. 0,5 = medio núcleo). Vacío = ilimitado.
 spec-help-memory-limit = Memoria máxima, p. ej. 512m o 1.5g. Vacío = ilimitado.
 spec-help-heartbeat = Tiempo de sesión inactiva en milisegundos; -1 nunca expira. Vacío = usa el valor global.
+admin-blocks-slot-empty = Aún no hay bloques en este slot.
+admin-blocks-drag-hint = Arrastra desde el asa para reordenar los bloques dentro del slot.

@@ -333,6 +333,47 @@ pub async fn move_block(
     Ok(true)
 }
 
+/// Rewrite the `position` of every block in `slot` to match the order
+/// of `ids` (drag-and-drop reorder). Ids that don't belong to `slot`
+/// are ignored, so a tampered payload can't move blocks across slots.
+/// Returns `false` for an unknown slot.
+pub async fn reorder(
+    pool: &SqlitePool,
+    slot: &str,
+    ids: &[String],
+    actor: Option<&str>,
+) -> Result<bool> {
+    if !SLOTS.contains(&slot) {
+        return Ok(false);
+    }
+    let now = Utc::now();
+    let mut tx = pool.begin().await.context("begin block reorder tx")?;
+
+    // Assign 0..N in submitted order; only rows actually in this slot
+    // advance the counter, so positions stay dense and slot-scoped.
+    let mut pos: i64 = 0;
+    for id in ids {
+        let res = sqlx::query(
+            "UPDATE landing_blocks SET position = ?, updated_at = ?
+               WHERE id = ? AND slot = ?",
+        )
+        .bind(pos)
+        .bind(now)
+        .bind(id)
+        .bind(slot)
+        .execute(&mut *tx)
+        .await
+        .context("reorder block")?;
+        if res.rows_affected() > 0 {
+            pos += 1;
+        }
+    }
+
+    audit(&mut tx, actor, "landing_block.reorder", slot, now).await?;
+    tx.commit().await.context("commit block reorder")?;
+    Ok(true)
+}
+
 async fn audit(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     actor: Option<&str>,

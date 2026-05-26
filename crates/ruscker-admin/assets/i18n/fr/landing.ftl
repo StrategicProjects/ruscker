@@ -367,3 +367,5 @@ spec-help-concurrent = Requêtes qu'une réplica d'API gère avant que le scaler
 spec-help-cpu-limit = CPU max en cœurs fractionnaires (ex. 0,5 = un demi-cœur). Vide = illimité.
 spec-help-memory-limit = Mémoire max, ex. 512m ou 1.5g. Vide = illimité.
 spec-help-heartbeat = Délai de session inactive en millisecondes ; -1 = jamais. Vide = valeur globale.
+admin-blocks-slot-empty = Aucun bloc dans cet emplacement.
+admin-blocks-drag-hint = Glissez par la poignée pour réordonner les blocs dans un emplacement.

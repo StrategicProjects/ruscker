@@ -73,9 +73,12 @@ tool" cases) is in
 
 ## Status
 
-**Production-ready and running in production.** Where the JVM-based
+**v0.1.0 — production-ready and running in production.** Releases are
+multi-arch (amd64 + arm64) and [cosign-signed]. Where the JVM-based
 stack it replaced idled at hundreds of megabytes, Ruscker idles in the
 low tens:
+
+[cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
 
 > **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
 > serving the same apps. A real 31-spec config migrated with **no
@@ -92,16 +95,20 @@ What's in the box:
   form, including API/scaling/resource/lifecycle settings, with inline
   help), image/media library, encrypted credentials store, a
   landing-page editor (colors, intros, SEO, social meta, analytics,
-  custom HTML blocks), an audit log, and a live SSE dashboard
-  (CPU/memory, logs, stop/restart).
+  custom HTML blocks), an audit log, **user accounts with Viewer /
+  Editor / Admin roles**, and a live SSE dashboard (CPU/memory
+  sparklines, live-follow logs, stop/restart).
 - **Operations** — `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
-  body-size limits, `validate --strict-compat` migration pre-flight.
+  body-size limits, an opt-in Prometheus `/metrics` endpoint, and
+  `validate --strict-compat` migration pre-flight.
 - **Distribution** — a multi-arch Docker image, a Debian package with a
-  hardened `systemd` unit, and static musl tarballs.
+  hardened `systemd` unit, static musl tarballs, a Homebrew tap, and
+  cosign-signed release artifacts.
 
-200+ unit + integration tests run green on `cargo test` (no Docker
-required); an extra suite exercises a real Docker daemon.
+300+ unit + integration tests run green on `cargo test` (no Docker
+required); extra feature-gated suites exercise a real Docker daemon
+(`docker-it`) and a full proxy + WebSocket end-to-end run (`e2e`).
 
 ## Install
 
@@ -118,6 +125,14 @@ Picks the right artifact from the latest release: the `.deb` (with the
 `systemd` unit + an auto-generated admin token) on Debian/Ubuntu, or the
 static binary into `/usr/local/bin` elsewhere. Pin a version or target
 dir with `./install.sh v0.1.0` or `PREFIX=~/.local/bin ./install.sh`.
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew install strategicprojects/tap/ruscker
+```
+
+Linux pulls the prebuilt musl binary; macOS builds from source.
 
 ### Docker
 
@@ -235,8 +250,9 @@ how to extend it.
 
 ```bash
 cargo build
-cargo test                                   # ~200 tests, no Docker needed
+cargo test                                   # 300+ tests, no Docker needed
 cargo test -p ruscker-docker --features docker-it   # + real Docker daemon
+cargo test -p ruscker-cli --features e2e            # + full proxy/WS e2e
 cargo fmt && cargo clippy --all-targets
 ./scripts/i18n-check.sh                      # enforce locale key parity
 ```

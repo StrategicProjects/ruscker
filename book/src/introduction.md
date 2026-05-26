@@ -37,39 +37,45 @@ proper admin panel, a monitoring dashboard, and load balancing.
 
 ## In production
 
-Ruscker runs in production today. Where the JVM-based stack it replaced
-idled at hundreds of megabytes, Ruscker idles in the low tens:
+Ruscker shipped **v0.1.0** and runs in production today. Where the
+JVM-based stack it replaced idled at hundreds of megabytes, Ruscker
+idles in the low tens:
 
 > **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
 > serving the same apps.
 
 A real 31-spec config migrated with **no unsupported features**, and
-apps spawn on demand.
+apps spawn on demand. Releases are multi-arch and **cosign-signed**;
+the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
 
 ## What's in the box
 
 - **Reverse proxy + load balancer** with sticky sessions, WebSocket
-  forwarding, per-spec replica pools and an auto-scaler.
-- **Container backend** (Docker) that spawns app containers on demand
-  and reaps idle ones.
+  forwarding, per-spec replica pools, an auto-scaler, and absolute-URL
+  rewriting so unmodified Shiny/Streamlit apps work behind a sub-path.
+- **Container backend** (Docker) that spawns app containers on demand,
+  applies per-container CPU/memory limits, and reaps idle ones.
 - **Admin panel** — apps CRUD, image/media library, encrypted
   credentials store, landing-page editor (colors, intros, SEO, social
-  meta, analytics, custom HTML blocks), audit log, and a live
-  monitoring dashboard.
+  meta, analytics, custom HTML blocks), audit log, **user accounts with
+  Viewer / Editor / Admin roles**, and a live monitoring dashboard
+  (CPU/memory sparklines, live-follow logs, stop/restart).
 - **Operations**: `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
-  body-size limits.
-- **Distribution**: a multi-stage Docker image and a Debian package
-  with a hardened `systemd` unit.
+  body-size limits, and an opt-in Prometheus `/metrics` endpoint.
+- **Distribution**: a multi-arch Docker image, a Debian package with a
+  hardened `systemd` unit, static musl tarballs, a Homebrew tap, and
+  cosign-signed artifacts.
 
 ## Where to next
 
 - [What Ruscker can serve](./use-cases.md) — Shiny, Streamlit, Dash,
   FastAPI, JupyterLab, LLM UIs, BI tools, and more.
-- [Installation](./installation.md) — Docker or the `.deb`.
+- [Installation](./installation.md) — Docker, the `.deb`, or `brew`.
 - [Migrating from ShinyProxy](./migrating.md) — point Ruscker at your
   existing `application.yml`.
 - [Configuration](./configuration.md) — the full YAML reference.
 - [The admin panel](./admin.md) — what each screen does.
 - [Deploying in production](./deploying.md) — systemd + nginx,
   side-by-side with ShinyProxy.
+- [Roadmap](./roadmap.md) — shipped phases and what's planned.

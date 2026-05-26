@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="720" height="430" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Two deployment shapes. Single-node (today): reverse proxy to one Ruscker to the local Docker daemon to app containers. Multi-node HA (planned, phase 7): an L4 load balancer fans to two Ruscker instances that share session state in Postgres and schedule onto Docker Swarm or Kubernetes.">
+  <title>Ruscker — deployment shapes</title>
+
+  <defs>
+    <marker id="dn" viewBox="0 0 10 10" refX="5" refY="8" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L5,10 L10,0 z" fill="#1D9E75"/>
+    </marker>
+  </defs>
+
+  <!-- divider -->
+  <line x1="360" y1="20" x2="360" y2="410" stroke="#D7E5E0" stroke-width="1.5" stroke-dasharray="4 5"/>
+
+  <!-- ───────────── Single-node (left) ───────────── -->
+  <text x="185" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Single-node · today</text>
+
+  <rect x="55" y="50" width="260" height="44" rx="9" fill="#FFFFFF" stroke="#5DCAA5" stroke-width="1.6"/>
+  <text x="185" y="77" text-anchor="middle" font-size="12.5" fill="#085041">Reverse proxy · terminates TLS</text>
+  <line x1="185" y1="94" x2="185" y2="120" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+
+  <rect x="55" y="124" width="260" height="58" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
+  <text x="185" y="148" text-anchor="middle" font-size="13" font-weight="700" fill="#085041">Ruscker</text>
+  <text x="185" y="167" text-anchor="middle" font-size="10.5" fill="#5B6B66">proxy · admin · Docker control</text>
+  <line x1="185" y1="182" x2="185" y2="208" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+  <text x="195" y="200" font-size="10.5" fill="#5B6B66">Docker API · local socket</text>
+
+  <rect x="55" y="212" width="260" height="44" rx="9" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.6"/>
+  <text x="185" y="239" text-anchor="middle" font-size="12.5" fill="#085041">Docker daemon</text>
+  <line x1="185" y1="256" x2="185" y2="282" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+
+  <rect x="55" y="286" width="260" height="56" rx="9" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.6"/>
+  <text x="185" y="310" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">App containers ×N</text>
+  <text x="185" y="328" text-anchor="middle" font-size="10.5" fill="#5B6B66">spawned on demand · reaped when idle</text>
+
+  <text x="185" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">what 99% of installs run — simple and fast</text>
+
+  <!-- ───────────── Multi-node HA (right) ───────────── -->
+  <text x="535" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Multi-node HA · planned (Phase 7)</text>
+
+  <rect x="405" y="50" width="260" height="44" rx="9" fill="#FFFFFF" stroke="#5DCAA5" stroke-width="1.6"/>
+  <text x="535" y="77" text-anchor="middle" font-size="12.5" fill="#085041">L4 load balancer</text>
+  <line x1="475" y1="94" x2="475" y2="120" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+  <line x1="595" y1="94" x2="595" y2="120" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+
+  <rect x="405" y="124" width="120" height="50" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
+  <text x="465" y="153" text-anchor="middle" font-size="12" font-weight="700" fill="#085041">Ruscker 1</text>
+  <rect x="545" y="124" width="120" height="50" rx="9" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
+  <text x="605" y="153" text-anchor="middle" font-size="12" font-weight="700" fill="#085041">Ruscker 2</text>
+  <line x1="465" y1="174" x2="500" y2="208" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+  <line x1="605" y1="174" x2="570" y2="208" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+
+  <rect x="405" y="212" width="260" height="44" rx="9" fill="#E8F3EE" stroke="#1D9E75" stroke-width="1.6"/>
+  <text x="535" y="231" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Postgres — shared session state</text>
+  <text x="535" y="248" text-anchor="middle" font-size="10" fill="#5B6B66">either instance can serve any session</text>
+  <line x1="535" y1="256" x2="535" y2="282" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
+
+  <rect x="405" y="286" width="260" height="56" rx="9" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.6"/>
+  <text x="535" y="310" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Docker Swarm / Kubernetes</text>
+  <text x="535" y="328" text-anchor="middle" font-size="10.5" fill="#5B6B66">multi-host scheduling (Phase 6)</text>
+
+  <text x="535" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">for teams needing failover + horizontal scale</text>
+</svg>

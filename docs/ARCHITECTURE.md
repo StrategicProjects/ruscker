@@ -6,67 +6,29 @@ how the pieces fit together.
 
 ## High-level diagram
 
-```
-                    ┌────────────────────┐
-                    │  Visitors (browsers)│
-                    └──────────┬──────────┘
-                               │ HTTPS
-                               ▼
-                    ┌─────────────────────┐
-                    │   Ruscker process   │
-                    │  ┌───────────────┐  │
-                    │  │ Landing page  │  │ ◄── Askama templates
-                    │  │ (Tailwind 4)  │  │
-                    │  └───────────────┘  │
-                    │  ┌───────────────┐  │
-                    │  │ HTTP+WS proxy │  │ ◄── ruscker-proxy
-                    │  │  - sticky     │  │
-                    │  │  - rewrite    │  │
-                    │  │  - WS upgrade │  │
-                    │  └───────────────┘  │
-                    │  ┌───────────────┐  │
-                    │  │  Admin panel  │  │ ◄── ruscker-admin
-                    │  │ (HTMX+Tailw.) │  │
-                    │  └───────────────┘  │
-                    │  ┌───────────────┐  │
-                    │  │  Router /     │  │ ◄── ruscker-core
-                    │  │  Auto-scaler  │  │
-                    │  └───────┬───────┘  │
-                    └──────────┼──────────┘
-                               │ Docker API
-                               ▼
-                    ┌─────────────────────┐
-                    │   Docker daemon     │
-                    │  ┌─────┐ ┌─────┐    │
-                    │  │ App │ │ App │    │
-                    │  │  1  │ │  2  │ …  │
-                    │  └─────┘ └─────┘    │
-                    └─────────────────────┘
-```
+![How Ruscker works: browsers and API clients hit a single Ruscker binary, which serves the landing page + admin and reverse-proxies to app containers it spawns on demand via the Docker daemon.](images/architecture.svg)
 
-All of this is a single Rust process (single binary, ~20MB).
+All of this is a single Rust process — one static binary, ~14 MB idle,
+no JVM. Visitors and API clients reach it on one port; it serves the
+landing page and admin UI, reverse-proxies `/app/{spec}` and
+`/api/{spec}` to the right replica (keeping Shiny sessions sticky and
+upgrading WebSockets), and drives the Docker daemon to spawn and reap
+containers. SQLite is the source of truth for configuration; the live
+replica registry and session store live in memory.
 
 ## Crate map
 
-```
-ruscker-config  (schema, parsing, validation)
-       ▲
-       │
-ruscker-core  (traits, types, routing algorithms)
-       ▲
-       ├──── ruscker-docker  (ContainerBackend impl)
-       │
-       ├──── ruscker-proxy   (HTTP+WS reverse proxy)
-       │
-       └──── ruscker-admin   (Web UI for management)
-                  ▲
-                  │
-            ruscker-cli   (binary entry point)
-```
+The workspace is six crates. `ruscker-config` and `ruscker-core` are
+**pure-domain** — no I/O, no async (bar the async trait *definitions*
+in core). Everything that touches the network or Docker layers on top,
+and the `ruscker-cli` binary stitches them together.
 
-`ruscker-config` and `ruscker-core` are pure-domain crates. They do no
-I/O and contain no async code (except for trait definitions in core
-which need to be async-capable for impls).
+![Crate dependency map: ruscker-cli builds on the I/O crates (docker, proxy, admin), which build on ruscker-core, which builds on ruscker-config.](images/crate-map.svg)
+
+Keeping the backend behind the `ContainerBackend` trait in
+`ruscker-core` means a future Kubernetes or multi-host backend is a new
+impl, not a rewrite — see [Deployment shapes](#deployment-shapes) and
+`docs/adr/`.
 
 ## Request flow
 
@@ -167,9 +129,12 @@ for git versioning, but the running config lives in SQLite.
 ### Trust levels
 
 - **Untrusted**: visitors. They can hit `/app/*` and `/api/*` only.
-  Admin paths require auth (when implemented).
-- **Privileged**: admin users. Can mutate specs, view logs, restart
-  containers.
+  Admin paths require an authenticated session.
+- **Privileged**: admin users. `/admin/*` is gated by per-user
+  password login with three roles — **Viewer** (read-only dashboard),
+  **Editor** (apps + media), **Admin** (everything, incl. user
+  management) — enforced server-side. A break-glass `RUSCKER_ADMIN_TOKEN`
+  bootstraps the first account. See `docs/SECURITY.md` §2.
 - **Operator**: filesystem access (the person running Ruscker). Can
   edit YAML, restart the process.
 
@@ -185,38 +150,21 @@ for git versioning, but the running config lives in SQLite.
 
 ## Deployment shapes
 
-### Single-node (default, MVP)
+![Two deployment shapes. Single-node (today): a reverse proxy in front of one Ruscker driving the local Docker daemon and its app containers. Multi-node HA (planned, Phase 7): an L4 load balancer fans to two Ruscker instances sharing session state in Postgres, scheduling onto Docker Swarm or Kubernetes.](images/deployment.svg)
 
-```
-[load balancer]
-      │
-      ▼
-[Ruscker (proxy + admin + Docker control)]
-      │
-      ▼
-[Docker daemon, local socket]
-      │
-      ▼
-[App containers]
-```
+### Single-node (default)
 
-This is what 99% of users will deploy. Simple, fast, easy to operate.
+A reverse proxy terminates TLS in front of a single Ruscker, which
+talks to the local Docker daemon over its socket. This is what 99% of
+installs run — simple, fast, easy to operate.
 
-### Multi-node HA (future)
+### Multi-node HA (planned — Phase 7)
 
-```
-[L4 load balancer]
-      │
-      ├──► [Ruscker 1] ──┐
-      │                  ├──► [Postgres]  ◄── shared state
-      └──► [Ruscker 2] ──┘
-                         │
-                         ▼
-                  [Docker Swarm / K8s]
-```
-
-Two Ruscker instances behind a real LB share session state via
-Postgres. Either can serve any session.
+Two Ruscker instances behind an L4 load balancer share session state in
+Postgres, so either can serve any session, and schedule onto a
+multi-host backend (Phase 6). Tracked on the Roadmap (Phases 6–7); the
+`ContainerBackend` / `SessionStore` traits already leave room for it
+without touching proxy code.
 
 ## What's not covered here
 

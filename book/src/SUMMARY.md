@@ -15,4 +15,5 @@
 # Reference
 
 - [Architecture](./architecture.md)
+- [Roadmap](./roadmap.md)
 - [Security](./security.md)

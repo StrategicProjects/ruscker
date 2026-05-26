@@ -1,3 +1,8 @@
+<p align="center">
+  <img class="ruscker-logo ruscker-logo-light" src="images/ruscker-lockup-horizontal.svg" alt="Ruscker">
+  <img class="ruscker-logo ruscker-logo-dark" src="images/ruscker-lockup-horizontal-dark.svg" alt="Ruscker">
+</p>
+
 # Ruscker
 
 **Ruscker** is a lightweight Rust alternative to **ShinyProxy** and

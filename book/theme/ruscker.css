@@ -1,0 +1,30 @@
+/* Ruscker brand — theme-aware logo swap.
+ *
+ * mdBook toggles the active theme via a class on <html> (light, rust,
+ * coal, navy, ayu) rather than the OS prefers-color-scheme, so the
+ * README's <picture> trick doesn't follow the in-book theme switcher.
+ * We render both wordmark lockups and show the one that contrasts with
+ * the current theme. */
+
+.ruscker-logo {
+  width: 320px;
+  max-width: 80%;
+  height: auto;
+}
+
+/* Default (light + rust): show the dark-text lockup. */
+.ruscker-logo-dark {
+  display: none;
+}
+
+/* Dark themes: hide the dark-text lockup, show the white-text one. */
+html.coal .ruscker-logo-light,
+html.navy .ruscker-logo-light,
+html.ayu .ruscker-logo-light {
+  display: none;
+}
+html.coal .ruscker-logo-dark,
+html.navy .ruscker-logo-dark,
+html.ayu .ruscker-logo-dark {
+  display: inline-block;
+}

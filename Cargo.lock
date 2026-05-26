@@ -2770,6 +2770,7 @@ version = "0.1.0-rc2"
 dependencies = [
  "anyhow",
  "clap",
+ "futures-util",
  "ruscker-admin",
  "ruscker-config",
  "ruscker-core",
@@ -2778,6 +2779,7 @@ dependencies = [
  "serde_json",
  "serde_yaml_ng",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
 ]

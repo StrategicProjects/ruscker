@@ -51,6 +51,25 @@ container on a machine with full internet, or in CI — and copy the
 artifact over. Docker pulls and the `build.rs` Tailwind download (from
 GitHub) still work from a connected builder.
 
+## Users bounce between replicas / lose their session after a restart
+The sticky-session cookie is signed with `RUSCKER_COOKIE_KEY`. If you
+don't set it, Ruscker generates a random key on each start — so every
+restart invalidates existing session cookies and can scatter users
+across replicas. Set a stable `RUSCKER_COOKIE_KEY` (e.g.
+`openssl rand -hex 32`) in `ruscker.env` and keep it constant.
+
+## The dashboard doesn't update live (or lags badly)
+The dashboard streams over Server-Sent Events. A reverse proxy that
+buffers the response will hold the stream back. Disable buffering for
+`/admin/dashboard/events` — see the nginx note in
+[Deploying](./deploying.md).
+
+## `docker pull ghcr.io/strategicprojects/ruscker` is denied
+A freshly-published image package starts **private**. Either make the
+package public (Packages → the package → *Package settings* →
+visibility), or authenticate: `docker login ghcr.io` with a token that
+has `read:packages`.
+
 ## Inspecting what's running
 ```sh
 systemctl status ruscker

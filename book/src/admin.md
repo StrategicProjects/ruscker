@@ -1,0 +1,72 @@
+# The admin panel
+
+The admin panel is Ruscker's main advantage over editing YAML by hand.
+It lives at `/admin`, is gated by a token, and needs a SQLite database
+(`serve --db <file>`).
+
+## Logging in
+
+Set `RUSCKER_ADMIN_TOKEN` (the `.deb` generates one on first install
+and prints it once). Browse to `/admin/login` and paste the token.
+Until a token is set, `/admin/*` returns `503` and only the public
+landing + proxy are served. Rotate the token any time by changing the
+value and restarting.
+
+The footer has the same **language** (pt-BR / en-US / es-ES / fr-FR)
+and **theme** (light / dark / auto) pickers as the public portal.
+
+## Screens
+
+### Dashboard
+A live view of running replicas: per-container state, uptime, sessions,
+CPU and memory (refreshed over Server-Sent Events). Stop or restart a
+replica; open its logs. Shows a banner when started without
+`--docker`.
+
+### Apps
+The list of specs (apps, APIs, external links). The add/edit form has a
+type selector, a live card preview, resource limits, registry
+credentials, and a **logo picker** that pulls from the media library
+(no need to type `/assets/img/...` by hand).
+
+### Media
+Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
+are the card logos and covers.
+
+### Credentials
+A named, AES-256-GCM-encrypted store for registry credentials (needs
+`RUSCKER_MASTER_KEY`). Passwords never appear in the YAML or in the
+panel after saving.
+
+### Landing editor
+Customise the public landing without a custom template:
+
+- **Colours + intro** — header background/foreground, a per-locale
+  intro paragraph.
+- **SEO & sharing** — page title, meta description, `og:image`. The
+  landing `<head>` emits `description` + `og:*` + `twitter:card`.
+- **Analytics** — paste a provider snippet (Plausible, Matomo, GA…)
+  and list its origins; Ruscker widens **only the landing's** CSP so
+  the script can load.
+
+### Blocks
+Custom HTML blocks rendered in the landing `top` (after the header) and
+`bottom` (after the card grid) slots. Create/edit/delete, enable/
+disable, and reorder within a slot with the ↑/↓ buttons. Each block can
+declare CSP origins for any third-party content it embeds.
+
+> Block and analytics HTML is rendered **verbatim** on the public
+> landing. It's admin-only input — the intentional escape hatch — so
+> only paste HTML you trust.
+
+### Audit log
+Every admin mutation (spec/image/credential/landing/block changes,
+imports) is recorded with actor, action, target and timestamp.
+
+## Config vs. database
+
+`serve --config` drives the public landing and the proxy. The admin
+panel reads and writes the SQLite DB. Use `ruscker import` to populate
+the DB from a YAML, and `ruscker export` to round-trip it back — both
+preserve specs, landing customization, SEO/analytics and custom
+blocks.

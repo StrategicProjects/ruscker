@@ -1,0 +1,56 @@
+name: docs
+
+# Build the mdBook site and publish it to GitHub Pages
+# (https://strategicprojects.github.io/ruscker/).
+#
+# Requires Pages to be enabled for the repo with source = "GitHub
+# Actions" (Settings → Pages → Build and deployment → Source).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "book/**"
+      - "docs/**" # chapters {{#include}} files from docs/
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One concurrent deploy; newer pushes supersede in-flight ones.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      MDBOOK_VERSION: "0.4.40"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mdBook
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          url="https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          curl -sSL "$url" | tar -xz -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the book
+        run: mdbook build book
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: book/book
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

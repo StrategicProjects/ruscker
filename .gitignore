@@ -45,3 +45,6 @@ secrets/
 CLAUDE.md
 **/CLAUDE.md
 .claude/
+
+# mdBook generated site
+/book/book/

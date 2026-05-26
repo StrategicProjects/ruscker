@@ -108,6 +108,17 @@ required); an extra suite exercises a real Docker daemon.
 Every tagged release publishes a multi-arch Docker image, `.deb`
 packages, and static `musl` tarballs (amd64 + arm64).
 
+### Quick install (Linux, amd64/arm64)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/StrategicProjects/ruscker/main/install.sh | sh
+```
+
+Picks the right artifact from the latest release: the `.deb` (with the
+`systemd` unit + an auto-generated admin token) on Debian/Ubuntu, or the
+static binary into `/usr/local/bin` elsewhere. Pin a version or target
+dir with `./install.sh v0.1.0` or `PREFIX=~/.local/bin ./install.sh`.
+
 ### Docker
 
 ```bash

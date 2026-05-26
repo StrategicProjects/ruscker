@@ -535,6 +535,12 @@ fn format_warning(w: &Warning) -> String {
                  (expected a size like `512m`, `1.5g`, or plain bytes) — no memory limit will be applied"
             )
         }
+        Warning::ZeroSeats { spec_id } => {
+            format!(
+                "spec {spec_id} sets seats-per-container: 0 — a replica then looks \
+                 saturated and idle at once, confusing the auto-scaler; use 1 or more"
+            )
+        }
     }
 }
 

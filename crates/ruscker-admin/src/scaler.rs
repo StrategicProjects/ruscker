@@ -181,6 +181,12 @@ async fn tick(
         specs.iter().map(|s| s.id.as_str()).collect();
     saturation_ticks.retain(|id, _| known_spec_ids.contains(id.as_str()));
     cooldown.retain(|id, _| known_spec_ids.contains(id.as_str()));
+    // GC the per-spec spawn coalescer locks for specs that no longer
+    // exist. Removing the Arc from the map is safe even if a task still
+    // holds a clone — that clone keeps the mutex alive until it's done.
+    state
+        .spawn_locks
+        .retain(|id, _| known_spec_ids.contains(id.as_str()));
 
     for spec in &specs {
         let kind = spec.kind();

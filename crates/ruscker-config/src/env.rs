@@ -28,7 +28,10 @@ use regex::Regex;
 use std::env;
 
 static ENV_VAR_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}").expect("env var regex is valid")
+    // Allow lower- and mixed-case names too (Spring/ShinyProxy do), so a
+    // `${db_password}` reference is interpolated rather than silently
+    // left as literal text.
+    Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}").expect("env var regex is valid")
 });
 
 /// Interpolate all `${VAR}` and `${VAR:-default}` references in the input.

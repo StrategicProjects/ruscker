@@ -118,6 +118,13 @@ pub enum Warning {
         field: String,
         value: String,
     },
+    /// A containerized spec sets `seats-per-container: 0`. Zero seats
+    /// makes a replica look saturated and idle at the same time, which
+    /// confuses the auto-scaler (it wants to scale up forever). Almost
+    /// always a typo for `1` or more.
+    ZeroSeats {
+        spec_id: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -364,6 +371,14 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             spec_id: spec.id.clone(),
             min,
             max,
+        });
+    }
+
+    // Zero seats on a containerized spec makes the replica look both
+    // saturated and idle — a foot-gun for the scaler.
+    if spec.kind() != crate::schema::SpecKind::External && spec.seats_per_container == Some(0) {
+        warnings.push(Warning::ZeroSeats {
+            spec_id: spec.id.clone(),
         });
     }
 
@@ -653,6 +668,26 @@ proxy:
                     if spec_id == "app1" && field == "limit"
             )),
             "expected InvalidCpuLimit, got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn flags_zero_seats_on_containerized_spec() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      seats-per-container: 0
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::ZeroSeats { spec_id } if spec_id == "app1")),
+            "expected ZeroSeats, got {:?}",
             report.warnings
         );
     }

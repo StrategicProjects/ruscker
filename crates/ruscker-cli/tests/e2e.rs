@@ -13,8 +13,8 @@
 //!   cargo test -p ruscker-cli --features e2e -- --nocapture
 //!
 //! The spec is `type: streamlit` (an InteractiveApp ⇒ sticky sessions +
-//! WS forwarding) with `api.port: 8080` to point Ruscker at the
-//! echo-server's listen port.
+//! WS forwarding) with `container-port: 8080` to point Ruscker at the
+//! echo-server's listen port (#120).
 #![cfg(feature = "e2e")]
 
 use futures_util::StreamExt;
@@ -84,7 +84,7 @@ async fn e2e_proxy_and_websocket_through_subpath() {
         format!(
             "proxy:\n  title: E2E\n  specs:\n    - id: {SPEC}\n      display-name: Echo\n      \
              container-image: jmalloc/echo-server:latest\n      type: streamlit\n      \
-             api:\n        port: 8080\n"
+             container-port: 8080\n"
         ),
     )
     .unwrap();

@@ -93,6 +93,11 @@ A spec describes one app, API, or external link. Every spec has an
 - id: my_app
   container-image: org/repo:tag       # required for containerized
   type: shiny                         # optional, default 'shiny' if image set
+  container-port: 8501                # port the app listens on inside the
+                                      #   container; default 3838 (Shiny).
+                                      #   Set for Streamlit (8501), Dash
+                                      #   (8050), … . ShinyProxy `port:`
+                                      #   is accepted as an alias.
   seats-per-container: 10             # sessions per replica
   max-lifetime: 360                   # minutes — hard cap
   container-lifetime: 360             # minutes — soft cap

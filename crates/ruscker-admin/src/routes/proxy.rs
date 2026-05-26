@@ -643,11 +643,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("spec {} has no container-image", spec.id))?;
 
-    let inner_port = spec
-        .api
-        .as_ref()
-        .and_then(|a| a.port)
-        .or_else(|| infer_inner_port(spec));
+    let inner_port = spec.effective_inner_port();
 
     let creds = resolve_creds(state, spec).await;
     let limits = limits_from_spec(spec);
@@ -681,13 +677,6 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     // — and release before the spec mutex unwinds.
     state.replicas.write().await.add(replica.clone());
     Ok(replica)
-}
-
-fn infer_inner_port(spec: &Spec) -> Option<u16> {
-    match spec.kind() {
-        SpecKind::Api => Some(8080),
-        _ => None,
-    }
 }
 
 /// Build optional registry credentials from a spec. Returns

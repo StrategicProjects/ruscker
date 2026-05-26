@@ -373,3 +373,8 @@ spec-help-memory-limit = Mémoire max, ex. 512m ou 1.5g. Vide = illimité.
 spec-help-heartbeat = Délai de session inactive en millisecondes ; -1 = jamais. Vide = valeur globale.
 admin-blocks-slot-empty = Aucun bloc dans cet emplacement.
 admin-blocks-drag-hint = Glissez par la poignée pour réordonner les blocs dans un emplacement.
+spec-form-volumes-section = Volumes
+spec-form-volumes = Montages de volume
+spec-form-volumes-help = Un bind par ligne — /hôte:/conteneur (ajoutez :ro pour lecture seule). Ajoutez-en autant que nécessaire.
+spec-help-volumes = Monte des répertoires de l'hôte dans le conteneur (ex. données persistantes, ou statiques servis par l'app). Admin uniquement ; monter des chemins de l'hôte équivaut à root.
+spec-form-error-volume = Chaque volume doit être /hôte:/conteneur (optionnel :ro).

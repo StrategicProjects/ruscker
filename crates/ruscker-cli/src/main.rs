@@ -541,6 +541,12 @@ fn format_warning(w: &Warning) -> String {
                  saturated and idle at once, confusing the auto-scaler; use 1 or more"
             )
         }
+        Warning::InvalidVolume { spec_id, value } => {
+            format!(
+                "spec {spec_id} has an invalid volume `{value}` \
+                 (expected `/host:/container` or `/host:/container:ro`) — the mount will be skipped"
+            )
+        }
     }
 }
 

@@ -125,6 +125,13 @@ pub enum Warning {
     ZeroSeats {
         spec_id: String,
     },
+    /// A `volumes` entry isn't valid Docker bind syntax — expected
+    /// `"/host:/container"` (optionally `":ro"`), with an absolute
+    /// container path. The mount would be silently skipped.
+    InvalidVolume {
+        spec_id: String,
+        value: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -217,7 +224,6 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
         "network-connections",
         "container network wiring is not implemented (phase 3.5)",
     ),
-    ("volumes", "volume mounts are not implemented (phase 3)"),
     (
         "environment",
         "per-spec environment injection is not implemented (phase 3)",
@@ -473,6 +479,33 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             }
         }
     }
+
+    // Volume bind syntax: "/host:/container[:ro]" with an absolute
+    // container path. A malformed entry would be silently skipped.
+    if let Some(vols) = &spec.volumes {
+        for v in vols {
+            if !is_valid_volume_bind(v) {
+                warnings.push(Warning::InvalidVolume {
+                    spec_id: spec.id.clone(),
+                    value: v.clone(),
+                });
+            }
+        }
+    }
+}
+
+/// A Docker bind spec: `host:container` plus an optional `:ro`/`:rw`
+/// mode, with a non-empty host and an absolute container path. Public so
+/// the admin form validates with the same rule.
+pub fn is_valid_volume_bind(v: &str) -> bool {
+    let parts: Vec<&str> = v.split(':').collect();
+    let host_ok = parts.first().is_some_and(|h| !h.trim().is_empty());
+    let container_ok = parts.get(1).is_some_and(|c| c.starts_with('/'));
+    let mode_ok = match parts.get(2) {
+        None => true,
+        Some(m) => matches!(m.trim(), "ro" | "rw"),
+    };
+    parts.len() <= 3 && host_ok && container_ok && mode_ok
 }
 
 fn collect_stats(config: &Config) -> Stats {
@@ -693,6 +726,30 @@ proxy:
     }
 
     #[test]
+    fn flags_malformed_volume_but_accepts_valid_ones() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      volumes:
+        - "/srv/data:/data"
+        - "/srv/www:/www:ro"
+        - "not-a-bind"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        let bad: Vec<&str> = report
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                Warning::InvalidVolume { value, .. } => Some(value.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(bad, vec!["not-a-bind"], "only the malformed bind warns");
+    }
+
+    #[test]
     fn accepts_valid_cpu_and_memory_limits() {
         let yaml = r#"
 proxy:
@@ -790,7 +847,11 @@ proxy:
             })
             .collect();
         assert!(fields.contains(&"port"), "fields: {fields:?}");
-        assert!(fields.contains(&"volumes"), "fields: {fields:?}");
+        // `volumes` is now a supported field — it must NOT be flagged.
+        assert!(
+            !fields.contains(&"volumes"),
+            "volumes is supported now, should not be flagged: {fields:?}"
+        );
         assert!(
             fields.contains(&"kubernetes-pod-patches"),
             "fields: {fields:?}"

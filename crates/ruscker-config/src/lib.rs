@@ -45,7 +45,7 @@ pub use schema::{
     is_valid_memory_size, ApiSpec, Config, LandingBlock, LandingCustomization, Logging, Proxy,
     RatePolicy, RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties,
 };
-pub use validate::{CompatWarning, ValidationReport, Warning};
+pub use validate::{is_valid_volume_bind, CompatWarning, ValidationReport, Warning};
 
 use std::path::Path;
 

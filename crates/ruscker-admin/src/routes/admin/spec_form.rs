@@ -89,6 +89,8 @@ pub struct SpecForm {
     pub max_replicas: String,
     /// API: concurrent requests a replica handles before scale-up.
     pub concurrent_requests_per_replica: String,
+    /// Bind-mount volumes, one `"/host:/container[:ro]"` per line.
+    pub volumes: String,
     /// API sub-fields (only meaningful for `type: api`).
     pub api_port: String,
     pub api_docs_path: String,
@@ -142,6 +144,11 @@ impl SpecForm {
             concurrent_requests_per_replica: spec
                 .concurrent_requests_per_replica
                 .map(|n| n.to_string())
+                .unwrap_or_default(),
+            volumes: spec
+                .volumes
+                .as_ref()
+                .map(|v| v.join("\n"))
                 .unwrap_or_default(),
             api_port: spec
                 .api
@@ -260,6 +267,7 @@ impl SpecForm {
             min_replicas: parse_opt(&self.min_replicas),
             max_replicas: parse_opt(&self.max_replicas),
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
+            volumes: lines_to_vec(&self.volumes),
             // ── Not modelled by the form: preserve from `base` so an
             //    edit never silently drops YAML-imported config. ──────
             container_lifetime: base.and_then(|b| b.container_lifetime),
@@ -339,6 +347,17 @@ impl SpecForm {
             }
         }
 
+        // Each volume line must be valid Docker bind syntax.
+        if self
+            .volumes
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .any(|l| !ruscker_config::is_valid_volume_bind(l))
+        {
+            errs.push("spec-form-error-volume");
+        }
+
         errs
     }
 }
@@ -360,6 +379,21 @@ fn set_or_remove(map: &mut HashMap<String, YamlValue>, key: &str, val: &str) {
 }
 fn parse_opt<T: std::str::FromStr>(s: &str) -> Option<T> {
     s.trim().parse().ok()
+}
+/// Split a textarea into trimmed, non-empty lines — `None` if all blank.
+/// Used for the volumes field (one `host:container[:ro]` per line).
+fn lines_to_vec(s: &str) -> Option<Vec<String>> {
+    let v: Vec<String> = s
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    if v.is_empty() {
+        None
+    } else {
+        Some(v)
+    }
 }
 fn is_kebab_id(s: &str) -> bool {
     !s.is_empty()
@@ -764,6 +798,30 @@ proxy:
         assert!(f
             .validate(FormMode::New)
             .contains(&"spec-form-error-replica-range"));
+    }
+
+    #[test]
+    fn volumes_round_trip_and_validate() {
+        let mut f = valid_form();
+        f.volumes = "/srv/data:/data\n/srv/www:/www:ro\n".into();
+        let spec = f.into_spec(None).expect("into_spec");
+        assert_eq!(
+            spec.volumes,
+            Some(vec![
+                "/srv/data:/data".to_string(),
+                "/srv/www:/www:ro".to_string()
+            ])
+        );
+        // Round-trips back into the textarea (newline-joined).
+        let back = SpecForm::from_spec(&spec);
+        assert_eq!(back.volumes, "/srv/data:/data\n/srv/www:/www:ro");
+
+        // A malformed bind is a form error.
+        let mut bad = valid_form();
+        bad.volumes = "not-a-bind".into();
+        assert!(bad
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-volume"));
     }
 
     #[test]

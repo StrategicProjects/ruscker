@@ -100,7 +100,16 @@ A spec describes one app, API, or external link. Every spec has an
   docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
   docker-registry-domain: docker.io
+  volumes:                            # bind mounts (ShinyProxy-compatible)
+    - /srv/myapp/data:/data           #   persistent data
+    - /srv/myapp/www:/www:ro          #   static assets, read-only
 ```
+
+`volumes` is a list of Docker bind specs (`/host:/container`, optionally
+`:ro`/`:rw`), mapped to the container's `HostConfig.binds`. Add as many
+as needed; editable in the admin **Advanced** form (one per line).
+**Bind-mounting host paths is root-equivalent and admin-only** — see
+`SECURITY.md`.
 
 ### External link specs (no container)
 

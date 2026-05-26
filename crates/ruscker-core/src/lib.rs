@@ -128,6 +128,10 @@ pub struct SpawnRequest {
     pub creds: Option<RegistryCredentials>,
     /// All-`None` (or omitted via `Default`) → no limits applied.
     pub limits: ResourceLimits,
+    /// Bind-mount specs in Docker syntax (`"/host:/container[:ro]"`).
+    /// Empty → no binds. The local backend maps these to
+    /// `HostConfig.binds`.
+    pub volumes: Vec<String>,
 }
 
 impl SpawnRequest {
@@ -138,6 +142,7 @@ impl SpawnRequest {
             inner_port: None,
             creds: None,
             limits: ResourceLimits::default(),
+            volumes: Vec::new(),
         }
     }
 
@@ -151,6 +156,10 @@ impl SpawnRequest {
     }
     pub fn with_limits(mut self, limits: ResourceLimits) -> Self {
         self.limits = limits;
+        self
+    }
+    pub fn with_volumes(mut self, volumes: Vec<String>) -> Self {
+        self.volumes = volumes;
         self
     }
 }

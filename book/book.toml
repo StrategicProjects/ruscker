@@ -1,0 +1,21 @@
+[book]
+title = "Ruscker"
+description = "A lightweight Rust alternative to ShinyProxy and Shiny Server Free — host and load-balance containerized apps behind one proxy with a real admin panel."
+authors = ["Ruscker contributors"]
+language = "en"
+src = "src"
+
+[output.html]
+default-theme = "rust"
+preferred-dark-theme = "ayu"
+git-repository-url = "https://github.com/StrategicProjects/ruscker"
+edit-url-template = "https://github.com/StrategicProjects/ruscker/edit/main/book/{path}"
+# Project Pages live under /ruscker/ — set so links/assets resolve there.
+site-url = "/ruscker/"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true

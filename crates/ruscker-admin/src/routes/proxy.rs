@@ -313,11 +313,24 @@ async fn forward(
     //    preceding HTTP request is how WS-only apps stay sticky.
     if let MaybeWs(Some(upgrade)) = ws_upgrade {
         let upstream_ws_url = format!("ws://{}{}", replica.upstream, upstream_path);
+        // Forward the client's session cookie and requested subprotocol
+        // onto the upstream handshake so the app keeps its session.
+        let cookie = req
+            .headers()
+            .get(header::COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+        let subprotocols = req
+            .headers()
+            .get(header::SEC_WEBSOCKET_PROTOCOL)
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
         tracing::debug!(
             spec = %spec.id, replica = %replica.id, url = %upstream_ws_url,
             "ws upgrade"
         );
-        return upgrade.on_upgrade(move |socket| ws::pump(socket, upstream_ws_url));
+        return upgrade
+            .on_upgrade(move |socket| ws::pump(socket, upstream_ws_url, cookie, subprotocols));
     }
 
     // 6. HTTP forward.

@@ -18,9 +18,9 @@ The URL stays at `/assets/img/<file>` across phases so:
 ## What the YAML references
 
 ```yaml
-- id: auroraprime
+- id: sales-dashboard
   template-properties:
-    logo: "/assets/img/auroraprime.png"   # ← the URL the browser fetches
+    logo: "/assets/img/sales-dashboard.png"   # ← the URL the browser fetches
 ```
 
 The leading `/assets/img/` is required (it's a URL path, not a
@@ -61,7 +61,7 @@ filesystem path). The bit after is whatever filename you pick.
 | Phase | Strategy |
 |---|---|
 | **Phase 1 (now)** | `cache-control: public, max-age=0, must-revalidate`. Browsers cache but always revalidate on reload — minimal surprise for the operator iterating on YAML. |
-| **Phase 5 (planned)** | Hash-bearing URLs (`/assets/img/auroraprime-<sha>.png`) served back with `immutable` so production deployments get long-lived caching without losing the cache-bust on updates. |
+| **Phase 5 (planned)** | Hash-bearing URLs (`/assets/img/sales-dashboard-<sha>.png`) served back with `immutable` so production deployments get long-lived caching without losing the cache-bust on updates. |
 
 > **Important:** never use `cache-control: immutable` on a URL whose
 > bytes can change. Chrome interprets `immutable` as "don't check on

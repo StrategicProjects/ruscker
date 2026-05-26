@@ -22,7 +22,7 @@ class Ruscker < Formula
 
   on_macos do
     url "https://github.com/StrategicProjects/ruscker/archive/refs/tags/v#{version}.tar.gz"
-    sha256 "REPLACE_WITH_SOURCE_TARBALL_SHA256"
+    sha256 "cfdceafaf5bdb5affe08d1e4269b44dd3f78ccc2b0a563b9dda4f719541161c4"
     depends_on "rust" => :build
 
     def install
@@ -33,11 +33,11 @@ class Ruscker < Formula
   on_linux do
     on_arm do
       url "https://github.com/StrategicProjects/ruscker/releases/download/v#{version}/ruscker-#{version}-linux-arm64.tar.gz"
-      sha256 "REPLACE_WITH_LINUX_ARM64_SHA256"
+      sha256 "6d493fbbf406e32ae0342cd672600e1695b1ba878d0ccac97f4c8d23f5a3fe75"
     end
     on_intel do
       url "https://github.com/StrategicProjects/ruscker/releases/download/v#{version}/ruscker-#{version}-linux-amd64.tar.gz"
-      sha256 "REPLACE_WITH_LINUX_AMD64_SHA256"
+      sha256 "aafa72c38c480be2756bde9dacd3bbf4d7aa3e0d18c353d0f929d8ee6c4c7379"
     end
 
     def install

@@ -111,6 +111,10 @@ struct ReplicaRow {
     cpu_display: Option<String>,
     /// Pre-formatted "412 MB" / "n/a" for the memory column.
     memory_display: Option<String>,
+    /// Recent CPU% / memory samples (oldest first) for the inline
+    /// sparklines. Empty until the metrics cache has ≥1 reading.
+    cpu_history: Vec<f64>,
+    mem_history: Vec<u64>,
 }
 
 /// What both the HTML render and the SSE stream consume.
@@ -296,6 +300,8 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
             let cached = state.metrics.get(&r.id);
             let cpu_display = cached.as_ref().map(|c| format!("{:.0}%", c.metrics.cpu_percent));
             let memory_display = cached.as_ref().map(|c| format_bytes(c.metrics.memory_bytes));
+            let cpu_history = cached.as_ref().map(|c| c.cpu_history.clone()).unwrap_or_default();
+            let mem_history = cached.as_ref().map(|c| c.mem_history.clone()).unwrap_or_default();
             if let Some(c) = cached.as_ref() {
                 total_memory_bytes = total_memory_bytes.saturating_add(c.metrics.memory_bytes);
             }
@@ -314,6 +320,8 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
                 container_short,
                 cpu_display,
                 memory_display,
+                cpu_history,
+                mem_history,
             }
         })
         .collect();
@@ -713,6 +721,8 @@ mod tests {
             container_short: "abc123def456".into(),
             cpu_display: None,
             memory_display: None,
+            cpu_history: Vec::new(),
+            mem_history: Vec::new(),
         }
     }
 

@@ -102,6 +102,9 @@
   }
   .dash-action:hover { background: var(--color-background-secondary, rgba(120,120,120,0.12)); }
   .dash-action--danger:hover { color: #ef4444; }
+  /* Inline CPU/memory trend sparkline next to the numeric value. */
+  .dash-metric-val { display: inline-block; min-width: 3.2em; }
+  .dash-spark { vertical-align: middle; margin-left: 6px; opacity: 0.75; }
 </style>
 
 <div class="flex items-end justify-between mb-5">
@@ -237,6 +240,27 @@
     });
   }
 
+  // Tiny inline sparkline (relative min..max of its own series). No
+  // chart lib — a single SVG polyline. Returns '' for <2 points so
+  // a just-spawned replica shows nothing rather than a flat dot.
+  function spark(values, stroke) {
+    if (!values || values.length < 2) return '';
+    var w = 56, h = 16, pad = 1.5;
+    var min = Math.min.apply(null, values);
+    var max = Math.max.apply(null, values);
+    var range = (max - min) || 1;
+    var n = values.length;
+    var pts = values.map(function (v, i) {
+      var x = pad + (w - 2 * pad) * (i / (n - 1));
+      var y = pad + (h - 2 * pad) * (1 - (v - min) / range);
+      return x.toFixed(1) + ',' + y.toFixed(1);
+    }).join(' ');
+    return '<svg class="dash-spark" width="' + w + '" height="' + h
+      + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">'
+      + '<polyline fill="none" stroke="' + stroke + '" stroke-width="1.2" points="'
+      + pts + '"/></svg>';
+  }
+
   function metric(name, value) {
     var el = document.querySelector('[data-metric="' + name + '"]');
     if (el && el.textContent !== String(value)) el.textContent = value;
@@ -267,8 +291,10 @@
       + '<td>' + escapeHtml(row.state_label) + '</td>'
       + '<td class="dash-mono">' + escapeHtml(row.uptime) + '</td>'
       + '<td>' + row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span></td>'
-      + '<td>' + cpu + '</td>'
-      + '<td>' + mem + '</td>'
+      + '<td><span class="dash-metric-val">' + cpu + '</span>'
+        + spark(row.cpu_history, 'var(--accent, #1d9e75)') + '</td>'
+      + '<td><span class="dash-metric-val">' + mem + '</span>'
+        + spark(row.mem_history, 'var(--accent-2, #5dcaa5)') + '</td>'
       + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
       + '<td style="white-space: nowrap;">'
         + '<a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)

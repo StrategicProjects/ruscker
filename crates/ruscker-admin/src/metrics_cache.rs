@@ -34,11 +34,20 @@ use tracing::{info, warn};
 /// CPU delta windows large enough to read sanely.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
-/// What we keep per replica.
+/// How many recent samples to keep per replica for the dashboard
+/// sparklines. 30 × [`REFRESH_INTERVAL`] (5 s) ≈ 2.5 min of history —
+/// enough to show a trend without unbounded growth.
+pub const HISTORY_LEN: usize = 30;
+
+/// What we keep per replica: the latest reading plus a short rolling
+/// history of CPU% and memory for the dashboard sparklines (oldest
+/// first, most recent last).
 #[derive(Debug, Clone)]
 pub struct CachedMetrics {
     pub metrics: ReplicaMetrics,
     pub observed_at: Instant,
+    pub cpu_history: Vec<f64>,
+    pub mem_history: Vec<u64>,
 }
 
 /// The cache itself. Cheap to clone (it's all `Arc`s underneath)
@@ -68,18 +77,38 @@ impl MetricsCache {
 
     /// Replace the cache contents with the given (id, metrics)
     /// pairs and drop any entries for ids that didn't appear.
-    /// Called by the refresher each tick.
+    /// Called by the refresher each tick. Each replica's rolling
+    /// CPU/memory history is **carried forward** and appended to (capped
+    /// at [`HISTORY_LEN`]), so the dashboard sparklines accumulate a
+    /// trend instead of resetting every tick. A replica that
+    /// disappears and comes back starts its history fresh.
     pub fn replace(&self, fresh: Vec<(ReplicaId, ReplicaMetrics)>) {
         use std::collections::HashSet;
         let now = Instant::now();
         let kept: HashSet<ReplicaId> = fresh.iter().map(|(id, _)| id.clone()).collect();
         self.inner.retain(|id, _| kept.contains(id));
         for (id, m) in fresh {
+            // Carry the prior history forward, then append this sample.
+            let (mut cpu_history, mut mem_history) = self
+                .inner
+                .get(&id)
+                .map(|e| (e.cpu_history.clone(), e.mem_history.clone()))
+                .unwrap_or_default();
+            cpu_history.push(m.cpu_percent);
+            mem_history.push(m.memory_bytes);
+            // Keep only the most recent HISTORY_LEN samples.
+            if cpu_history.len() > HISTORY_LEN {
+                let drop = cpu_history.len() - HISTORY_LEN;
+                cpu_history.drain(0..drop);
+                mem_history.drain(0..drop);
+            }
             self.inner.insert(
                 id,
                 CachedMetrics {
                     metrics: m,
                     observed_at: now,
+                    cpu_history,
+                    mem_history,
                 },
             );
         }
@@ -236,6 +265,39 @@ mod tests {
         reg.write().await.remove(&id1);
         refresh_once(&cache, backend.as_ref(), &reg).await;
         assert!(cache.is_empty(), "stale entry must be evicted");
+    }
+
+    #[test]
+    fn history_accumulates_and_caps() {
+        let cache = MetricsCache::new();
+        let id = ReplicaId(uuid::Uuid::new_v4());
+        let sample = |cpu: f64, mem: u64| {
+            vec![(
+                id.clone(),
+                ReplicaMetrics {
+                    cpu_percent: cpu,
+                    memory_bytes: mem,
+                    network_rx_bytes: 0,
+                    network_tx_bytes: 0,
+                },
+            )]
+        };
+        // Two ticks ⇒ two samples, oldest first.
+        cache.replace(sample(1.0, 10));
+        cache.replace(sample(2.0, 20));
+        let c = cache.get(&id).unwrap();
+        assert_eq!(c.cpu_history, vec![1.0, 2.0]);
+        assert_eq!(c.mem_history, vec![10, 20]);
+        assert_eq!(c.metrics.cpu_percent, 2.0); // latest
+
+        // Push well past the cap; only the most recent HISTORY_LEN survive.
+        for i in 0..HISTORY_LEN + 10 {
+            cache.replace(sample(i as f64, i as u64));
+        }
+        let c = cache.get(&id).unwrap();
+        assert_eq!(c.cpu_history.len(), HISTORY_LEN);
+        // Last sample is the most recent push.
+        assert_eq!(*c.cpu_history.last().unwrap(), (HISTORY_LEN + 9) as f64);
     }
 
     #[tokio::test]

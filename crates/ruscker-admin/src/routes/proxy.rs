@@ -334,12 +334,27 @@ async fn forward(
     }
 
     // 6. HTTP forward.
+    // The mount prefix we advertise to the upstream via
+    // `X-Forwarded-Prefix` / `X-Script-Name` — the public path the
+    // spec is reachable at, with no trailing slash (`route_prefix`
+    // already carries one), e.g. `/app/my-shiny` or `/api/my-api`.
+    let forwarded_prefix = format!("{route_prefix}{}", spec.id);
     tracing::debug!(
         spec = %spec.id, replica = %replica.id,
         upstream = %replica.upstream, path = %upstream_path,
+        prefix = %forwarded_prefix,
         "forwarding"
     );
-    let resp = match do_forward(&replica, upstream_path, req, body_cap).await {
+    let resp = match do_forward(
+        &replica,
+        upstream_path,
+        &forwarded_prefix,
+        is_https,
+        req,
+        body_cap,
+    )
+    .await
+    {
         Ok(r) => r,
         Err(err) => {
             tracing::error!(
@@ -358,8 +373,10 @@ async fn forward(
     //     `/app/` route family so relative URLs in the app's
     //     templates resolve against the prefix rather than the
     //     server root. API responses skip this entirely — APIs
-    //     return JSON / binary, not HTML.
-    let resp = if route_prefix == APP_PREFIX {
+    //     return JSON / binary, not HTML. Operators can also disable
+    //     the transform per spec (`inject-base-href: false`) once the
+    //     app self-routes from the forwarded-prefix headers above.
+    let resp = if route_prefix == APP_PREFIX && spec.effective_inject_base_href() {
         let base = format!("{route_prefix}{}/", spec.id);
         rewrite::inject_base_href(resp, &base).await
     } else {
@@ -813,9 +830,49 @@ fn select<'a>(
     Some(chosen.clone())
 }
 
+/// Stamp the smart-routing headers onto an outbound upstream request.
+///
+/// These let a containerised app figure out the public path / scheme /
+/// host it's served behind, so it can build correct links and route
+/// its own assets without Ruscker rewriting its HTML:
+///
+/// - `X-Forwarded-Prefix` — the mount path with no trailing slash
+///   (e.g. `/app/my-shiny`). De-facto standard honoured by Spring,
+///   Traefik, and FastAPI's `root_path` proxy support.
+/// - `X-Script-Name` — the WSGI / Dash / Plumber spelling of the same
+///   mount path.
+/// - `X-Forwarded-Proto` — `https`/`http` as seen by the *client*
+///   (taken from `X-Forwarded-Proto` on the inbound request, or the
+///   connection scheme), so the app emits `https://` links behind TLS
+///   termination.
+/// - `X-Forwarded-Host` — the public `Host` the client used.
+///
+/// A malformed prefix (one that can't be a header value) is skipped
+/// rather than failing the request; the HTML rewriter still covers it.
+fn apply_smart_routing_headers(
+    headers: &mut HeaderMap,
+    forwarded_prefix: &str,
+    is_https: bool,
+    fwd_host: Option<HeaderValue>,
+) {
+    if let Ok(v) = HeaderValue::from_str(forwarded_prefix) {
+        headers.insert("x-forwarded-prefix", v.clone());
+        headers.insert("x-script-name", v);
+    }
+    headers.insert(
+        "x-forwarded-proto",
+        HeaderValue::from_static(if is_https { "https" } else { "http" }),
+    );
+    if let Some(host) = fwd_host {
+        headers.insert("x-forwarded-host", host);
+    }
+}
+
 async fn do_forward(
     replica: &Replica,
     upstream_path: String,
+    forwarded_prefix: &str,
+    is_https: bool,
     mut req: Request,
     max_body: Option<usize>,
 ) -> anyhow::Result<Response> {
@@ -825,7 +882,20 @@ async fn do_forward(
         .map_err(|e| anyhow::anyhow!("build upstream uri: {e}"))?;
     *req.uri_mut() = new_uri;
 
+    // Capture the client's `Host` before `strip_hop_headers` drops it
+    // (it's hop-by-hop for us; hyper re-derives it from the upstream
+    // authority). We re-publish it as `X-Forwarded-Host` so the app
+    // can build absolute URLs against the public hostname, not the
+    // container's internal address.
+    let fwd_host = req.headers().get(header::HOST).cloned();
+
     strip_hop_headers(req.headers_mut());
+
+    // Smart-routing headers — tell the upstream what public prefix,
+    // scheme, and host it's mounted behind so it can self-route. Set
+    // *after* the hop-by-hop strip (which removes any inbound
+    // `X-Forwarded-Proto`) so our values are authoritative.
+    apply_smart_routing_headers(req.headers_mut(), forwarded_prefix, is_https, fwd_host);
 
     // Hard cap on the streamed request body. The `Content-Length`
     // fast-path in `forward` already rejected declared-oversize
@@ -1212,6 +1282,59 @@ container-cpu-limit: 1.5
         assert_eq!(l.memory_reservation_bytes, Some(256 * 1024 * 1024));
         assert_eq!(l.cpu_fraction, Some(1.5));
         assert!(!l.is_empty());
+    }
+
+    // ── Smart-routing headers (#102) ────────────────────────────────
+
+    #[test]
+    fn smart_routing_headers_set_prefix_proto_and_host() {
+        let mut h = HeaderMap::new();
+        let host = HeaderValue::from_static("portal.example.org");
+        apply_smart_routing_headers(&mut h, "/app/my-shiny", true, Some(host));
+
+        assert_eq!(h.get("x-forwarded-prefix").unwrap(), "/app/my-shiny");
+        // X-Script-Name carries the same mount path for WSGI/Dash apps.
+        assert_eq!(h.get("x-script-name").unwrap(), "/app/my-shiny");
+        // is_https = true ⇒ the app should emit https:// links.
+        assert_eq!(h.get("x-forwarded-proto").unwrap(), "https");
+        assert_eq!(h.get("x-forwarded-host").unwrap(), "portal.example.org");
+    }
+
+    #[test]
+    fn smart_routing_proto_is_http_when_not_https() {
+        let mut h = HeaderMap::new();
+        apply_smart_routing_headers(&mut h, "/api/data", false, None);
+        assert_eq!(h.get("x-forwarded-proto").unwrap(), "http");
+        // No inbound Host ⇒ we don't fabricate X-Forwarded-Host.
+        assert!(h.get("x-forwarded-host").is_none());
+    }
+
+    #[test]
+    fn smart_routing_overwrites_inbound_proto() {
+        // A client (or upstream proxy) that sent its own forwarded
+        // headers must not win — Ruscker is the trust boundary here.
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-proto", HeaderValue::from_static("https"));
+        apply_smart_routing_headers(&mut h, "/app/x", false, None);
+        assert_eq!(h.get("x-forwarded-proto").unwrap(), "http");
+        // insert (not append) ⇒ exactly one value, no smuggling.
+        assert_eq!(h.get_all("x-forwarded-proto").iter().count(), 1);
+    }
+
+    #[test]
+    fn inject_base_href_defaults_on_and_honours_false() {
+        // Default (unset) ⇒ HTML rewriting stays on.
+        assert!(fake_spec("x").effective_inject_base_href());
+        // Explicit opt-out ⇒ off.
+        let off = spec_yaml(
+            r#"
+id: selfrouting
+display-name: Self
+container-image: x:1
+inject-base-href: false
+"#,
+        );
+        assert!(!off.effective_inject_base_href());
     }
 
     #[test]

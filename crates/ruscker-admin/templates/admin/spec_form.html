@@ -462,6 +462,18 @@
             <div class="spec-form-help">{{ self.t("spec-form-volumes-help") }}</div>
           </div>
 
+          {# Routing — how requests reach the upstream app #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-routing-section") }}</div>
+          <div class="spec-form-field">
+            <label class="spec-form-check">
+              <input type="checkbox" name="inject_base_href" value="on"
+                     {% if !form.inject_base_href.is_empty() %}checked{% endif %}>
+              {{ self.t("spec-form-inject-base-href") }}
+              {% call help(self.t("spec-help-inject-base-href")) %}{% endcall %}
+            </label>
+            <div class="spec-form-help">{{ self.t("spec-form-inject-base-href-help") }}</div>
+          </div>
+
           {# Lifecycle #}
           <div class="spec-form-subsection">{{ self.t("spec-form-lifecycle-section") }}</div>
           <div class="spec-form-field">

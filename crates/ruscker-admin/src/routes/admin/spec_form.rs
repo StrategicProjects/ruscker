@@ -172,15 +172,22 @@ impl SpecForm {
         }
     }
 
-    /// Build a fresh [`Spec`] from the submitted form values.
-    /// Empty optional strings become `None`. Numeric strings parse
-    /// optimistically; non-parseable values fall back to None
-    /// (operator gets a 400 from `validate` before reaching here).
-    pub fn into_spec(self) -> Result<Spec> {
+    /// Build a [`Spec`] from the submitted form, **merged onto `base`**
+    /// (the existing spec, on edit). The form overwrites only the fields
+    /// it owns; everything it doesn't model — `container-lifetime`,
+    /// `docker-registry-*`, `*-request`, `max-body-size`, scaling
+    /// thresholds, `routing-strategy`, `stop-on-logout`, and any custom
+    /// `template-properties` keys — passes through from `base` instead of
+    /// being silently dropped. `base` is `None` for a brand-new spec.
+    /// Empty optional strings become `None`; numeric strings parse
+    /// optimistically.
+    pub fn into_spec(self, base: Option<&Spec>) -> Result<Spec> {
         let dt = DisplayType::parse(&self.display_type).unwrap_or(DisplayType::App);
+        // App/API/External set an explicit kind; Talk/Report are purely
+        // visual, so keep whatever run-kind override `base` carried.
         let kind_override = match dt {
             DisplayType::App => Some(SpecKindOverride::Shiny),
-            DisplayType::Talk | DisplayType::Report => None, // these are visual
+            DisplayType::Talk | DisplayType::Report => base.and_then(|b| b.kind_override.clone()),
             DisplayType::Package | DisplayType::Link => Some(SpecKindOverride::External),
             DisplayType::Api => Some(SpecKindOverride::Api),
         };
@@ -191,37 +198,22 @@ impl SpecForm {
             self.updated.trim().to_string()
         };
 
-        let mut tp_map: HashMap<String, YamlValue> = HashMap::new();
-        // type, state, icon are always set so chips/filters render
+        // Start from base so custom template-properties keys (anything
+        // the form doesn't render) survive an edit, then overwrite the
+        // managed keys. Empty managed fields are *removed* so the form
+        // stays authoritative for the keys it owns.
+        let mut tp_map: HashMap<String, YamlValue> = base
+            .map(|b| b.template_properties.0.clone())
+            .unwrap_or_default();
+        // type, state, icon, updated are always set so chips/filters render
         tp_map.insert("type".into(), YamlValue::String(dt.key().to_string()));
         tp_map.insert("state".into(), YamlValue::String(self.state.clone()));
         tp_map.insert("icon".into(), YamlValue::String(self.access.clone()));
         tp_map.insert("updated".into(), YamlValue::String(updated));
-
-        if !self.subject.trim().is_empty() {
-            tp_map.insert(
-                "subject".into(),
-                YamlValue::String(self.subject.trim().to_string()),
-            );
-        }
-        if !self.logo.trim().is_empty() {
-            tp_map.insert(
-                "logo".into(),
-                YamlValue::String(self.logo.trim().to_string()),
-            );
-        }
-        if !self.cover.trim().is_empty() {
-            tp_map.insert(
-                "cover".into(),
-                YamlValue::String(self.cover.trim().to_string()),
-            );
-        }
-        if !self.link.trim().is_empty() {
-            tp_map.insert(
-                "link".into(),
-                YamlValue::String(self.link.trim().to_string()),
-            );
-        }
+        set_or_remove(&mut tp_map, "subject", &self.subject);
+        set_or_remove(&mut tp_map, "logo", &self.logo);
+        set_or_remove(&mut tp_map, "cover", &self.cover);
+        set_or_remove(&mut tp_map, "link", &self.link);
 
         let container_image = match dt {
             DisplayType::Package | DisplayType::Link => None,
@@ -259,29 +251,31 @@ impl SpecForm {
             container_image,
             seats_per_container: parse_opt(&self.seats_per_container),
             max_lifetime: parse_opt(&self.max_lifetime),
-            container_lifetime: None,
             heartbeat_timeout: parse_opt(&self.heartbeat_timeout),
-            stop_on_logout: None,
-            docker_registry_username: None,
-            docker_registry_password: None,
-            docker_registry_domain: None,
-            docker_registry_credential: None,
             container_cpu_limit: parse_opt(&self.container_cpu_limit),
-            container_cpu_request: None,
             container_memory_limit: empty_to_none(&self.container_memory_limit),
-            container_memory_request: None,
-            max_body_size: None,
             template_properties: TemplateProperties(tp_map),
             kind_override,
             api,
             min_replicas: parse_opt(&self.min_replicas),
             max_replicas: parse_opt(&self.max_replicas),
-            scale_up_threshold: None,
-            scale_down_threshold: None,
-            scale_down_grace: None,
-            drain_timeout: None,
-            routing_strategy: None,
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
+            // ── Not modelled by the form: preserve from `base` so an
+            //    edit never silently drops YAML-imported config. ──────
+            container_lifetime: base.and_then(|b| b.container_lifetime),
+            stop_on_logout: base.and_then(|b| b.stop_on_logout),
+            docker_registry_username: base.and_then(|b| b.docker_registry_username.clone()),
+            docker_registry_password: base.and_then(|b| b.docker_registry_password.clone()),
+            docker_registry_domain: base.and_then(|b| b.docker_registry_domain.clone()),
+            docker_registry_credential: base.and_then(|b| b.docker_registry_credential.clone()),
+            container_cpu_request: base.and_then(|b| b.container_cpu_request),
+            container_memory_request: base.and_then(|b| b.container_memory_request.clone()),
+            max_body_size: base.and_then(|b| b.max_body_size.clone()),
+            scale_up_threshold: base.and_then(|b| b.scale_up_threshold),
+            scale_down_threshold: base.and_then(|b| b.scale_down_threshold),
+            scale_down_grace: base.and_then(|b| b.scale_down_grace),
+            drain_timeout: base.and_then(|b| b.drain_timeout),
+            routing_strategy: base.and_then(|b| b.routing_strategy.clone()),
         })
     }
 
@@ -307,6 +301,17 @@ impl SpecForm {
 fn empty_to_none(s: &str) -> Option<String> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t.to_string()) }
+}
+/// Set a managed template-property to the trimmed value, or remove the
+/// key entirely when the form left it blank (so clearing a field clears
+/// it, while unmanaged keys merged from the base stay put).
+fn set_or_remove(map: &mut HashMap<String, YamlValue>, key: &str, val: &str) {
+    let t = val.trim();
+    if t.is_empty() {
+        map.remove(key);
+    } else {
+        map.insert(key.to_string(), YamlValue::String(t.to_string()));
+    }
 }
 fn parse_opt<T: std::str::FromStr>(s: &str) -> Option<T> {
     s.trim().parse().ok()
@@ -480,7 +485,7 @@ async fn create(
     }
 
     let id = form.id.trim().to_string();
-    let spec = match form.into_spec() {
+    let spec = match form.into_spec(None) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = ?e, "form → spec failed");
@@ -519,7 +524,18 @@ async fn update(
         return render_form_with_errors(&state, loc, theme, FormMode::Edit, form, errors).await;
     }
 
-    let spec = match form.into_spec() {
+    // Load the existing spec as the merge base so fields the form
+    // doesn't model (registry creds, lifetimes, limits, scaling, custom
+    // template-properties) survive the edit instead of being wiped.
+    let base = match db::specs::fetch_one(pool, &id).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::error!(error = ?e, id, "load base spec failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+
+    let spec = match form.into_spec(base.as_ref()) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = ?e, "form → spec failed");
@@ -577,4 +593,92 @@ async fn render_form_with_errors(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "render").into_response(),
     };
     (StatusCode::UNPROCESSABLE_ENTITY, axum::response::Html(body)).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ruscker_config::Config;
+
+    /// A spec carrying fields the form doesn't model must survive an
+    /// edit: `from_spec` (load into the form) → `into_spec(Some(base))`
+    /// (save) must preserve registry creds, lifetimes, limits, scaling
+    /// thresholds and custom template-properties. Regression for #74.
+    #[test]
+    fn edit_preserves_unmodelled_fields() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: ops
+      display-name: Ops
+      container-image: registry.example.com/acme/ops:latest
+      container-lifetime: 360
+      stop-on-logout: true
+      docker-registry-username: acme
+      docker-registry-domain: registry.example.com
+      docker-registry-credential: dh-creds
+      container-cpu-request: 0.25
+      container-memory-request: 128m
+      max-body-size: 25m
+      routing-strategy: round-robin
+      min-replicas: 1
+      max-replicas: 4
+      template-properties:
+        type: app
+        state: active
+        custom-key: keep-me
+"#;
+        let cfg = Config::from_yaml(yaml).expect("parse fixture");
+        let original = &cfg.proxy.specs[0];
+
+        // Round-trip: load into the form, change a managed field, save.
+        let mut form = SpecForm::from_spec(original);
+        form.display_name = "Ops (edited)".into();
+        let merged = form.into_spec(Some(original)).expect("into_spec");
+
+        // Managed field changed.
+        assert_eq!(merged.display_name.as_deref(), Some("Ops (edited)"));
+        // Unmodelled fields preserved (the #74 bug would None these).
+        assert_eq!(merged.container_lifetime, Some(360));
+        assert_eq!(merged.stop_on_logout, Some(true));
+        assert_eq!(merged.docker_registry_username.as_deref(), Some("acme"));
+        assert_eq!(
+            merged.docker_registry_domain.as_deref(),
+            Some("registry.example.com")
+        );
+        assert_eq!(
+            merged.docker_registry_credential.as_deref(),
+            Some("dh-creds")
+        );
+        assert_eq!(merged.container_cpu_request, Some(0.25));
+        assert_eq!(merged.container_memory_request.as_deref(), Some("128m"));
+        assert_eq!(merged.max_body_size.as_deref(), Some("25m"));
+        assert!(merged.routing_strategy.is_some());
+        // Custom template-property survives.
+        assert_eq!(
+            merged.template_properties.get_str("custom-key"),
+            Some("keep-me")
+        );
+        // Form-managed advanced fields still round-trip.
+        assert_eq!(merged.min_replicas, Some(1));
+        assert_eq!(merged.max_replicas, Some(4));
+    }
+
+    /// A brand-new spec (no base) has no unmodelled fields to carry.
+    #[test]
+    fn create_without_base_leaves_unmodelled_none() {
+        let form = SpecForm {
+            id: "fresh".into(),
+            display_name: "Fresh".into(),
+            display_type: "app".into(),
+            state: "active".into(),
+            access: "lock".into(),
+            ..Default::default()
+        };
+        let spec = form.into_spec(None).expect("into_spec");
+        assert_eq!(spec.id, "fresh");
+        assert_eq!(spec.container_lifetime, None);
+        assert_eq!(spec.docker_registry_username, None);
+        assert_eq!(spec.max_body_size, None);
+    }
 }

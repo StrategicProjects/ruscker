@@ -21,8 +21,10 @@ copyright = "2025-2026, Ruscker contributors. Licensed under Apache-2.0."
 section = "web"
 priority = "optional"
 # $auto pulls the binary's shared-lib deps (libc, …); ca-certificates
-# is needed for TLS when pulling private images from registries.
-depends = "$auto, ca-certificates"
+# for TLS when pulling private images; adduser because the postinst uses
+# addgroup/adduser to create the service account (Ubuntu 24.04 minimal no
+# longer ships it in the base set).
+depends = "$auto, ca-certificates, adduser"
 extended-description = """\
 Ruscker is a lightweight Rust alternative to ShinyProxy and Shiny Server \
 Free. It hosts and load-balances containerized interactive web apps \

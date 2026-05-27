@@ -113,6 +113,33 @@ async fn anonymous_sees_only_open_specs() {
 }
 
 #[tokio::test]
+async fn show_admin_link_false_hides_signin_for_anonymous() {
+    // #156: a fully-public portal can hide the admin entrance.
+    const CFG: &str = r#"
+proxy:
+  title: Public Portal
+  port: 8088
+  landing-customization:
+    show-admin-link: false
+  specs:
+    - id: open-app
+      display-name: Open App
+      container-image: demo/img
+"#;
+    std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+    let config = Config::from_yaml(CFG).expect("parse config");
+    let mut state = app_state(open_db().await).await;
+    state.config = Arc::new(config);
+    let body = landing_body(state, None).await;
+
+    assert!(has_card(&body, "open app"), "cards still render");
+    assert!(
+        !body.contains(r#"href="/admin/login""#),
+        "sign-in entrance hidden when show-admin-link=false"
+    );
+}
+
+#[tokio::test]
 async fn admin_session_sees_every_spec() {
     let db = open_db().await;
     let state = app_state(db).await;

@@ -67,6 +67,9 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 // Blocks live in their own table; callers that render
                 // or export them load via `landing_blocks`.
                 blocks: Vec::new(),
+                // Deploy policy (#156) read from YAML config, not the
+                // DB-backed editable customization.
+                show_admin_link: None,
             })
         }
     }

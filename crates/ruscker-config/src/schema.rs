@@ -341,6 +341,25 @@ pub struct LandingCustomization {
     /// slot is the render order.
     #[serde(default)]
     pub blocks: Vec<LandingBlock>,
+
+    /// Whether the public landing shows the "Sign in" entrance to
+    /// `/admin/login` for **anonymous** visitors (#156). Defaults to
+    /// `true` (the sign-in affordance from #155). Set `false` on a
+    /// fully-public, no-login portal to hide the admin entrance
+    /// entirely — logged-in users still see their panel link. A
+    /// deploy-level policy, so it lives in YAML config rather than the
+    /// live landing editor.
+    #[serde(default, rename = "show-admin-link")]
+    pub show_admin_link: Option<bool>,
+}
+
+impl LandingCustomization {
+    /// Resolve [`Self::show_admin_link`] — defaults to `true` so the
+    /// landing keeps the anonymous "Sign in" entrance unless an
+    /// operator opts out.
+    pub fn effective_show_admin_link(&self) -> bool {
+        self.show_admin_link.unwrap_or(true)
+    }
 }
 
 /// A custom HTML block on the public landing (admin-authored,

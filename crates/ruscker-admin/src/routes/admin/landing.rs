@@ -130,6 +130,9 @@ impl LandingForm {
             // screen does); `landing::update` ignores this field, so
             // an empty Vec here never clobbers stored blocks.
             blocks: Vec::new(),
+            // `show-admin-link` is a YAML deploy policy (#156), not an
+            // editor field — never persisted from the form.
+            show_admin_link: None,
         }
     }
 }

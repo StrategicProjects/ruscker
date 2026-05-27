@@ -32,7 +32,11 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     env:
-      MDBOOK_VERSION: "0.4.40"
+      # Match the version built locally. 0.4.x shipped an older theme
+      # whose wide-screen edge chevrons (prev/next chapter) were easy to
+      # mistake for a broken sidebar toggle; 0.5.x has the clean
+      # "Toggle Table of Contents" sidebar button.
+      MDBOOK_VERSION: "0.5.3"
     steps:
       - uses: actions/checkout@v6
 

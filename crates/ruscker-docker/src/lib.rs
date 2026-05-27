@@ -260,6 +260,7 @@ impl LocalDockerBackend {
             started_at: Utc::now(),
             sessions_active: 0,
             sessions_max: 0,
+            host: None,
         })
     }
 
@@ -492,6 +493,7 @@ impl ContainerBackend for LocalDockerBackend {
                 started_at: Utc::now(), // exact value would need inspect()
                 sessions_active: 0,
                 sessions_max: 0,
+                host: None,
             });
         }
         Ok(replicas)

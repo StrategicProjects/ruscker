@@ -387,6 +387,7 @@ mod registry_tests {
             started_at: chrono::Utc::now(),
             sessions_active: 0,
             sessions_max: 5,
+            host: None,
         }
     }
 

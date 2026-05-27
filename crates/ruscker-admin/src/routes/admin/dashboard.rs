@@ -115,6 +115,9 @@ struct ReplicaRow {
     /// sparklines. Empty until the metrics cache has ≥1 reading.
     cpu_history: Vec<f64>,
     mem_history: Vec<u64>,
+    /// Docker host the replica runs on (multi-host, Phase 6). Empty for
+    /// the single local daemon — rendered as "local".
+    host: String,
 }
 
 /// What both the HTML render and the SSE stream consume.
@@ -322,6 +325,7 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
                 memory_display,
                 cpu_history,
                 mem_history,
+                host: r.host.unwrap_or_default(),
             }
         })
         .collect();
@@ -723,6 +727,7 @@ mod tests {
             memory_display: None,
             cpu_history: Vec::new(),
             mem_history: Vec::new(),
+            host: String::new(),
         }
     }
 

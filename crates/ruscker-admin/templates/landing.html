@@ -22,7 +22,26 @@
       <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
       <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
     </div>
-    <div class="text-xs opacity-70">{{ counts.total }}</div>
+    <div class="flex items-center gap-4 text-xs">
+      <span class="opacity-70">{{ counts.total }}</span>
+      {% if signed_in %}
+        {% if !viewer_name.is_empty() %}
+          <span class="opacity-70 hidden sm:inline">{{ self.t_with("landing-signed-in-as", "user", viewer_name.as_str()) }}</span>
+        {% endif %}
+        <a class="inline-flex items-center gap-1 opacity-80 hover:opacity-100" href="/admin/dashboard">
+          <i class="ti ti-layout-dashboard" aria-hidden="true"></i> {{ self.t("landing-panel") }}
+        </a>
+        <form method="post" action="/admin/logout" class="inline">
+          <button type="submit" class="inline-flex items-center gap-1 opacity-80 hover:opacity-100 bg-transparent border-0 cursor-pointer font-inherit text-inherit">
+            <i class="ti ti-logout" aria-hidden="true"></i> {{ self.t("landing-signout") }}
+          </button>
+        </form>
+      {% else %}
+        <a class="inline-flex items-center gap-1 opacity-80 hover:opacity-100" href="/admin/login">
+          <i class="ti ti-login" aria-hidden="true"></i> {{ self.t("landing-signin") }}
+        </a>
+      {% endif %}
+    </div>
   </div>
 </header>
 

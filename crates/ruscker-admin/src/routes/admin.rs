@@ -272,7 +272,12 @@ async fn login_submit(
 
     let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
     let path = super::same_origin_path(referer, user.role.home());
-    let target = if path.starts_with("/admin/")
+    let target = if path == "/" {
+        // Signed in from the public landing — return there so the
+        // viewer sees the apps their groups unlock (#155), rather than
+        // bouncing a non-admin into the panel.
+        path
+    } else if path.starts_with("/admin/")
         && !path.starts_with("/admin/login")
         && user.role.can_access_section(section_for_admin_path(&path))
     {

@@ -1,0 +1,178 @@
+//! Integration test for per-group app visibility on the public landing
+//! (#155, Slice 3). Builds a config with one open spec and two
+//! restricted ones (by group and by username) and asserts the landing
+//! shows the right cards for anonymous / admin / per-group sessions.
+//!
+//! Uses an in-process `Router::oneshot` plus an in-memory SQLite for the
+//! user → groups lookup. No socket bound.
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use ruscker_admin::auth::{AdminAuth, Role, COOKIE_NAME};
+use ruscker_admin::db::ConfigDb;
+use ruscker_admin::i18n::Locales;
+use ruscker_admin::{router, AppState};
+use ruscker_config::Config;
+use std::sync::Arc;
+use tower::ServiceExt;
+
+const CONFIG: &str = r#"
+proxy:
+  title: Ruscker Test
+  port: 8088
+  specs:
+    - id: open-app
+      display-name: Open App
+      container-image: demo/img
+    - id: analysts-app
+      display-name: Analysts App
+      container-image: demo/img
+      access-groups: [analysts]
+    - id: vip-user-app
+      display-name: VIP User App
+      container-image: demo/img
+      access-users: [carol]
+"#;
+
+/// A fresh, migrated SQLite at a unique temp path. (The crate's
+/// `open_memory` is `#[cfg(test)]`-only, so integration tests open a
+/// file instead.)
+async fn open_db() -> ConfigDb {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "ruscker-landing-access-{}-{}.db",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&path);
+    ConfigDb::Sqlite(ruscker_admin::db::open(&path).await.unwrap())
+}
+
+/// AppState with admin auth configured (so sessions resolve) and an
+/// in-memory DB for the user → groups lookup.
+async fn app_state(db: ConfigDb) -> AppState {
+    std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+    let config = Config::from_yaml(CONFIG).expect("parse config");
+    let locales = Locales::load().expect("load locales");
+    AppState {
+        config: Arc::new(config),
+        locales: Arc::new(locales),
+        admin_auth: AdminAuth {
+            admin: Some(Arc::from("test-token")),
+        },
+        admin_sessions: Default::default(),
+        log_buffer: None,
+        login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
+        api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
+        db: Some(db),
+        images_dir: None,
+        master_key: Default::default(),
+        backend: None,
+        replicas: Arc::new(tokio::sync::RwLock::new(Default::default())),
+        cookie_key: ruscker_proxy::sticky::CookieKey::random(),
+        spawn_locks: Arc::new(dashmap::DashMap::new()),
+        sessions: Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
+        leader: Arc::new(ruscker_admin::leader::AlwaysLeader),
+        metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
+        draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    }
+}
+
+async fn landing_body(state: AppState, cookie: Option<String>) -> String {
+    let app = router(state);
+    let mut req = Request::builder().method("GET").uri("/");
+    if let Some(c) = cookie {
+        req = req.header(header::COOKIE, c);
+    }
+    let resp = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+/// Cards render `data-name="{display_name|lower}"`; this matches the
+/// presence of a specific card without tripping on other markup.
+fn has_card(body: &str, lower_name: &str) -> bool {
+    body.contains(&format!(r#"data-name="{lower_name}""#))
+}
+
+#[tokio::test]
+async fn anonymous_sees_only_open_specs() {
+    let db = open_db().await;
+    let state = app_state(db).await;
+    let body = landing_body(state, None).await;
+
+    assert!(has_card(&body, "open app"), "open spec visible to anyone");
+    assert!(!has_card(&body, "analysts app"), "group-restricted spec hidden");
+    assert!(!has_card(&body, "vip user app"), "user-restricted spec hidden");
+    // Anonymous visitor gets the sign-in affordance.
+    assert!(body.contains(r#"href="/admin/login""#), "sign-in link present");
+}
+
+#[tokio::test]
+async fn admin_session_sees_every_spec() {
+    let db = open_db().await;
+    let state = app_state(db).await;
+    // A break-glass token session: Admin role, no username.
+    let sid = state.admin_sessions.create(Role::Admin, None);
+    let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
+
+    assert!(has_card(&body, "open app"));
+    assert!(has_card(&body, "analysts app"), "admin sees group-restricted");
+    assert!(has_card(&body, "vip user app"), "admin sees user-restricted");
+    // Signed-in affordance instead of sign-in.
+    assert!(body.contains(r#"action="/admin/logout""#), "sign-out present");
+}
+
+#[tokio::test]
+async fn group_member_sees_their_group_spec() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &["analysts".to_string()],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let state = app_state(db).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("alice".to_string()));
+    let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
+
+    assert!(has_card(&body, "open app"));
+    assert!(has_card(&body, "analysts app"), "alice is in analysts");
+    assert!(!has_card(&body, "vip user app"), "alice is not the VIP user");
+}
+
+#[tokio::test]
+async fn named_user_sees_their_user_spec() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "carol",
+        "carolpass1",
+        Role::Viewer,
+        false,
+        &[],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let state = app_state(db).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("carol".to_string()));
+    let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
+
+    assert!(has_card(&body, "open app"));
+    assert!(has_card(&body, "vip user app"), "carol is the VIP user");
+    assert!(!has_card(&body, "analysts app"), "carol is not in analysts");
+}

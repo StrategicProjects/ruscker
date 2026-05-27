@@ -2,6 +2,10 @@
 
 landing-title = Ruscker
 landing-subtitle = Application and API portal
+landing-signin = Sign in
+landing-panel = Panel
+landing-signout = Sign out
+landing-signed-in-as = { $user }
 
 filter-search-placeholder = Search application…
 filter-access-all = All

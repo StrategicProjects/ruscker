@@ -14,6 +14,7 @@ use axum::{
 };
 use fluent_bundle::{FluentArgs, FluentValue};
 
+use crate::auth::{MaybeSession, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::view_model::{
@@ -61,6 +62,13 @@ struct LandingPage<'a> {
     /// after the card grid (`bottom` slot), in `position` order.
     blocks_top: Vec<crate::db::landing_blocks::LandingBlock>,
     blocks_bottom: Vec<crate::db::landing_blocks::LandingBlock>,
+    /// True when the request carries a live admin session. Drives the
+    /// header affordance: a "go to the panel" link + sign-out instead
+    /// of "sign in".
+    signed_in: bool,
+    /// Display name of the signed-in viewer (username, or empty for a
+    /// break-glass token session). Shown next to the panel link.
+    viewer_name: String,
 }
 
 impl<'a> LandingPage<'a> {
@@ -81,12 +89,35 @@ impl<'a> LandingPage<'a> {
     }
 }
 
-async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Response {
+async fn index(
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    MaybeSession(session): MaybeSession,
+) -> Response {
+    // Resolve the viewer for app-visibility filtering (#155):
+    //  - an Admin role (incl. the break-glass token) sees every spec;
+    //  - a named login sees open specs plus those matching its username
+    //    or any of its groups;
+    //  - an anonymous visitor sees only the open specs.
+    let is_admin = session.as_ref().map(|s| s.role == Role::Admin).unwrap_or(false);
+    let username = session.as_ref().and_then(|s| s.actor.clone());
+    let groups: Vec<String> = match (username.as_deref(), state.db.as_ref()) {
+        (Some(user), Some(db)) => crate::db::users::fetch(db, user)
+            .await
+            .ok()
+            .flatten()
+            .map(|row| row.groups)
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+
     let mut cards: Vec<CardCtx<'_>> = state
         .config
         .proxy
         .specs
         .iter()
+        .filter(|spec| spec.access_allows(is_admin, username.as_deref(), &groups))
         .map(CardCtx::from_spec)
         .collect();
     sort_by_recent(&mut cards);
@@ -176,6 +207,8 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
         analytics_html,
         blocks_top,
         blocks_bottom,
+        signed_in: session.is_some(),
+        viewer_name: username.unwrap_or_default(),
     };
     let mut resp = render(&page);
     // Widen *this page's* CSP so the analytics script can load/report.

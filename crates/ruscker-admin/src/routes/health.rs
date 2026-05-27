@@ -73,14 +73,18 @@ async fn readyz(State(state): State<AppState>) -> Response {
     let mut checks = serde_json::Map::new();
     let mut ready = true;
 
-    // SQLite: a trivial round-trip confirms the pool can hand out a
-    // live connection (catches a deleted/locked DB file or an
-    // exhausted pool). In Postgres mode `sqlite()` is `None` and this
-    // probe is skipped until readiness learns to probe that pool too
-    // (a later Phase 7c slice, when the CLI can select Postgres).
-    if let Some(pool) = state.sqlite() {
-        match sqlx::query("SELECT 1").fetch_one(pool).await {
-            Ok(_) => {
+    // Config database: a trivial round-trip confirms the pool can hand
+    // out a live connection (catches a deleted/locked SQLite file, an
+    // unreachable Postgres, or an exhausted pool). Probes whichever
+    // backend is attached.
+    if let Some(db) = state.db.as_ref() {
+        use crate::db::ConfigDb;
+        let probe = match db {
+            ConfigDb::Sqlite(pool) => sqlx::query("SELECT 1").fetch_one(pool).await.map(|_| ()),
+            ConfigDb::Postgres(pool) => sqlx::query("SELECT 1").fetch_one(pool).await.map(|_| ()),
+        };
+        match probe {
+            Ok(()) => {
                 checks.insert("db".into(), json!("ok"));
             }
             Err(err) => {

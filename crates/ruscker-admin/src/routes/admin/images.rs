@@ -99,7 +99,7 @@ async fn render_index(
     flash_uploaded: Option<String>,
     flash_error: Option<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "database not attached — start with --db <path>",
@@ -134,7 +134,7 @@ async fn upload(
     theme: Theme,
     mut multipart: Multipart,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -205,7 +205,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::images::delete_one(pool, &id, Some(editor.actor())).await {

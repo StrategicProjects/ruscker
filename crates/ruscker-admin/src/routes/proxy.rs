@@ -743,7 +743,7 @@ pub(crate) async fn resolve_creds(
         .as_deref()
         .filter(|s| !s.is_empty())
     {
-        match (state.sqlite(), state.master_key.is_configured()) {
+        match (state.db.as_ref(), state.master_key.is_configured()) {
             (Some(pool), true) => {
                 match crate::db::credentials::resolve(pool, &state.master_key, name).await {
                     Ok(Some(c)) => return Some(c),

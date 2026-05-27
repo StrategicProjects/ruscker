@@ -9,10 +9,10 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
 use zeroize::Zeroizing;
 
 use crate::crypto::MasterKey;
+use crate::db::ConfigDb;
 
 /// Public-facing summary — no secrets. What the gallery sees.
 #[derive(Debug, Clone)]
@@ -27,7 +27,7 @@ pub struct CredentialMeta {
 /// the master key with a fresh nonce. Audit entry tagged with
 /// `actor`. Returns `true` if a prior row was replaced.
 pub async fn upsert(
-    pool: &SqlitePool,
+    db: &ConfigDb,
     key: &MasterKey,
     name: &str,
     registry: &str,
@@ -37,66 +37,123 @@ pub async fn upsert(
 ) -> Result<bool> {
     let now = Utc::now();
     let (ciphertext, nonce) = key.encrypt(password.as_bytes())?;
-
-    let mut tx = pool.begin().await.context("begin credential tx")?;
-
-    let existing: Option<(i64,)> =
-        sqlx::query_as("SELECT 1 FROM credentials WHERE name = ?")
-            .bind(name)
-            .fetch_optional(&mut *tx)
-            .await
-            .with_context(|| format!("lookup credential {name}"))?;
-    let replaced = existing.is_some();
-
-    sqlx::query(
-        "INSERT INTO credentials
-           (name, registry, username, password_enc, nonce, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(name) DO UPDATE SET
-           registry = excluded.registry,
-           username = excluded.username,
-           password_enc = excluded.password_enc,
-           nonce = excluded.nonce",
-    )
-    .bind(name)
-    .bind(registry)
-    .bind(username)
-    .bind(&ciphertext)
-    .bind(&nonce)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .with_context(|| format!("insert credential {name}"))?;
-
-    sqlx::query(
-        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-         VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(actor)
-    .bind(if replaced { "credential.update" } else { "credential.create" })
-    .bind(format!("credential:{name}"))
-    .bind(serde_json::to_string(&serde_json::json!({
+    // Metadata-only audit diff — never the password (see the
+    // `audit_log_never_records_the_password` test).
+    let diff = serde_json::to_string(&serde_json::json!({
         "registry": registry,
         "username": username,
-    }))?)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .context("audit credential upsert")?;
+    }))?;
+    let target = format!("credential:{name}");
 
-    tx.commit().await.context("commit credential tx")?;
-    Ok(replaced)
+    // `ON CONFLICT(name) DO UPDATE SET col = excluded.col` is the same
+    // on both backends — only the placeholders differ.
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin credential tx")?;
+            let existing: Option<(String,)> =
+                sqlx::query_as("SELECT name FROM credentials WHERE name = ?")
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .with_context(|| format!("lookup credential {name}"))?;
+            let replaced = existing.is_some();
+            sqlx::query(
+                "INSERT INTO credentials
+                   (name, registry, username, password_enc, nonce, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(name) DO UPDATE SET
+                   registry = excluded.registry,
+                   username = excluded.username,
+                   password_enc = excluded.password_enc,
+                   nonce = excluded.nonce",
+            )
+            .bind(name)
+            .bind(registry)
+            .bind(username)
+            .bind(&ciphertext)
+            .bind(&nonce)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("insert credential {name}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(if replaced {
+                "credential.update"
+            } else {
+                "credential.create"
+            })
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit credential upsert")?;
+            tx.commit().await.context("commit credential tx")?;
+            Ok(replaced)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin credential tx")?;
+            let existing: Option<(String,)> =
+                sqlx::query_as("SELECT name FROM credentials WHERE name = $1")
+                    .bind(name)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .with_context(|| format!("lookup credential {name}"))?;
+            let replaced = existing.is_some();
+            sqlx::query(
+                "INSERT INTO credentials
+                   (name, registry, username, password_enc, nonce, created_at)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 ON CONFLICT(name) DO UPDATE SET
+                   registry = excluded.registry,
+                   username = excluded.username,
+                   password_enc = excluded.password_enc,
+                   nonce = excluded.nonce",
+            )
+            .bind(name)
+            .bind(registry)
+            .bind(username)
+            .bind(&ciphertext)
+            .bind(&nonce)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("insert credential {name}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(actor)
+            .bind(if replaced {
+                "credential.update"
+            } else {
+                "credential.create"
+            })
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit credential upsert")?;
+            tx.commit().await.context("commit credential tx")?;
+            Ok(replaced)
+        }
+    }
 }
 
 /// List every credential — names, usernames, registries only.
-pub async fn list_all(pool: &SqlitePool) -> Result<Vec<CredentialMeta>> {
-    let rows: Vec<(String, String, String, DateTime<Utc>)> = sqlx::query_as(
-        "SELECT name, registry, username, created_at
+pub async fn list_all(db: &ConfigDb) -> Result<Vec<CredentialMeta>> {
+    let sql = "SELECT name, registry, username, created_at
            FROM credentials
-          ORDER BY name ASC",
-    )
-    .fetch_all(pool)
-    .await
+          ORDER BY name ASC";
+    let rows: Vec<(String, String, String, DateTime<Utc>)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
     .context("list credentials")?;
     Ok(rows
         .into_iter()
@@ -119,16 +176,24 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<CredentialMeta>> {
 /// encrypt/decrypt path; it's called from the spawn path, never
 /// from a UI handler.
 pub async fn resolve(
-    pool: &SqlitePool,
+    db: &ConfigDb,
     key: &MasterKey,
     name: &str,
 ) -> Result<Option<ruscker_core::RegistryCredentials>> {
-    let row: Option<(String, String, Vec<u8>, Vec<u8>)> = sqlx::query_as(
-        "SELECT registry, username, password_enc, nonce FROM credentials WHERE name = ?",
-    )
-    .bind(name)
-    .fetch_optional(pool)
-    .await
+    let row: Option<(String, String, Vec<u8>, Vec<u8>)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(
+            "SELECT registry, username, password_enc, nonce FROM credentials WHERE name = ?",
+        )
+        .bind(name)
+        .fetch_optional(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(
+            "SELECT registry, username, password_enc, nonce FROM credentials WHERE name = $1",
+        )
+        .bind(name)
+        .fetch_optional(pool)
+        .await,
+    }
     .with_context(|| format!("resolve credential {name}"))?;
     match row {
         None => Ok(None),
@@ -157,16 +222,25 @@ pub async fn resolve(
 /// runtime when pulling an image; **not** exposed in the UI.
 /// Returns `None` if the name doesn't exist.
 pub async fn fetch_password(
-    pool: &SqlitePool,
+    db: &ConfigDb,
     key: &MasterKey,
     name: &str,
 ) -> Result<Option<Zeroizing<String>>> {
-    let row: Option<(Vec<u8>, Vec<u8>)> =
-        sqlx::query_as("SELECT password_enc, nonce FROM credentials WHERE name = ?")
-            .bind(name)
-            .fetch_optional(pool)
-            .await
-            .with_context(|| format!("fetch credential {name}"))?;
+    let row: Option<(Vec<u8>, Vec<u8>)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT password_enc, nonce FROM credentials WHERE name = ?")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT password_enc, nonce FROM credentials WHERE name = $1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("fetch credential {name}"))?;
     match row {
         None => Ok(None),
         Some((enc, nonce)) => {
@@ -178,29 +252,57 @@ pub async fn fetch_password(
     }
 }
 
-pub async fn delete_one(pool: &SqlitePool, name: &str, actor: Option<&str>) -> Result<bool> {
+pub async fn delete_one(db: &ConfigDb, name: &str, actor: Option<&str>) -> Result<bool> {
     let now = Utc::now();
-    let mut tx = pool.begin().await.context("begin credential delete tx")?;
-    let rows = sqlx::query("DELETE FROM credentials WHERE name = ?")
-        .bind(name)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("delete credential {name}"))?;
-    let removed = rows.rows_affected() > 0;
-    if removed {
-        sqlx::query(
-            "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-             VALUES (?, 'credential.delete', ?, '{}', ?)",
-        )
-        .bind(actor)
-        .bind(format!("credential:{name}"))
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .context("audit credential.delete")?;
+    let target = format!("credential:{name}");
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin credential delete tx")?;
+            let rows = sqlx::query("DELETE FROM credentials WHERE name = ?")
+                .bind(name)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete credential {name}"))?;
+            let removed = rows.rows_affected() > 0;
+            if removed {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES (?, 'credential.delete', ?, '{}', ?)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit credential.delete")?;
+            }
+            tx.commit().await.context("commit credential delete")?;
+            Ok(removed)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin credential delete tx")?;
+            let rows = sqlx::query("DELETE FROM credentials WHERE name = $1")
+                .bind(name)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete credential {name}"))?;
+            let removed = rows.rows_affected() > 0;
+            if removed {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES ($1, 'credential.delete', $2, '{}', $3)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit credential.delete")?;
+            }
+            tx.commit().await.context("commit credential delete")?;
+            Ok(removed)
+        }
     }
-    tx.commit().await.context("commit credential delete")?;
-    Ok(removed)
 }
 
 #[cfg(test)]
@@ -215,22 +317,24 @@ mod tests {
     #[tokio::test]
     async fn upsert_then_fetch_round_trip() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "docker-hub", "docker.io", "acme", "hunter2", Some("admin"))
+        upsert(&db, &key, "docker-hub", "docker.io", "acme", "hunter2", Some("admin"))
             .await
             .unwrap();
-        let pw = fetch_password(&pool, &key, "docker-hub").await.unwrap();
+        let pw = fetch_password(&db, &key, "docker-hub").await.unwrap();
         assert_eq!(pw.unwrap().as_str(), "hunter2");
     }
 
     #[tokio::test]
     async fn list_does_not_contain_passwords() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "acme", "topsecret", None)
+        upsert(&db, &key, "dh", "docker.io", "acme", "topsecret", None)
             .await
             .unwrap();
-        let metas = list_all(&pool).await.unwrap();
+        let metas = list_all(&db).await.unwrap();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].name, "dh");
         assert_eq!(metas[0].username, "acme");
@@ -241,9 +345,10 @@ mod tests {
     #[tokio::test]
     async fn audit_log_never_records_the_password() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
         upsert(
-            &pool,
+            &db,
             &key,
             "dh",
             "docker.io",
@@ -271,31 +376,34 @@ mod tests {
     #[tokio::test]
     async fn upsert_replaces_password() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "acme", "old", None).await.unwrap();
-        let replaced = upsert(&pool, &key, "dh", "docker.io", "acme", "new", None).await.unwrap();
+        upsert(&db, &key, "dh", "docker.io", "acme", "old", None).await.unwrap();
+        let replaced = upsert(&db, &key, "dh", "docker.io", "acme", "new", None).await.unwrap();
         assert!(replaced);
-        let pw = fetch_password(&pool, &key, "dh").await.unwrap().unwrap();
+        let pw = fetch_password(&db, &key, "dh").await.unwrap().unwrap();
         assert_eq!(pw.as_str(), "new");
     }
 
     #[tokio::test]
     async fn delete_then_fetch_returns_none() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "dh", "docker.io", "acme", "x", None).await.unwrap();
-        assert!(delete_one(&pool, "dh", None).await.unwrap());
-        assert!(fetch_password(&pool, &key, "dh").await.unwrap().is_none());
+        upsert(&db, &key, "dh", "docker.io", "acme", "x", None).await.unwrap();
+        assert!(delete_one(&db, "dh", None).await.unwrap());
+        assert!(fetch_password(&db, &key, "dh").await.unwrap().is_none());
     }
 
     #[tokio::test]
     async fn resolve_returns_full_credential() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "priv", "registry.example.com", "bot", "hunter2", None)
+        upsert(&db, &key, "priv", "registry.example.com", "bot", "hunter2", None)
             .await
             .unwrap();
-        let c = resolve(&pool, &key, "priv").await.unwrap().expect("resolved");
+        let c = resolve(&db, &key, "priv").await.unwrap().expect("resolved");
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("registry.example.com"));
@@ -304,16 +412,58 @@ mod tests {
     #[tokio::test]
     async fn resolve_empty_registry_means_docker_hub() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        upsert(&pool, &key, "hub", "", "bot", "pw", None).await.unwrap();
-        let c = resolve(&pool, &key, "hub").await.unwrap().unwrap();
+        upsert(&db, &key, "hub", "", "bot", "pw", None).await.unwrap();
+        let c = resolve(&db, &key, "hub").await.unwrap().unwrap();
         assert!(c.server_address.is_none(), "empty registry -> Docker Hub default");
     }
 
     #[tokio::test]
     async fn resolve_unknown_name_is_none() {
         let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
         let key = fixed_key();
-        assert!(resolve(&pool, &key, "nope").await.unwrap().is_none());
+        assert!(resolve(&db, &key, "nope").await.unwrap().is_none());
+    }
+
+    // Encrypt/replace/decrypt/resolve/delete through the
+    // `ConfigDb::Postgres` arm against a real daemon (BYTEA round-trip +
+    // `ON CONFLICT`). Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn credentials_against_real_postgres() {
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        sqlx::query("DELETE FROM credentials")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let db = ConfigDb::Postgres(pool);
+        let key = fixed_key();
+
+        assert!(
+            !upsert(&db, &key, "dh", "docker.io", "acme", "s3cret", Some("admin"))
+                .await
+                .unwrap(),
+            "first upsert inserts"
+        );
+        assert!(
+            upsert(&db, &key, "dh", "docker.io", "acme2", "s3cret2", Some("admin"))
+                .await
+                .unwrap(),
+            "second upsert replaces"
+        );
+        assert_eq!(
+            fetch_password(&db, &key, "dh").await.unwrap().unwrap().as_str(),
+            "s3cret2"
+        );
+        let c = resolve(&db, &key, "dh").await.unwrap().unwrap();
+        assert_eq!(c.username, "acme2");
+        assert_eq!(c.server_address.as_deref(), Some("docker.io"));
+        assert_eq!(list_all(&db).await.unwrap().len(), 1);
+        assert!(delete_one(&db, "dh", Some("admin")).await.unwrap());
+        assert!(fetch_password(&db, &key, "dh").await.unwrap().is_none());
     }
 }

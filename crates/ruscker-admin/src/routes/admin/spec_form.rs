@@ -490,7 +490,7 @@ impl<'a> SpecFormPage<'a> {
 /// Media-library filenames for the logo picker. Empty when no DB is
 /// wired or the query fails — the picker degrades to the text field.
 async fn logo_filenames(state: &AppState) -> Vec<String> {
-    match state.sqlite() {
+    match state.db.as_ref() {
         Some(pool) => db::images::list_all(pool)
             .await
             .map(|imgs| imgs.into_iter().map(|i| i.filename).collect())

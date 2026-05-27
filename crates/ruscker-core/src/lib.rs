@@ -378,6 +378,27 @@ impl ReplicaRegistry {
         }
     }
 
+    /// Overwrite every replica's active-session count from an
+    /// authoritative external tally. Replicas absent from `counts`
+    /// are reset to zero.
+    ///
+    /// This is the HA reconcile path: the Postgres session store owns
+    /// the cluster-wide session table, and its sweep periodically
+    /// pushes the per-replica totals here so this node's routing /
+    /// scaling math reflects sessions opened by sibling nodes too. The
+    /// single-node `InMemorySessionStore` never calls this — it owns
+    /// the counter directly via `inc_sessions` / `dec_sessions`.
+    pub fn set_session_counts(
+        &mut self,
+        counts: &std::collections::HashMap<ReplicaId, u32>,
+    ) {
+        for replicas in self.by_spec.values_mut() {
+            for r in replicas.iter_mut() {
+                r.sessions_active = counts.get(&r.id).copied().unwrap_or(0);
+            }
+        }
+    }
+
     fn find_mut(&mut self, replica_id: &ReplicaId) -> Option<&mut Replica> {
         for replicas in self.by_spec.values_mut() {
             if let Some(r) = replicas.iter_mut().find(|r| r.id == *replica_id) {

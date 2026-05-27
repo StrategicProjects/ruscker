@@ -34,6 +34,7 @@ pub mod ratelimit;
 pub mod routes;
 pub mod scaler;
 pub mod sessions;
+pub mod sessions_pg;
 pub mod theme;
 pub mod view_model;
 
@@ -220,6 +221,19 @@ impl AdminServer {
         backend: std::sync::Arc<dyn ruscker_core::ContainerBackend>,
     ) -> Self {
         self.state.backend = Some(backend);
+        self
+    }
+
+    /// Swap in a different session store. The default is the
+    /// single-node [`sessions::InMemorySessionStore`]; HA deployments
+    /// pass a [`sessions_pg::PostgresSessionStore`] so several Ruscker
+    /// instances share one session table. The proxy and sweeper only
+    /// ever see the `dyn SessionStore`, so nothing else changes.
+    pub fn with_session_store(
+        mut self,
+        store: std::sync::Arc<dyn sessions::SessionStore>,
+    ) -> Self {
+        self.state.sessions = store;
         self
     }
 

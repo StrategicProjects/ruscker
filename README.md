@@ -73,7 +73,7 @@ tool" cases) is in
 
 ## Status
 
-**v0.1.0 — production-ready and running in production.** Releases are
+**v0.1.1 — production-ready and running in production.** Releases are
 multi-arch (amd64 + arm64) and [cosign-signed]. Where the JVM-based
 stack it replaced idled at hundreds of megabytes, Ruscker idles in the
 low tens:
@@ -124,7 +124,7 @@ curl -fsSL https://raw.githubusercontent.com/StrategicProjects/ruscker/main/inst
 Picks the right artifact from the latest release: the `.deb` (with the
 `systemd` unit + an auto-generated admin token) on Debian/Ubuntu, or the
 static binary into `/usr/local/bin` elsewhere. Pin a version or target
-dir with `./install.sh v0.1.0` or `PREFIX=~/.local/bin ./install.sh`.
+dir with `./install.sh v0.1.1` or `PREFIX=~/.local/bin ./install.sh`.
 
 ### Homebrew (macOS / Linux)
 

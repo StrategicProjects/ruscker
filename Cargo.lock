@@ -2779,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-admin"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2826,7 +2826,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-cli"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -2846,7 +2846,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-config"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "ordered-float",
@@ -2861,7 +2861,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -2874,7 +2874,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-docker"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2893,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "ruscker-proxy"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",

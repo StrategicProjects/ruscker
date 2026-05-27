@@ -28,3 +28,37 @@ html.navy .ruscker-logo-dark,
 html.ayu .ruscker-logo-dark {
   display: inline-block;
 }
+
+/* Brand re-tint — paint mdBook's accents in the Ruscker teal palette
+ * (#0F6E56 / #1D9E75 / #5DCAA5) instead of the stock theme colours. This
+ * additional-css loads after the built-in theme CSS, so these override
+ * the per-theme custom-property values. */
+
+/* Light theme (the default): primary teal reads well on white. */
+html.light {
+  --links: #0f6e56;
+  --sidebar-active: #0f6e56;
+  --icons-hover: #0f6e56;
+  --searchbar-border-color: #5dcaa5;
+  --search-mark-bg: #b9e6d5;
+  --searchresults-header-fg: #0f6e56;
+  --inline-code-color: #0b5d49;
+}
+
+/* Dark themes: the lighter teal keeps contrast on dark backgrounds. */
+html.coal,
+html.navy,
+html.ayu {
+  --links: #5dcaa5;
+  --sidebar-active: #5dcaa5;
+  --icons-hover: #5dcaa5;
+  --search-mark-bg: #1d9e75;
+  --searchresults-header-fg: #5dcaa5;
+}
+
+/* The active page in the sidebar gets a subtle teal rail in every
+ * theme — cheap wayfinding that reinforces the brand. */
+.chapter li.chapter-item a.active {
+  border-left: 3px solid var(--sidebar-active);
+  padding-left: calc(1rem - 3px);
+}

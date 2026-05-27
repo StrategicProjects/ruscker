@@ -231,8 +231,8 @@ ruscker/
     └── application.yml   # a generic, comprehensive reference config
 ```
 
-Each crate has its own `CLAUDE.md` documenting scope, conventions, and
-how to extend it.
+Each crate carries module-level docs (`cargo doc --open`) describing its
+scope and how to extend it.
 
 ## Documentation
 

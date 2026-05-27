@@ -25,7 +25,7 @@ dashboard).
 - [x] Two-phase validation (raw text scan + typed model checks)
 - [x] CLI binary with `validate`, `show`, `inspect`
 - [x] Integration tests against the real `application.yml`
-- [x] CLAUDE.md memory for every crate
+- [x] Per-crate developer docs (module-level)
 - [x] Mockups in `docs/mockups/`
 - [x] Architecture, roadmap, ADRs
 

@@ -26,6 +26,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/users", get(index).post(create))
         .route("/admin/users/{username}/role", post(set_role))
+        .route("/admin/users/{username}/groups", post(set_groups))
         .route("/admin/users/{username}/password", post(reset_password))
         .route("/admin/users/{username}/delete", post(delete))
 }
@@ -120,6 +121,9 @@ pub struct CreateForm {
     pub username: String,
     pub password: String,
     pub role: String,
+    /// Comma-separated group names; canonicalized in `db::users`.
+    #[serde(default)]
+    pub groups: String,
 }
 
 const MIN_PASSWORD_LEN: usize = 8;
@@ -137,6 +141,7 @@ async fn create(
     if username.is_empty() || form.password.len() < MIN_PASSWORD_LEN {
         return redirect_flash("bad-input");
     }
+    let groups = db::users::parse_groups(&form.groups);
     // New accounts get the "change your password?" prompt on first login.
     match db::users::create(
         pool,
@@ -144,6 +149,7 @@ async fn create(
         &form.password,
         role,
         true,
+        &groups,
         Some(admin.actor()),
     )
     .await
@@ -152,6 +158,32 @@ async fn create(
         Err(e) => {
             tracing::warn!(error = ?e, %username, "create user failed");
             redirect_flash("exists")
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GroupsForm {
+    /// Comma-separated group names; canonicalized in `db::users`.
+    #[serde(default)]
+    pub groups: String,
+}
+
+async fn set_groups(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Path(username): Path<String>,
+    Form(form): Form<GroupsForm>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let groups = db::users::parse_groups(&form.groups);
+    match db::users::set_groups(pool, &username, &groups, Some(admin.actor())).await {
+        Ok(()) => redirect_flash("saved"),
+        Err(e) => {
+            tracing::warn!(error = ?e, %username, "set groups failed");
+            redirect_flash("bad-input")
         }
     }
 }

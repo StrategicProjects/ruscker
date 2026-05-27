@@ -418,6 +418,7 @@ async fn setup_submit(
         &form.password,
         Role::Admin,
         false,
+        &[],
         Some("token"),
     )
     .await

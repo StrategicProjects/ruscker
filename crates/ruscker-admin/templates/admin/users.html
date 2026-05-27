@@ -43,12 +43,16 @@
         {% endfor %}
       </select>
     </label>
+    <label class="admin-login-field" style="margin:0">
+      <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
+      <input type="text" name="groups" autocapitalize="none" placeholder="{{ self.t("admin-users-groups-placeholder") }}">
+    </label>
     <button type="submit" class="admin-login-btn" style="width:auto">
       <i class="ti ti-user-plus" aria-hidden="true"></i>
       {{ self.t("admin-users-create") }}
     </button>
   </div>
-  <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-initial-password-hint") }}</p>
+  <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-initial-password-hint") }} · {{ self.t("admin-users-groups-hint") }}</p>
 </form>
 
 {# ── Existing users ────────────────────────────────────────────── #}
@@ -57,6 +61,7 @@
     <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
       <th class="py-2">{{ self.t("admin-users-col-user") }}</th>
       <th>{{ self.t("admin-users-col-role") }}</th>
+      <th>{{ self.t("admin-users-col-groups") }}</th>
       <th>{{ self.t("admin-users-col-created") }}</th>
       <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
     </tr>
@@ -77,6 +82,13 @@
               {% endfor %}
             </select>
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-role") }}"><i class="ti ti-check"></i></button>
+          </form>
+        </td>
+        <td>
+          <form method="post" action="/admin/users/{{ u.username }}/groups" style="display:flex;gap:6px;align-items:center">
+            <input type="text" name="groups" value="{{ u.groups|join(", ") }}" autocapitalize="none"
+                   placeholder="{{ self.t("admin-users-groups-placeholder") }}" style="width:160px">
+            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-groups") }}"><i class="ti ti-check"></i></button>
           </form>
         </td>
         <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>

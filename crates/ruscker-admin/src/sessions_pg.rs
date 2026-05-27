@@ -73,6 +73,12 @@ pub struct PostgresSessionStore {
     local_len: AtomicUsize,
 }
 
+/// Outcome of one upsert — see [`PostgresSessionStore::try_touch`].
+struct TouchRow {
+    inserted: bool,
+    took_over: bool,
+}
+
 impl PostgresSessionStore {
     /// Connect to `url` (a `postgres://…` DSN), create the session
     /// table if missing, and return a ready store.
@@ -102,8 +108,18 @@ impl PostgresSessionStore {
                  spec_id     TEXT NOT NULL,
                  replica_id  UUID NOT NULL,
                  instance_id UUID NOT NULL,
+                 created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
                  last_seen   TIMESTAMPTZ NOT NULL DEFAULT now()
              )",
+        )
+        .execute(&self.pool)
+        .await?;
+        // `created_at` discriminates insert from update on the upsert
+        // (see `try_touch`). Backfill it for any table created before
+        // this column existed; `ADD COLUMN IF NOT EXISTS` is idempotent.
+        sqlx::query(
+            "ALTER TABLE proxy_sessions
+                 ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now()",
         )
         .execute(&self.pool)
         .await?;
@@ -124,26 +140,47 @@ impl PostgresSessionStore {
         Ok(())
     }
 
-    /// Inner `touch_or_register` returning the DB error so the trait
-    /// method can decide how to degrade.
+    /// Result of one [`try_touch`](Self::try_touch) upsert.
+    ///
+    /// `inserted` ⇒ a brand-new session (mint the sticky cookie + admit
+    /// a seat). `took_over` ⇒ an *existing* session whose ownership just
+    /// moved to this node (a load-balancer failover) — it was already
+    /// counted cluster-wide, but it's newly part of *this* node's
+    /// `len()` for graceful drain.
     async fn try_touch(
         &self,
         session_id: Uuid,
         spec_id: &str,
         replica_id: &ReplicaId,
-    ) -> sqlx::Result<bool> {
-        // One UPSERT. `xmax = 0` is Postgres' idiom for "this row was
-        // freshly inserted" (vs. updated) — true on insert, false on
-        // the ON CONFLICT update path. Lets us tell a brand-new
-        // session (mint the sticky cookie) from a returning one (just
-        // refresh) in a single round-trip on the hot path.
+    ) -> sqlx::Result<TouchRow> {
+        // One UPSERT, two facts pulled back in the same round-trip:
+        //
+        //  - `inserted`: `created_at = last_seen`. On a fresh INSERT both
+        //    are the statement's `now()`, so they're equal. On the
+        //    ON CONFLICT update path `created_at` keeps the row's
+        //    original (earlier) insert time while `last_seen` becomes a
+        //    strictly-later `now()` — so they differ. This replaces the
+        //    officially-unsupported `xmax = 0` trick with plain,
+        //    supported SQL (an update's transaction always starts after
+        //    the insert committed, so `created_at < last_seen` holds).
+        //
+        //  - `prev_instance`: the row's owner *before* this touch,
+        //    captured by a CTE evaluated against the pre-statement
+        //    snapshot. `NULL` on a fresh insert. Lets the caller detect
+        //    a takeover (owner changed to me) and adjust node-local
+        //    accounting without waiting for the next sweep.
         let row = sqlx::query(
-            "INSERT INTO proxy_sessions
-                 (session_id, spec_id, replica_id, instance_id, last_seen)
-             VALUES ($1, $2, $3, $4, now())
+            "WITH prev AS (
+                 SELECT instance_id FROM proxy_sessions WHERE session_id = $1
+             )
+             INSERT INTO proxy_sessions
+                 (session_id, spec_id, replica_id, instance_id, created_at, last_seen)
+             VALUES ($1, $2, $3, $4, now(), now())
              ON CONFLICT (session_id) DO UPDATE
                  SET last_seen = now(), instance_id = $4
-             RETURNING (xmax = 0) AS inserted",
+             RETURNING
+                 (created_at = last_seen) AS inserted,
+                 (SELECT instance_id FROM prev) AS prev_instance",
         )
         .bind(session_id)
         .bind(spec_id)
@@ -151,7 +188,30 @@ impl PostgresSessionStore {
         .bind(self.instance_id)
         .fetch_one(&self.pool)
         .await?;
-        row.try_get::<bool, _>("inserted")
+        let inserted: bool = row.try_get("inserted")?;
+        let prev_instance: Option<Uuid> = row.try_get("prev_instance")?;
+        // Took over iff the row already existed under a *different*
+        // owner. (A repeat touch by this same node is neither an insert
+        // nor a takeover.)
+        let took_over = !inserted && prev_instance != Some(self.instance_id);
+        Ok(TouchRow {
+            inserted,
+            took_over,
+        })
+    }
+
+    /// `count(*)` of live sessions on one replica, read straight from
+    /// the shared table. Used on the register path to set the replica's
+    /// count to committed truth (B2) instead of a blind `+1` a
+    /// concurrent reconcile could clobber.
+    async fn count_for_replica(&self, replica_id: &ReplicaId) -> sqlx::Result<u32> {
+        let n: i64 =
+            sqlx::query("SELECT count(*)::bigint AS n FROM proxy_sessions WHERE replica_id = $1")
+                .bind(replica_id.0)
+                .fetch_one(&self.pool)
+                .await?
+                .try_get("n")?;
+        Ok(n.max(0) as u32)
     }
 
     /// Inner `sweep`. Returns the number of rows evicted, or a DB
@@ -244,14 +304,33 @@ impl SessionStore for PostgresSessionStore {
         replica_id: &ReplicaId,
     ) -> TouchOutcome {
         match self.try_touch(session_id, spec_id, replica_id).await {
-            Ok(true) => {
-                // Fresh session: bump the local registry counter for
-                // immediacy (the next sweep reconciles it anyway).
-                registry.write().await.inc_sessions(replica_id);
+            Ok(TouchRow { inserted: true, .. }) => {
+                // Fresh session. For immediacy (before the next sweep
+                // reconciles) set this replica's count to committed
+                // truth read back from the shared table — an absolute
+                // value, so a concurrent reconcile can't lose a blind
+                // `+1` (B2). On a count read error, fall back to the
+                // old blind bump rather than skip the admission.
+                match self.count_for_replica(replica_id).await {
+                    Ok(n) => registry.write().await.set_session_count(replica_id, n),
+                    Err(e) => {
+                        warn!(error = %e, "replica count read failed; using blind bump");
+                        registry.write().await.inc_sessions(replica_id);
+                    }
+                }
                 self.local_len.fetch_add(1, Ordering::Relaxed);
                 TouchOutcome::Registered
             }
-            Ok(false) => TouchOutcome::Touched,
+            Ok(TouchRow { took_over: true, .. }) => {
+                // Existing session failed over to this node. It's
+                // already counted cluster-wide, so don't touch the
+                // registry — but it now counts toward *this* node's
+                // `len()` for drain, which otherwise wouldn't see it
+                // until the next sweep (B1).
+                self.local_len.fetch_add(1, Ordering::Relaxed);
+                TouchOutcome::Touched
+            }
+            Ok(_) => TouchOutcome::Touched,
             Err(e) => {
                 // Degrade gracefully: the request still proxies. We
                 // can't tell new from returning, so report Touched —
@@ -432,5 +511,82 @@ mod tests {
         // …and the session is node-local to A, not B.
         assert_eq!(a.len(), 1);
         assert_eq!(b.len(), 0);
+    }
+
+    // B1: a load-balancer failover hands A's live session to B. B's
+    // touch is an UPDATE (the row exists) — so `Touched`, not
+    // `Registered` — but ownership moves to B, and B's node-local
+    // `len()` must reflect it *immediately* (not only after the next
+    // sweep), or a graceful drain on B could finish while it's still
+    // serving the failed-over session. Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn takeover_bumps_node_local_len_immediately() {
+        use ruscker_core::{Replica, ReplicaState};
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let a = PostgresSessionStore::connect(&url).await.unwrap();
+        let b = PostgresSessionStore::connect(&url).await.unwrap();
+        sqlx::query("DELETE FROM proxy_sessions")
+            .execute(&a.pool)
+            .await
+            .unwrap();
+
+        let rid = ReplicaId(Uuid::new_v4());
+        let mk = || Replica {
+            id: rid.clone(),
+            spec_id: "alpha".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 5,
+            host: None,
+        };
+        let reg_a = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let reg_b = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        reg_a.write().await.add(mk());
+        reg_b.write().await.add(mk());
+
+        // A registers; A owns it, A.len() == 1, B.len() == 0.
+        let sid = Uuid::new_v4();
+        assert_eq!(
+            a.touch_or_register(&reg_a, sid, "alpha", &rid).await,
+            TouchOutcome::Registered
+        );
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 0);
+
+        // Failover: the LB routes the *same* session to B. The row
+        // exists, so this is a Touched (not Registered) — but B now
+        // owns it and must count it in len() right away (B1 fix).
+        assert_eq!(
+            b.touch_or_register(&reg_b, sid, "alpha", &rid).await,
+            TouchOutcome::Touched
+        );
+        assert_eq!(b.len(), 1, "B counts the failed-over session immediately");
+
+        // The cluster-wide count is still exactly 1 (one session, now on
+        // B) — the takeover must not have double-counted the seat.
+        b.sweep(&reg_b, 3_600_000, &HashMap::new()).await;
+        assert_eq!(reg_b.read().await.replicas_of("alpha")[0].sessions_active, 1);
+
+        // After A sweeps, the row's instance_id is B's, so A's len()
+        // drains to 0 (A is no longer serving it).
+        a.sweep(&reg_a, 3_600_000, &HashMap::new()).await;
+        assert_eq!(a.len(), 0, "A no longer owns the session");
+
+        // A repeat touch by the new owner is neither insert nor takeover
+        // — len() stays 1, no double count.
+        assert_eq!(
+            b.touch_or_register(&reg_b, sid, "alpha", &rid).await,
+            TouchOutcome::Touched
+        );
+        assert_eq!(b.len(), 1);
     }
 }

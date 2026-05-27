@@ -183,6 +183,53 @@ pub struct Proxy {
     /// extension — not present in ShinyProxy YAML.
     #[serde(rename = "metrics-enabled")]
     pub metrics_enabled: bool,
+
+    /// Docker hosts for multi-host scheduling (Phase 6). **Empty (the
+    /// default) ⇒ the single local Docker daemon** — today's behaviour.
+    /// When set, Ruscker spawns app containers across these hosts.
+    /// Ruscker extension.
+    #[serde(default)]
+    pub hosts: Vec<Host>,
+}
+
+/// A Docker host Ruscker can schedule containers onto (Phase 6).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Host {
+    /// Stable identifier — referenced by replicas, placement, and the
+    /// dashboard. Required and unique.
+    pub id: String,
+
+    /// Daemon address. Supported schemes:
+    /// - `ssh://user@host[:port]` — Docker over SSH (simplest to run);
+    /// - `tcp://host:port` — Docker over TLS (set `tls`);
+    /// - `http://host:port` — Docker over plain TCP (no TLS; trusted
+    ///   networks only);
+    /// - `unix:///path/to/docker.sock` — a local socket.
+    pub address: String,
+
+    /// Client TLS material for `tcp://` mutual TLS. Ignored for other
+    /// schemes.
+    #[serde(default)]
+    pub tls: Option<HostTls>,
+
+    /// Optional hard cap on the number of containers this host runs.
+    /// Placement (Phase 6c) won't exceed it.
+    #[serde(rename = "max-containers")]
+    pub max_containers: Option<u32>,
+
+    /// Relative weight for spread placement. Defaults to 1.
+    pub weight: Option<u32>,
+}
+
+/// Client TLS paths for a `tcp://` Docker host (mutual TLS).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostTls {
+    /// CA certificate that signed the daemon's server cert.
+    pub ca: PathBuf,
+    /// Client certificate presented to the daemon.
+    pub cert: PathBuf,
+    /// Client private key.
+    pub key: PathBuf,
 }
 
 impl Default for Proxy {
@@ -204,6 +251,7 @@ impl Default for Proxy {
             specs: Vec::new(),
             landing_customization: LandingCustomization::default(),
             metrics_enabled: false,
+            hosts: Vec::new(),
         }
     }
 }

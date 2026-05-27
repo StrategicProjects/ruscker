@@ -82,8 +82,10 @@ infer = "0.19"
 # Database (SQLite via sqlx)
 sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
 
-# Docker client
-bollard = "0.21"
+# Docker client. `ssh` + `ssl` enable remote daemons over `ssh://` and
+# `tcp://` (mTLS) for multi-host scheduling (Phase 6); the default
+# `http`+`pipe` only cover the local socket.
+bollard = { version = "0.21", features = ["ssh", "ssl"] }
 
 # Cryptography
 ring = "0.17.14"

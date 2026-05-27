@@ -3,16 +3,16 @@
   <title>Ruscker — crate map</title>
 
   <defs>
-    <marker id="up" viewBox="0 0 10 10" refX="5" refY="2" markerWidth="7" markerHeight="7" orient="auto">
+    <marker id="up" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0,10 L5,0 L10,10 z" fill="#1D9E75"/>
     </marker>
   </defs>
 
   <!-- layer bands -->
   <rect x="24" y="120" width="672" height="92" rx="12" fill="#F4F8F7" stroke="#D7E5E0" stroke-width="1.5"/>
-  <text x="40" y="142" font-size="12" font-weight="600" fill="#5B6B66">I/O layer · async + tokio</text>
+  <text x="40" y="142" font-size="12" font-weight="600" fill="#5B6B66">I/O layer · async</text>
   <rect x="24" y="250" width="672" height="178" rx="12" fill="#E8F3EE" stroke="#D7E5E0" stroke-width="1.5"/>
-  <text x="40" y="272" font-size="12" font-weight="600" fill="#5B6B66">pure domain · no I/O, no async (trait defs aside)</text>
+  <text x="40" y="272" font-size="12" font-weight="600" fill="#5B6B66">pure domain · no I/O</text>
 
   <!-- ruscker-cli (binary) -->
   <rect x="270" y="28" width="180" height="58" rx="10" fill="#0F6E56" stroke="#0F6E56" stroke-width="2"/>

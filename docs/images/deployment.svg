@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="720" height="430" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Two deployment shapes. Single-node (today): reverse proxy to one Ruscker to the local Docker daemon to app containers. Multi-node HA (planned, phase 7): an L4 load balancer fans to two Ruscker instances that share session state in Postgres and schedule onto Docker Swarm or Kubernetes.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="720" height="430" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Two deployment shapes. Single-node (today): reverse proxy to one Ruscker to the local Docker daemon to app containers. Multi-node HA (active-active): an L4 load balancer fans to two Ruscker instances that share session state in Postgres and schedule across multiple Docker hosts.">
   <title>Ruscker — deployment shapes</title>
 
   <defs>
-    <marker id="dn" viewBox="0 0 10 10" refX="5" refY="8" markerWidth="7" markerHeight="7" orient="auto">
+    <marker id="dn" viewBox="0 0 10 10" refX="5" refY="10" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0,0 L5,10 L10,0 z" fill="#1D9E75"/>
     </marker>
   </defs>
@@ -35,7 +35,7 @@
   <text x="185" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">what 99% of installs run — simple and fast</text>
 
   <!-- ───────────── Multi-node HA (right) ───────────── -->
-  <text x="535" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Multi-node HA · planned (Phase 7)</text>
+  <text x="535" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Multi-node HA · active-active</text>
 
   <rect x="405" y="50" width="260" height="44" rx="9" fill="#FFFFFF" stroke="#5DCAA5" stroke-width="1.6"/>
   <text x="535" y="77" text-anchor="middle" font-size="12.5" fill="#085041">L4 load balancer</text>
@@ -55,8 +55,8 @@
   <line x1="535" y1="256" x2="535" y2="282" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
 
   <rect x="405" y="286" width="260" height="56" rx="9" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.6"/>
-  <text x="535" y="310" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Docker Swarm / Kubernetes</text>
-  <text x="535" y="328" text-anchor="middle" font-size="10.5" fill="#5B6B66">multi-host scheduling (Phase 6)</text>
+  <text x="535" y="310" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Docker hosts ×M</text>
+  <text x="535" y="328" text-anchor="middle" font-size="10.5" fill="#5B6B66">multi-host scheduling · ssh / tcp</text>
 
   <text x="535" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">for teams needing failover + horizontal scale</text>
 </svg>

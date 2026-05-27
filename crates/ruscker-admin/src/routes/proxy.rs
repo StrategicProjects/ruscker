@@ -122,40 +122,44 @@ async fn forward_app(
     cookies: Cookies,
     ws: MaybeWs,
     peer: MaybePeer,
+    session: crate::auth::MaybeSession,
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, peer.0, APP_PREFIX, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, peer.0, session, APP_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_app_root(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
     peer: MaybePeer,
+    session: crate::auth::MaybeSession,
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, peer.0, APP_PREFIX, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, peer.0, session, APP_PREFIX, spec_id, "/".to_string(), req).await
 }
 async fn forward_api(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
     peer: MaybePeer,
+    session: crate::auth::MaybeSession,
     Path((spec_id, rest)): Path<(String, String)>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, peer.0, API_PREFIX, spec_id, format!("/{rest}"), req).await
+    forward(state, cookies, ws, peer.0, session, API_PREFIX, spec_id, format!("/{rest}"), req).await
 }
 async fn forward_api_root(
     state: State<AppState>,
     cookies: Cookies,
     ws: MaybeWs,
     peer: MaybePeer,
+    session: crate::auth::MaybeSession,
     Path(spec_id): Path<String>,
     req: Request,
 ) -> Response {
-    forward(state, cookies, ws, peer.0, API_PREFIX, spec_id, "/".to_string(), req).await
+    forward(state, cookies, ws, peer.0, session, API_PREFIX, spec_id, "/".to_string(), req).await
 }
 
 // ── Core forward ───────────────────────────────────────────────────
@@ -166,6 +170,7 @@ async fn forward(
     cookies: Cookies,
     ws_upgrade: MaybeWs,
     peer: Option<SocketAddr>,
+    session: crate::auth::MaybeSession,
     route_prefix: &'static str,
     spec_id: String,
     upstream_path: String,
@@ -265,6 +270,50 @@ async fn forward(
     }
     // Byte cap to hand to the forward step; `None` ⇒ unlimited.
     let body_cap = max_body.map(|l| usize::try_from(l).unwrap_or(usize::MAX));
+
+    // 2d. Access control (#155). An open spec (no `access-groups` /
+    //     `access-users`) stays reachable by anyone — including
+    //     anonymous `/api` clients, so unrestricted APIs keep working.
+    //     A restricted spec requires a session whose username or groups
+    //     match; an Admin role (incl. the break-glass token) passes
+    //     everything. This is the *enforcement* that the landing's card
+    //     filtering only hints at — hiding a card never stopped a direct
+    //     hit on `/app/{spec}`. We resolve groups per request (only for
+    //     restricted specs) from the same `users` store the landing uses.
+    if !spec.is_open() {
+        let session = session.0;
+        let is_admin = session
+            .as_ref()
+            .map(|s| s.role == crate::auth::Role::Admin)
+            .unwrap_or(false);
+        let username = session.as_ref().and_then(|s| s.actor.clone());
+        let groups: Vec<String> = match (username.as_deref(), state.db.as_ref()) {
+            (Some(user), Some(db)) => crate::db::users::fetch(db, user)
+                .await
+                .ok()
+                .flatten()
+                .map(|row| row.groups)
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        if !spec.access_allows(is_admin, username.as_deref(), &groups) {
+            tracing::info!(
+                spec = %spec.id,
+                user = username.as_deref().unwrap_or("-"),
+                "access denied to restricted spec"
+            );
+            // An anonymous visitor hitting a restricted interactive app
+            // is sent to log in; everyone else (and all API clients) get
+            // a flat 403 (CORS-wrapped for the `/api/` family).
+            if route_prefix == APP_PREFIX && session.is_none() {
+                return Redirect::to("/admin/login").into_response();
+            }
+            return with_cors(
+                (StatusCode::FORBIDDEN, "access denied\n").into_response(),
+                cors_on,
+            );
+        }
+    }
 
     // 3. Backend required to proxy.
     if state.backend.is_none() {

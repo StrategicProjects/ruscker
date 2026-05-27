@@ -207,6 +207,7 @@ mod tests {
             started_at: chrono::Utc::now(),
             sessions_active: active,
             sessions_max: 5,
+            host: None,
         }
     }
 

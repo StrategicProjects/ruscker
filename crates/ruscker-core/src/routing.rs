@@ -87,6 +87,7 @@ mod tests {
             started_at: Utc::now(),
             sessions_active: active,
             sessions_max: max,
+            host: None,
         }
     }
 

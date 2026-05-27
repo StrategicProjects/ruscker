@@ -980,6 +980,7 @@ mod tests {
             started_at: chrono::Utc::now(),
             sessions_active: active,
             sessions_max: max,
+            host: None,
         }
     }
 
@@ -1107,6 +1108,7 @@ mod tests {
                 started_at: chrono::Utc::now(),
                 sessions_active: 0,
                 sessions_max: 1,
+                host: None,
             })
         }
         async fn spawn_with_port(

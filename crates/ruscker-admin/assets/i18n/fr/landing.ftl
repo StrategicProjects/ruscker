@@ -134,6 +134,7 @@ admin-dashboard-col-spec = Application
 admin-dashboard-col-state = État
 admin-dashboard-col-uptime = Uptime
 admin-dashboard-col-sessions = Sessions
+admin-dashboard-col-host = Hôte
 admin-dashboard-col-container = Conteneur
 admin-dashboard-col-cpu = CPU
 admin-dashboard-col-memory = Mémoire

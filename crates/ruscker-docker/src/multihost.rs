@@ -150,7 +150,8 @@ impl ContainerBackend for MultiHostDockerBackend {
 
     async fn spawn_request(&self, req: &SpawnRequest) -> CoreResult<Replica> {
         let (host_id, backend) = self.pick_host();
-        let replica = backend.spawn_request(req).await?;
+        let mut replica = backend.spawn_request(req).await?;
+        replica.host = Some(host_id.clone());
         self.placement.insert(replica.id.clone(), host_id.clone());
         tracing::info!(host = %host_id, replica = %replica.id, spec = %req.spec_id, "spawned on host");
         Ok(replica)
@@ -181,9 +182,10 @@ impl ContainerBackend for MultiHostDockerBackend {
         let mut all = Vec::new();
         for (host_id, backend) in &self.hosts {
             match backend.list().await {
-                Ok(replicas) => {
-                    for r in &replicas {
+                Ok(mut replicas) => {
+                    for r in &mut replicas {
                         self.placement.insert(r.id.clone(), host_id.clone());
+                        r.host = Some(host_id.clone());
                     }
                     all.extend(replicas);
                 }

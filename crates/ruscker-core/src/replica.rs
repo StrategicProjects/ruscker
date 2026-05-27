@@ -52,6 +52,11 @@ pub struct Replica {
     pub started_at: DateTime<Utc>,
     pub sessions_active: u32,
     pub sessions_max: u32,
+    /// Which Docker host this replica runs on (multi-host scheduling,
+    /// Phase 6). `None` for the single local daemon. Set by the
+    /// `MultiHostDockerBackend`; surfaced in the dashboard.
+    #[serde(default)]
+    pub host: Option<String>,
 }
 
 impl Replica {

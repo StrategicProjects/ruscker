@@ -448,4 +448,47 @@ mod tests {
         // only asserting we reached the tcp branch (not the scheme error).
         assert!(!err_of(connect_host(&h)).contains("must start with"));
     }
+
+    /// Live test against TWO real Docker endpoints. Skipped unless built
+    /// with `--features multihost-it` and `RUSCKER_IT_HOST1` /
+    /// `RUSCKER_IT_HOST2` point at reachable daemons (`ssh://` /
+    /// `http://` / `unix://`) whose published ports this host can reach.
+    /// See `book/src/deploying.md` § Multi-host scheduling.
+    ///
+    ///   RUSCKER_IT_HOST1=ssh://ops@10.0.0.11 \
+    ///   RUSCKER_IT_HOST2=ssh://ops@10.0.0.12 \
+    ///   cargo test -p ruscker-docker --features multihost-it -- --nocapture
+    #[cfg(feature = "multihost-it")]
+    #[tokio::test]
+    async fn spreads_two_replicas_across_real_hosts() {
+        use ruscker_core::ContainerBackend;
+
+        let addr1 = std::env::var("RUSCKER_IT_HOST1").expect("set RUSCKER_IT_HOST1");
+        let addr2 = std::env::var("RUSCKER_IT_HOST2").expect("set RUSCKER_IT_HOST2");
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+
+        let backend = MultiHostDockerBackend::connect(&[host("h1", &addr1), host("h2", &addr2)])
+            .expect("connect both hosts");
+
+        // Two spread replicas of the same spec should land on different
+        // hosts (anti-affinity off; spread = least-loaded).
+        let req = SpawnRequest::new("it-spec", &image).with_port(80);
+        let r1 = backend.spawn_request(&req).await.expect("spawn 1");
+        let r2 = backend.spawn_request(&req).await.expect("spawn 2");
+        assert!(
+            r1.host.is_some() && r2.host.is_some(),
+            "replicas carry a host"
+        );
+        assert_ne!(r1.host, r2.host, "spread placed both on the same host");
+
+        // list() fans out over both hosts and tags each replica.
+        let listed = backend.list().await.expect("list");
+        assert!(listed.iter().any(|r| r.id == r1.id && r.host == r1.host));
+        assert!(listed.iter().any(|r| r.id == r2.id && r.host == r2.host));
+
+        // Routed stop reaches the owning host.
+        backend.stop(&r1.id).await.expect("stop 1");
+        backend.stop(&r2.id).await.expect("stop 2");
+    }
 }

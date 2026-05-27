@@ -27,3 +27,10 @@ async-stream = { workspace = true }
 # `cargo test -p ruscker-docker --features docker-it`. Requires the
 # `docker` group / socket access on the host.
 docker-it = []
+
+# Multi-host integration test against TWO real Docker endpoints. Enable
+# with `cargo test -p ruscker-docker --features multihost-it`. Needs
+# RUSCKER_IT_HOST1 / RUSCKER_IT_HOST2 set to reachable daemon addresses
+# (ssh:// / http:// / unix://) whose published ports the test host can
+# reach. See book/src/deploying.md § Multi-host scheduling.
+multihost-it = []

@@ -22,6 +22,9 @@ use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, ListContainersOptions, LogsOptionsBuilder,
     RemoveContainerOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
 };
+pub mod multihost;
+pub use multihost::MultiHostDockerBackend;
+
 use bollard::Docker;
 use chrono::Utc;
 use dashmap::DashMap;
@@ -30,7 +33,7 @@ use ruscker_core::{
     ContainerBackend, CoreError, CoreResult, Replica, ReplicaId, ReplicaMetrics, ReplicaState,
 };
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::time::sleep;
@@ -58,6 +61,15 @@ pub const STOP_TIMEOUT_SECS: i32 = 10;
 
 pub struct LocalDockerBackend {
     docker: Docker,
+    /// Interface the container's port is published on, in the
+    /// daemon's `HostConfig` port binding. `127.0.0.1` for a local
+    /// daemon (keep it off the network); `0.0.0.0` for a remote
+    /// daemon so the proxy can reach it across hosts.
+    publish_ip: String,
+    /// Host the proxy connects to for the upstream — `127.0.0.1` for
+    /// local, or the remote host's reachable IP/name for a remote
+    /// daemon. Combined with the bound port to form `Replica.upstream`.
+    upstream_host: String,
     /// Previous-reading cache for CPU delta calculation. Docker
     /// reports CPU as a cumulative counter; converting to a
     /// percentage requires comparing two readings against each
@@ -88,17 +100,30 @@ impl LocalDockerBackend {
     pub fn local() -> CoreResult<Self> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| CoreError::Backend(format!("connect to docker socket: {e}")))?;
-        Ok(Self {
-            docker,
-            prev_stats: DashMap::new(),
-        })
+        Ok(Self::from_docker(docker))
     }
 
-    /// Build over an existing bollard connection — used by tests
-    /// to inject a stub via testcontainers-rs.
+    /// Build over an existing bollard connection bound to the **local**
+    /// daemon — publishes on `127.0.0.1` and proxies to `127.0.0.1`.
+    /// Used by `local()` and tests.
     pub fn from_docker(docker: Docker) -> Self {
+        Self::from_docker_addressed(docker, "127.0.0.1", "127.0.0.1")
+    }
+
+    /// Build over an existing bollard connection with explicit
+    /// addressing — for a remote daemon (multi-host, Phase 6):
+    /// `publish_ip` is the interface the container port binds to on the
+    /// daemon's host (use `0.0.0.0` so the proxy can reach it), and
+    /// `upstream_host` is the reachable host the proxy connects to.
+    pub fn from_docker_addressed(
+        docker: Docker,
+        publish_ip: impl Into<String>,
+        upstream_host: impl Into<String>,
+    ) -> Self {
         Self {
             docker,
+            publish_ip: publish_ip.into(),
+            upstream_host: upstream_host.into(),
             prev_stats: DashMap::new(),
         }
     }
@@ -154,7 +179,9 @@ impl LocalDockerBackend {
         port_bindings.insert(
             port_key.clone(),
             Some(vec![PortBinding {
-                host_ip: Some("127.0.0.1".to_string()),
+                // Local daemon ⇒ 127.0.0.1 (off the network); remote
+                // daemon ⇒ 0.0.0.0 so the proxy can reach it.
+                host_ip: Some(self.publish_ip.clone()),
                 host_port: Some(String::new()), // "" => ephemeral
             }]),
         );
@@ -207,9 +234,19 @@ impl LocalDockerBackend {
 
         // 4. Inspect to learn the host port Docker assigned.
         let bound = self.bound_host_port(&container_id, &port_key).await?;
-        let upstream: SocketAddr = format!("127.0.0.1:{bound}")
-            .parse()
-            .map_err(|e| CoreError::Backend(format!("parse upstream addr: {e}")))?;
+        // Proxy connects to the daemon's host (127.0.0.1 local, or the
+        // remote host's reachable address) on the published port.
+        // `to_socket_addrs` resolves an IP literal instantly and a
+        // hostname via DNS, so a remote `ssh://user@host` works too.
+        let upstream: SocketAddr = format!("{}:{bound}", self.upstream_host)
+            .to_socket_addrs()
+            .map_err(|e| {
+                CoreError::Backend(format!("resolve upstream {}: {e}", self.upstream_host))
+            })?
+            .next()
+            .ok_or_else(|| {
+                CoreError::Backend(format!("no address for upstream {}", self.upstream_host))
+            })?;
 
         // 5. Wait for the container's process to bind that port.
         wait_for_ready(upstream).await?;
@@ -425,7 +462,16 @@ impl ContainerBackend for LocalDockerBackend {
                     .and_then(|p| p.public_port.map(|n| n))
             });
             let upstream: SocketAddr = match host_port {
-                Some(p) => format!("127.0.0.1:{p}").parse().unwrap(),
+                Some(p) => match format!("{}:{p}", self.upstream_host).to_socket_addrs() {
+                    Ok(mut addrs) => match addrs.next() {
+                        Some(a) => a,
+                        None => continue,
+                    },
+                    Err(e) => {
+                        tracing::warn!(error = %e, host = %self.upstream_host, "resolve upstream on list; skipping");
+                        continue;
+                    }
+                },
                 None => {
                     tracing::warn!(
                         container_id = ?c.id,

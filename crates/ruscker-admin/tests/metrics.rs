@@ -26,7 +26,7 @@ fn state(yaml: &str) -> AppState {
         replicas: Arc::new(tokio::sync::RwLock::new(Default::default())),
         cookie_key: ruscker_proxy::sticky::CookieKey::random(),
         spawn_locks: Arc::new(dashmap::DashMap::new()),
-        sessions: Arc::new(ruscker_admin::sessions::SessionTracker::new()),
+        sessions: Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }

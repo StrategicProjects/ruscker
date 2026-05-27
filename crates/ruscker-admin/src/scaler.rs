@@ -513,7 +513,7 @@ mod tests {
             replicas: Arc::new(tokio::sync::RwLock::new(ReplicaRegistry::new())),
             cookie_key: ruscker_proxy::sticky::CookieKey::random(),
             spawn_locks: Arc::new(dashmap::DashMap::new()),
-            sessions: Arc::new(crate::sessions::SessionTracker::new()),
+            sessions: Arc::new(crate::sessions::InMemorySessionStore::new()),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }

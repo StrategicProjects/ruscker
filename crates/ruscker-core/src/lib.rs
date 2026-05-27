@@ -23,11 +23,9 @@
 
 pub mod replica;
 pub mod routing;
-pub mod session;
 
 pub use replica::{Replica, ReplicaId, ReplicaState};
 pub use routing::{RoutingDecision, Router};
-pub use session::{Session, SessionId, SessionStore, StickySession};
 
 use async_trait::async_trait;
 use futures_util::Stream;

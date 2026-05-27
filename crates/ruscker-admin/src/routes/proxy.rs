@@ -545,7 +545,7 @@ async fn resolve_replica(
 
 /// Build + set the sticky cookie from an explicit `StickySession`
 /// — keeps the session_id consistent with what we tracked in the
-/// `SessionTracker` rather than minting a fresh, untracked id
+/// `SessionStore` rather than minting a fresh, untracked id
 /// inside the cookie helper.
 fn set_sticky_cookie(
     cookies: &Cookies,
@@ -1155,7 +1155,7 @@ mod tests {
             replicas: StdArc::new(RwLock::new(ReplicaRegistry::new())),
             cookie_key: CookieKey::random(),
             spawn_locks: StdArc::new(dashmap::DashMap::new()),
-            sessions: StdArc::new(crate::sessions::SessionTracker::new()),
+            sessions: StdArc::new(crate::sessions::InMemorySessionStore::new()),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
         }

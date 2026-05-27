@@ -132,6 +132,14 @@ pub enum Warning {
         spec_id: String,
         value: String,
     },
+    /// A `proxy.hosts` entry is malformed: empty/duplicate `id`, an
+    /// `address` with an unsupported scheme, or `tls` set on a non-`tcp`
+    /// address (or missing on a `tcp://` one). The host would fail to
+    /// connect at startup. `host` is the id (or index when blank).
+    InvalidHost {
+        host: String,
+        reason: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -332,9 +340,72 @@ pub fn run(config: &Config) -> ValidationReport {
         });
     }
 
+    check_hosts(&config.proxy.hosts, &mut warnings);
+
     let stats = collect_stats(config);
 
     ValidationReport { warnings, stats }
+}
+
+/// Validate `proxy.hosts` (Phase 6): non-empty unique ids, a supported
+/// address scheme, and `tls` paired correctly with `tcp://`. Pure
+/// string-level checks — the actual daemon connection happens in
+/// `ruscker-docker` at startup.
+fn check_hosts(hosts: &[crate::schema::Host], warnings: &mut Vec<Warning>) {
+    let mut seen: HashMap<&str, usize> = HashMap::new();
+    for (i, host) in hosts.iter().enumerate() {
+        let label = if host.id.trim().is_empty() {
+            format!("#{i}")
+        } else {
+            host.id.clone()
+        };
+
+        if host.id.trim().is_empty() {
+            warnings.push(Warning::InvalidHost {
+                host: label.clone(),
+                reason: "empty `id`".to_string(),
+            });
+        } else {
+            *seen.entry(host.id.as_str()).or_insert(0) += 1;
+        }
+
+        let addr = host.address.trim();
+        let scheme = addr.split("://").next().filter(|s| *s != addr);
+        match scheme {
+            Some("ssh") | Some("http") | Some("unix") => {
+                if host.tls.is_some() {
+                    warnings.push(Warning::InvalidHost {
+                        host: label.clone(),
+                        reason: format!("`tls` is only used with `tcp://` (address is {addr})"),
+                    });
+                }
+            }
+            Some("tcp") => {
+                if host.tls.is_none() {
+                    warnings.push(Warning::InvalidHost {
+                        host: label.clone(),
+                        reason: "`tcp://` host needs `tls` (ca/cert/key) for mutual TLS"
+                            .to_string(),
+                    });
+                }
+            }
+            _ => warnings.push(Warning::InvalidHost {
+                host: label.clone(),
+                reason: format!(
+                    "address `{addr}` must start with ssh:// , tcp:// , http:// or unix://"
+                ),
+            }),
+        }
+    }
+
+    for (id, count) in seen {
+        if count > 1 {
+            warnings.push(Warning::InvalidHost {
+                host: id.to_string(),
+                reason: "duplicate host id".to_string(),
+            });
+        }
+    }
 }
 
 fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
@@ -897,5 +968,68 @@ proxy:
             &issues[0],
             CompatWarning::UnsupportedProxyField { field, .. } if field == "docker"
         ));
+    }
+
+    // ── proxy.hosts validation (Phase 6) ────────────────────────────
+
+    fn host_warnings(yaml: &str) -> Vec<String> {
+        let config = Config::from_yaml(yaml).expect("parse");
+        run(&config)
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                Warning::InvalidHost { host, reason } => Some(format!("{host}: {reason}")),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn valid_hosts_produce_no_warnings() {
+        let yaml = "\
+proxy:
+  hosts:
+    - id: ssh-1
+      address: ssh://ops@10.0.0.11
+    - id: tcp-1
+      address: tcp://10.0.0.12:2376
+      tls: { ca: /c/ca.pem, cert: /c/cert.pem, key: /c/key.pem }
+    - id: local
+      address: unix:///var/run/docker.sock
+  specs: []
+";
+        assert!(host_warnings(yaml).is_empty(), "{:?}", host_warnings(yaml));
+    }
+
+    #[test]
+    fn host_flags_bad_scheme_dup_and_tls_mismatch() {
+        let yaml = "\
+proxy:
+  hosts:
+    - id: weird
+      address: rdp://nope
+    - id: tcp-notls
+      address: tcp://h:2376
+    - id: ssh-withtls
+      address: ssh://ops@h
+      tls: { ca: /a, cert: /b, key: /c }
+    - id: dup
+      address: ssh://a
+    - id: dup
+      address: ssh://b
+  specs: []
+";
+        let w = host_warnings(yaml);
+        let has = |id: &str, frag: &str| w.iter().any(|s| s.starts_with(id) && s.contains(frag));
+        assert!(has("weird:", "ssh://"));
+        assert!(has("tcp-notls:", "needs `tls`"));
+        assert!(has("ssh-withtls:", "only used with"));
+        assert!(has("dup:", "duplicate"));
+    }
+
+    #[test]
+    fn no_hosts_is_clean() {
+        // Absent `hosts` is the default single-local-daemon mode.
+        assert!(host_warnings("proxy:\n  specs: []\n").is_empty());
     }
 }

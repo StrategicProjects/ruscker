@@ -627,6 +627,9 @@ fn format_warning(w: &Warning) -> String {
                  (expected `/host:/container` or `/host:/container:ro`) — the mount will be skipped"
             )
         }
+        Warning::InvalidHost { host, reason } => {
+            format!("docker host `{host}`: {reason} — it will fail to connect at startup")
+        }
     }
 }
 

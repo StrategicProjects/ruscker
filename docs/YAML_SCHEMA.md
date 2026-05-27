@@ -51,6 +51,32 @@ ignored by Ruscker.
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
 | `metrics-enabled` | bool | `false` | Expose a Prometheus `/metrics` endpoint (**unauthenticated** when on — firewall it). Ruscker extension |
+| `hosts` | list | `[]` | Docker hosts for multi-host scheduling (Phase 6). Empty ⇒ the local daemon. Ruscker extension |
+
+### `proxy.hosts` — multi-host scheduling (Phase 6)
+
+Empty (the default) means the single local Docker daemon — today's
+behaviour. List hosts to spawn app containers across several daemons:
+
+```yaml
+proxy:
+  hosts:
+    - id: ssh-1
+      address: ssh://ops@10.0.0.11      # Docker over SSH (simplest)
+    - id: tcp-1
+      address: tcp://10.0.0.12:2376     # Docker over TLS
+      tls: { ca: /etc/ruscker/ca.pem, cert: /etc/ruscker/cert.pem, key: /etc/ruscker/key.pem }
+      max-containers: 40                # optional cap
+      weight: 2                         # optional, for spread placement
+    - id: local
+      address: unix:///var/run/docker.sock
+```
+
+Address schemes: `ssh://user@host[:port]`, `tcp://host:port` (needs
+`tls`), `http://host:port` (plain TCP — trusted networks only),
+`unix:///path`. `validate` flags empty/duplicate ids, unknown schemes,
+and `tls` mismatched with the scheme. Placement controls
+(spread/bin-pack, anti-affinity) land in a later slice.
 | `container-log-path` | path | none | Directory for per-container logs |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |

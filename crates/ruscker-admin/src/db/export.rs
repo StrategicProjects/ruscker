@@ -37,9 +37,9 @@ pub async fn reconstruct_config(pool: &SqlitePool) -> Result<Config> {
     // `fetch` is dual-dialect now; the export path is SQLite-only, so
     // wrap this pool in a `ConfigDb` to call it. (Cheap — the pool is
     // an `Arc` clone.)
-    let mut landing_customization =
-        super::landing::fetch(&super::ConfigDb::Sqlite(pool.clone())).await?;
-    landing_customization.blocks = super::landing_blocks::list_all(pool)
+    let cfgdb = super::ConfigDb::Sqlite(pool.clone());
+    let mut landing_customization = super::landing::fetch(&cfgdb).await?;
+    landing_customization.blocks = super::landing_blocks::list_all(&cfgdb)
         .await?
         .iter()
         .map(|b| b.to_config())

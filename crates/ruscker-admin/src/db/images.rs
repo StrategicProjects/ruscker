@@ -268,6 +268,7 @@ mod pg_tests {
     // through the `ConfigDb::Postgres` arm against a real daemon.
     #[tokio::test]
     async fn images_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
         let url = std::env::var("RUSCKER_TEST_PG_URL")
             .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
         let pool = crate::db::open_pg(&url).await.unwrap();

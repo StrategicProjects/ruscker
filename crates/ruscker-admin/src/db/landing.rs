@@ -9,7 +9,6 @@ use crate::db::ConfigDb;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use ruscker_config::LandingCustomization;
-use sqlx::SqlitePool;
 
 /// Read the singleton row. Returns the default
 /// [`LandingCustomization`] when the row hasn't been initialized
@@ -78,25 +77,41 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
 /// collapses them to `None` so empty values disappear from the
 /// exported YAML rather than serializing as `""`.
 pub async fn update(
-    pool: &SqlitePool,
+    db: &ConfigDb,
     lc: &LandingCustomization,
     actor: Option<&str>,
 ) -> Result<()> {
     let now = Utc::now();
-    let mut tx = pool.begin().await.context("begin landing update tx")?;
-    update_in_tx(&mut tx, lc, now).await?;
-
-    sqlx::query(
-        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-         VALUES (?, 'landing.update', 'landing:customization', NULL, ?)",
-    )
-    .bind(actor)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .context("audit landing.update")?;
-
-    tx.commit().await.context("commit landing update")?;
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin landing update tx")?;
+            update_in_tx(&mut tx, lc, now).await?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'landing.update', 'landing:customization', NULL, ?)",
+            )
+            .bind(actor)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit landing.update")?;
+            tx.commit().await.context("commit landing update")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin landing update tx")?;
+            update_in_tx_pg(&mut tx, lc, now).await?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'landing.update', 'landing:customization', NULL, $2)",
+            )
+            .bind(actor)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit landing.update")?;
+            tx.commit().await.context("commit landing update")?;
+        }
+    }
     Ok(())
 }
 
@@ -117,6 +132,40 @@ pub(crate) async fn update_in_tx(
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
                 updated_at = ?
+          WHERE id = 1",
+    )
+    .bind(none_if_empty(&lc.header_bg))
+    .bind(none_if_empty(&lc.header_fg))
+    .bind(none_if_empty(&lc.intro))
+    .bind(&intro_locales_json)
+    .bind(none_if_empty(&lc.seo_title))
+    .bind(none_if_empty(&lc.seo_description))
+    .bind(none_if_empty(&lc.og_image))
+    .bind(none_if_empty(&lc.analytics_html))
+    .bind(none_if_empty(&lc.analytics_origins))
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .context("update landing_customization")?;
+    Ok(())
+}
+
+/// Postgres twin of [`update_in_tx`] — `$n` placeholders. Used by the
+/// Postgres arm of [`update`]. (`import_all` stays SQLite-only and
+/// keeps `update_in_tx`.)
+pub(crate) async fn update_in_tx_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lc: &LandingCustomization,
+    now: chrono::DateTime<Utc>,
+) -> Result<()> {
+    let intro_locales_json =
+        serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
+    sqlx::query(
+        "UPDATE landing_customization
+            SET header_bg = $1, header_fg = $2, intro = $3,
+                intro_locales_json = $4, seo_title = $5, seo_description = $6,
+                og_image = $7, analytics_html = $8, analytics_origins = $9,
+                updated_at = $10
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -166,7 +215,7 @@ mod tests {
         lc.intro_locales.insert("pt".into(), "Bem-vindo".into());
         lc.intro_locales.insert("en".into(), "Welcome".into());
 
-        update(&pool, &lc, Some("admin")).await.unwrap();
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.header_bg.as_deref(), Some("#0f6e56"));
         assert_eq!(got.header_fg.as_deref(), Some("#ffffff"));
@@ -190,7 +239,7 @@ mod tests {
         lc.seo_title = Some("Demo Portal".into());
         lc.seo_description = Some("Demo portal description".into());
         lc.og_image = Some("/assets/img/og.png".into());
-        update(&pool, &lc, Some("admin")).await.unwrap();
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.seo_title.as_deref(), Some("Demo Portal"));
         assert_eq!(
@@ -208,7 +257,7 @@ mod tests {
         let mut lc = LandingCustomization::default();
         lc.analytics_html = Some(snippet.into());
         lc.analytics_origins = Some(origins.into());
-        update(&pool, &lc, Some("admin")).await.unwrap();
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.analytics_html.as_deref(), Some(snippet));
         assert_eq!(got.analytics_origins.as_deref(), Some(origins));
@@ -220,7 +269,7 @@ mod tests {
         let mut lc = LandingCustomization::default();
         lc.header_bg = Some("   ".into()); // whitespace only
         lc.intro = Some("".into());
-        update(&pool, &lc, None).await.unwrap();
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, None).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert!(got.header_bg.is_none(), "whitespace-only becomes None");
         assert!(got.intro.is_none());
@@ -233,6 +282,7 @@ mod tests {
     #[cfg(feature = "postgres-it")]
     #[tokio::test]
     async fn fetch_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
         let url = std::env::var("RUSCKER_TEST_PG_URL")
             .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
         let pool = crate::db::open_pg(&url).await.unwrap();
@@ -241,5 +291,35 @@ mod tests {
         assert!(lc.header_bg.is_none());
         assert!(lc.intro.is_none());
         assert!(lc.intro_locales.is_empty());
+    }
+
+    // Writes the singleton through the Postgres arm, then reads it
+    // back (and confirms empty-string collapse). Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn update_then_fetch_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let db = ConfigDb::Postgres(crate::db::open_pg(&url).await.unwrap());
+
+        let mut lc = LandingCustomization::default();
+        lc.header_bg = Some("#0f6e56".into());
+        lc.intro = Some("Bem-vindo".into());
+        lc.seo_title = Some("Portal".into());
+        lc.intro_locales.insert("pt".into(), "Olá".into());
+        update(&db, &lc, Some("admin")).await.unwrap();
+
+        let got = fetch(&db).await.unwrap();
+        assert_eq!(got.header_bg.as_deref(), Some("#0f6e56"));
+        assert_eq!(got.intro.as_deref(), Some("Bem-vindo"));
+        assert_eq!(got.seo_title.as_deref(), Some("Portal"));
+        assert_eq!(got.intro_locales.get("pt").map(String::as_str), Some("Olá"));
+
+        // Whitespace-only collapses to NULL on write.
+        let mut empty = LandingCustomization::default();
+        empty.header_bg = Some("   ".into());
+        update(&db, &empty, None).await.unwrap();
+        assert!(fetch(&db).await.unwrap().header_bg.is_none());
     }
 }

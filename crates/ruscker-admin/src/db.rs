@@ -121,6 +121,18 @@ pub async fn open_pg(url: &str) -> Result<sqlx::PgPool> {
     Ok(pool)
 }
 
+/// Serializes the `postgres-it` integration tests. They all run against
+/// one shared database, so cargo's default parallel test execution would
+/// let them clobber each other's rows (e.g. two tests that
+/// `DELETE FROM landing_blocks`, or a default-singleton read racing a
+/// singleton write). Every gated test takes this lock first, so they run
+/// one at a time regardless of `--test-threads`.
+#[cfg(all(test, feature = "postgres-it"))]
+pub(crate) fn pg_test_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Open an in-memory database for tests. Migrations applied.
 #[cfg(test)]
 pub async fn open_memory() -> Result<SqlitePool> {
@@ -156,6 +168,7 @@ mod pg_tests {
     //     cargo test -p ruscker-admin --features postgres-it -- --nocapture
     #[tokio::test]
     async fn pg_migrations_apply_and_match_sqlite_tables() {
+        let _guard = crate::db::pg_test_lock().lock().await;
         let url = std::env::var("RUSCKER_TEST_PG_URL")
             .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
 

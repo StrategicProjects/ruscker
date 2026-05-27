@@ -5,6 +5,7 @@
 //! The same shape as [`ruscker_config::LandingCustomization`] so
 //! import/export round-trip without translation gymnastics.
 
+use crate::db::ConfigDb;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use ruscker_config::LandingCustomization;
@@ -14,7 +15,11 @@ use sqlx::SqlitePool;
 /// [`LandingCustomization`] when the row hasn't been initialized
 /// yet (which shouldn't normally happen — migration 0001 inserts
 /// it — but defensive code keeps tests with a fresh DB happy).
-pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
+///
+/// First repository read ported to dual-dialect (Phase 7c-3): the
+/// SELECT carries no placeholders and reads only TEXT columns, so the
+/// SQL is identical on both backends — only the pool differs.
+pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
     type Row = (
         Option<String>, // header_bg
         Option<String>, // header_fg
@@ -26,14 +31,14 @@ pub async fn fetch(pool: &SqlitePool) -> Result<LandingCustomization> {
         Option<String>, // analytics_html
         Option<String>, // analytics_origins
     );
-    let row: Option<Row> = sqlx::query_as(
-        "SELECT header_bg, header_fg, intro, intro_locales_json,
+    let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins
-           FROM landing_customization WHERE id = 1",
-    )
-    .fetch_optional(pool)
-    .await
+           FROM landing_customization WHERE id = 1";
+    let row: Option<Row> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
+    }
     .context("load landing_customization")?;
     match row {
         None => Ok(LandingCustomization::default()),
@@ -145,7 +150,7 @@ mod tests {
     #[tokio::test]
     async fn defaults_on_fresh_db() {
         let pool = open_memory().await.unwrap();
-        let lc = fetch(&pool).await.unwrap();
+        let lc = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert!(lc.header_bg.is_none());
         assert!(lc.intro.is_none());
         assert!(lc.intro_locales.is_empty());
@@ -162,7 +167,7 @@ mod tests {
         lc.intro_locales.insert("en".into(), "Welcome".into());
 
         update(&pool, &lc, Some("admin")).await.unwrap();
-        let got = fetch(&pool).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.header_bg.as_deref(), Some("#0f6e56"));
         assert_eq!(got.header_fg.as_deref(), Some("#ffffff"));
         assert_eq!(got.intro.as_deref(), Some("Welcome"));
@@ -186,7 +191,7 @@ mod tests {
         lc.seo_description = Some("Demo portal description".into());
         lc.og_image = Some("/assets/img/og.png".into());
         update(&pool, &lc, Some("admin")).await.unwrap();
-        let got = fetch(&pool).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.seo_title.as_deref(), Some("Demo Portal"));
         assert_eq!(
             got.seo_description.as_deref(),
@@ -204,7 +209,7 @@ mod tests {
         lc.analytics_html = Some(snippet.into());
         lc.analytics_origins = Some(origins.into());
         update(&pool, &lc, Some("admin")).await.unwrap();
-        let got = fetch(&pool).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.analytics_html.as_deref(), Some(snippet));
         assert_eq!(got.analytics_origins.as_deref(), Some(origins));
     }
@@ -216,8 +221,25 @@ mod tests {
         lc.header_bg = Some("   ".into()); // whitespace only
         lc.intro = Some("".into());
         update(&pool, &lc, None).await.unwrap();
-        let got = fetch(&pool).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert!(got.header_bg.is_none(), "whitespace-only becomes None");
         assert!(got.intro.is_none());
+    }
+
+    // Proves the ported `fetch` runs against a real Postgres through
+    // the `ConfigDb::Postgres` arm. Gated:
+    //   RUSCKER_TEST_PG_URL=postgres://… \
+    //     cargo test -p ruscker-admin --features postgres-it -- --nocapture
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn fetch_against_real_postgres() {
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        // The 0001 migration seeds the singleton with empty fields.
+        let lc = fetch(&ConfigDb::Postgres(pool)).await.unwrap();
+        assert!(lc.header_bg.is_none());
+        assert!(lc.intro.is_none());
+        assert!(lc.intro_locales.is_empty());
     }
 }

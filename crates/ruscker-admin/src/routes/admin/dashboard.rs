@@ -225,6 +225,24 @@ fn state_label_key(s: ReplicaState) -> &'static str {
     }
 }
 
+/// Serialize `value` to JSON safe to embed in an HTML `<script>` element.
+///
+/// `serde_json` does not escape `<`, `>`, or `&`, so a string field
+/// containing `</script>` would close the element early and the rest
+/// would be parsed as live HTML — a stored-XSS hole when fields like a
+/// spec's `display_name` or a container `host` label reach the embedded
+/// `<script type="application/json">` snapshot (and the SSE frames).
+/// Escaping those three to `\uXXXX` keeps the JSON valid (they only ever
+/// occur inside string literals) while making `</script>`, `<!--`, etc.
+/// inert.
+fn json_for_html_script<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_else(|_| "{}".to_string())
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+}
+
 async fn index(
     session: AdminSession,
     State(state): State<AppState>,
@@ -232,7 +250,7 @@ async fn index(
     theme: Theme,
 ) -> Response {
     let snap = build_snapshot(&state, loc).await;
-    let snapshot_json = serde_json::to_string(&snap).unwrap_or_else(|_| "{}".to_string());
+    let snapshot_json = json_for_html_script(&snap);
     let page = DashboardPage {
         locale: loc,
         theme,
@@ -392,7 +410,7 @@ async fn events(
         // interval. Avoids a visible "stale" gap right after
         // page load.
         let first = build_snapshot(&state, loc).await;
-        let body = serde_json::to_string(&first).unwrap_or_else(|_| "{}".to_string());
+        let body = json_for_html_script(&first);
         yield Ok::<_, Infallible>(Event::default().data(body));
 
         let mut ticker = tokio::time::interval(SSE_INTERVAL);
@@ -402,7 +420,7 @@ async fn events(
         loop {
             ticker.tick().await;
             let snap = build_snapshot(&state, loc).await;
-            let body = serde_json::to_string(&snap).unwrap_or_else(|_| "{}".to_string());
+            let body = json_for_html_script(&snap);
             yield Ok::<_, Infallible>(Event::default().data(body));
         }
     };
@@ -656,6 +674,32 @@ fn format_uptime(d: chrono::Duration) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn json_for_html_script_neutralizes_script_breakout() {
+        // A spec display_name / container host carrying `</script>` must
+        // not break out of the embedded <script> island (stored XSS).
+        #[derive(serde::Serialize)]
+        struct Row {
+            display_name: String,
+        }
+        let evil = Row {
+            display_name: "</script><img src=x onerror=alert(1)>".into(),
+        };
+        let out = json_for_html_script(&evil);
+        assert!(
+            !out.contains("</script>"),
+            "literal </script> must not survive: {out}"
+        );
+        assert!(!out.contains("<img"), "literal < must be escaped: {out}");
+        assert!(out.contains("\\u003c/script\\u003e"), "got: {out}");
+        // Still valid JSON that round-trips to the original string.
+        let v: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(
+            v["display_name"], "</script><img src=x onerror=alert(1)>",
+            "JSON.parse must recover the original value"
+        );
+    }
 
     #[test]
     fn format_uptime_picks_the_right_unit() {

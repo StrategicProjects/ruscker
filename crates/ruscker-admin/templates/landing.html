@@ -36,7 +36,7 @@
             <i class="ti ti-logout" aria-hidden="true"></i> {{ self.t("landing-signout") }}
           </button>
         </form>
-      {% else %}
+      {% else if show_admin_link %}
         <a class="inline-flex items-center gap-1 opacity-80 hover:opacity-100" href="/admin/login">
           <i class="ti ti-login" aria-hidden="true"></i> {{ self.t("landing-signin") }}
         </a>

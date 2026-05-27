@@ -69,6 +69,10 @@ struct LandingPage<'a> {
     /// Display name of the signed-in viewer (username, or empty for a
     /// break-glass token session). Shown next to the panel link.
     viewer_name: String,
+    /// Whether to render the anonymous "Sign in" entrance (#156). A
+    /// deploy policy from `landing-customization.show-admin-link`
+    /// (default true); false hides the admin entrance on public portals.
+    show_admin_link: bool,
 }
 
 impl<'a> LandingPage<'a> {
@@ -209,6 +213,13 @@ async fn index(
         blocks_bottom,
         signed_in: session.is_some(),
         viewer_name: username.unwrap_or_default(),
+        // Deploy policy from YAML config (not the DB editor): whether
+        // anonymous visitors see the "Sign in" entrance (#156).
+        show_admin_link: state
+            .config
+            .proxy
+            .landing_customization
+            .effective_show_admin_link(),
     };
     let mut resp = render(&page);
     // Widen *this page's* CSP so the analytics script can load/report.

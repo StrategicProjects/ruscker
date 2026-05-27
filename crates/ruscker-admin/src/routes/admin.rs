@@ -159,7 +159,7 @@ async fn show_token_form(state: &AppState, force_token: bool) -> bool {
     if force_token {
         return true;
     }
-    match state.sqlite() {
+    match state.db.as_ref() {
         Some(pool) => !db::users::any_user_exists(pool).await.unwrap_or(false),
         None => true,
     }
@@ -242,7 +242,7 @@ async fn login_submit(
 
     // Username/password login needs the user store. Without a DB the
     // only way in is the break-glass token.
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return login_error(&state, loc, theme, "wrong-login", false);
     };
 
@@ -320,7 +320,7 @@ async fn token_login(
     issue_session_cookie(&cookies, &headers, session_id);
 
     // No admin account yet (and a DB to create one in) ⇒ run setup.
-    let need_setup = match state.sqlite() {
+    let need_setup = match state.db.as_ref() {
         Some(pool) => !db::users::any_admin_exists(pool).await.unwrap_or(false),
         None => false,
     };
@@ -344,7 +344,7 @@ async fn setup_form(
 ) -> Response {
     // Setup is admin-gated and only meaningful before the first admin
     // account exists. Once one does, send the operator to the dashboard.
-    if let Some(pool) = state.sqlite() {
+    if let Some(pool) = state.db.as_ref() {
         if db::users::any_admin_exists(pool).await.unwrap_or(false) {
             return Redirect::to("/admin/dashboard").into_response();
         }
@@ -380,7 +380,7 @@ async fn setup_submit(
     headers: HeaderMap,
     Form(form): Form<SetupForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "no database — start with --db",
@@ -447,7 +447,7 @@ async fn password_form(
     let Some(actor) = session.actor.clone() else {
         return Redirect::to("/admin/dashboard").into_response();
     };
-    let first = match state.sqlite() {
+    let first = match state.db.as_ref() {
         Some(pool) => db::users::fetch(pool, &actor)
             .await
             .ok()
@@ -488,7 +488,7 @@ async fn password_submit(
     let Some(actor) = session.actor.clone() else {
         return Redirect::to("/admin/dashboard").into_response();
     };
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "no database — start with --db",

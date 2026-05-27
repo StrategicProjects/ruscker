@@ -92,7 +92,7 @@ async fn wrong_token_is_rejected() {
 #[tokio::test]
 async fn password_login_succeeds_and_wrong_fails() {
     let (state, pool) = state_with_db().await;
-    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "alice", "alicepass1", Role::Editor, false, None)
+    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "alice", "alicepass1", Role::Editor, false, &[], None)
         .await
         .unwrap();
 
@@ -114,7 +114,7 @@ async fn password_login_succeeds_and_wrong_fails() {
 async fn first_login_with_must_change_redirects_to_password() {
     let (state, pool) = state_with_db().await;
     // must_change = true ⇒ first login lands on the change-password page.
-    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "bob", "bobpass12", Role::Viewer, true, None)
+    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "bob", "bobpass12", Role::Viewer, true, &[], None)
         .await
         .unwrap();
     let (status, loc) = post(
@@ -131,7 +131,7 @@ async fn first_login_with_must_change_redirects_to_password() {
 #[tokio::test]
 async fn last_admin_cannot_be_deleted() {
     let (state, pool) = state_with_db().await;
-    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "root", "rootpass1", Role::Admin, false, None)
+    ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "root", "rootpass1", Role::Admin, false, &[], None)
         .await
         .unwrap();
     // Mint an admin session directly (the shared store the router reads).

@@ -26,6 +26,9 @@ pub struct UserRow {
     pub username: String,
     pub role: Role,
     pub must_change_password: bool,
+    /// Group memberships, matched against a spec's `access-groups` for
+    /// app visibility (#155). Empty = belongs to no group.
+    pub groups: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub created_by: Option<String>,
 }
@@ -34,6 +37,28 @@ pub struct UserRow {
 /// Usernames are case-insensitive and unique.
 pub fn normalize_username(raw: &str) -> String {
     raw.trim().to_lowercase()
+}
+
+/// Parse the stored comma-separated `groups` column into a clean list:
+/// trimmed, empties dropped, duplicates removed (first wins, order
+/// preserved). Group names are compared case-sensitively against a
+/// spec's `access-groups`, so we keep the operator's casing.
+pub fn parse_groups(stored: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for tok in stored.split(',') {
+        let t = tok.trim();
+        if !t.is_empty() && !out.iter().any(|g| g == t) {
+            out.push(t.to_string());
+        }
+    }
+    out
+}
+
+/// Canonicalize a group list for storage: same cleanup as
+/// [`parse_groups`], joined with `,` (no spaces) so the round-trip is
+/// stable.
+pub fn join_groups(groups: &[String]) -> String {
+    parse_groups(&groups.join(",")).join(",")
 }
 
 /// Hash a plaintext password with argon2id and a fresh random salt,
@@ -97,6 +122,7 @@ fn row_from(
     username: String,
     role: String,
     must_change: bool,
+    groups: String,
     created_at: DateTime<Utc>,
     created_by: Option<String>,
 ) -> UserRow {
@@ -107,6 +133,7 @@ fn row_from(
         // `must_change_password` reads as `bool` on both backends: sqlx
         // decodes SQLite's INTEGER 0/1 and Postgres' native BOOLEAN.
         must_change_password: must_change,
+        groups: parse_groups(&groups),
         created_at,
         created_by,
     }
@@ -114,8 +141,8 @@ fn row_from(
 
 /// List all users (no hashes), most-recent first.
 pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
-    type Row = (String, String, String, bool, DateTime<Utc>, Option<String>);
-    let sql = "SELECT id, username, role, must_change_password, created_at, created_by
+    type Row = (String, String, String, bool, String, DateTime<Utc>, Option<String>);
+    let sql = "SELECT id, username, role, must_change_password, groups, created_at, created_by
            FROM users
           ORDER BY created_at DESC, username ASC";
     let rows: Vec<Row> = match db {
@@ -125,24 +152,24 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
     .context("list users")?;
     Ok(rows
         .into_iter()
-        .map(|(id, u, r, m, c, by)| row_from(id, u, r, m, c, by))
+        .map(|(id, u, r, m, g, c, by)| row_from(id, u, r, m, g, c, by))
         .collect())
 }
 
 /// Fetch one user by (normalized) username, without the hash.
 pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
-    type Row = (String, String, String, bool, DateTime<Utc>, Option<String>);
+    type Row = (String, String, String, bool, String, DateTime<Utc>, Option<String>);
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, created_at, created_by
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, created_at, created_by
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -150,7 +177,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
         .await,
     }
     .with_context(|| format!("fetch user {username}"))?;
-    Ok(row.map(|(id, u, r, m, c, by)| row_from(id, u, r, m, c, by)))
+    Ok(row.map(|(id, u, r, m, g, c, by)| row_from(id, u, r, m, g, c, by)))
 }
 
 /// Verify a login. Returns the [`UserRow`] on a correct password,
@@ -168,6 +195,7 @@ pub async fn verify_login(
         String,
         String,
         bool,
+        String,
         DateTime<Utc>,
         Option<String>,
         String,
@@ -175,14 +203,14 @@ pub async fn verify_login(
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, created_at, created_by, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, password_hash
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, created_at, created_by, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, password_hash
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -192,8 +220,8 @@ pub async fn verify_login(
     .with_context(|| format!("login lookup {username}"))?;
 
     match row {
-        Some((id, u, r, m, c, by, hash)) if verify_password(password, &hash) => {
-            Ok(Some(row_from(id, u, r, m, c, by)))
+        Some((id, u, r, m, g, c, by, hash)) if verify_password(password, &hash) => {
+            Ok(Some(row_from(id, u, r, m, g, c, by)))
         }
         Some(_) => Ok(None),
         None => {
@@ -221,10 +249,12 @@ pub async fn create(
     password: &str,
     role: Role,
     must_change: bool,
+    groups: &[String],
     actor: Option<&str>,
 ) -> Result<()> {
     let username = normalize_username(username);
     let hash = hash_password(password)?;
+    let groups = join_groups(groups);
     let now = Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
 
@@ -234,14 +264,15 @@ pub async fn create(
             sqlx::query(
                 "INSERT INTO users
                    (id, username, password_hash, role, must_change_password,
-                    created_at, updated_at, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    groups, created_at, updated_at, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
             .bind(&username)
             .bind(&hash)
             .bind(role.as_str())
             .bind(must_change as i64)
+            .bind(&groups)
             .bind(now)
             .bind(now)
             .bind(actor)
@@ -256,14 +287,15 @@ pub async fn create(
             sqlx::query(
                 "INSERT INTO users
                    (id, username, password_hash, role, must_change_password,
-                    created_at, updated_at, created_by)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                    groups, created_at, updated_at, created_by)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(&id)
             .bind(&username)
             .bind(&hash)
             .bind(role.as_str())
             .bind(must_change)
+            .bind(&groups)
             .bind(now)
             .bind(now)
             .bind(actor)
@@ -393,6 +425,77 @@ pub async fn set_role(
             }
             audit_pg(&mut tx, actor, "user.role", &username, &role, now).await?;
             tx.commit().await.context("commit role change")?;
+        }
+    }
+    Ok(())
+}
+
+/// Replace a user's group memberships. The list is canonicalized
+/// ([`join_groups`]) before storage. Records the new list in the audit
+/// log's `diff_json`.
+pub async fn set_groups(
+    db: &ConfigDb,
+    username: &str,
+    groups: &[String],
+    actor: Option<&str>,
+) -> Result<()> {
+    let username = normalize_username(username);
+    let groups = join_groups(groups);
+    let now = Utc::now();
+    let target = format!("user:{username}");
+    let diff = serde_json::json!({ "groups": groups }).to_string();
+
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin groups tx")?;
+            let res = sqlx::query("UPDATE users SET groups = ?, updated_at = ? WHERE username = ?")
+                .bind(&groups)
+                .bind(now)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("set groups for {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!("user {username} not found");
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'user.groups', ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit groups change")?;
+            tx.commit().await.context("commit groups change")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin groups tx")?;
+            let res =
+                sqlx::query("UPDATE users SET groups = $1, updated_at = $2 WHERE username = $3")
+                    .bind(&groups)
+                    .bind(now)
+                    .bind(&username)
+                    .execute(&mut *tx)
+                    .await
+                    .with_context(|| format!("set groups for {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!("user {username} not found");
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'user.groups', $2, $3, $4)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit groups change")?;
+            tx.commit().await.context("commit groups change")?;
         }
     }
     Ok(())
@@ -546,28 +649,81 @@ mod tests {
     #[tokio::test]
     async fn create_then_verify_login() {
         let p = pool().await;
-        create(&p, "Alice", "pw-alice", Role::Editor, true, Some("admin"))
-            .await
-            .unwrap();
+        create(
+            &p,
+            "Alice",
+            "pw-alice",
+            Role::Editor,
+            true,
+            &["analysts".to_string()],
+            Some("admin"),
+        )
+        .await
+        .unwrap();
         // Username is case-insensitive.
         let u = verify_login(&p, "alice", "pw-alice").await.unwrap();
         let u = u.expect("login ok");
         assert_eq!(u.username, "alice");
         assert_eq!(u.role, Role::Editor);
         assert!(u.must_change_password);
+        // Groups round-trip through the column.
+        assert_eq!(u.groups, vec!["analysts".to_string()]);
         // Wrong password / unknown user ⇒ None.
         assert!(verify_login(&p, "alice", "nope").await.unwrap().is_none());
         assert!(verify_login(&p, "ghost", "pw").await.unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_and_join_groups_canonicalize() {
+        // Trim, drop empties, dedupe (first wins), preserve order.
+        assert_eq!(
+            parse_groups(" analysts , ,leads, analysts ,viewers"),
+            vec![
+                "analysts".to_string(),
+                "leads".to_string(),
+                "viewers".to_string()
+            ]
+        );
+        assert!(parse_groups("").is_empty());
+        assert!(parse_groups("  ,  , ").is_empty());
+        assert_eq!(
+            join_groups(&["a".to_string(), " a ".to_string(), "b".to_string()]),
+            "a,b"
+        );
+    }
+
+    #[tokio::test]
+    async fn set_groups_replaces_membership() {
+        let p = pool().await;
+        create(&p, "carol", "pw-carol1", Role::Viewer, false, &[], Some("a"))
+            .await
+            .unwrap();
+        assert!(fetch(&p, "carol").await.unwrap().unwrap().groups.is_empty());
+        set_groups(
+            &p,
+            "carol",
+            &["leads".to_string(), "leads".to_string(), "ops".to_string()],
+            Some("a"),
+        )
+        .await
+        .unwrap();
+        let u = fetch(&p, "carol").await.unwrap().unwrap();
+        assert_eq!(u.groups, vec!["leads".to_string(), "ops".to_string()]);
+        // Clearing groups writes an empty list back.
+        set_groups(&p, "carol", &[], Some("a")).await.unwrap();
+        assert!(fetch(&p, "carol").await.unwrap().unwrap().groups.is_empty());
+        // Unknown user ⇒ error.
+        assert!(set_groups(&p, "ghost", &[], Some("a")).await.is_err());
     }
 
     #[tokio::test]
     async fn admin_count_and_roles() {
         let p = pool().await;
         assert!(!any_admin_exists(&p).await.unwrap());
-        create(&p, "root", "pw", Role::Admin, false, None)
+        create(&p, "root", "pw", Role::Admin, false, &[], None)
             .await
             .unwrap();
-        create(&p, "ed", "pw", Role::Editor, false, None)
+        create(&p, "ed", "pw", Role::Editor, false, &[], None)
             .await
             .unwrap();
         assert_eq!(count_admins(&p).await.unwrap(), 1);
@@ -580,10 +736,10 @@ mod tests {
     #[tokio::test]
     async fn duplicate_username_rejected() {
         let p = pool().await;
-        create(&p, "dup", "pw", Role::Viewer, false, None)
+        create(&p, "dup", "pw", Role::Viewer, false, &[], None)
             .await
             .unwrap();
-        assert!(create(&p, "DUP", "pw2", Role::Viewer, false, None)
+        assert!(create(&p, "DUP", "pw2", Role::Viewer, false, &[], None)
             .await
             .is_err());
     }
@@ -591,7 +747,7 @@ mod tests {
     #[tokio::test]
     async fn set_password_clears_must_change() {
         let p = pool().await;
-        create(&p, "bob", "init-pw", Role::Viewer, true, Some("admin"))
+        create(&p, "bob", "init-pw", Role::Viewer, true, &[], Some("admin"))
             .await
             .unwrap();
         set_password(&p, "bob", "new-pw", false, Some("bob"))
@@ -619,10 +775,10 @@ mod tests {
         let db = ConfigDb::Postgres(pg);
 
         assert!(!any_admin_exists(&db).await.unwrap());
-        create(&db, "Root", "rootpw12", Role::Admin, false, None)
+        create(&db, "Root", "rootpw12", Role::Admin, false, &[], None)
             .await
             .unwrap();
-        create(&db, "Ed", "edpw1234", Role::Editor, true, Some("root"))
+        create(&db, "Ed", "edpw1234", Role::Editor, true, &["leads".to_string()], Some("root"))
             .await
             .unwrap();
         assert_eq!(count_admins(&db).await.unwrap(), 1);
@@ -636,8 +792,26 @@ mod tests {
             .expect("login ok");
         assert_eq!(u.role, Role::Editor);
         assert!(u.must_change_password);
+        // Groups column round-trips through the Postgres TEXT arm.
+        assert_eq!(u.groups, vec!["leads".to_string()]);
         assert!(verify_login(&db, "ed", "wrong").await.unwrap().is_none());
         assert!(verify_login(&db, "ghost", "x").await.unwrap().is_none());
+
+        // Replace group membership, then clear it.
+        set_groups(
+            &db,
+            "ed",
+            &["leads".to_string(), "ops".to_string()],
+            Some("root"),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            fetch(&db, "ed").await.unwrap().unwrap().groups,
+            vec!["leads".to_string(), "ops".to_string()]
+        );
+        set_groups(&db, "ed", &[], Some("root")).await.unwrap();
+        assert!(fetch(&db, "ed").await.unwrap().unwrap().groups.is_empty());
 
         // Promote, re-set password (clears must_change), then delete.
         set_role(&db, "ed", Role::Admin, Some("root")).await.unwrap();

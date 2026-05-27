@@ -188,6 +188,17 @@ pub struct SessionInfo {
 /// never exposes the master token, and logout actually invalidates the
 /// session instead of just clearing the browser's copy. The stored
 /// [`Role`] is what route guards and the nav dispatch on.
+///
+/// **HA note (#161):** this map is process-local. In active-active HA
+/// the admin catalog and `proxy_sessions` are shared, but sign-in
+/// sessions are not — a load-balancer hop to another instance re-prompts
+/// login (and, with per-group app visibility, the proxy on the other
+/// instance sees the request as anonymous). Until a shared session store
+/// lands, the deploy guide prescribes a **sticky upstream** for the
+/// session-bearing paths (`book/src/deploying.md` § "Sticky upstream for
+/// the sign-in session"). A signed stateless cookie was rejected on
+/// purpose — opaque server-side ids keep logout/restart revocable
+/// (SECURITY.md §1).
 #[derive(Debug)]
 pub struct AdminSessions {
     sessions: DashMap<String, SessionEntry>,

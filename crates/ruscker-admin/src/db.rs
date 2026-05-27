@@ -27,6 +27,16 @@ use std::str::FromStr;
 /// no separate deployment needed.
 pub static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// Postgres twin of [`MIGRATIONS`], embedded from `migrations-pg/`.
+///
+/// Phase 7 (HA / active-active) lets the admin catalog live in shared
+/// Postgres instead of per-node SQLite. The two directories are kept
+/// in lockstep — same migration numbers, same intent, different
+/// dialect — so the schema is identical whichever backend an install
+/// runs. SQLite stays the zero-config single-node default; Postgres is
+/// opt-in for clustering.
+pub static MIGRATIONS_PG: sqlx::migrate::Migrator = sqlx::migrate!("./migrations-pg");
+
 /// Open the SQLite database at `path`, creating the file if
 /// missing, and apply any pending migrations. Returns the pool
 /// ready for use.
@@ -59,6 +69,31 @@ pub async fn open(path: impl AsRef<Path>) -> Result<SqlitePool> {
     Ok(pool)
 }
 
+/// Open the shared Postgres admin database at `url` (a `postgres://…`
+/// DSN) and apply any pending [`MIGRATIONS_PG`]. Returns the pool ready
+/// for use.
+///
+/// This is the HA counterpart to [`open`]: several Ruscker instances
+/// point at the same Postgres so they share one editable spec catalog,
+/// landing customization, credential store, user table and audit log.
+/// The per-statement query port that lets the existing repositories
+/// run against this pool lands in the following Phase 7c slices; this
+/// function plus `migrations-pg/` is the foundation it builds on.
+pub async fn open_pg(url: &str) -> Result<sqlx::PgPool> {
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(5)
+        .connect(url)
+        .await
+        .context("open Postgres admin database")?;
+
+    MIGRATIONS_PG
+        .run(&pool)
+        .await
+        .context("apply Postgres migrations")?;
+
+    Ok(pool)
+}
+
 /// Open an in-memory database for tests. Migrations applied.
 #[cfg(test)]
 pub async fn open_memory() -> Result<SqlitePool> {
@@ -81,3 +116,77 @@ pub mod landing;
 pub mod landing_blocks;
 pub mod specs;
 pub mod users;
+
+#[cfg(all(test, feature = "postgres-it"))]
+mod pg_tests {
+    use super::*;
+    use sqlx::Row;
+
+    // Proves the Postgres migrations apply cleanly to a real daemon
+    // and produce the same table set as the SQLite schema. Gated:
+    //   docker run --rm -e POSTGRES_PASSWORD=pg -p 5433:5432 postgres:16-alpine
+    //   RUSCKER_TEST_PG_URL=postgres://postgres:pg@127.0.0.1:5433/postgres \
+    //     cargo test -p ruscker-admin --features postgres-it -- --nocapture
+    #[tokio::test]
+    async fn pg_migrations_apply_and_match_sqlite_tables() {
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+
+        // open_pg runs every migration. A second open_pg must be a
+        // no-op (the migrator tracks applied rows) — exercise
+        // idempotency. Non-destructive throughout so this can share a
+        // database with the 7b session-store test without racing it.
+        let pool = open_pg(&url).await.unwrap();
+        let pool = {
+            drop(pool);
+            open_pg(&url).await.unwrap()
+        };
+
+        // Every admin table the SQLite schema defines must be present
+        // (subset check — a sibling test's `proxy_sessions` may also
+        // exist; we don't require an exact match).
+        let present: std::collections::HashSet<String> = sqlx::query(
+            "SELECT table_name FROM information_schema.tables
+             WHERE table_schema = 'public' AND table_type = 'BASE TABLE'",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| r.get::<String, _>("table_name"))
+        .collect();
+        for expected in [
+            "audit_log",
+            "config_meta",
+            "credentials",
+            "images",
+            "landing_blocks",
+            "landing_customization",
+            "spec_versions",
+            "specs",
+            "users",
+        ] {
+            assert!(present.contains(expected), "missing table: {expected}");
+        }
+
+        // The singleton landing row was seeded by 0001.
+        let n: i64 = sqlx::query("SELECT count(*) AS n FROM landing_customization")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("n");
+        assert_eq!(n, 1);
+
+        // The 0003/0004 ALTERs landed (seo + analytics columns).
+        let cols: i64 = sqlx::query(
+            "SELECT count(*) AS n FROM information_schema.columns
+             WHERE table_name = 'landing_customization'
+               AND column_name IN ('seo_title', 'analytics_html', 'og_image')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("n");
+        assert_eq!(cols, 3);
+    }
+}

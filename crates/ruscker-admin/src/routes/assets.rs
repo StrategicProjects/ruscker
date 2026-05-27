@@ -109,7 +109,7 @@ async fn serve_card_image(
     }
 
     // 1. DB lookup
-    if let Some(pool) = state.sqlite() {
+    if let Some(pool) = state.db.as_ref() {
         match crate::db::images::fetch_by_filename(pool, &filename).await {
             Ok(Some((mime, bytes))) => return serve_dynamic(bytes, &mime),
             Ok(None) => {}

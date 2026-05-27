@@ -75,8 +75,25 @@ proxy:
 Address schemes: `ssh://user@host[:port]`, `tcp://host:port` (needs
 `tls`), `http://host:port` (plain TCP — trusted networks only),
 `unix:///path`. `validate` flags empty/duplicate ids, unknown schemes,
-and `tls` mismatched with the scheme. Placement controls
-(spread/bin-pack, anti-affinity) land in a later slice.
+and `tls` mismatched with the scheme.
+
+**Per-host:** `max-containers` caps how many containers a host runs;
+`weight` (default 1) biases spread placement toward bigger hosts.
+
+**Per-spec placement** controls how a spec's replicas land across hosts:
+
+```yaml
+- id: heavy-shiny
+  placement: spread          # spread (default) | bin-pack
+  anti-affinity: true        # keep replicas on distinct hosts (best-effort)
+```
+
+- `spread` distributes replicas (weighted least-loaded) for fault
+  isolation; `bin-pack` fills one host before using the next.
+- `anti-affinity: true` prefers hosts not already running the spec,
+  falling back to the strategy above if every eligible host does
+  (so scaling never stalls). Hosts at `max-containers` are skipped; if
+  all are full, the spawn fails (the scaler retries).
 | `container-log-path` | path | none | Directory for per-container logs |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |

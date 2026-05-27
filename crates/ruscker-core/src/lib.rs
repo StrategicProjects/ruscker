@@ -130,6 +130,12 @@ pub struct SpawnRequest {
     /// Empty → no binds. The local backend maps these to
     /// `HostConfig.binds`.
     pub volumes: Vec<String>,
+    /// Multi-host placement strategy for this spec (Phase 6). Ignored
+    /// by the single-host backend; the `MultiHostDockerBackend` uses it
+    /// to choose which host to spawn on.
+    pub placement: ruscker_config::Placement,
+    /// Prefer distinct hosts for this spec's replicas (anti-affinity).
+    pub anti_affinity: bool,
 }
 
 impl SpawnRequest {
@@ -141,7 +147,18 @@ impl SpawnRequest {
             creds: None,
             limits: ResourceLimits::default(),
             volumes: Vec::new(),
+            placement: ruscker_config::Placement::default(),
+            anti_affinity: false,
         }
+    }
+
+    pub fn with_placement(mut self, placement: ruscker_config::Placement) -> Self {
+        self.placement = placement;
+        self
+    }
+    pub fn with_anti_affinity(mut self, anti_affinity: bool) -> Self {
+        self.anti_affinity = anti_affinity;
+        self
     }
 
     pub fn with_port(mut self, port: u16) -> Self {

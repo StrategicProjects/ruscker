@@ -629,7 +629,7 @@ fn cmd_inspect(path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn print_human_report(path: &PathBuf, config: &Config, report: &ValidationReport) {
+fn print_human_report(path: &Path, config: &Config, report: &ValidationReport) {
     println!();
     println!("  Ruscker config validation");
     println!("  ─────────────────────────");

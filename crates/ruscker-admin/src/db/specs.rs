@@ -365,8 +365,8 @@ async fn upsert_in_tx(
 }
 
 /// Postgres twin of [`upsert_in_tx`] — identical logic, `$n`
-/// placeholders. Used by the Postgres arm of [`upsert_one`].
-/// (`import_all` stays SQLite-only for now and keeps `upsert_in_tx`.)
+/// placeholders. Used by the Postgres arms of [`upsert_one`] and
+/// [`import_all`] (each dispatches on the `ConfigDb` dialect).
 async fn upsert_in_tx_pg(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     spec: &Spec,

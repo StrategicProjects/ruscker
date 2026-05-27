@@ -12,8 +12,8 @@
 //! never be locked out — treat it as a sensitive secret. When it isn't
 //! set, admin routes 503.
 //!
-//! Roles (see [`Role`]): **Viewer** (dashboard only), **Editor** (apps
-//! + media + dashboard), **Admin** (everything, incl. user
+//! Roles (see [`Role`]): **Viewer** (dashboard only), **Editor**
+//! (apps + media + dashboard), and **Admin** (everything, incl. user
 //! management). External IdPs (OIDC/SAML/LDAP) and per-app ACLs land
 //! in Phase 8.
 //!

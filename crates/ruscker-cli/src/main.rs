@@ -86,7 +86,8 @@ enum Command {
         path: PathBuf,
     },
 
-    /// Import a YAML configuration into a SQLite admin database.
+    /// Import a YAML configuration into an admin database (SQLite via
+    /// `--db`, or a shared Postgres catalog via `--config-db-url`).
     /// Idempotent — re-running with unchanged YAML produces zero
     /// writes. Specs in the DB but absent from the YAML are NOT
     /// deleted (separate operator action).
@@ -95,9 +96,16 @@ enum Command {
         path: PathBuf,
 
         /// Path to the SQLite file. Created with the schema if
-        /// missing.
+        /// missing. Mutually exclusive with `--config-db-url`.
         #[arg(long)]
-        db: PathBuf,
+        db: Option<PathBuf>,
+
+        /// Postgres DSN for the shared HA admin catalog
+        /// (`postgres://…`). Seeds a fresh Postgres catalog from the
+        /// YAML — the HA counterpart to `--db`. Takes precedence over
+        /// `--db` when both are given.
+        #[arg(long, env = "RUSCKER_CONFIG_DB_URL")]
+        config_db_url: Option<String>,
     },
 
     /// Reconstruct an application.yml from a SQLite admin database
@@ -182,7 +190,11 @@ fn main() -> Result<()> {
         } => cmd_validate(&path, json, strict, strict_compat),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
-        Command::Import { path, db } => cmd_import(&path, &db),
+        Command::Import {
+            path,
+            db,
+            config_db_url,
+        } => cmd_import(&path, db, config_db_url),
         Command::Export { db } => cmd_export(&db),
         Command::Serve {
             config,
@@ -228,7 +240,19 @@ fn cmd_export(db_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
+fn cmd_import(
+    yaml_path: &PathBuf,
+    db_path: Option<PathBuf>,
+    config_db_url: Option<String>,
+) -> Result<()> {
+    // Need a destination. Postgres wins if both are given.
+    if config_db_url.is_none() && db_path.is_none() {
+        anyhow::bail!(
+            "no destination — pass --db <path> (SQLite) or \
+             --config-db-url <postgres://…> (shared HA catalog)"
+        );
+    }
+
     let config = Config::from_file(yaml_path).with_context(|| {
         format!("failed to load config from {}", yaml_path.display())
     })?;
@@ -237,22 +261,41 @@ fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
         .enable_all()
         .build()?;
 
-    let report = rt.block_on(async {
-        let pool = ruscker_admin::db::open(db_path).await?;
-        let r = ruscker_admin::db::specs::import_all(
-            &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
-            &config,
-        )
-        .await?;
-        pool.close().await;
-        anyhow::Ok(r)
+    // Returns the import report plus a human label for the destination
+    // (never the raw DSN — it may carry a password).
+    let (report, target) = rt.block_on(async {
+        if let Some(url) = config_db_url {
+            if db_path.is_some() {
+                eprintln!("note: both --config-db-url and --db given; using Postgres");
+            }
+            let pool = ruscker_admin::db::open_pg(&url)
+                .await
+                .context("connect to the Postgres admin catalog")?;
+            let r = ruscker_admin::db::specs::import_all(
+                &ruscker_admin::db::ConfigDb::Postgres(pool.clone()),
+                &config,
+            )
+            .await?;
+            pool.close().await;
+            anyhow::Ok((r, "Postgres admin catalog".to_string()))
+        } else {
+            let path = db_path.expect("db_path present");
+            let pool = ruscker_admin::db::open(&path).await?;
+            let r = ruscker_admin::db::specs::import_all(
+                &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+                &config,
+            )
+            .await?;
+            pool.close().await;
+            anyhow::Ok((r, path.display().to_string()))
+        }
     })?;
 
     println!();
     println!("  Ruscker import");
     println!("  ──────────────");
     println!("  from:  {}", yaml_path.display());
-    println!("  into:  {}", db_path.display());
+    println!("  into:  {}", target);
     println!();
     println!("  specs:");
     println!("    created    {:>4}", report.created);

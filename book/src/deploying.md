@@ -209,9 +209,9 @@ and pass `X-Forwarded-*` as in the nginx section above.
 
 > Today the running proxy reads its spec list from the YAML
 > (`--config`), so deploy the same `application.yml` to every instance;
-> the Postgres catalog backs the **admin UI**. Seeding a fresh Postgres
-> catalog from YAML over the CLI (`ruscker import --config-db-url`) is a
-> small planned follow-up — for now the admin UI writes it.
+> the Postgres catalog backs the **admin UI**. Seed a fresh Postgres
+> catalog from YAML with `ruscker import --config-db-url postgres://…`
+> (idempotent, same as the SQLite `--db` import).
 
 [ha]: https://github.com/StrategicProjects/ruscker/tree/main/examples/ha
 

@@ -58,6 +58,7 @@ async fn app_state(db: ConfigDb) -> AppState {
     let locales = Locales::load().expect("load locales");
     AppState {
         config: Arc::new(config),
+        base_path: Arc::from(""),
         locales: Arc::new(locales),
         admin_auth: AdminAuth {
             admin: Some(Arc::from("test-token")),

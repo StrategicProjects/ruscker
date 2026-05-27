@@ -165,6 +165,34 @@ Cut over by reloading nginx; roll back by restoring the previous
 config. Keep a backup of the site file and run `nginx -t` before every
 reload.
 
+## 4b. Mounting under a base path (subpath)
+
+When you can't create a subdomain (no DNS governance), serve the whole
+portal under a subpath like `example.org/box/`. Start Ruscker with
+`--base-path /box` (or `server.context-path: /box` in the config —
+ShinyProxy's `server.servlet.context-path` is also accepted), and point
+nginx at it **preserving the prefix** (no trailing path on `proxy_pass`,
+so the `/box` stays in the forwarded URL):
+
+```nginx
+# Forward both the bare /box and everything under /box/ — without an
+# nginx-side redirect (Ruscker does its own canonicalization below).
+location = /box  { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
+location /box/   { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
+```
+
+Ruscker then nests every route under `/box` (`/box`, `/box/admin/…`,
+`/box/app/{spec}/…`), rewrites the URLs/redirects it emits to carry the
+prefix, and injects a small runtime shim so JS-built requests (the live
+dashboard's SSE, `fetch`, etc.) resolve under `/box` too. `/healthz` and
+`/readyz` stay at the **root** for load-balancer probes — don't put them
+behind the `/box` locations. `--base-path` is empty by default, so
+root-mounted deploys are unaffected.
+
+> The canonical landing URL is `/box` (no trailing slash); a request to
+> `/box/` 308-redirects to it. Keeping nginx as a plain `proxy_pass`
+> (never redirecting) means that single hop can't loop.
+
 ## 5. Health checks
 
 Point your load balancer / orchestrator at:

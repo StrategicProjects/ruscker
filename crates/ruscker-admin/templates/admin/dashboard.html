@@ -276,11 +276,11 @@
       ? escapeHtml(row.memory_display)
       : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
     var actions = !canManage ? '' : ''
-      + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+      + '<form method="post" action="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
         + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
         + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
       + '</form>'
-      + '<form method="post" action="/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+      + '<form method="post" action="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
         + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
         + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
       + '</form>';
@@ -300,7 +300,7 @@
       + '<td>' + (row.host ? escapeHtml(row.host) : '<span style="color:var(--text-faint)">local</span>') + '</td>'
       + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
       + '<td style="white-space: nowrap;">'
-        + '<a href="/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
+        + '<a href="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
           + '" title="' + escapeHtml(logsTitle)
           + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
         + actions

@@ -57,6 +57,7 @@ async fn app_state(db: ConfigDb) -> AppState {
     let locales = Locales::load().expect("load locales");
     AppState {
         config: Arc::new(config),
+        base_path: Arc::from(""),
         locales: Arc::new(locales),
         admin_auth: AdminAuth {
             admin: Some(Arc::from("test-token")),
@@ -137,6 +138,36 @@ proxy:
         !body.contains(r#"href="/admin/login""#),
         "sign-in entrance hidden when show-admin-link=false"
     );
+}
+
+#[tokio::test]
+async fn base_path_nests_the_portal_and_keeps_health_at_root() {
+    // #173 slice 1: with a base path the whole portal moves under it,
+    // while /healthz stays at the root for load-balancer probes.
+    let mut state = app_state(open_db().await).await;
+    state.base_path = Arc::from("/box");
+    let app = router(state);
+
+    async fn code(app: axum::Router, uri: &str) -> StatusCode {
+        app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap()
+            .status()
+    }
+
+    // Landing lives under /box now; the bare root no longer matches.
+    assert_eq!(code(app.clone(), "/box").await, StatusCode::OK);
+    // `/box/` (what a browser/nginx sends) redirects to the canonical /box.
+    assert_eq!(
+        code(app.clone(), "/box/").await,
+        StatusCode::PERMANENT_REDIRECT
+    );
+    // Deeper routes match under the prefix directly.
+    assert_eq!(code(app.clone(), "/box/admin/login").await, StatusCode::OK);
+    assert_eq!(code(app.clone(), "/").await, StatusCode::NOT_FOUND);
+    // Health is mounted at the root regardless of the base path.
+    assert_eq!(code(app.clone(), "/healthz").await, StatusCode::OK);
+    assert_eq!(code(app, "/box/healthz").await, StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

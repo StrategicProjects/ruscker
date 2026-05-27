@@ -426,7 +426,9 @@ async fn forward(
     //     the transform per spec (`inject-base-href: false`) once the
     //     app self-routes from the forwarded-prefix headers above.
     let resp = if route_prefix == APP_PREFIX && spec.effective_inject_base_href() {
-        let base = format!("{route_prefix}{}/", spec.id);
+        // Include the portal base path (#173) so the app's `<base href>`
+        // is `/box/app/{spec}/` when Ruscker is mounted under `/box`.
+        let base = format!("{}{route_prefix}{}/", state.base_path, spec.id);
         rewrite::inject_base_href(resp, &base).await
     } else {
         resp
@@ -1193,6 +1195,7 @@ mod tests {
         let cfg = Config::from_yaml("specs: []").expect("empty config");
         AppState {
             config: std::sync::Arc::new(cfg),
+            base_path: std::sync::Arc::from(""),
             locales: std::sync::Arc::new(
                 crate::i18n::Locales::load().expect("load locales"),
             ),

@@ -203,9 +203,53 @@ rest serve traffic. If the leader dies its lock releases and another
 takes over within one scaler tick — nothing to configure. Each instance
 logs its role at startup (`acquired leadership` / `standing by`).
 
-The load balancer does **not** need sticky upstreams — sessions are
-shared, so round-robin is fine. Keep `server.useForwardHeaders: true`
-and pass `X-Forwarded-*` as in the nginx section above.
+**App traffic** doesn't need sticky upstreams — proxy sessions are
+shared (the sticky cookie is a shared-key HMAC and the `proxy_sessions`
+table is shared), so round-robin is fine for `/app` and `/api`. Keep
+`server.useForwardHeaders: true` and pass `X-Forwarded-*` as in the
+nginx section above.
+
+### Sticky upstream for the sign-in session (`/admin`, `/app`, `/api`)
+
+One thing is **not** shared across instances yet: the **sign-in session**
+(`AdminSessions`) is an in-memory map per process. So an admin — or, with
+per-group app visibility ([access control](./configuration.md)), any
+signed-in user — who logs into instance A and is then round-robined to
+instance B is bounced back to the login screen (B doesn't know the
+session), and on the proxy path B would treat them as anonymous (so a
+restricted app could 403/redirect even though they're entitled to it).
+
+Until a shared session store lands ([#161]), pin the **session-bearing
+paths** to one instance with a sticky upstream. The simplest is
+`ip_hash` (route by client IP); a cookie-based sticky on the
+`ruscker_admin_session` cookie is more precise if you have nginx Plus or
+a similar LB.
+
+```nginx
+# Pin each client to one instance so its sign-in session is found.
+upstream ruscker {
+    ip_hash;                      # sticky by client IP
+    server 10.0.0.11:8080;
+    server 10.0.0.12:8080;
+}
+server {
+    # … TLS, proxy headers (see above) …
+    location / {                  # landing, /admin, /app, /api
+        proxy_pass http://ruscker;
+    }
+}
+```
+
+The shared catalog + session table mean **no data is lost** on a
+failover — the worst case is a re-login. If you can't make the LB
+sticky, document for your admins that a failover re-prompts login.
+
+> **Roadmap:** [#161] tracks backing `AdminSessions` with the shared
+> Postgres (a small `admin_sessions` table, fronted by a short-TTL local
+> cache so the hot proxy path stays DB-free) — that removes the need for
+> stickiness entirely.
+
+[#161]: https://github.com/StrategicProjects/ruscker/issues/161
 
 > Today the running proxy reads its spec list from the YAML
 > (`--config`), so deploy the same `application.yml` to every instance;

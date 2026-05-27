@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" width="720" height="520" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Roadmap timeline. Phases 0 through 5 are shipped (scaffolding, landing page, persistence and admin CRUD, proxy and Docker backend, monitoring dashboard, production polish — v0.1.0). Phases 6 to 8 are planned and optional: multi-host scheduling, high availability, and external auth.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" width="720" height="520" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Roadmap timeline. Phases 0 through 7 are done: 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence and admin CRUD, proxy and Docker backend, monitoring dashboard, production polish); 6 (multi-host scheduling) and 7 (HA / multi-instance) are complete on main. Phase 8 (external auth) is planned and optional.">
   <title>Ruscker — roadmap</title>
 
-  <!-- rail: solid teal through the shipped phases, dashed grey after -->
-  <line x1="60" y1="52" x2="60" y2="312" stroke="#1D9E75" stroke-width="3"/>
-  <line x1="60" y1="312" x2="60" y2="476" stroke="#B9CDC6" stroke-width="3" stroke-dasharray="3 6"/>
+  <!-- rail: solid teal through the done phases (0–7), dashed grey after -->
+  <line x1="60" y1="52" x2="60" y2="420" stroke="#1D9E75" stroke-width="3"/>
+  <line x1="60" y1="420" x2="60" y2="476" stroke="#B9CDC6" stroke-width="3" stroke-dasharray="3 6"/>
 
   <!-- done phases -->
   <g font-size="13">
@@ -49,15 +49,17 @@
 
   <!-- planned phases -->
   <g font-size="13">
-    <!-- 6 -->
-    <circle cx="60" cy="368" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
-    <text x="86" y="365" font-weight="700" fill="#5B6B66">Phase 6 · Multi-host scheduling</text>
-    <text x="86" y="381" font-size="11" fill="#90A39C">multiple Docker hosts · bin-pack / spread · anti-affinity</text>
+    <!-- 6 (done) -->
+    <circle cx="60" cy="368" r="9" fill="#0F6E56"/>
+    <path d="M55.5,368 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="365" font-weight="700" fill="#085041">Phase 6 · Multi-host scheduling</text>
+    <text x="86" y="381" font-size="11" fill="#5B6B66">multiple Docker hosts · bin-pack / spread · anti-affinity</text>
 
-    <!-- 7 -->
-    <circle cx="60" cy="420" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
-    <text x="86" y="417" font-weight="700" fill="#5B6B66">Phase 7 · HA / multi-instance</text>
-    <text x="86" y="433" font-size="11" fill="#90A39C">Postgres session store · advisory locks · failover</text>
+    <!-- 7 (done) -->
+    <circle cx="60" cy="420" r="9" fill="#0F6E56"/>
+    <path d="M55.5,420 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="417" font-weight="700" fill="#085041">Phase 7 · HA / multi-instance</text>
+    <text x="86" y="433" font-size="11" fill="#5B6B66">Postgres session store · advisory locks · failover</text>
 
     <!-- 8 -->
     <circle cx="60" cy="472" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>

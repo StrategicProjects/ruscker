@@ -184,12 +184,12 @@ async fn render(
     flash_saved: bool,
     flash_error: Option<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(database) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let form = match preset_form {
         Some(f) => f,
-        None => match db::landing::fetch(pool).await {
+        None => match db::landing::fetch(database).await {
             Ok(lc) => LandingForm::from_customization(&lc),
             Err(err) => {
                 tracing::error!(error = ?err, "landing fetch failed");

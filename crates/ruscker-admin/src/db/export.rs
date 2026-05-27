@@ -34,7 +34,11 @@ pub async fn reconstruct_config(pool: &SqlitePool) -> Result<Config> {
     //    loader so every field (incl. SEO) round-trips without
     //    duplicating the column list here. Then attach the custom
     //    HTML blocks (ordered by slot, position) so they round-trip too.
-    let mut landing_customization = super::landing::fetch(pool).await?;
+    // `fetch` is dual-dialect now; the export path is SQLite-only, so
+    // wrap this pool in a `ConfigDb` to call it. (Cheap — the pool is
+    // an `Arc` clone.)
+    let mut landing_customization =
+        super::landing::fetch(&super::ConfigDb::Sqlite(pool.clone())).await?;
     landing_customization.blocks = super::landing_blocks::list_all(pool)
         .await?
         .iter()

@@ -7,6 +7,7 @@
 //! separated) widens the landing CSP so embedded third-party content
 //! can load.
 
+use crate::db::ConfigDb;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use sqlx::SqlitePool;
@@ -37,14 +38,18 @@ pub struct BlockInput {
     pub csp_origins: String,
 }
 
-type Row = (String, String, i64, i64, String, String, String);
+// `enabled` is read as `bool`: SQLite decodes its INTEGER 0/1 into a
+// bool, Postgres reads the native BOOLEAN — one Row type serves both
+// dialects (Phase 7c). The write paths still bind `enabled as i64` on
+// the SQLite side; those columns get ported with their modules.
+type Row = (String, String, i64, bool, String, String, String);
 
 fn row_to_block((id, slot, position, enabled, title, html, csp_origins): Row) -> LandingBlock {
     LandingBlock {
         id,
         slot,
         position,
-        enabled: enabled != 0,
+        enabled,
         title,
         html,
         csp_origins,
@@ -64,13 +69,18 @@ pub async fn list_all(pool: &SqlitePool) -> Result<Vec<LandingBlock>> {
 }
 
 /// Enabled blocks only, ordered — for rendering the public landing.
-pub async fn list_enabled(pool: &SqlitePool) -> Result<Vec<LandingBlock>> {
-    let rows: Vec<Row> = sqlx::query_as(
-        "SELECT id, slot, position, enabled, title, html, csp_origins
-           FROM landing_blocks WHERE enabled = 1 ORDER BY slot, position, created_at",
-    )
-    .fetch_all(pool)
-    .await
+///
+/// Ported to dual-dialect (Phase 7c-3): bare `WHERE enabled` (not
+/// `= 1`) is truthy on SQLite and a native BOOLEAN test on Postgres,
+/// and the rest of the SELECT is placeholder-free, so one SQL string
+/// serves both backends.
+pub async fn list_enabled(db: &ConfigDb) -> Result<Vec<LandingBlock>> {
+    let sql = "SELECT id, slot, position, enabled, title, html, csp_origins
+           FROM landing_blocks WHERE enabled ORDER BY slot, position, created_at";
+    let rows: Vec<Row> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
     .context("list enabled landing_blocks")?;
     Ok(rows.into_iter().map(row_to_block).collect())
 }
@@ -458,7 +468,10 @@ mod tests {
         let mut off = input("top", "x");
         off.enabled = false;
         update(&pool, &id, &off, None).await.unwrap();
-        assert!(list_enabled(&pool).await.unwrap().is_empty());
+        assert!(list_enabled(&ConfigDb::Sqlite(pool.clone()))
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(list_all(&pool).await.unwrap().len(), 1);
     }
 
@@ -469,5 +482,39 @@ mod tests {
         assert!(delete(&pool, &id, None).await.unwrap());
         assert!(fetch_one(&pool, &id).await.unwrap().is_none());
         assert!(!delete(&pool, &id, None).await.unwrap());
+    }
+
+    // Proves the ported `list_enabled` reads the native BOOLEAN column
+    // through the `ConfigDb::Postgres` arm and honours `WHERE enabled`.
+    // Inserts are raw SQL here because the write path isn't ported yet.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn list_enabled_against_real_postgres() {
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        // Isolate from other runs sharing this database.
+        sqlx::query("DELETE FROM landing_blocks")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for (id, enabled) in [("keep", true), ("skip", false)] {
+            sqlx::query(
+                "INSERT INTO landing_blocks
+                   (id, slot, position, enabled, title, html, csp_origins,
+                    created_at, updated_at)
+                 VALUES ($1, 'top', 0, $2, '', '', '', now(), now())",
+            )
+            .bind(id)
+            .bind(enabled)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let enabled = list_enabled(&ConfigDb::Postgres(pool)).await.unwrap();
+        let ids: Vec<&str> = enabled.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(ids, ["keep"]);
+        assert!(enabled[0].enabled);
     }
 }

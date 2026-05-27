@@ -291,6 +291,10 @@ fn cmd_serve(
         found
     });
 
+    // Captured before `config` is moved into the server — picks the
+    // multi-host backend when `proxy.hosts` is set (Phase 6).
+    let hosts = config.proxy.hosts.clone();
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -307,9 +311,19 @@ fn cmd_serve(
             server = server.with_master_key(k).context("invalid --master-key")?;
         }
         if docker {
-            let backend = ruscker_docker::LocalDockerBackend::local()
-                .context("connect to Docker daemon")?;
-            server = server.with_backend(std::sync::Arc::new(backend));
+            let backend: std::sync::Arc<dyn ruscker_core::ContainerBackend> = if hosts.is_empty() {
+                std::sync::Arc::new(
+                    ruscker_docker::LocalDockerBackend::local()
+                        .context("connect to Docker daemon")?,
+                )
+            } else {
+                tracing::info!(count = hosts.len(), "multi-host backend");
+                std::sync::Arc::new(
+                    ruscker_docker::MultiHostDockerBackend::connect(&hosts)
+                        .context("connect to Docker hosts")?,
+                )
+            };
+            server = server.with_backend(backend);
         }
         if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;

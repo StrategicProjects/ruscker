@@ -86,11 +86,51 @@ pub fn connect_host(host: &Host) -> CoreResult<LocalDockerBackend> {
     }
 }
 
+/// Classify a host's **config** (not connectivity): `Some(msg)` for a
+/// fatal operator error — an unknown address scheme, or `tcp://` with no
+/// TLS — that [`MultiHostDockerBackend::connect`] must reject up front;
+/// `None` otherwise. A reachable-but-down host, or a bad TLS file path,
+/// is *not* a config error here — those surface from `connect_host` and
+/// are skipped for degraded start (#160 D4).
+fn host_config_error(host: &Host) -> Option<String> {
+    let addr = host.address.trim();
+    if addr.starts_with("unix://") || addr.starts_with("ssh://") || addr.starts_with("http://") {
+        None
+    } else if addr.starts_with("tcp://") {
+        host.tls
+            .is_none()
+            .then(|| format!("host `{}`: tcp:// needs `tls` (ca/cert/key)", host.id))
+    } else {
+        Some(format!(
+            "host `{}`: address `{addr}` must start with ssh:// , tcp:// , http:// or unix://",
+            host.id
+        ))
+    }
+}
+
 /// Reachable host from an `[user@]host[:port]` authority — drops the
-/// `user@` and the `:port`. (IPv6 literals aren't handled yet.)
+/// `user@` and a trailing `:port`. Handles bracketed IPv6 literals
+/// (`[2001:db8::1]:2376` → `2001:db8::1`); a bare unbracketed IPv6 is
+/// returned as-is rather than truncated at the first colon (#160 D3).
 fn host_part(authority: &str) -> String {
     let no_user = authority.rsplit('@').next().unwrap_or(authority);
-    no_user.split(':').next().unwrap_or(no_user).to_string()
+    // Bracketed IPv6: take what's inside the brackets, ignore any port.
+    if let Some(rest) = no_user.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return rest[..end].to_string();
+        }
+    }
+    // `host:port` (IPv4 / hostname): strip the port only when there's a
+    // single colon and the suffix is numeric. Multiple colons with no
+    // brackets ⇒ a bare IPv6 literal — return it whole, don't truncate.
+    match no_user.rsplit_once(':') {
+        Some((h, port))
+            if !h.contains(':') && !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) =>
+        {
+            h.to_string()
+        }
+        _ => no_user.to_string(),
+    }
 }
 
 /// A connected host plus the placement metadata from its config.
@@ -165,20 +205,43 @@ fn choose_host(loads: &[HostLoad], placement: Placement, anti_affinity: bool) ->
 }
 
 impl MultiHostDockerBackend {
-    /// Connect to every configured host. Fails if the list is empty or
-    /// any host can't be built (bad address / TLS).
+    /// Connect to every configured host. A **config** error (empty
+    /// list, unknown scheme, `tcp://` without TLS) is always fatal —
+    /// it's operator error. A **connectivity** failure (down daemon,
+    /// bad TLS path, unreachable ssh) only logs+skips that host, so the
+    /// cluster can start degraded from whoever is reachable; boot fails
+    /// only if *no* host connects (#160 D4). This mirrors `list`'s
+    /// degraded philosophy.
     pub fn connect(hosts: &[Host]) -> CoreResult<Self> {
         if hosts.is_empty() {
             return Err(CoreError::Backend("no docker hosts configured".into()));
         }
+        // Phase 1 — config validation: fatal, before touching the
+        // network, so a typo'd scheme can't be masked by degraded-start.
+        for h in hosts {
+            if let Some(msg) = host_config_error(h) {
+                return Err(CoreError::Backend(msg));
+            }
+        }
+        // Phase 2 — connect; skip the unreachable.
         let mut built = Vec::with_capacity(hosts.len());
         for h in hosts {
-            built.push(HostEntry {
-                id: h.id.clone(),
-                backend: connect_host(h)?,
-                max_containers: h.max_containers,
-                weight: h.weight.unwrap_or(1).max(1),
-            });
+            match connect_host(h) {
+                Ok(backend) => built.push(HostEntry {
+                    id: h.id.clone(),
+                    backend,
+                    max_containers: h.max_containers,
+                    weight: h.weight.unwrap_or(1).max(1),
+                }),
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "connect to host failed; starting without it");
+                }
+            }
+        }
+        if built.is_empty() {
+            return Err(CoreError::Backend(
+                "no docker hosts reachable (all configured hosts failed to connect)".into(),
+            ));
         }
         Ok(Self {
             hosts: built,
@@ -254,16 +317,25 @@ impl ContainerBackend for MultiHostDockerBackend {
             self.placement.remove(replica_id);
             return r;
         }
-        // Placement miss (e.g. never listed): best-effort across hosts.
+        // Placement miss (never listed, or its host left the config):
+        // try every host.
         for h in &self.hosts {
             if h.backend.stop(replica_id).await.is_ok() {
                 self.placement.remove(replica_id);
                 return Ok(());
             }
         }
-        Err(CoreError::Backend(format!(
-            "replica {replica_id} not found on any host"
-        )))
+        // No host owned it. `stop` is idempotent — an absent container
+        // satisfies the request — so drop any stale (unroutable)
+        // placement entry instead of leaving a ghost that inflates
+        // `pick_host` forever (#160 D1/D2), and report success. Warned
+        // because it could also mean every host is unreachable.
+        self.placement.remove(replica_id);
+        tracing::warn!(
+            replica = %replica_id,
+            "stop: no host confirmed the container; treating as already gone"
+        );
+        Ok(())
     }
 
     async fn list(&self) -> CoreResult<Vec<Replica>> {
@@ -271,6 +343,8 @@ impl ContainerBackend for MultiHostDockerBackend {
         // later stop/metrics/logs route correctly. A host that fails to
         // answer is logged and skipped (degraded, not fatal).
         let mut all = Vec::new();
+        let mut live: std::collections::HashSet<ReplicaId> = std::collections::HashSet::new();
+        let mut failed_hosts: std::collections::HashSet<String> = std::collections::HashSet::new();
         for h in &self.hosts {
             match h.backend.list().await {
                 Ok(mut replicas) => {
@@ -278,29 +352,36 @@ impl ContainerBackend for MultiHostDockerBackend {
                         self.placement
                             .insert(r.id.clone(), (h.id.clone(), r.spec_id.clone()));
                         r.host = Some(h.id.clone());
+                        live.insert(r.id.clone());
                     }
                     all.extend(replicas);
                 }
                 Err(e) => {
                     tracing::warn!(host = %h.id, error = %e, "list on host failed; skipping");
+                    failed_hosts.insert(h.id.clone());
                 }
             }
         }
+        // Authoritative prune (#160 D1): drop placement for replicas no
+        // host reported, so dead/crashed containers stop inflating
+        // `pick_host`'s load counts. Keep entries whose owning host
+        // *didn't answer* — we can't tell if those are gone.
+        self.placement
+            .retain(|id, (host, _)| live.contains(id) || failed_hosts.contains(host));
         Ok(all)
     }
 
     async fn metrics(&self, replica_id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
-        if let Some(backend) = self.placed(replica_id) {
-            return backend.metrics(replica_id).await;
+        // Placement-only, like `logs` (#160 D2): a metrics fan-out would
+        // fire a CPU-delta stats round-trip at every daemon that doesn't
+        // own the replica, every cache refresh. `list` keeps placement
+        // fresh, so a miss here means we genuinely don't know the host.
+        match self.placed(replica_id) {
+            Some(backend) => backend.metrics(replica_id).await,
+            None => Err(CoreError::Backend(format!(
+                "replica {replica_id} not placed on any known host"
+            ))),
         }
-        for h in &self.hosts {
-            if let Ok(m) = h.backend.metrics(replica_id).await {
-                return Ok(m);
-            }
-        }
-        Err(CoreError::Backend(format!(
-            "replica {replica_id} not found on any host"
-        )))
     }
 
     async fn logs(&self, replica_id: &ReplicaId, tail: usize) -> CoreResult<Vec<String>> {
@@ -344,6 +425,38 @@ mod tests {
         assert_eq!(host_part("10.0.0.12:2376"), "10.0.0.12");
         assert_eq!(host_part("ops@host.example:2376"), "host.example");
         assert_eq!(host_part("plainhost"), "plainhost");
+    }
+
+    #[test]
+    fn host_part_handles_ipv6_literals() {
+        // #160 D3: bracketed IPv6, with and without a port / user.
+        assert_eq!(host_part("[2001:db8::1]:2376"), "2001:db8::1");
+        assert_eq!(host_part("[2001:db8::1]"), "2001:db8::1");
+        assert_eq!(host_part("ops@[fe80::1]:2376"), "fe80::1");
+        assert_eq!(host_part("[::1]:2376"), "::1");
+        // A bare unbracketed IPv6 is returned whole, not truncated at
+        // the first colon (the old `split(':').next()` bug).
+        assert_eq!(host_part("2001:db8::1"), "2001:db8::1");
+    }
+
+    #[test]
+    fn host_config_error_flags_only_config_mistakes() {
+        // Valid schemes ⇒ no config error (connectivity is checked later).
+        assert!(host_config_error(&host("a", "ssh://ops@h")).is_none());
+        assert!(host_config_error(&host("b", "http://h:2375")).is_none());
+        assert!(host_config_error(&host("c", "unix:///var/run/docker.sock")).is_none());
+        // tcp:// without TLS ⇒ fatal config error.
+        assert!(host_config_error(&host("d", "tcp://h:2376")).is_some());
+        // tcp:// with TLS ⇒ ok.
+        let mut tls_host = host("e", "tcp://h:2376");
+        tls_host.tls = Some(HostTls {
+            ca: PathBuf::from("ca.pem"),
+            cert: PathBuf::from("cert.pem"),
+            key: PathBuf::from("key.pem"),
+        });
+        assert!(host_config_error(&tls_host).is_none());
+        // Unknown scheme ⇒ fatal config error.
+        assert!(host_config_error(&host("f", "ftp://h")).is_some());
     }
 
     fn load(count: usize, max: Option<u32>, weight: u32, runs_spec: bool) -> HostLoad {

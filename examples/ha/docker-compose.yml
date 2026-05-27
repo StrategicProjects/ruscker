@@ -1,0 +1,79 @@
+# Ruscker active-active HA harness (Phase 7).
+#
+# Two Ruscker instances behind an nginx load balancer, sharing one
+# Postgres for BOTH the admin catalog (--config-db-url) and the session
+# store (--session-store-url). They use the SAME RUSCKER_COOKIE_KEY so a
+# sticky-session cookie minted by one instance validates on the other —
+# that, plus the shared session table and both instances reconciling the
+# same Docker daemon, is what makes sessions survive an instance moving.
+#
+# Exactly one instance runs the auto-scaler (Postgres advisory-lock
+# leader election); the rest stand by. Kill the leader and the survivor
+# takes over within one scaler tick.
+#
+#   docker compose -f examples/ha/docker-compose.yml up --build
+#   curl localhost:8080/readyz        # both instances report db: ok
+#   docker compose ... logs | grep leadership   # one "acquired", one "standing by"
+#
+# ⚠️  The keys below are throwaway DEV values for a local demo. Generate
+#     real ones (`openssl rand -hex 32`) and keep them out of YAML for
+#     production — see book/src/deploying.md.
+
+x-ruscker-env: &ruscker-env
+  RUSCKER_ADMIN_TOKEN: dev-admin-token-change-me
+  RUSCKER_MASTER_KEY: 00000000000000000000000000000000000000000000000000000000000000aa
+  # Shared across instances — REQUIRED for cross-instance sticky sessions.
+  RUSCKER_COOKIE_KEY: 00000000000000000000000000000000000000000000000000000000000000bb
+  DOCKER_REGISTRY_PASSWORD: unused
+
+x-ruscker-cmd: &ruscker-cmd
+  - serve
+  - --config=/etc/ruscker/application.yml
+  - --bind=0.0.0.0:8080
+  - --docker
+  - --config-db-url=postgres://ruscker:ruscker@postgres/ruscker
+  - --session-store-url=postgres://ruscker:ruscker@postgres/ruscker
+  - --log-format=json
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ruscker
+      POSTGRES_PASSWORD: ruscker
+      POSTGRES_DB: ruscker
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ruscker"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  ruscker-1: &ruscker
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    command: *ruscker-cmd
+    environment: *ruscker-env
+    volumes:
+      - ./application.yml:/etc/ruscker/application.yml:ro
+      # The host Docker daemon — both instances reconcile the same
+      # containers. The image runs as a non-root `ruscker` user, so it
+      # needs access to the socket; `user: root` keeps the demo simple.
+      - /var/run/docker.sock:/var/run/docker.sock
+    user: root
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  ruscker-2:
+    <<: *ruscker
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - ruscker-1
+      - ruscker-2

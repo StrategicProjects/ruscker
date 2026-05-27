@@ -176,6 +176,45 @@ Point your load balancer / orchestrator at:
 On `SIGTERM` Ruscker flips `/readyz` to `draining`, lets in-flight
 sessions wind down up to `proxy.shutdown-grace-ms`, then exits.
 
+## Running active-active (HA, Phase 7)
+
+For high availability you can run **several Ruscker instances behind a
+load balancer**, all sharing one Postgres. There's a runnable harness
+(two instances + nginx + Postgres) in [`examples/ha/`][ha] — start
+there. The three things every instance must share:
+
+- **`--config-db-url postgres://…`** — the admin catalog (specs,
+  landing, users, credentials, audit) lives in Postgres instead of a
+  per-node SQLite file, so an edit on any instance is seen by all. Runs
+  the same migrations as SQLite; `--db` stays the single-node default.
+- **`--session-store-url postgres://…`** — one shared `proxy_sessions`
+  table. Each instance reconciles the cluster-wide per-replica session
+  counts, so routing and the scaler agree across the fleet.
+- **the same `RUSCKER_COOKIE_KEY`** on every instance — the sticky
+  cookie is an HMAC, so a shared key lets any instance validate a cookie
+  another minted. With that, the shared session table, and every
+  instance pointed at the same Docker backend (so they reconcile the
+  same replicas), a session survives the load balancer moving it
+  between instances.
+
+**Scaler leader election is automatic:** instances elect one leader via
+a Postgres advisory lock; only the leader spawns/reaps replicas, the
+rest serve traffic. If the leader dies its lock releases and another
+takes over within one scaler tick — nothing to configure. Each instance
+logs its role at startup (`acquired leadership` / `standing by`).
+
+The load balancer does **not** need sticky upstreams — sessions are
+shared, so round-robin is fine. Keep `server.useForwardHeaders: true`
+and pass `X-Forwarded-*` as in the nginx section above.
+
+> Today the running proxy reads its spec list from the YAML
+> (`--config`), so deploy the same `application.yml` to every instance;
+> the Postgres catalog backs the **admin UI**. Seeding a fresh Postgres
+> catalog from YAML over the CLI (`ruscker import --config-db-url`) is a
+> small planned follow-up — for now the admin UI writes it.
+
+[ha]: https://github.com/StrategicProjects/ruscker/tree/main/examples/ha
+
 ## Running with Docker instead of the `.deb`
 
 If you'd rather run the container image, mount your config and the

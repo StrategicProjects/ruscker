@@ -111,9 +111,13 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
         // boundary.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // Tracks leadership across ticks so we log only on change.
-        // `true` initially so a single-node (always-leader) instance
-        // logs nothing.
-        let mut was_leader = true;
+        // `None` until the first observation so the first tick always
+        // logs this instance's role — a single-node instance logs
+        // "acquired leadership" once (confirming the scaler is live);
+        // in HA the leader and every standby each announce themselves,
+        // which the operator and the HA harness rely on to see who's
+        // scaling. Subsequent ticks log only on a leadership change.
+        let mut was_leader: Option<bool> = None;
         loop {
             ticker.tick().await;
 
@@ -124,13 +128,13 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
             // task are harmless: a new leader rebuilds them from the
             // live registry over the next few ticks.
             let is_leader = state.leader.is_leader().await;
-            if is_leader != was_leader {
+            if was_leader != Some(is_leader) {
                 if is_leader {
                     info!("auto-scaler: acquired leadership; scaling active");
                 } else {
                     info!("auto-scaler: standing by (another instance leads)");
                 }
-                was_leader = is_leader;
+                was_leader = Some(is_leader);
             }
             if !is_leader {
                 continue;

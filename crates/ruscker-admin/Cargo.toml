@@ -6,6 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 description = "Admin panel and public landing for Ruscker (Askama + HTMX + Tailwind 4)"
 
+[features]
+# End-to-end test of PostgresSessionStore against a real Postgres.
+# Enable with `cargo test -p ruscker-admin --features postgres-it` and
+# set RUSCKER_TEST_PG_URL to a reachable `postgres://` DSN. See
+# crates/ruscker-admin/src/sessions_pg.rs for a throwaway-daemon recipe.
+postgres-it = []
+
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
 ruscker-core = { path = "../ruscker-core" }

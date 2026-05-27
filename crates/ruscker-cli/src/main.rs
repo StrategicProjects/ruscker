@@ -150,6 +150,14 @@ enum Command {
         /// containers. Without it those routes return 503.
         #[arg(long)]
         docker: bool,
+
+        /// Postgres DSN for the shared HA session store
+        /// (`postgres://user:pass@host/db`). When set, several Ruscker
+        /// instances behind a load balancer share one session table so
+        /// their seat accounting and load balancing stay consistent.
+        /// Omitted → the single-node in-memory store (default).
+        #[arg(long, env = "RUSCKER_SESSION_STORE_URL")]
+        session_store_url: Option<String>,
     },
 }
 
@@ -168,9 +176,26 @@ fn main() -> Result<()> {
         Command::Inspect { path } => cmd_inspect(&path),
         Command::Import { path, db } => cmd_import(&path, &db),
         Command::Export { db } => cmd_export(&db),
-        Command::Serve { config, bind, images_dir, db, admin_token, master_key, docker } => {
-            cmd_serve(&config, bind, images_dir, db, admin_token, master_key, docker, log_buffer)
-        }
+        Command::Serve {
+            config,
+            bind,
+            images_dir,
+            db,
+            admin_token,
+            master_key,
+            docker,
+            session_store_url,
+        } => cmd_serve(
+            &config,
+            bind,
+            images_dir,
+            db,
+            admin_token,
+            master_key,
+            docker,
+            session_store_url,
+            log_buffer,
+        ),
     }
 }
 
@@ -265,6 +290,7 @@ fn cmd_serve(
     admin_token: Option<String>,
     master_key: Option<String>,
     docker: bool,
+    session_store_url: Option<String>,
     log_buffer: ruscker_admin::logbuf::LogBuffer,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
@@ -328,6 +354,13 @@ fn cmd_serve(
         if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;
             server = server.with_db(pool);
+        }
+        if let Some(url) = session_store_url {
+            tracing::info!("HA session store: Postgres");
+            let store = ruscker_admin::sessions_pg::PostgresSessionStore::connect(&url)
+                .await
+                .context("connect to the Postgres session store")?;
+            server = server.with_session_store(std::sync::Arc::new(store));
         }
         server.run().await
     })

@@ -79,8 +79,9 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # Sniff MIME from magic bytes; client Content-Type can lie.
 infer = "0.19"
 
-# Database (SQLite via sqlx)
-sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "macros", "chrono", "uuid"] }
+# Database: SQLite is the single-node source of truth; Postgres backs
+# the optional HA session store (Phase 7, `PostgresSessionStore`).
+sqlx = { version = "0.9", features = ["runtime-tokio", "sqlite", "postgres", "macros", "chrono", "uuid"] }
 
 # Docker client. `ssh` + `ssl` enable remote daemons over `ssh://` and
 # `tcp://` (mTLS) for multi-host scheduling (Phase 6); the default

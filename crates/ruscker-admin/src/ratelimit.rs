@@ -19,7 +19,9 @@
 //! The caller passes a `client` key (see `proxy::client_key`). When
 //! Ruscker runs behind a reverse proxy that the operator has opted
 //! into trusting (`server.useForwardHeaders`), that key is the
-//! left-most `X-Forwarded-For` address; otherwise it's the TCP peer.
+//! right-most parseable `X-Forwarded-For` address (the entry the
+//! trusted proxy appended — the spoof-safe choice); otherwise it's the
+//! TCP peer.
 //! We never trust `X-Forwarded-For` unless the operator opted in,
 //! because otherwise a client could rotate the header to evade the
 //! limit — the same reasoning the login limiter documents.

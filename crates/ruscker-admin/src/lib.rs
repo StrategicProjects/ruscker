@@ -331,12 +331,18 @@ impl AdminServer {
         // deliberately dropped — there's no graceful shutdown
         // protocol for the scaler because every tick is idempotent.
         if let Some(backend) = self.state.backend.clone() {
+            // These `spawn`s return a `JoinHandle` (itself a future) we
+            // deliberately detach — each loop is idempotent and has no
+            // shutdown protocol — so the `let_underscore_future` lint is
+            // a false positive here.
+            #[allow(clippy::let_underscore_future)]
             let _ = scaler::spawn(self.state.clone(), scaler::DEFAULT_INTERVAL);
             // Session sweeper: evicts idle sessions per the
             // global `heartbeat-timeout`. `-1` (the ShinyProxy
             // idiom for "never expire") becomes a no-op loop
             // inside `sessions::spawn` so the call shape stays
             // uniform.
+            #[allow(clippy::let_underscore_future)]
             let _ = sessions::spawn(
                 self.state.sessions.clone(),
                 self.state.replicas.clone(),
@@ -345,6 +351,7 @@ impl AdminServer {
             // Dashboard metrics: keep `state.metrics` fresh in
             // the background so dashboard renders are read-only
             // and never block on a Docker stats call.
+            #[allow(clippy::let_underscore_future)]
             let _ = metrics_cache::spawn(
                 self.state.metrics.clone(),
                 backend,

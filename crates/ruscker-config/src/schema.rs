@@ -544,8 +544,10 @@ pub struct Spec {
 
     // -- Ruscker extensions: spec type --
     /// Spec type. When absent:
+    ///
     /// - `App` if `container_image` is set
     /// - `External` otherwise
+    ///
     /// Use this field explicitly to mark a containerized API
     /// (`api`), a Streamlit/Dash app, etc.
     #[serde(rename = "type")]

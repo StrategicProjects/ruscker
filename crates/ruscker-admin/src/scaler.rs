@@ -110,8 +110,32 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
         // a backlog of ticks queued — we just resume on the next
         // boundary.
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        // Tracks leadership across ticks so we log only on change.
+        // `true` initially so a single-node (always-leader) instance
+        // logs nothing.
+        let mut was_leader = true;
         loop {
             ticker.tick().await;
+
+            // HA: only the leader scales — otherwise every instance
+            // would fight over the replica count against the shared
+            // backend. Single-node uses `AlwaysLeader`, so this is a
+            // free `true`. Stale per-spec/replica counters held in this
+            // task are harmless: a new leader rebuilds them from the
+            // live registry over the next few ticks.
+            let is_leader = state.leader.is_leader().await;
+            if is_leader != was_leader {
+                if is_leader {
+                    info!("auto-scaler: acquired leadership; scaling active");
+                } else {
+                    info!("auto-scaler: standing by (another instance leads)");
+                }
+                was_leader = is_leader;
+            }
+            if !is_leader {
+                continue;
+            }
+
             tick(
                 &state,
                 &mut idle_ticks,
@@ -517,6 +541,7 @@ mod tests {
             cookie_key: ruscker_proxy::sticky::CookieKey::random(),
             spawn_locks: Arc::new(dashmap::DashMap::new()),
             sessions: Arc::new(crate::sessions::InMemorySessionStore::new()),
+            leader: Arc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }

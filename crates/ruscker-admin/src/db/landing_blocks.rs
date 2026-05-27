@@ -369,6 +369,49 @@ pub(crate) async fn replace_all_in_tx(
     Ok(())
 }
 
+/// Postgres twin of [`replace_all_in_tx`] — `$n` placeholders, and
+/// `enabled` binds as the native `bool`. Used by the Postgres arm of
+/// `specs::import_all`.
+pub(crate) async fn replace_all_in_tx_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    blocks: &[ruscker_config::LandingBlock],
+    now: chrono::DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query("DELETE FROM landing_blocks")
+        .execute(&mut **tx)
+        .await
+        .context("clear landing_blocks")?;
+
+    let mut next: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+    for b in blocks {
+        let slot = if SLOTS.contains(&b.slot.as_str()) {
+            b.slot.as_str()
+        } else {
+            "top"
+        };
+        let pos = next.entry(slot.to_owned()).or_insert(0);
+        sqlx::query(
+            "INSERT INTO landing_blocks
+               (id, slot, position, enabled, title, html, csp_origins, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(slot)
+        .bind(*pos)
+        .bind(b.enabled)
+        .bind(&b.title)
+        .bind(&b.html)
+        .bind(&b.csp_origins)
+        .bind(now)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .context("insert imported block")?;
+        *pos += 1;
+    }
+    Ok(())
+}
+
 /// Move a block one step within its slot by swapping `position` with
 /// the adjacent block (`up` = toward the front). No-op (returns
 /// `false`) when the block doesn't exist or is already at the slot

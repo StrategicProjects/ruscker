@@ -13,7 +13,8 @@
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use sqlx::SqlitePool;
+
+use crate::db::ConfigDb;
 
 /// One row of `audit_log`, with `diff_json` parsed when valid.
 #[derive(Debug, Clone)]
@@ -81,16 +82,26 @@ impl AuditFilter {
     }
 }
 
-/// List rows matching `filter`, newest first.
-///
-/// Dynamic WHERE built via [`sqlx::QueryBuilder`] (the typed
-/// `query_as` family takes `&'static str` only). All values are
-/// bound through `push_bind`; no string interpolation, no SQL
-/// injection.
-pub async fn list(pool: &SqlitePool, filter: &AuditFilter) -> Result<Vec<AuditEntry>> {
-    let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-        "SELECT id, actor, action, target, diff_json, occurred_at FROM audit_log WHERE 1=1",
-    );
+/// Row tuple shared by both dialect arms of [`list`].
+type ListRow = (
+    i64,
+    Option<String>,
+    String,
+    Option<String>,
+    Option<String>,
+    DateTime<Utc>,
+);
+
+/// Append the dynamic WHERE/ORDER/LIMIT for [`list`] onto a
+/// [`sqlx::QueryBuilder`]. Generic over the database so the SQLite and
+/// Postgres arms share one filter definition — `push_bind` emits the
+/// right placeholder (`?` vs `$n`) for each backend automatically.
+fn push_filters<DB>(qb: &mut sqlx::QueryBuilder<DB>, filter: &AuditFilter)
+where
+    DB: sqlx::Database,
+    String: sqlx::Type<DB> + for<'q> sqlx::Encode<'q, DB>,
+    i64: sqlx::Type<DB> + for<'q> sqlx::Encode<'q, DB>,
+{
     if let Some(family) = filter.family {
         qb.push(" AND action LIKE ");
         qb.push_bind(format!("{}%", family.as_prefix()));
@@ -105,12 +116,31 @@ pub async fn list(pool: &SqlitePool, filter: &AuditFilter) -> Result<Vec<AuditEn
     }
     qb.push(" ORDER BY id DESC LIMIT ");
     qb.push_bind(filter.limit.max(1).min(1000));
+}
 
-    let rows: Vec<(i64, Option<String>, String, Option<String>, Option<String>, DateTime<Utc>)> =
-        qb.build_query_as()
-            .fetch_all(pool)
-            .await
-            .context("list audit_log")?;
+const LIST_SELECT: &str =
+    "SELECT id, actor, action, target, diff_json, occurred_at FROM audit_log WHERE 1=1";
+
+/// List rows matching `filter`, newest first.
+///
+/// Dynamic WHERE built via [`sqlx::QueryBuilder`] (the typed
+/// `query_as` family takes `&'static str` only). All values are
+/// bound through `push_bind`; no string interpolation, no SQL
+/// injection.
+pub async fn list(db: &ConfigDb, filter: &AuditFilter) -> Result<Vec<AuditEntry>> {
+    let rows: Vec<ListRow> = match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(LIST_SELECT);
+            push_filters(&mut qb, filter);
+            qb.build_query_as().fetch_all(pool).await
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(LIST_SELECT);
+            push_filters(&mut qb, filter);
+            qb.build_query_as().fetch_all(pool).await
+        }
+    }
+    .context("list audit_log")?;
 
     Ok(rows
         .into_iter()
@@ -130,12 +160,25 @@ pub async fn list(pool: &SqlitePool, filter: &AuditFilter) -> Result<Vec<AuditEn
 /// Distinct values of `action` currently in the table — used to
 /// populate the filter dropdown so the UI doesn't enumerate
 /// actions that have never fired in this install.
-pub async fn distinct_actions(pool: &SqlitePool) -> Result<Vec<String>> {
-    let rows: Vec<(String,)> =
-        sqlx::query_as("SELECT DISTINCT action FROM audit_log ORDER BY action ASC")
-            .fetch_all(pool)
-            .await
-            .context("distinct actions")?;
+pub async fn distinct_actions(db: &ConfigDb) -> Result<Vec<String>> {
+    let sql = "SELECT DISTINCT action FROM audit_log ORDER BY action ASC";
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
+    .context("distinct actions")?;
+    Ok(rows.into_iter().map(|(a,)| a).collect())
+}
+
+/// Distinct non-null `actor` values — populates the actor filter
+/// dropdown (only worth showing on multi-operator installs).
+pub async fn distinct_actors(db: &ConfigDb) -> Result<Vec<String>> {
+    let sql = "SELECT DISTINCT actor FROM audit_log WHERE actor IS NOT NULL ORDER BY actor ASC";
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
+    .context("distinct actors")?;
     Ok(rows.into_iter().map(|(a,)| a).collect())
 }
 
@@ -145,7 +188,8 @@ mod tests {
     use crate::db::open_memory;
     use chrono::Utc;
 
-    async fn seed(pool: &SqlitePool, action: &str, target: Option<&str>, actor: Option<&str>) {
+    async fn seed(db: &ConfigDb, action: &str, target: Option<&str>, actor: Option<&str>) {
+        let pool = db.as_sqlite().unwrap();
         sqlx::query(
             "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
              VALUES (?, ?, ?, NULL, ?)",
@@ -161,12 +205,12 @@ mod tests {
 
     #[tokio::test]
     async fn list_returns_newest_first() {
-        let pool = open_memory().await.unwrap();
-        seed(&pool, "spec.create", Some("spec:a"), None).await;
-        seed(&pool, "spec.update", Some("spec:a"), None).await;
-        seed(&pool, "spec.delete", Some("spec:a"), None).await;
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        seed(&db, "spec.create", Some("spec:a"), None).await;
+        seed(&db, "spec.update", Some("spec:a"), None).await;
+        seed(&db, "spec.delete", Some("spec:a"), None).await;
 
-        let v = list(&pool, &AuditFilter::new()).await.unwrap();
+        let v = list(&db, &AuditFilter::new()).await.unwrap();
         assert_eq!(v.len(), 3);
         assert_eq!(v[0].action, "spec.delete");
         assert_eq!(v[2].action, "spec.create");
@@ -174,46 +218,98 @@ mod tests {
 
     #[tokio::test]
     async fn family_filter_narrows_by_prefix() {
-        let pool = open_memory().await.unwrap();
-        seed(&pool, "spec.create", Some("spec:a"), None).await;
-        seed(&pool, "image.upload", Some("image:1"), None).await;
-        seed(&pool, "credential.create", Some("credential:dh"), None).await;
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        seed(&db, "spec.create", Some("spec:a"), None).await;
+        seed(&db, "image.upload", Some("image:1"), None).await;
+        seed(&db, "credential.create", Some("credential:dh"), None).await;
 
         let f = AuditFilter {
             family: Some(ActionFamily::Image),
             ..AuditFilter::new()
         };
-        let v = list(&pool, &f).await.unwrap();
+        let v = list(&db, &f).await.unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].action, "image.upload");
     }
 
     #[tokio::test]
     async fn target_substring_filter() {
-        let pool = open_memory().await.unwrap();
-        seed(&pool, "spec.update", Some("spec:sales-dashboard"), None).await;
-        seed(&pool, "spec.update", Some("spec:ops-report"), None).await;
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        seed(&db, "spec.update", Some("spec:sales-dashboard"), None).await;
+        seed(&db, "spec.update", Some("spec:ops-report"), None).await;
 
         let f = AuditFilter {
             target_contains: Some("sales".into()),
             ..AuditFilter::new()
         };
-        let v = list(&pool, &f).await.unwrap();
+        let v = list(&db, &f).await.unwrap();
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].target.as_deref(), Some("spec:sales-dashboard"));
     }
 
     #[tokio::test]
     async fn limit_caps_returned_rows() {
-        let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
         for i in 0..10 {
-            seed(&pool, "spec.create", Some(&format!("spec:{i}")), None).await;
+            seed(&db, "spec.create", Some(&format!("spec:{i}")), None).await;
         }
         let f = AuditFilter {
             limit: 3,
             ..AuditFilter::new()
         };
-        let v = list(&pool, &f).await.unwrap();
+        let v = list(&db, &f).await.unwrap();
         assert_eq!(v.len(), 3);
+    }
+
+    // list (newest-first + family filter via QueryBuilder<Postgres>) +
+    // distinct_actions / distinct_actors against a real daemon. Gated
+    // on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn audit_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pg = crate::db::open_pg(&url).await.unwrap();
+        sqlx::query("DELETE FROM audit_log")
+            .execute(&pg)
+            .await
+            .unwrap();
+        for (action, target, actor) in [
+            ("spec.create", "spec:a", Some("root")),
+            ("image.upload", "image:1", None),
+            ("spec.update", "spec:a", Some("ed")),
+        ] {
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, NULL, now())",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(target)
+            .execute(&pg)
+            .await
+            .unwrap();
+        }
+        let db = ConfigDb::Postgres(pg);
+
+        let all = list(&db, &AuditFilter::new()).await.unwrap();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].action, "spec.update", "newest first");
+
+        let f = AuditFilter {
+            family: Some(ActionFamily::Image),
+            ..AuditFilter::new()
+        };
+        assert_eq!(list(&db, &f).await.unwrap().len(), 1);
+
+        assert!(distinct_actions(&db)
+            .await
+            .unwrap()
+            .contains(&"spec.create".to_string()));
+        assert_eq!(
+            distinct_actors(&db).await.unwrap(),
+            vec!["ed".to_string(), "root".to_string()]
+        );
     }
 }

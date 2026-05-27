@@ -378,6 +378,20 @@ impl ReplicaRegistry {
         }
     }
 
+    /// Set one replica's active-session count to an authoritative
+    /// value (e.g. a fresh `count(*) WHERE replica_id = …` read after a
+    /// session was registered). Unlike [`inc_sessions`], this writes an
+    /// absolute count read from committed shared state, so it converges
+    /// to the same truth the periodic [`set_session_counts`] reconcile
+    /// uses — the two can interleave without a blind `+1` being lost.
+    /// No-ops if the replica is gone. Used by the Postgres store on the
+    /// register path; the in-memory store doesn't need it.
+    pub fn set_session_count(&mut self, replica_id: &ReplicaId, n: u32) {
+        if let Some(r) = self.find_mut(replica_id) {
+            r.sessions_active = n;
+        }
+    }
+
     /// Overwrite every replica's active-session count from an
     /// authoritative external tally. Replicas absent from `counts`
     /// are reset to zero.

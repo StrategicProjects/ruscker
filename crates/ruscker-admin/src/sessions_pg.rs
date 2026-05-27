@@ -223,6 +223,7 @@ impl PostgresSessionStore {
         registry: &RwLock<ReplicaRegistry>,
         global_ms: i64,
         overrides: &HashMap<String, i64>,
+        is_leader: bool,
     ) -> sqlx::Result<usize> {
         let mut evicted: u64 = 0;
 
@@ -230,9 +231,13 @@ impl PostgresSessionStore {
         // each is handled (or skipped, if never-expire) below.
         let overridden: Vec<String> = overrides.keys().cloned().collect();
 
+        // Idle-eviction DELETEs run on the leader only (#159 C3): with M
+        // instances all sweeping every few seconds, ungated they'd race
+        // identical deletes on the same rows (harmless but O(M·rows)).
+        // The read-only reconcile + per-instance count below always run.
         // Global pass: every non-overridden spec, unless the global
         // timeout itself is the never-expire sentinel (< 0).
-        if global_ms >= 0 {
+        if is_leader && global_ms >= 0 {
             let res = sqlx::query(
                 "DELETE FROM proxy_sessions
                  WHERE last_seen < now() - ($1::float8 * interval '1 millisecond')
@@ -247,9 +252,10 @@ impl PostgresSessionStore {
 
         // Per-spec overrides: a non-negative override reaps that
         // spec's idle rows on its own clock; a negative one (-1) means
-        // "never expire", so we leave it alone.
+        // "never expire", so we leave it alone. Leader-gated like the
+        // global pass (#159 C3).
         for (spec_id, ms) in overrides {
-            if *ms < 0 {
+            if !is_leader || *ms < 0 {
                 continue;
             }
             let res = sqlx::query(
@@ -347,8 +353,9 @@ impl SessionStore for PostgresSessionStore {
         registry: &RwLock<ReplicaRegistry>,
         global_ms: i64,
         overrides: &HashMap<String, i64>,
+        is_leader: bool,
     ) -> usize {
-        match self.try_sweep(registry, global_ms, overrides).await {
+        match self.try_sweep(registry, global_ms, overrides, is_leader).await {
             Ok(n) => n,
             Err(e) => {
                 // Leave the registry counts as last reconciled rather
@@ -436,7 +443,7 @@ mod tests {
         // A no-op sweep keeps the fresh session and reconciles the
         // count to exactly 1 from the shared table.
         let no_overrides = HashMap::new();
-        let evicted = store.sweep(&reg, 3_600_000, &no_overrides).await;
+        let evicted = store.sweep(&reg, 3_600_000, &no_overrides, true).await;
         assert_eq!(evicted, 0);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
 
@@ -446,7 +453,7 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let evicted = store.sweep(&reg, 1_000, &no_overrides).await;
+        let evicted = store.sweep(&reg, 1_000, &no_overrides, true).await;
         assert_eq!(evicted, 1);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
         assert_eq!(store.len(), 0);
@@ -506,7 +513,7 @@ mod tests {
         // B's sweep reconciles the cluster-wide count from the shared
         // table and now sees A's session.
         let no_overrides = HashMap::new();
-        b.sweep(&reg_b, 3_600_000, &no_overrides).await;
+        b.sweep(&reg_b, 3_600_000, &no_overrides, true).await;
         assert_eq!(reg_b.read().await.replicas_of("alpha")[0].sessions_active, 1);
         // …and the session is node-local to A, not B.
         assert_eq!(a.len(), 1);
@@ -573,12 +580,12 @@ mod tests {
 
         // The cluster-wide count is still exactly 1 (one session, now on
         // B) — the takeover must not have double-counted the seat.
-        b.sweep(&reg_b, 3_600_000, &HashMap::new()).await;
+        b.sweep(&reg_b, 3_600_000, &HashMap::new(), true).await;
         assert_eq!(reg_b.read().await.replicas_of("alpha")[0].sessions_active, 1);
 
         // After A sweeps, the row's instance_id is B's, so A's len()
         // drains to 0 (A is no longer serving it).
-        a.sweep(&reg_a, 3_600_000, &HashMap::new()).await;
+        a.sweep(&reg_a, 3_600_000, &HashMap::new(), true).await;
         assert_eq!(a.len(), 0, "A no longer owns the session");
 
         // A repeat touch by the new owner is neither insert nor takeover
@@ -588,5 +595,61 @@ mod tests {
             TouchOutcome::Touched
         );
         assert_eq!(b.len(), 1);
+    }
+
+    // C3: a non-leader sweep must reconcile (read-only) but never issue
+    // the idle-eviction DELETEs — only the leader reaps, so M instances
+    // don't race identical deletes. Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn non_leader_sweep_reconciles_but_does_not_evict() {
+        use ruscker_core::{Replica, ReplicaState};
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let store = PostgresSessionStore::connect(&url).await.unwrap();
+        sqlx::query("DELETE FROM proxy_sessions")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let rid = ReplicaId(Uuid::new_v4());
+        reg.write().await.add(Replica {
+            id: rid.clone(),
+            spec_id: "alpha".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 5,
+            host: None,
+        });
+
+        let sid = Uuid::new_v4();
+        store
+            .touch_or_register(&reg, sid, "alpha", &rid)
+            .await;
+        // Age the row well past any tiny timeout.
+        sqlx::query("UPDATE proxy_sessions SET last_seen = now() - interval '1 hour'")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+
+        let no_overrides = HashMap::new();
+        // Non-leader: nothing evicted, but the reconcile still ran (the
+        // surviving row is counted onto the replica).
+        let evicted = store.sweep(&reg, 1_000, &no_overrides, false).await;
+        assert_eq!(evicted, 0, "non-leader must not DELETE");
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
+
+        // Leader: now the idle row is reaped and the count reconciles down.
+        let evicted = store.sweep(&reg, 1_000, &no_overrides, true).await;
+        assert_eq!(evicted, 1, "leader reaps the idle row");
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
     }
 }

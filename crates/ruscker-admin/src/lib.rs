@@ -347,6 +347,7 @@ impl AdminServer {
                 self.state.sessions.clone(),
                 self.state.replicas.clone(),
                 self.state.config.clone(),
+                self.state.leader.clone(),
             );
             // Dashboard metrics: keep `state.metrics` fresh in
             // the background so dashboard renders are read-only

@@ -28,6 +28,7 @@ pub mod crypto;
 pub mod db;
 pub mod i18n;
 pub mod images;
+pub mod leader;
 pub mod logbuf;
 pub mod metrics_cache;
 pub mod ratelimit;
@@ -113,6 +114,12 @@ pub struct AppState {
     /// `proxy.heartbeat_timeout` ms.
     pub sessions: std::sync::Arc<dyn sessions::SessionStore>,
 
+    /// Decides whether this instance runs the auto-scaler. Single-node
+    /// installs use [`leader::AlwaysLeader`]; HA installs inject a
+    /// [`leader::PgLeaderLock`] so exactly one instance scales. The
+    /// proxy and session tracking never consult this — only the scaler.
+    pub leader: std::sync::Arc<dyn leader::LeaderElector>,
+
     /// Per-replica metrics cache. Filled by a background
     /// refresher that fans out `backend.metrics()` calls every
     /// [`metrics_cache::REFRESH_INTERVAL`]; the dashboard reads
@@ -175,6 +182,7 @@ impl AdminServer {
                 .context("load sticky cookie key")?,
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
             sessions: std::sync::Arc::new(sessions::InMemorySessionStore::new()),
+            leader: std::sync::Arc::new(leader::AlwaysLeader),
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
@@ -262,6 +270,17 @@ impl AdminServer {
     /// SQLite shorthand for `with_config_db(ConfigDb::Sqlite(pool))`.
     pub fn with_config_db(mut self, db: db::ConfigDb) -> Self {
         self.state.db = Some(db);
+        self
+    }
+
+    /// Replace the leader elector. Default is [`leader::AlwaysLeader`]
+    /// (single node). HA installs pass a [`leader::PgLeaderLock`] so
+    /// only one instance runs the auto-scaler.
+    pub fn with_leader_elector(
+        mut self,
+        elector: std::sync::Arc<dyn leader::LeaderElector>,
+    ) -> Self {
+        self.state.leader = elector;
         self
     }
 

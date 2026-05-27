@@ -1160,6 +1160,7 @@ mod tests {
             cookie_key: CookieKey::random(),
             spawn_locks: StdArc::new(dashmap::DashMap::new()),
             sessions: StdArc::new(crate::sessions::InMemorySessionStore::new()),
+            leader: StdArc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
         }

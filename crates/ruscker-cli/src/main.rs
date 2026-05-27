@@ -377,6 +377,12 @@ fn cmd_serve(
                 .await
                 .context("connect to the Postgres admin catalog")?;
             server = server.with_config_db(ruscker_admin::db::ConfigDb::Postgres(pool));
+            // HA: elect a single scaler leader via a Postgres advisory
+            // lock on the same database, so instances don't fight over
+            // the replica count.
+            server = server.with_leader_elector(std::sync::Arc::new(
+                ruscker_admin::leader::PgLeaderLock::new(url),
+            ));
         } else if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;
             server = server.with_db(pool);

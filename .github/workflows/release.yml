@@ -251,7 +251,7 @@ jobs:
           echo "digest=${digest}" >> "$GITHUB_OUTPUT"
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v3
 
       - name: Sign the image (keyless)
         env:
@@ -278,7 +278,7 @@ jobs:
         run: ls -la dist
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4
+        uses: sigstore/cosign-installer@v3
 
       - name: Sign release blobs (keyless)
         working-directory: dist

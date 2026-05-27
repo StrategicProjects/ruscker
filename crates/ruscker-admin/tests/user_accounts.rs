@@ -30,7 +30,7 @@ async fn state_with_db() -> (AppState, sqlx::SqlitePool) {
         log_buffer: None,
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
-        db: Some(pool.clone()),
+        db: Some(ruscker_admin::db::ConfigDb::Sqlite(pool.clone())),
         images_dir: None,
         master_key: Default::default(),
         backend: None,

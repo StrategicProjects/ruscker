@@ -136,7 +136,7 @@ async fn index(
     theme: Theme,
     Query(flash): Query<SpecsQuery>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "database not attached — start with --db <path>",
@@ -187,7 +187,7 @@ async fn import(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 

@@ -59,9 +59,11 @@ pub struct AppState {
     /// `AppState` sees the same sliding windows. Specs without a
     /// configured limit never touch it.
     pub api_limiter: Arc<ratelimit::ApiRateLimiter>,
-    /// Optional SQLite pool. `None` ⇒ admin CRUD routes 503
-    /// because they have no source of truth to read or write.
-    pub db: Option<SqlitePool>,
+    /// Optional admin config database (SQLite by default, Postgres in
+    /// HA mode). `None` ⇒ admin CRUD routes 503 because they have no
+    /// source of truth. Reach the SQLite pool for not-yet-ported
+    /// repositories via [`AppState::sqlite`].
+    pub db: Option<db::ConfigDb>,
     /// On-disk fallback directory for `/assets/img/<file>`. When
     /// the DB lookup misses (or `db` is `None`), the assets route
     /// falls through to this directory before 404'ing. `None`
@@ -123,6 +125,15 @@ pub struct AppState {
     /// closes. Shared (Arc) so the signal handler and every request
     /// handler observe the same flag.
     pub draining: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AppState {
+    /// The SQLite pool when the config DB is SQLite, else `None`.
+    /// Repositories not yet ported to Postgres call this; in Postgres
+    /// mode they get `None` and 503. See [`db::ConfigDb`].
+    pub fn sqlite(&self) -> Option<&SqlitePool> {
+        self.db.as_ref().and_then(db::ConfigDb::as_sqlite)
+    }
 }
 
 /// HTTP server hosting the landing and (later) the admin panel.
@@ -242,7 +253,7 @@ impl AdminServer {
     /// across all requests — sqlx handles the connection
     /// multiplexing.
     pub fn with_db(mut self, pool: SqlitePool) -> Self {
-        self.state.db = Some(pool);
+        self.state.db = Some(db::ConfigDb::Sqlite(pool));
         self
     }
 

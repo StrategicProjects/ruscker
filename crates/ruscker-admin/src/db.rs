@@ -37,6 +37,33 @@ pub static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// opt-in for clustering.
 pub static MIGRATIONS_PG: sqlx::migrate::Migrator = sqlx::migrate!("./migrations-pg");
 
+/// A handle to the admin config database.
+///
+/// SQLite is the zero-config single-node default; Postgres backs the
+/// shared catalog in HA mode (Phase 7). The repository functions are
+/// ported to dual-dialect **one module at a time** — until a function
+/// is ported it runs in SQLite mode only, reached through
+/// [`ConfigDb::as_sqlite`]. In Postgres mode an un-ported path gets
+/// `None` and the caller surfaces a clear "not yet supported" response
+/// rather than silently misbehaving.
+#[derive(Debug, Clone)]
+pub enum ConfigDb {
+    Sqlite(SqlitePool),
+    Postgres(sqlx::PgPool),
+}
+
+impl ConfigDb {
+    /// The SQLite pool when running in SQLite mode, else `None`.
+    /// Un-ported repositories go through this; a ported one matches on
+    /// the enum directly.
+    pub fn as_sqlite(&self) -> Option<&SqlitePool> {
+        match self {
+            ConfigDb::Sqlite(pool) => Some(pool),
+            ConfigDb::Postgres(_) => None,
+        }
+    }
+}
+
 /// Open the SQLite database at `path`, creating the file if
 /// missing, and apply any pending migrations. Returns the pool
 /// ready for use.

@@ -99,7 +99,7 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
     // Landing customization: read from DB when available
     // (admin-editable), fall back to the YAML-derived value
     // otherwise (Phase 1 / no-DB deployments).
-    let lc = match state.db.as_ref() {
+    let lc = match state.sqlite() {
         Some(pool) => crate::db::landing::fetch(pool)
             .await
             .unwrap_or_else(|err| {
@@ -140,7 +140,7 @@ async fn index(State(state): State<AppState>, loc: Locale, theme: Theme) -> Resp
     // content can load.
     let (mut blocks_top, mut blocks_bottom) = (Vec::new(), Vec::new());
     let mut origins = not_blank(&lc.analytics_origins).unwrap_or_default();
-    if let Some(pool) = state.db.as_ref() {
+    if let Some(pool) = state.sqlite() {
         match crate::db::landing_blocks::list_enabled(pool).await {
             Ok(blocks) => {
                 for b in blocks {

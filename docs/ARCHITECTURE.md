@@ -168,8 +168,8 @@ without touching proxy code.
 
 ## What's not covered here
 
-- The admin UI internals — see `crates/ruscker-admin/CLAUDE.md`.
-- The proxy's WebSocket handling — see
-  `crates/ruscker-proxy/CLAUDE.md`.
+- The admin UI internals — see the `ruscker-admin` crate
+  (`cargo doc --open`).
+- The proxy's WebSocket handling — see the `ruscker-proxy` crate.
 - Specific algorithm choices — see `docs/adr/`.
 - The YAML schema — see `docs/YAML_SCHEMA.md`.

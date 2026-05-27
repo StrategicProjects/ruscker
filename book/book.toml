@@ -6,8 +6,10 @@ language = "en"
 src = "src"
 
 [output.html]
-default-theme = "rust"
-preferred-dark-theme = "ayu"
+# A neutral light base, re-tinted to the brand teal in theme/ruscker.css
+# (mdBook's "rust" theme is orange/brown — off-brand for Ruscker's teal).
+default-theme = "light"
+preferred-dark-theme = "navy"
 additional-css = ["theme/ruscker.css"]
 git-repository-url = "https://github.com/StrategicProjects/ruscker"
 edit-url-template = "https://github.com/StrategicProjects/ruscker/edit/main/book/{path}"

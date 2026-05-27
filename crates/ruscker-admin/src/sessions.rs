@@ -84,11 +84,19 @@ pub trait SessionStore: Send + Sync {
     /// One idle-expiry pass: evict sessions past their (per-spec)
     /// timeout and decrement the replica counter. Returns how many
     /// were evicted.
+    ///
+    /// `is_leader` gates the **destructive** part in shared-store (HA)
+    /// implementations: only the leader issues the idle-eviction
+    /// DELETEs, so M instances don't race identical deletes on the same
+    /// rows (#159 C3). The read-only reconcile (cluster-wide counts +
+    /// this node's `len()`) always runs, on every node. Single-node
+    /// stores ignore the flag — they're always the sole writer.
     async fn sweep(
         &self,
         registry: &RwLock<ReplicaRegistry>,
         global_ms: i64,
         overrides: &std::collections::HashMap<String, i64>,
+        is_leader: bool,
     ) -> usize;
 
     /// Number of tracked sessions (used by graceful-shutdown drain and
@@ -195,6 +203,9 @@ impl SessionStore for InMemorySessionStore {
         registry: &RwLock<ReplicaRegistry>,
         global_ms: i64,
         overrides: &std::collections::HashMap<String, i64>,
+        // Single-node store: this process is the only writer, so it
+        // always evicts (the flag only matters for the shared HA store).
+        _is_leader: bool,
     ) -> usize {
         let now = Instant::now();
         // Collect victims first so we don't hold DashMap shard
@@ -252,6 +263,7 @@ pub fn spawn(
     tracker: Arc<dyn SessionStore>,
     registry: Arc<RwLock<ReplicaRegistry>>,
     config: Arc<ruscker_config::Config>,
+    leader: Arc<dyn crate::leader::LeaderElector>,
 ) -> JoinHandle<()> {
     let global_ms = config.proxy.heartbeat_timeout;
     let overrides: std::collections::HashMap<String, i64> = config
@@ -271,7 +283,13 @@ pub fn spawn(
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
-            let evicted = tracker.sweep(&registry, global_ms, &overrides).await;
+            // Only the leader issues the idle-eviction DELETEs in a
+            // shared (HA) store; the reconcile runs regardless (#159 C3).
+            // `AlwaysLeader` (single-node) is always true.
+            let is_leader = leader.is_leader().await;
+            let evicted = tracker
+                .sweep(&registry, global_ms, &overrides, is_leader)
+                .await;
             if evicted > 0 {
                 info!(evicted, "session sweeper evicted idle sessions");
             }
@@ -319,7 +337,7 @@ mod tests {
         assert!(!store.is_empty());
         // Idle sweep through the trait object (is_empty is the trait default).
         let evicted = store
-            .sweep(&reg, 0, &std::collections::HashMap::new())
+            .sweep(&reg, 0, &std::collections::HashMap::new(), true)
             .await;
         assert_eq!(evicted, 1);
         assert!(store.is_empty());
@@ -377,7 +395,7 @@ mod tests {
         }
 
         let no_overrides = std::collections::HashMap::new();
-        let evicted = tracker.sweep(&reg, 10_000, &no_overrides).await;
+        let evicted = tracker.sweep(&reg, 10_000, &no_overrides, true).await;
         assert_eq!(evicted, 1);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
         assert!(tracker.is_empty());
@@ -396,7 +414,7 @@ mod tests {
         // last_seen is now, sweep with 10s timeout — nothing
         // should evict.
         let no_overrides = std::collections::HashMap::new();
-        let evicted = tracker.sweep(&reg, 10_000, &no_overrides).await;
+        let evicted = tracker.sweep(&reg, 10_000, &no_overrides, true).await;
         assert_eq!(evicted, 0);
         assert_eq!(tracker.len(), 1);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
@@ -431,7 +449,7 @@ mod tests {
         let mut overrides = std::collections::HashMap::new();
         overrides.insert("pinned".to_string(), -1_i64); // never expire
 
-        let evicted = tracker.sweep(&reg, 10_000, &overrides).await;
+        let evicted = tracker.sweep(&reg, 10_000, &overrides, true).await;
         assert_eq!(evicted, 1, "only the global-timeout session is reaped");
         // pinned survives, normal is gone
         assert!(tracker.sessions.contains_key(&s_pinned));
@@ -459,7 +477,7 @@ mod tests {
         overrides.insert("snappy".to_string(), 5_000_i64); // 5s override
 
         // Global is 1h (would keep it), but the 5s override reaps it.
-        let evicted = tracker.sweep(&reg, 3_600_000, &overrides).await;
+        let evicted = tracker.sweep(&reg, 3_600_000, &overrides, true).await;
         assert_eq!(evicted, 1);
     }
 }

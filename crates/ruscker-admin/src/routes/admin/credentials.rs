@@ -67,7 +67,7 @@ async fn render_index(
     flash_saved: Option<String>,
     flash_error: Option<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let credentials = match db::credentials::list_all(pool).await {
@@ -107,7 +107,7 @@ async fn create_or_update(
     theme: Theme,
     Form(form): Form<CredentialForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     if !state.master_key.is_configured() {
@@ -165,7 +165,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(name): Path<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::credentials::delete_one(pool, &name, Some(admin.actor())).await {

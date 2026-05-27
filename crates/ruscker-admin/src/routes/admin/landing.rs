@@ -155,7 +155,7 @@ async fn save(
     theme: Theme,
     Form(form): Form<LandingForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let lc = form.into_customization();
@@ -184,7 +184,7 @@ async fn render(
     flash_saved: bool,
     flash_error: Option<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let form = match preset_form {

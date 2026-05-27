@@ -104,7 +104,7 @@ async fn index(
     theme: Theme,
     Query(q): Query<AuditQuery>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 

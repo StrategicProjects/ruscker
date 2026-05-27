@@ -490,7 +490,7 @@ impl<'a> SpecFormPage<'a> {
 /// Media-library filenames for the logo picker. Empty when no DB is
 /// wired or the query fails — the picker degrades to the text field.
 async fn logo_filenames(state: &AppState) -> Vec<String> {
-    match state.db.as_ref() {
+    match state.sqlite() {
         Some(pool) => db::images::list_all(pool)
             .await
             .map(|imgs| imgs.into_iter().map(|i| i.filename).collect())
@@ -536,7 +536,7 @@ async fn edit_form(
     theme: Theme,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let spec = match db::specs::fetch_one(pool, &id).await {
@@ -569,7 +569,7 @@ async fn create(
     theme: Theme,
     Form(form): Form<SpecForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -626,7 +626,7 @@ async fn update(
     Path(id): Path<String>,
     Form(mut form): Form<SpecForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -682,7 +682,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::specs::delete_one(pool, &id, Some(editor.actor())).await {

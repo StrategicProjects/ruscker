@@ -78,7 +78,7 @@ async fn index(
     theme: Theme,
     Query(q): Query<UsersQuery>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "database not attached — start with --db <path>",
@@ -129,7 +129,7 @@ async fn create(
     State(state): State<AppState>,
     Form(form): Form<CreateForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let username = db::users::normalize_username(&form.username);
@@ -167,7 +167,7 @@ async fn set_role(
     Path(username): Path<String>,
     Form(form): Form<RoleForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let new_role = Role::parse(&form.role).unwrap_or(Role::Viewer);
@@ -196,7 +196,7 @@ async fn reset_password(
     Path(username): Path<String>,
     Form(form): Form<ResetForm>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     if form.password.len() < MIN_PASSWORD_LEN {
@@ -218,7 +218,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(username): Path<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
+    let Some(pool) = state.sqlite() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     // Last-admin guard: deleting the only admin would lock everyone out.

@@ -75,8 +75,10 @@ async fn readyz(State(state): State<AppState>) -> Response {
 
     // SQLite: a trivial round-trip confirms the pool can hand out a
     // live connection (catches a deleted/locked DB file or an
-    // exhausted pool).
-    if let Some(pool) = &state.db {
+    // exhausted pool). In Postgres mode `sqlite()` is `None` and this
+    // probe is skipped until readiness learns to probe that pool too
+    // (a later Phase 7c slice, when the CLI can select Postgres).
+    if let Some(pool) = state.sqlite() {
         match sqlx::query("SELECT 1").fetch_one(pool).await {
             Ok(_) => {
                 checks.insert("db".into(), json!("ok"));

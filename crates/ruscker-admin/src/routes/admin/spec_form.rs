@@ -291,6 +291,8 @@ impl SpecForm {
             container_port: base.and_then(|b| b.container_port),
             placement: base.and_then(|b| b.placement),
             anti_affinity: base.and_then(|b| b.anti_affinity),
+            access_groups: base.and_then(|b| b.access_groups.clone()),
+            access_users: base.and_then(|b| b.access_users.clone()),
             container_lifetime: base.and_then(|b| b.container_lifetime),
             stop_on_logout: base.and_then(|b| b.stop_on_logout),
             docker_registry_username: base.and_then(|b| b.docker_registry_username.clone()),

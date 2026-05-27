@@ -505,6 +505,19 @@ pub struct Spec {
     #[serde(default)]
     pub volumes: Option<Vec<String>>,
 
+    /// Groups allowed to see and reach this app (ShinyProxy
+    /// `access-groups`). A spec with neither `access-groups` nor
+    /// `access-users` is **open** (visible to everyone, including
+    /// anonymous visitors). Otherwise only matching logged-in users —
+    /// and admins always — may see it on the landing and reach `/app`.
+    #[serde(rename = "access-groups", default)]
+    pub access_groups: Option<Vec<String>>,
+
+    /// Individual usernames allowed to see and reach this app
+    /// (ShinyProxy `access-users`). See [`Spec::access_groups`].
+    #[serde(rename = "access-users", default)]
+    pub access_users: Option<Vec<String>>,
+
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
     #[serde(rename = "template-properties", default)]
@@ -680,6 +693,41 @@ impl Spec {
             SpecKind::Shiny | SpecKind::InteractiveApp => 1,
             SpecKind::External => 0,
         })
+    }
+
+    /// Whether this app is **open** — no access list, so visible and
+    /// reachable by everyone (including anonymous visitors). True when
+    /// both `access-groups` and `access-users` are absent or empty.
+    pub fn is_open(&self) -> bool {
+        self.access_groups.as_deref().is_none_or(<[String]>::is_empty)
+            && self.access_users.as_deref().is_none_or(<[String]>::is_empty)
+    }
+
+    /// Whether a viewer may see and reach this app (Phase 8 per-app
+    /// access). Pure rule, shared by the landing filter and the `/app`
+    /// /`/api` enforcement guard so they can't drift:
+    ///
+    /// - **open** spec → always;
+    /// - **admin** (`is_admin`) → always;
+    /// - **logged-in** user → their `username` is in `access-users`, or
+    ///   any of their `groups` is in `access-groups`;
+    /// - **anonymous** (`username: None`) → only open specs.
+    pub fn access_allows(&self, is_admin: bool, username: Option<&str>, groups: &[String]) -> bool {
+        if is_admin || self.is_open() {
+            return true;
+        }
+        if let Some(name) = username {
+            if self
+                .access_users
+                .as_deref()
+                .is_some_and(|us| us.iter().any(|u| u == name))
+            {
+                return true;
+            }
+        }
+        self.access_groups
+            .as_deref()
+            .is_some_and(|gs| gs.iter().any(|g| groups.iter().any(|h| h == g)))
     }
 
     /// Effective minimum replicas (default 1 for containerized, 0 for
@@ -1185,6 +1233,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            access_groups: None,
+            access_users: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -1227,6 +1277,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            access_groups: None,
+            access_users: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -1269,6 +1321,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            access_groups: None,
+            access_users: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,
@@ -1293,6 +1347,44 @@ proxy:
 
     fn parse_spec(yaml: &str) -> Spec {
         serde_yaml_ng::from_str(yaml).expect("parse spec")
+    }
+
+    #[test]
+    fn access_open_when_no_acl() {
+        let s = parse_spec("id: a\ncontainer-image: x");
+        assert!(s.is_open());
+        // open → everyone, including anonymous.
+        assert!(s.access_allows(false, None, &[]));
+        assert!(s.access_allows(false, Some("u"), &["g".into()]));
+        // empty lists are also "open".
+        let e = parse_spec("id: a\ncontainer-image: x\naccess-groups: []");
+        assert!(e.is_open());
+    }
+
+    #[test]
+    fn access_restricted_by_group() {
+        let s = parse_spec("id: a\ncontainer-image: x\naccess-groups: [staff, ops]");
+        assert!(!s.is_open());
+        assert!(!s.access_allows(false, None, &[]), "anonymous denied");
+        assert!(
+            !s.access_allows(false, Some("u"), &["other".into()]),
+            "non-matching group denied"
+        );
+        assert!(
+            s.access_allows(false, Some("u"), &["ops".into()]),
+            "matching group allowed"
+        );
+        assert!(s.access_allows(true, None, &[]), "admin always allowed");
+    }
+
+    #[test]
+    fn access_restricted_by_user() {
+        let s = parse_spec("id: a\ncontainer-image: x\naccess-users: [alice]");
+        assert!(!s.is_open());
+        assert!(s.access_allows(false, Some("alice"), &[]), "named user allowed");
+        assert!(!s.access_allows(false, Some("bob"), &[]), "other user denied");
+        assert!(!s.access_allows(false, None, &[]), "anonymous denied");
+        assert!(s.access_allows(true, Some("bob"), &[]), "admin always allowed");
     }
 
     #[test]

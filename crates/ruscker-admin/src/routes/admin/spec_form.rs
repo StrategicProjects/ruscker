@@ -536,7 +536,7 @@ async fn edit_form(
     theme: Theme,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let spec = match db::specs::fetch_one(pool, &id).await {
@@ -569,7 +569,7 @@ async fn create(
     theme: Theme,
     Form(form): Form<SpecForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -626,7 +626,7 @@ async fn update(
     Path(id): Path<String>,
     Form(mut form): Form<SpecForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -682,7 +682,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::specs::delete_one(pool, &id, Some(editor.actor())).await {

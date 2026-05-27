@@ -4,6 +4,7 @@
 //! SQL throughout the codebase. Keeps the schema's invariants
 //! (audit log + version bump on update) in one place.
 
+use crate::db::ConfigDb;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use ruscker_config::{Config, Spec};
@@ -90,13 +91,21 @@ pub enum UpsertOutcome {
 
 /// Fetch a single spec by id, deserializing `config_json` back to
 /// a [`Spec`]. Returns `None` if no row matches.
-pub async fn fetch_one(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
-    let row: Option<(String,)> =
-        sqlx::query_as("SELECT config_json FROM specs WHERE id = ?")
+///
+/// Dual-dialect (Phase 7c-4): one bound parameter, so the only
+/// difference is the placeholder (`?` vs `$1`).
+pub async fn fetch_one(db: &ConfigDb, id: &str) -> Result<Option<Spec>> {
+    let row: Option<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as("SELECT config_json FROM specs WHERE id = ?")
             .bind(id)
             .fetch_optional(pool)
-            .await
-            .with_context(|| format!("fetch spec {id}"))?;
+            .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as("SELECT config_json FROM specs WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await,
+    }
+    .with_context(|| format!("fetch spec {id}"))?;
     match row {
         None => Ok(None),
         Some((json,)) => {
@@ -107,67 +116,128 @@ pub async fn fetch_one(pool: &SqlitePool, id: &str) -> Result<Option<Spec>> {
     }
 }
 
-/// Upsert a single spec — used by the admin form. Wraps the same
-/// logic as `import_all`'s per-row path in its own transaction
-/// (with an audit-log entry tagged with `actor` if provided).
+/// The audit action for an upsert outcome, or `None` when nothing
+/// changed (no audit row written).
+fn upsert_audit_action(outcome: &UpsertOutcome) -> Option<&'static str> {
+    match outcome {
+        UpsertOutcome::Created => Some("spec.create"),
+        UpsertOutcome::Updated => Some("spec.update"),
+        UpsertOutcome::Unchanged => None,
+    }
+}
+
+/// Upsert a single spec — used by the admin form. Runs the per-row
+/// upsert in its own transaction with an audit-log entry tagged with
+/// `actor` (unless the spec was unchanged).
+///
+/// Dual-dialect (Phase 7c-4): the transaction type and placeholders
+/// differ per backend, so the body forks per arm — but each arm reuses
+/// the dialect's `upsert_in_tx*` helper and the shared
+/// [`upsert_audit_action`].
 pub async fn upsert_one(
-    pool: &SqlitePool,
+    db: &ConfigDb,
     spec: &Spec,
     actor: Option<&str>,
 ) -> Result<UpsertOutcome> {
     let now = Utc::now();
-    let mut tx = pool.begin().await.context("begin upsert tx")?;
-    let outcome = upsert_in_tx(&mut tx, spec, now).await?;
-    if outcome != UpsertOutcome::Unchanged {
-        let action = if outcome == UpsertOutcome::Created {
-            "spec.create"
-        } else {
-            "spec.update"
-        };
-        sqlx::query(
-            "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-             VALUES (?, ?, ?, NULL, ?)",
-        )
-        .bind(actor)
-        .bind(action)
-        .bind(format!("spec:{}", spec.id))
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .context("audit upsert_one")?;
+    let target = format!("spec:{}", spec.id);
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin upsert tx")?;
+            let outcome = upsert_in_tx(&mut tx, spec, now).await?;
+            if let Some(action) = upsert_audit_action(&outcome) {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES (?, ?, ?, NULL, ?)",
+                )
+                .bind(actor)
+                .bind(action)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit upsert_one")?;
+            }
+            tx.commit().await.context("commit upsert_one tx")?;
+            Ok(outcome)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin upsert tx")?;
+            let outcome = upsert_in_tx_pg(&mut tx, spec, now).await?;
+            if let Some(action) = upsert_audit_action(&outcome) {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES ($1, $2, $3, NULL, $4)",
+                )
+                .bind(actor)
+                .bind(action)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit upsert_one")?;
+            }
+            tx.commit().await.context("commit upsert_one tx")?;
+            Ok(outcome)
+        }
     }
-    tx.commit().await.context("commit upsert_one tx")?;
-    Ok(outcome)
 }
 
 /// Delete a spec and all its history. Returns `true` if a row was
-/// actually removed (false if the id didn't exist). Audit log
-/// records the action either way.
-pub async fn delete_one(pool: &SqlitePool, id: &str, actor: Option<&str>) -> Result<bool> {
+/// actually removed (false if the id didn't exist). Audit log records
+/// the action when something was deleted. `ON DELETE CASCADE` clears
+/// `spec_versions` on both backends.
+pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<bool> {
     let now = Utc::now();
-    let mut tx = pool.begin().await.context("begin delete tx")?;
-    // ON DELETE CASCADE handles spec_versions; we still need to
-    // delete the specs row itself.
-    let rows = sqlx::query("DELETE FROM specs WHERE id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-        .with_context(|| format!("delete spec {id}"))?;
-    let removed = rows.rows_affected() > 0;
-    if removed {
-        sqlx::query(
-            "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-             VALUES (?, 'spec.delete', ?, NULL, ?)",
-        )
-        .bind(actor)
-        .bind(format!("spec:{id}"))
-        .bind(now)
-        .execute(&mut *tx)
-        .await
-        .context("audit delete")?;
+    let target = format!("spec:{id}");
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin delete tx")?;
+            let rows = sqlx::query("DELETE FROM specs WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete spec {id}"))?;
+            let removed = rows.rows_affected() > 0;
+            if removed {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES (?, 'spec.delete', ?, NULL, ?)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit delete")?;
+            }
+            tx.commit().await.context("commit delete tx")?;
+            Ok(removed)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin delete tx")?;
+            let rows = sqlx::query("DELETE FROM specs WHERE id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete spec {id}"))?;
+            let removed = rows.rows_affected() > 0;
+            if removed {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES ($1, 'spec.delete', $2, NULL, $3)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit delete")?;
+            }
+            tx.commit().await.context("commit delete tx")?;
+            Ok(removed)
+        }
     }
-    tx.commit().await.context("commit delete tx")?;
-    Ok(removed)
 }
 
 async fn upsert_in_tx(
@@ -251,6 +321,106 @@ async fn upsert_in_tx(
             sqlx::query(
                 "INSERT INTO spec_versions (spec_id, version, config_json, changed_at, changed_by)
                  VALUES (?, ?, ?, ?, NULL)",
+            )
+            .bind(&spec.id)
+            .bind(next_version)
+            .bind(&config_json)
+            .bind(now)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("history v{next_version} for {}", spec.id))?;
+
+            Ok(UpsertOutcome::Updated)
+        }
+    }
+}
+
+/// Postgres twin of [`upsert_in_tx`] — identical logic, `$n`
+/// placeholders. Used by the Postgres arm of [`upsert_one`].
+/// (`import_all` stays SQLite-only for now and keeps `upsert_in_tx`.)
+async fn upsert_in_tx_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    spec: &Spec,
+    now: DateTime<Utc>,
+) -> Result<UpsertOutcome> {
+    let config_json =
+        canonical_json(spec).with_context(|| format!("serialize spec {}", spec.id))?;
+    let kind = kind_str(spec);
+    let state = if spec.template_properties.is_active() {
+        "active"
+    } else {
+        "inactive"
+    };
+
+    let existing: Option<(String, i64)> =
+        sqlx::query_as("SELECT config_json, version FROM specs WHERE id = $1")
+            .bind(&spec.id)
+            .fetch_optional(&mut **tx)
+            .await
+            .with_context(|| format!("lookup spec {}", spec.id))?;
+
+    match existing {
+        None => {
+            sqlx::query(
+                "INSERT INTO specs (id, display_name, description, kind,
+                                    container_image, config_json, state,
+                                    created_at, updated_at, version)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)",
+            )
+            .bind(&spec.id)
+            .bind(spec.display_name.as_deref())
+            .bind(spec.description.as_deref())
+            .bind(kind)
+            .bind(spec.container_image.as_deref())
+            .bind(&config_json)
+            .bind(state)
+            .bind(now)
+            .bind(now)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("insert spec {}", spec.id))?;
+
+            sqlx::query(
+                "INSERT INTO spec_versions (spec_id, version, config_json, changed_at, changed_by)
+                 VALUES ($1, 1, $2, $3, NULL)",
+            )
+            .bind(&spec.id)
+            .bind(&config_json)
+            .bind(now)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("insert v1 history for {}", spec.id))?;
+
+            Ok(UpsertOutcome::Created)
+        }
+        Some((existing_json, version)) => {
+            if existing_json == config_json {
+                return Ok(UpsertOutcome::Unchanged);
+            }
+            let next_version = version + 1;
+            sqlx::query(
+                "UPDATE specs
+                    SET display_name = $1, description = $2, kind = $3,
+                        container_image = $4, config_json = $5, state = $6,
+                        updated_at = $7, version = $8
+                  WHERE id = $9",
+            )
+            .bind(spec.display_name.as_deref())
+            .bind(spec.description.as_deref())
+            .bind(kind)
+            .bind(spec.container_image.as_deref())
+            .bind(&config_json)
+            .bind(state)
+            .bind(now)
+            .bind(next_version)
+            .bind(&spec.id)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("update spec {}", spec.id))?;
+
+            sqlx::query(
+                "INSERT INTO spec_versions (spec_id, version, config_json, changed_at, changed_by)
+                 VALUES ($1, $2, $3, $4, NULL)",
             )
             .bind(&spec.id)
             .bind(next_version)
@@ -411,5 +581,64 @@ mod tests {
             serde_json::from_str(&row.3).unwrap();
         assert!(parsed.contains_key("pt"));
         assert!(parsed.contains_key("en"));
+    }
+
+    // Exercises the ported CRUD (create / unchanged / fetch / update +
+    // version bump / delete + cascade) through the `ConfigDb::Postgres`
+    // arm against a real daemon. Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn spec_crud_against_real_postgres() {
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        // Isolate: clear specs (ON DELETE CASCADE clears spec_versions).
+        sqlx::query("DELETE FROM specs")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let db = ConfigDb::Postgres(pool.clone());
+
+        let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
+        let mut spec = cfg.proxy.specs[0].clone();
+
+        assert_eq!(
+            upsert_one(&db, &spec, Some("admin")).await.unwrap(),
+            UpsertOutcome::Created
+        );
+        assert_eq!(
+            upsert_one(&db, &spec, Some("admin")).await.unwrap(),
+            UpsertOutcome::Unchanged
+        );
+        assert_eq!(fetch_one(&db, &spec.id).await.unwrap().unwrap().id, spec.id);
+
+        spec.description = Some("changed in pg".into());
+        assert_eq!(
+            upsert_one(&db, &spec, Some("admin")).await.unwrap(),
+            UpsertOutcome::Updated
+        );
+        let (version,): (i64,) = sqlx::query_as("SELECT version FROM specs WHERE id = $1")
+            .bind(&spec.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 2);
+        let (history,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM spec_versions WHERE spec_id = $1")
+                .bind(&spec.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(history, 2, "v1 + v2 in history");
+
+        assert!(delete_one(&db, &spec.id, Some("admin")).await.unwrap());
+        assert!(fetch_one(&db, &spec.id).await.unwrap().is_none());
+        let (history,): (i64,) =
+            sqlx::query_as("SELECT COUNT(*) FROM spec_versions WHERE spec_id = $1")
+                .bind(&spec.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(history, 0, "cascade cleared history");
     }
 }

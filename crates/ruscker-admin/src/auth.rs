@@ -523,6 +523,26 @@ impl FromRequestParts<crate::AppState> for MaybeAdminSession {
     }
 }
 
+/// Like [`MaybeAdminSession`] but keeps the whole session (role +
+/// username) instead of just the role. Used by the public landing to
+/// resolve the viewer's group memberships and show a "signed in"
+/// affordance. `None` ⇒ anonymous visitor.
+pub struct MaybeSession(pub Option<AdminSession>);
+
+impl FromRequestParts<crate::AppState> for MaybeSession {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &crate::AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match AdminSession::from_request_parts(parts, state).await {
+            Ok(s) => Ok(MaybeSession(Some(s))),
+            Err(_) => Ok(MaybeSession(None)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

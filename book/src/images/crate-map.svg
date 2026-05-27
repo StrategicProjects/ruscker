@@ -3,8 +3,11 @@
   <title>Ruscker — crate map</title>
 
   <defs>
-    <marker id="up" viewBox="0 0 10 10" refX="5" refY="0" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0,10 L5,0 L10,10 z" fill="#1D9E75"/>
+    <!-- Right-pointing triangle + orient="auto": the renderer rotates it
+         to follow each line's direction. (A fixed up/down triangle with
+         orient="auto" gets rotated sideways in real browsers.) -->
+    <marker id="up" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1D9E75"/>
     </marker>
   </defs>
 

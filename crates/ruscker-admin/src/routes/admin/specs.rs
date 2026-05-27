@@ -136,7 +136,7 @@ async fn index(
     theme: Theme,
     Query(flash): Query<SpecsQuery>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(database) = state.db.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             "database not attached — start with --db <path>",
@@ -144,14 +144,15 @@ async fn index(
             .into_response();
     };
 
-    let specs: Vec<SpecRow> = match sqlx::query_as(
-        "SELECT id, display_name, kind, state, updated_at, version
+    // Placeholder-free SELECT, so one query string serves both backends.
+    let sql = "SELECT id, display_name, kind, state, updated_at, version
            FROM specs
-           ORDER BY updated_at DESC, id ASC",
-    )
-    .fetch_all(pool)
-    .await
-    {
+           ORDER BY updated_at DESC, id ASC";
+    let loaded = match database {
+        crate::db::ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        crate::db::ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    };
+    let specs: Vec<SpecRow> = match loaded {
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(error = ?err, "load specs failed");
@@ -187,7 +188,7 @@ async fn import(
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 

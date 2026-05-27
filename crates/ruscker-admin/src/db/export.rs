@@ -105,7 +105,7 @@ mod tests {
     async fn round_trip_preserves_specs_count() {
         let pool = open_memory().await.unwrap();
         let cfg_in = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg_in).await.unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in).await.unwrap();
 
         let cfg_out = reconstruct_config(&pool).await.unwrap();
         assert_eq!(cfg_out.proxy.specs.len(), cfg_in.proxy.specs.len());
@@ -115,19 +115,19 @@ mod tests {
     async fn round_trip_then_reimport_is_unchanged() {
         let pool = open_memory().await.unwrap();
         let cfg_in = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg_in).await.unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in).await.unwrap();
 
         let cfg_out = reconstruct_config(&pool).await.unwrap();
 
         // Re-import the exported Config into a fresh DB — every
         // spec should land as Created.
         let pool2 = open_memory().await.unwrap();
-        let r = import_all(&pool2, &cfg_out).await.unwrap();
+        let r = import_all(&crate::db::ConfigDb::Sqlite(pool2.clone()), &cfg_out).await.unwrap();
         assert_eq!(r.created, cfg_in.proxy.specs.len());
 
         // And re-import the same Config into the SAME DB — every
         // spec unchanged.
-        let r2 = import_all(&pool2, &cfg_out).await.unwrap();
+        let r2 = import_all(&crate::db::ConfigDb::Sqlite(pool2.clone()), &cfg_out).await.unwrap();
         assert_eq!(r2.unchanged, cfg_in.proxy.specs.len());
         assert_eq!(r2.updated, 0);
     }
@@ -136,7 +136,7 @@ mod tests {
     async fn round_trip_preserves_landing_customization() {
         let pool = open_memory().await.unwrap();
         let cfg_in = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg_in).await.unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in).await.unwrap();
         let cfg_out = reconstruct_config(&pool).await.unwrap();
 
         assert_eq!(
@@ -166,7 +166,7 @@ proxy:
         // `enabled` defaults to true when the key is omitted.
         assert!(cfg_in.proxy.landing_customization.blocks[1].enabled);
 
-        import_all(&pool, &cfg_in).await.unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in).await.unwrap();
         let cfg_out = reconstruct_config(&pool).await.unwrap();
         let out = &cfg_out.proxy.landing_customization.blocks;
 
@@ -189,7 +189,7 @@ proxy:
     async fn round_trip_preserves_proxy_settings() {
         let pool = open_memory().await.unwrap();
         let cfg_in = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg_in).await.unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in).await.unwrap();
         let cfg_out = reconstruct_config(&pool).await.unwrap();
 
         assert_eq!(cfg_out.proxy.title, cfg_in.proxy.title);

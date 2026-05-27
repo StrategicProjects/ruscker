@@ -229,7 +229,11 @@ fn cmd_import(yaml_path: &PathBuf, db_path: &PathBuf) -> Result<()> {
 
     let report = rt.block_on(async {
         let pool = ruscker_admin::db::open(db_path).await?;
-        let r = ruscker_admin::db::specs::import_all(&pool, &config).await?;
+        let r = ruscker_admin::db::specs::import_all(
+            &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+            &config,
+        )
+        .await?;
         pool.close().await;
         anyhow::Ok(r)
     })?;

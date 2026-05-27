@@ -104,7 +104,7 @@ async fn index(
     theme: Theme,
     Query(q): Query<AuditQuery>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
 
@@ -126,15 +126,7 @@ async fn index(
     // Distinct actors only worth showing when there are at least
     // two — single-operator installs leak no information by
     // omitting the select.
-    let distinct_actors: Vec<String> = match sqlx::query_as::<_, (String,)>(
-        "SELECT DISTINCT actor FROM audit_log WHERE actor IS NOT NULL ORDER BY actor ASC",
-    )
-    .fetch_all(pool)
-    .await
-    {
-        Ok(rows) => rows.into_iter().map(|(s,)| s).collect(),
-        Err(_) => Vec::new(),
-    };
+    let distinct_actors: Vec<String> = db::audit::distinct_actors(pool).await.unwrap_or_default();
 
     let page = AuditPage {
         locale: loc,

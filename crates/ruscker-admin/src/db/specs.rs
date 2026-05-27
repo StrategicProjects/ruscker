@@ -8,7 +8,6 @@ use crate::db::ConfigDb;
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use ruscker_config::{Config, Spec};
-use sqlx::SqlitePool;
 
 /// What happened during [`import_all`].
 #[derive(Debug, Default, Clone)]
@@ -30,56 +29,68 @@ pub struct ImportReport {
 /// incoming config are NOT deleted — that's a separate operator
 /// action (no surprise destruction).
 ///
-/// The whole import runs in a single transaction.
-pub async fn import_all(pool: &SqlitePool, config: &Config) -> Result<ImportReport> {
+/// The whole import runs in a single transaction. Dual-dialect: each
+/// arm uses its backend's `*_in_tx` writers (SQLite vs Postgres twins)
+/// and placeholders, but the spec-iteration + report bookkeeping is the
+/// same shape.
+pub async fn import_all(db: &ConfigDb, config: &Config) -> Result<ImportReport> {
     let now = Utc::now();
-    let mut tx = pool.begin().await.context("begin import tx")?;
+    let lc = &config.proxy.landing_customization;
+    // The rest of `proxy` (minus specs + landing-customization) and the
+    // top-level server / logging blocks round-trip as JSON in
+    // config_meta — computed once, written inside the chosen arm.
+    let proxy_meta = proxy_meta_value(&config.proxy)?;
+    let server_meta = serde_json::to_value(&config.server)?;
+    let logging_meta = serde_json::to_value(&config.logging)?;
 
-    let mut report = ImportReport::default();
-
-    for spec in &config.proxy.specs {
-        let outcome = upsert_in_tx(&mut tx, spec, now).await?;
-        match outcome {
-            UpsertOutcome::Created => report.created += 1,
-            UpsertOutcome::Updated => report.updated += 1,
-            UpsertOutcome::Unchanged => report.unchanged += 1,
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin import tx")?;
+            let mut report = ImportReport::default();
+            for spec in &config.proxy.specs {
+                tally(&mut report, upsert_in_tx(&mut tx, spec, now).await?);
+            }
+            super::landing::update_in_tx(&mut tx, lc, now).await?;
+            super::landing_blocks::replace_all_in_tx(&mut tx, &lc.blocks, now).await?;
+            upsert_meta(&mut tx, "proxy", &proxy_meta, now).await?;
+            upsert_meta(&mut tx, "server", &server_meta, now).await?;
+            upsert_meta(&mut tx, "logging", &logging_meta, now).await?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (NULL, 'spec.import', NULL, ?, ?)",
+            )
+            .bind(import_diff(&report)?)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit import")?;
+            tx.commit().await.context("commit import tx")?;
+            Ok(report)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin import tx")?;
+            let mut report = ImportReport::default();
+            for spec in &config.proxy.specs {
+                tally(&mut report, upsert_in_tx_pg(&mut tx, spec, now).await?);
+            }
+            super::landing::update_in_tx_pg(&mut tx, lc, now).await?;
+            super::landing_blocks::replace_all_in_tx_pg(&mut tx, &lc.blocks, now).await?;
+            upsert_meta_pg(&mut tx, "proxy", &proxy_meta, now).await?;
+            upsert_meta_pg(&mut tx, "server", &server_meta, now).await?;
+            upsert_meta_pg(&mut tx, "logging", &logging_meta, now).await?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (NULL, 'spec.import', NULL, $1, $2)",
+            )
+            .bind(import_diff(&report)?)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit import")?;
+            tx.commit().await.context("commit import tx")?;
+            Ok(report)
         }
     }
-
-    // Landing customization is a singleton — replace it whole, incl.
-    // SEO/analytics columns (via the shared writer) and the custom
-    // HTML blocks, so the full landing config round-trips.
-    let lc = &config.proxy.landing_customization;
-    super::landing::update_in_tx(&mut tx, lc, now).await?;
-    super::landing_blocks::replace_all_in_tx(&mut tx, &lc.blocks, now).await?;
-
-    // Persist the rest of `proxy` (everything except specs and
-    // landing-customization) + the top-level server / logging
-    // blocks as JSON blobs in config_meta. Lets export reconstruct
-    // a byte-equivalent (mod whitespace) YAML without inventing
-    // schema for every field the admin UI doesn't expose yet.
-    let proxy_meta = proxy_meta_value(&config.proxy)?;
-    upsert_meta(&mut tx, "proxy", &proxy_meta, now).await?;
-    upsert_meta(&mut tx, "server", &serde_json::to_value(&config.server)?, now).await?;
-    upsert_meta(&mut tx, "logging", &serde_json::to_value(&config.logging)?, now).await?;
-
-    // System-level audit entry for the import.
-    sqlx::query(
-        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-         VALUES (NULL, 'spec.import', NULL, ?, ?)",
-    )
-    .bind(serde_json::to_string(&serde_json::json!({
-        "created": report.created,
-        "updated": report.updated,
-        "unchanged": report.unchanged,
-    }))?)
-    .bind(now)
-    .execute(&mut *tx)
-    .await
-    .context("audit import")?;
-
-    tx.commit().await.context("commit import tx")?;
-    Ok(report)
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -87,6 +98,24 @@ pub enum UpsertOutcome {
     Created,
     Updated,
     Unchanged,
+}
+
+/// Fold one per-spec [`UpsertOutcome`] into the running [`ImportReport`].
+fn tally(report: &mut ImportReport, outcome: UpsertOutcome) {
+    match outcome {
+        UpsertOutcome::Created => report.created += 1,
+        UpsertOutcome::Updated => report.updated += 1,
+        UpsertOutcome::Unchanged => report.unchanged += 1,
+    }
+}
+
+/// The `diff_json` for the system-level import audit row.
+fn import_diff(report: &ImportReport) -> Result<String> {
+    Ok(serde_json::to_string(&serde_json::json!({
+        "created": report.created,
+        "updated": report.updated,
+        "unchanged": report.unchanged,
+    }))?)
 }
 
 /// Fetch a single spec by id, deserializing `config_json` back to
@@ -487,6 +516,31 @@ async fn upsert_meta(
     Ok(())
 }
 
+/// Postgres twin of [`upsert_meta`]. SQLite's `INSERT OR REPLACE`
+/// becomes the standard `ON CONFLICT (key) DO UPDATE`.
+async fn upsert_meta_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    key: &str,
+    value: &serde_json::Value,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    let json = serde_json::to_string(value)?;
+    sqlx::query(
+        "INSERT INTO config_meta (key, value_json, updated_at)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (key) DO UPDATE SET
+           value_json = excluded.value_json,
+           updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(&json)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("upsert config_meta[{key}]"))?;
+    Ok(())
+}
+
 fn kind_str(spec: &Spec) -> &'static str {
     use ruscker_config::SpecKind;
     match spec.kind() {
@@ -513,12 +567,12 @@ mod tests {
         let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
         let n = cfg.proxy.specs.len();
 
-        let r1 = import_all(&pool, &cfg).await.unwrap();
+        let r1 = import_all(&ConfigDb::Sqlite(pool.clone()), &cfg).await.unwrap();
         assert_eq!(r1.created, n, "first import inserts all");
         assert_eq!(r1.updated, 0);
         assert_eq!(r1.unchanged, 0);
 
-        let r2 = import_all(&pool, &cfg).await.unwrap();
+        let r2 = import_all(&ConfigDb::Sqlite(pool.clone()), &cfg).await.unwrap();
         assert_eq!(r2.created, 0, "second import sees them as existing");
         assert_eq!(r2.updated, 0, "no changes → no version bumps");
         assert_eq!(r2.unchanged, n);
@@ -537,11 +591,11 @@ mod tests {
     async fn modifying_a_spec_bumps_version() {
         let pool = open_memory().await.unwrap();
         let mut cfg = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg).await.unwrap();
+        import_all(&ConfigDb::Sqlite(pool.clone()), &cfg).await.unwrap();
 
         // Tweak one spec's description and re-import.
         cfg.proxy.specs[0].description = Some("Updated description".to_string());
-        let r = import_all(&pool, &cfg).await.unwrap();
+        let r = import_all(&ConfigDb::Sqlite(pool.clone()), &cfg).await.unwrap();
         assert_eq!(r.updated, 1);
         assert_eq!(r.unchanged, cfg.proxy.specs.len() - 1);
 
@@ -566,7 +620,7 @@ mod tests {
     async fn landing_customization_round_trips() {
         let pool = open_memory().await.unwrap();
         let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
-        import_all(&pool, &cfg).await.unwrap();
+        import_all(&ConfigDb::Sqlite(pool.clone()), &cfg).await.unwrap();
 
         let row: (Option<String>, Option<String>, Option<String>, String) = sqlx::query_as(
             "SELECT header_bg, header_fg, intro, intro_locales_json
@@ -641,5 +695,44 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(history, 0, "cascade cleared history");
+    }
+
+    // The full `import_all` transaction (specs + landing + blocks +
+    // config_meta + audit) through the Postgres arm, plus idempotency.
+    // Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn import_all_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        // Clear what the import writes (DELETE specs cascades spec_versions).
+        for stmt in [
+            "DELETE FROM specs",
+            "DELETE FROM landing_blocks",
+            "DELETE FROM config_meta",
+        ] {
+            sqlx::query(stmt).execute(&pool).await.unwrap();
+        }
+        let db = ConfigDb::Postgres(pool.clone());
+
+        let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
+        let n = cfg.proxy.specs.len();
+
+        let r1 = import_all(&db, &cfg).await.unwrap();
+        assert_eq!(r1.created, n, "first import inserts all");
+        assert_eq!(r1.updated, 0);
+
+        let r2 = import_all(&db, &cfg).await.unwrap();
+        assert_eq!(r2.unchanged, n, "re-import sees them unchanged");
+        assert_eq!(r2.created, 0);
+
+        // proxy / server / logging round-tripped into config_meta.
+        let (meta,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM config_meta")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(meta, 3);
     }
 }

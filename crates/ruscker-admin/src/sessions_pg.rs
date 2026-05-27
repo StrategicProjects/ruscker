@@ -372,4 +372,65 @@ mod tests {
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
         assert_eq!(store.len(), 0);
     }
+
+    // Session continuity across instances (the HA core, Phase 7e): a
+    // session registered by instance A is visible to instance B once B
+    // reconciles from the shared table — so B's router/scaler see A's
+    // load. Two stores (distinct instance_ids) over one Postgres, with
+    // separate registries (as each node reconciles the same replica
+    // from the shared Docker backend). Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn session_registered_on_a_is_seen_by_b() {
+        use ruscker_core::{Replica, ReplicaState};
+        use std::net::SocketAddr;
+        use std::sync::Arc;
+
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let a = PostgresSessionStore::connect(&url).await.unwrap();
+        let b = PostgresSessionStore::connect(&url).await.unwrap();
+        sqlx::query("DELETE FROM proxy_sessions")
+            .execute(&a.pool)
+            .await
+            .unwrap();
+
+        // Same replica id on both nodes (each reconciles it from the
+        // shared backend) — but separate registries.
+        let rid = ReplicaId(Uuid::new_v4());
+        let mk = || Replica {
+            id: rid.clone(),
+            spec_id: "alpha".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 5,
+            host: None,
+        };
+        let reg_a = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let reg_b = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        reg_a.write().await.add(mk());
+        reg_b.write().await.add(mk());
+
+        // A registers a session.
+        let sid = Uuid::new_v4();
+        assert_eq!(
+            a.touch_or_register(&reg_a, sid, "alpha", &rid).await,
+            TouchOutcome::Registered
+        );
+        // B hasn't reconciled yet — its registry shows nothing.
+        assert_eq!(reg_b.read().await.replicas_of("alpha")[0].sessions_active, 0);
+
+        // B's sweep reconciles the cluster-wide count from the shared
+        // table and now sees A's session.
+        let no_overrides = HashMap::new();
+        b.sweep(&reg_b, 3_600_000, &no_overrides).await;
+        assert_eq!(reg_b.read().await.replicas_of("alpha")[0].sessions_active, 1);
+        // …and the session is node-local to A, not B.
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 0);
+    }
 }

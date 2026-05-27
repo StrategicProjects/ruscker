@@ -1,0 +1,14 @@
+# Minimal config for the HA harness. One stateless demo app
+# (traefik/whoami) so you can watch requests land on whichever Ruscker
+# instance the load balancer picked. Swap in your own specs to try the
+# real thing.
+proxy:
+  title: Ruscker HA Demo
+  bind-address: 0.0.0.0
+  port: 8080
+  specs:
+    - id: whoami
+      display-name: Who Am I
+      description: Stateless echo server — prints the container it ran on.
+      container-image: traefik/whoami:latest
+      port: 80

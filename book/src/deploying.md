@@ -51,6 +51,62 @@ spec. With many specs that's a lot of idle containers. To match
 ShinyProxy's on-demand behaviour (spawn on first request, reap when
 idle), set `min-replicas: 0` on the specs.
 
+### Multiple Docker hosts (Phase 6)
+
+By default Ruscker drives the **local** Docker daemon. To spread app
+containers across several hosts, list them under `proxy.hosts` — then
+Ruscker schedules, routes, monitors and reaps containers on all of
+them from the one process:
+
+```yaml
+proxy:
+  hosts:
+    - id: gpu-1
+      address: ssh://ops@10.0.0.11        # Docker over SSH — simplest
+    - id: gpu-2
+      address: tcp://10.0.0.12:2376       # Docker over TLS
+      tls: { ca: /etc/ruscker/ca.pem, cert: /etc/ruscker/cert.pem, key: /etc/ruscker/key.pem }
+      max-containers: 40                  # cap; placement won't exceed it
+      weight: 2                           # bigger host ⇒ more of the spread
+  specs:
+    - id: heavy-shiny
+      container-image: org/shiny:latest
+      placement: spread                   # spread (default) | bin-pack
+      anti-affinity: true                 # replicas on distinct hosts
+```
+
+**Transports.** `ssh://user@host[:port]` (reuses your SSH keys — no
+daemon TLS to set up), `tcp://host:port` + `tls` (mutual TLS), or
+`http://host:port` (plain TCP — trusted networks only). SSH is the
+least-effort option. Empty `hosts` keeps the single-local-daemon mode.
+
+**Networking — the catch.** On a remote host Ruscker publishes each
+container's port on the host's `0.0.0.0` and proxies to
+`host:published-port`. So **the Ruscker box must be able to reach the
+app hosts on the ephemeral published ports** (roughly 32768–60999).
+Put Ruscker and the hosts on a private network and open that range
+between them; **do not expose those ports to the public** — they're
+unauthenticated app backends. (For SSH hosts, the SSH connection is
+only the Docker *control* plane; the *data* plane is still this direct
+TCP path.)
+
+**Placement.** `spread` (default) distributes replicas (weighted by
+`weight`) for fault isolation; `bin-pack` fills one host before the
+next. `anti-affinity: true` keeps a spec's replicas on distinct hosts,
+falling back gracefully when every eligible host already runs it.
+`max-containers` caps a host; if all hosts are full a spawn fails and
+the scaler retries. The dashboard's **Host** column shows where each
+replica landed.
+
+**Validating it.** A gated integration test exercises spawn + spread +
+routed stop against two real daemons:
+
+```sh
+RUSCKER_IT_HOST1=ssh://ops@10.0.0.11 \
+RUSCKER_IT_HOST2=ssh://ops@10.0.0.12 \
+cargo test -p ruscker-docker --features multihost-it -- --nocapture
+```
+
 ## 3. nginx
 
 Terminate TLS at your edge / load balancer and forward to nginx with

@@ -562,6 +562,20 @@ pub struct Spec {
     #[serde(rename = "concurrent-requests-per-replica")]
     pub concurrent_requests_per_replica: Option<u32>,
 
+    // -- Ruscker extensions: multi-host placement (Phase 6) --
+    /// How to place this spec's replicas across `proxy.hosts`:
+    /// `spread` (default — distribute for fault isolation) or
+    /// `bin-pack` (fill a host before using the next). Only matters
+    /// with multiple hosts configured.
+    pub placement: Option<Placement>,
+
+    /// Keep replicas of this spec on **distinct** hosts when possible
+    /// (anti-affinity). Defaults to `false`. Best-effort: if every
+    /// eligible host already runs the spec, placement falls back to the
+    /// strategy above rather than refusing to scale.
+    #[serde(rename = "anti-affinity")]
+    pub anti_affinity: Option<bool>,
+
     // -- Ruscker extensions: smart routing --
     /// Whether to inject `<base href>` and rewrite root-relative URLs
     /// in HTML responses on the `/app/{spec}` route — the transform
@@ -681,6 +695,16 @@ impl Spec {
     /// auto-scaling unless the operator opts in).
     pub fn effective_max_replicas(&self) -> u32 {
         self.max_replicas.unwrap_or_else(|| self.effective_min_replicas())
+    }
+
+    /// Multi-host placement strategy (default [`Placement::Spread`]).
+    pub fn effective_placement(&self) -> Placement {
+        self.placement.unwrap_or_default()
+    }
+
+    /// Whether replicas should prefer distinct hosts (default false).
+    pub fn effective_anti_affinity(&self) -> bool {
+        self.anti_affinity.unwrap_or(false)
     }
 
     /// Effective routing strategy.
@@ -1079,6 +1103,19 @@ pub enum RoutingStrategy {
     ResourceAware,
 }
 
+/// How to place a spec's replicas across multiple Docker hosts
+/// (Phase 6). Default [`Placement::Spread`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Placement {
+    /// Distribute replicas across hosts (weighted by `host.weight`) for
+    /// fault isolation. The default.
+    #[default]
+    Spread,
+    /// Fill one host before using the next (better density / cost).
+    BinPack,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Logging {
@@ -1160,6 +1197,8 @@ proxy:
             routing_strategy: None,
             inject_base_href: None,
             container_port: None,
+            placement: None,
+            anti_affinity: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::External);
@@ -1200,6 +1239,8 @@ proxy:
             routing_strategy: None,
             inject_base_href: None,
             container_port: None,
+            placement: None,
+            anti_affinity: None,
             concurrent_requests_per_replica: None,
         };
         assert_eq!(spec.kind(), SpecKind::Shiny);
@@ -1240,6 +1281,8 @@ proxy:
             routing_strategy: None,
             inject_base_href: None,
             container_port: None,
+            placement: None,
+            anti_affinity: None,
             concurrent_requests_per_replica: None,
         };
         spec.kind_override = Some(SpecKindOverride::Api);

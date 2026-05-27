@@ -657,7 +657,9 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     );
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
         .with_limits(limits)
-        .with_volumes(spec.volumes.clone().unwrap_or_default());
+        .with_volumes(spec.volumes.clone().unwrap_or_default())
+        .with_placement(spec.effective_placement())
+        .with_anti_affinity(spec.effective_anti_affinity());
     if let Some(port) = inner_port {
         req = req.with_port(port);
     }

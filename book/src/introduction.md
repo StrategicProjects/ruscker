@@ -69,8 +69,11 @@ the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
 
 ## Where to next
 
+- [Quickstart](./quickstart.md) — from zero to a running app in minutes.
 - [What Ruscker can serve](./use-cases.md) — Shiny, Streamlit, Dash,
   FastAPI, JupyterLab, LLM UIs, BI tools, and more.
+- [Ruscker vs. alternatives](./alternatives.md) — how it compares to
+  ShinyProxy, Shiny Server, Posit Connect, and JupyterHub.
 - [Installation](./installation.md) — Docker, the `.deb`, or `brew`.
 - [Migrating from ShinyProxy](./migrating.md) — point Ruscker at your
   existing `application.yml`.

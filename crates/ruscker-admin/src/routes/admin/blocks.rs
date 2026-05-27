@@ -66,7 +66,7 @@ async fn index(
     loc: Locale,
     theme: Theme,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     let blocks = match landing_blocks::list_all(pool).await {
@@ -132,7 +132,7 @@ async fn new_form(
     loc: Locale,
     theme: Theme,
 ) -> Response {
-    if state.sqlite().is_none() {
+    if state.db.as_ref().is_none() {
         return no_db();
     }
     super::render(&BlockFormPage {
@@ -160,7 +160,7 @@ async fn edit_form(
     theme: Theme,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     let block = match landing_blocks::fetch_one(pool, &id).await {
@@ -226,7 +226,7 @@ async fn create(
     State(state): State<AppState>,
     Form(form): Form<BlockForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     match landing_blocks::insert(pool, &form.into_input(), Some(admin.actor())).await {
@@ -244,7 +244,7 @@ async fn update(
     Path(id): Path<String>,
     Form(form): Form<BlockForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     match landing_blocks::update(pool, &id, &form.into_input(), Some(admin.actor())).await {
@@ -262,7 +262,7 @@ async fn delete(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     match landing_blocks::delete(pool, &id, Some(admin.actor())).await {
@@ -279,7 +279,7 @@ async fn move_block(
     State(state): State<AppState>,
     Path((id, dir)): Path<(String, String)>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     let up = match dir.as_str() {
@@ -311,7 +311,7 @@ async fn reorder(
     State(state): State<AppState>,
     Json(req): Json<ReorderReq>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     match landing_blocks::reorder(pool, &req.slot, &req.ids, Some(admin.actor())).await {

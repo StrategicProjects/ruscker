@@ -155,7 +155,7 @@ async fn save(
     theme: Theme,
     Form(form): Form<LandingForm>,
 ) -> Response {
-    let Some(pool) = state.sqlite() else {
+    let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let lc = form.into_customization();

@@ -285,7 +285,10 @@ impl SessionStore for PostgresSessionStore {
     }
 }
 
-#[cfg(test)]
+// Only the gated Postgres test lives here; the pure logic is covered
+// by the in-memory store's tests. Gating the whole module on the
+// feature keeps `use super::*` from being unused in the default build.
+#[cfg(all(test, feature = "postgres-it"))]
 mod tests {
     use super::*;
 
@@ -307,6 +310,7 @@ mod tests {
         use std::net::SocketAddr;
         use std::sync::Arc;
 
+        let _guard = crate::db::pg_test_lock().lock().await;
         let url = std::env::var("RUSCKER_TEST_PG_URL")
             .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
         let store = PostgresSessionStore::connect(&url).await.unwrap();

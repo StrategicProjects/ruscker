@@ -499,6 +499,25 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::admin::routes())
         .layer(axum::middleware::from_fn(security_headers));
 
+    // Base-path mounting (#173): when served under a subpath, rewrite the
+    // chrome's root-absolute URLs / redirects to carry the prefix. Only
+    // the chrome needs it — the proxy's `/app` responses get the prefix
+    // through their own rewriter, and `/api`/metrics carry no chrome URLs.
+    // No-op layer cost when there's no base path (we skip adding it).
+    let own = {
+        let base = state.base_path.clone();
+        if base.is_empty() {
+            own
+        } else {
+            own.layer(axum::middleware::from_fn(
+                move |req: axum::extract::Request, next: axum::middleware::Next| {
+                    let base = base.clone();
+                    async move { routes::rewrite::prefix_base_path(next.run(req).await, &base).await }
+                },
+            ))
+        }
+    };
+
     // Health probes (`/healthz`, `/readyz`) sit outside the
     // `security_headers` layer: they return JSON for orchestrators,
     // not HTML for browsers, so CSP / X-Frame-Options are

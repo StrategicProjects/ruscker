@@ -62,3 +62,50 @@ html.ayu {
   border-left: 3px solid var(--sidebar-active);
   padding-left: calc(1rem - 3px);
 }
+
+/* "Collapse sidebar" chevron (injected by theme/ruscker.js). It's a
+ * <label for="mdbook-sidebar-toggle-anchor">, so clicking it toggles
+ * mdBook's own sidebar checkbox — no custom state to keep in sync.
+ *
+ * Pinned with `position: fixed` to the sidebar's inner-right edge via
+ * mdBook's `--sidebar-width` (so it tracks a resized sidebar and ignores
+ * the TOC iframe's own layout), just below the menu bar. Shown only when
+ * the sidebar is open; collapsing it hides the chevron — reopen with the
+ * top-bar hamburger. */
+.ruscker-sidebar-close {
+  position: fixed;
+  top: 3.4rem;
+  left: calc(var(--sidebar-width) - 2.3rem);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--sidebar-fg);
+  background: var(--theme-hover, rgba(0, 0, 0, 0.05));
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+.ruscker-sidebar-close:hover {
+  opacity: 1;
+  color: #ffffff;
+  background: var(--sidebar-active);
+}
+.ruscker-sidebar-close svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+/* Gone when the sidebar is collapsed (the hamburger brings it back). */
+html:not(.sidebar-visible) .ruscker-sidebar-close {
+  display: none;
+}
+/* On narrow viewports the sidebar is a full overlay and the hamburger
+ * sits right next to it — the extra chevron just clutters, so hide it. */
+@media only screen and (max-width: 1080px) {
+  .ruscker-sidebar-close {
+    display: none;
+  }
+}

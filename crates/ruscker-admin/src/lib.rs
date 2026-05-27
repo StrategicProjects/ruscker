@@ -257,6 +257,14 @@ impl AdminServer {
         self
     }
 
+    /// Attach a config database directly as a [`db::ConfigDb`] — used to
+    /// select the shared Postgres catalog for HA. `with_db` is the
+    /// SQLite shorthand for `with_config_db(ConfigDb::Sqlite(pool))`.
+    pub fn with_config_db(mut self, db: db::ConfigDb) -> Self {
+        self.state.db = Some(db);
+        self
+    }
+
     /// Start listening. Blocks until the process is shut down.
     pub async fn run(self) -> Result<()> {
         // Reconcile the in-memory replica registry with whatever

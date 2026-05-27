@@ -129,9 +129,17 @@ enum Command {
         images_dir: Option<PathBuf>,
 
         /// Path to the SQLite admin database. Required for `/admin/*`
-        /// routes to function. Without it, those routes return 503.
+        /// routes to function. Without it (and without
+        /// `--config-db-url`), those routes return 503.
         #[arg(long)]
         db: Option<PathBuf>,
+
+        /// Postgres DSN for the shared admin catalog (`postgres://…`).
+        /// HA alternative to `--db`: several instances share one
+        /// editable spec catalog / users / landing / audit store.
+        /// Takes precedence over `--db` when both are set.
+        #[arg(long, env = "RUSCKER_CONFIG_DB_URL")]
+        config_db_url: Option<String>,
 
         /// Admin auth token. Overrides `RUSCKER_ADMIN_TOKEN` env var
         /// when set. Without either, /admin/* routes return 503.
@@ -181,6 +189,7 @@ fn main() -> Result<()> {
             bind,
             images_dir,
             db,
+            config_db_url,
             admin_token,
             master_key,
             docker,
@@ -190,6 +199,7 @@ fn main() -> Result<()> {
             bind,
             images_dir,
             db,
+            config_db_url,
             admin_token,
             master_key,
             docker,
@@ -291,6 +301,7 @@ fn cmd_serve(
     bind_override: Option<std::net::SocketAddr>,
     images_dir_override: Option<PathBuf>,
     db_path: Option<PathBuf>,
+    config_db_url: Option<String>,
     admin_token: Option<String>,
     master_key: Option<String>,
     docker: bool,
@@ -355,7 +366,18 @@ fn cmd_serve(
             };
             server = server.with_backend(backend);
         }
-        if let Some(path) = db_path {
+        // Config database: Postgres (shared HA catalog) takes precedence
+        // over the SQLite path when both are given.
+        if let Some(url) = config_db_url {
+            if db_path.is_some() {
+                tracing::warn!("both --config-db-url and --db set; using Postgres");
+            }
+            tracing::info!("admin catalog: Postgres");
+            let pool = ruscker_admin::db::open_pg(&url)
+                .await
+                .context("connect to the Postgres admin catalog")?;
+            server = server.with_config_db(ruscker_admin::db::ConfigDb::Postgres(pool));
+        } else if let Some(path) = db_path {
             let pool = ruscker_admin::db::open(&path).await?;
             server = server.with_db(pool);
         }

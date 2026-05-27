@@ -152,6 +152,8 @@ A spec describes one app, API, or external link. Every spec has an
   volumes:                            # bind mounts (ShinyProxy-compatible)
     - /srv/myapp/data:/data           #   persistent data
     - /srv/myapp/www:/www:ro          #   static assets, read-only
+  access-groups: [staff, ops]         # who may see/reach this app
+  access-users: [alice]               #   (ShinyProxy-compatible)
 ```
 
 `volumes` is a list of Docker bind specs (`/host:/container`, optionally
@@ -159,6 +161,15 @@ A spec describes one app, API, or external link. Every spec has an
 as needed; editable in the admin **Advanced** form (one per line).
 **Bind-mounting host paths is root-equivalent and admin-only** — see
 `SECURITY.md`.
+
+`access-groups` / `access-users` (ShinyProxy-compatible) scope who can
+**see** an app on the landing and **reach** it at `/app` / `/api`. A spec
+with neither is **open** — visible to everyone, including anonymous
+visitors. Otherwise: a logged-in user sees it when their username is in
+`access-users` or one of their groups is in `access-groups`; an admin
+always sees everything; an anonymous visitor sees only open apps. Group
+membership is set per user in the admin panel. Enforcement is real (not
+just hiding the card). See the [Roadmap](ROADMAP.md) Phase 8.
 
 ### Smart routing — sub-path context for the upstream
 

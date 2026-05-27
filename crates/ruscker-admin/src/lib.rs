@@ -46,6 +46,11 @@ use sqlx::SqlitePool;
 pub struct AppState {
     pub config: Arc<Config>,
     pub locales: Arc<i18n::Locales>,
+    /// Normalized base path the portal is served under (#173): `""` for
+    /// root (default) or e.g. `"/box"`. The router nests everything
+    /// under it and the response rewriter prefixes generated URLs /
+    /// redirects / cookie paths with it.
+    pub base_path: Arc<str>,
     pub admin_auth: auth::AdminAuth,
     /// Opaque server-side admin session store. The cookie holds a
     /// random session id (not the token); shared so every cloned
@@ -166,6 +171,7 @@ impl AdminServer {
         let state = AppState {
             config: Arc::new(config),
             locales: Arc::new(locales),
+            base_path: Arc::from(""),
             admin_auth: auth::AdminAuth::from_env(),
             admin_sessions: Arc::new(auth::AdminSessions::default_policy()),
             login_limiter: Arc::new(auth::LoginRateLimiter::default_policy()),
@@ -229,6 +235,15 @@ impl AdminServer {
     /// Created and populated by a `tracing` layer in `ruscker-cli`.
     pub fn with_log_buffer(mut self, buffer: logbuf::LogBuffer) -> Self {
         self.state.log_buffer = Some(buffer);
+        self
+    }
+
+    /// Serve the whole portal under a base path (#173), e.g. `/box` for
+    /// mounting at `example.org/box/`. Normalized via
+    /// [`ruscker_config::normalize_base_path`]; empty ⇒ root (default).
+    pub fn with_base_path(mut self, path: impl AsRef<str>) -> Self {
+        let norm = ruscker_config::normalize_base_path(path.as_ref());
+        self.state.base_path = Arc::from(norm.as_str());
         self
     }
 
@@ -489,12 +504,42 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
     // not HTML for browsers, so CSP / X-Frame-Options are
     // irrelevant. Like the proxy routes, they're merged at the
     // outer level.
-    own.merge(routes::proxy::routes())
-        .merge(routes::health::routes())
+    // The full portal surface (chrome + proxy + metrics). Health is
+    // kept separate so it can stay at the root even under a base path —
+    // load-balancer probes shouldn't have to know the prefix.
+    let portal = own
+        .merge(routes::proxy::routes())
         // `/metrics` (opt-in via proxy.metrics-enabled) is likewise
         // unauthenticated and outside `security_headers` — it serves
         // Prometheus text for a scraper, not HTML for a browser.
-        .merge(routes::metrics::routes())
+        .merge(routes::metrics::routes());
+
+    // Mount under the configured base path (#173). `""` ⇒ root (the
+    // default), so single-host deploys are unchanged. With e.g. `/box`,
+    // every portal route matches under `/box/...`; the response rewriter
+    // (added in a later slice) prefixes the URLs the handlers emit.
+    let base = state.base_path.clone();
+    let portal = if base.is_empty() {
+        portal
+    } else {
+        // axum 0.8 `nest` maps the inner `/` route to exactly `/box`
+        // (no trailing slash) and does NOT match `/box/` — but that's
+        // the URL a browser / nginx sends for the landing root. Redirect
+        // `/box/` → `/box` so both forms work (the deeper routes like
+        // `/box/admin/...` are matched by nest directly).
+        let canonical = base.to_string();
+        let trailing = format!("{base}/");
+        Router::new().nest(&base, portal).route(
+            &trailing,
+            axum::routing::get(move || {
+                let to = canonical.clone();
+                async move { axum::response::Redirect::permanent(&to) }
+            }),
+        )
+    };
+
+    portal
+        .merge(routes::health::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

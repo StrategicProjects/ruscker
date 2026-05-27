@@ -67,6 +67,48 @@ pub struct Server {
     /// existing ShinyProxy configs.
     #[serde(rename = "servlet.session.timeout")]
     pub flat_servlet_session_timeout: Option<u64>,
+
+    /// Base path to serve the whole portal under, for mounting behind a
+    /// reverse proxy at a subpath (e.g. `/box` ⇒ `example.org/box/`)
+    /// when you can't create a subdomain (#173). Maps to ShinyProxy's
+    /// `server.servlet.context-path`; we also accept the flat
+    /// `server.context-path`. Empty/absent ⇒ served at the root.
+    #[serde(rename = "context-path")]
+    pub context_path: Option<String>,
+
+    /// ShinyProxy's nested `server.servlet.context-path`. Resolved by
+    /// [`Self::effective_base_path`] when the flat form isn't set.
+    #[serde(rename = "servlet.context-path")]
+    pub flat_servlet_context_path: Option<String>,
+}
+
+impl Server {
+    /// The normalized base path the portal is served under: a leading
+    /// slash, no trailing slash, never just `"/"`. Empty string ⇒ root
+    /// (the default). Resolves the flat `context-path` first, then the
+    /// ShinyProxy `servlet.context-path`. `normalize_base_path` does the
+    /// shaping so the CLI `--base-path` override and this agree.
+    pub fn effective_base_path(&self) -> String {
+        let raw = self
+            .context_path
+            .as_deref()
+            .or(self.flat_servlet_context_path.as_deref())
+            .unwrap_or("");
+        normalize_base_path(raw)
+    }
+}
+
+/// Shape an operator-supplied base path into the canonical form the
+/// router and rewriter expect: trimmed, with exactly one leading slash
+/// and no trailing slash; `""` (root) for anything empty or `"/"`.
+/// E.g. `"box"`, `"/box/"`, `"box/"` all become `"/box"`.
+pub fn normalize_base_path(raw: &str) -> String {
+    let t = raw.trim().trim_matches('/');
+    if t.is_empty() {
+        String::new()
+    } else {
+        format!("/{t}")
+    }
 }
 
 impl Server {
@@ -1200,6 +1242,40 @@ pub struct LoggingFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_base_path_canonicalizes() {
+        assert_eq!(normalize_base_path(""), "");
+        assert_eq!(normalize_base_path("/"), "");
+        assert_eq!(normalize_base_path("   "), "");
+        assert_eq!(normalize_base_path("box"), "/box");
+        assert_eq!(normalize_base_path("/box"), "/box");
+        assert_eq!(normalize_base_path("/box/"), "/box");
+        assert_eq!(normalize_base_path("  box/  "), "/box");
+        assert_eq!(normalize_base_path("a/b"), "/a/b");
+    }
+
+    #[test]
+    fn server_resolves_base_path_flat_then_servlet() {
+        let flat = Server {
+            context_path: Some("/box/".into()),
+            ..Default::default()
+        };
+        assert_eq!(flat.effective_base_path(), "/box");
+        let nested = Server {
+            flat_servlet_context_path: Some("portal".into()),
+            ..Default::default()
+        };
+        assert_eq!(nested.effective_base_path(), "/portal");
+        // Flat wins when both present.
+        let both = Server {
+            context_path: Some("/a".into()),
+            flat_servlet_context_path: Some("/b".into()),
+            ..Default::default()
+        };
+        assert_eq!(both.effective_base_path(), "/a");
+        assert_eq!(Server::default().effective_base_path(), "");
+    }
 
     #[test]
     fn parses_minimal_config() {

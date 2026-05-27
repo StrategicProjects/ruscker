@@ -174,6 +174,13 @@ enum Command {
         /// Omitted → the single-node in-memory store (default).
         #[arg(long, env = "RUSCKER_SESSION_STORE_URL")]
         session_store_url: Option<String>,
+
+        /// Serve the whole portal under a base path, for mounting behind
+        /// a reverse proxy at a subpath when you can't make a subdomain
+        /// (e.g. `--base-path /box` ⇒ `example.org/box/`). Overrides
+        /// `server.context-path` in the config. Empty ⇒ root (default).
+        #[arg(long, env = "RUSCKER_BASE_PATH")]
+        base_path: Option<String>,
     },
 }
 
@@ -206,6 +213,7 @@ fn main() -> Result<()> {
             master_key,
             docker,
             session_store_url,
+            base_path,
         } => cmd_serve(
             &config,
             bind,
@@ -216,6 +224,7 @@ fn main() -> Result<()> {
             master_key,
             docker,
             session_store_url,
+            base_path,
             log_buffer,
         ),
     }
@@ -349,6 +358,7 @@ fn cmd_serve(
     master_key: Option<String>,
     docker: bool,
     session_store_url: Option<String>,
+    base_path_override: Option<String>,
     log_buffer: ruscker_admin::logbuf::LogBuffer,
 ) -> Result<()> {
     let config = Config::from_file(config_path).with_context(|| {
@@ -379,12 +389,21 @@ fn cmd_serve(
     // multi-host backend when `proxy.hosts` is set (Phase 6).
     let hosts = config.proxy.hosts.clone();
 
+    // Base path (#173): the `--base-path` flag wins over
+    // `server.context-path`. Normalized once; `""` ⇒ root.
+    let base_path = match base_path_override {
+        Some(p) => ruscker_config::normalize_base_path(&p),
+        None => config.server.effective_base_path(),
+    };
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
     rt.block_on(async {
-        let mut server = ruscker_admin::AdminServer::new(addr, config)?.with_log_buffer(log_buffer);
+        let mut server = ruscker_admin::AdminServer::new(addr, config)?
+            .with_log_buffer(log_buffer)
+            .with_base_path(&base_path);
         if let Some(dir) = images_dir {
             server = server.with_images_dir(dir);
         }

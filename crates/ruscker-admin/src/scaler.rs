@@ -531,6 +531,7 @@ mod tests {
         let cfg = Config::from_yaml(yaml).expect("parse config");
         AppState {
             config: Arc::new(cfg),
+            base_path: Arc::from(""),
             locales: Arc::new(crate::i18n::Locales::load().expect("load locales")),
             admin_auth: Default::default(),
             admin_sessions: Default::default(),

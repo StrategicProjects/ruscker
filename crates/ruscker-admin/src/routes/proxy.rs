@@ -1193,6 +1193,7 @@ mod tests {
         let cfg = Config::from_yaml("specs: []").expect("empty config");
         AppState {
             config: std::sync::Arc::new(cfg),
+            base_path: std::sync::Arc::from(""),
             locales: std::sync::Arc::new(
                 crate::i18n::Locales::load().expect("load locales"),
             ),

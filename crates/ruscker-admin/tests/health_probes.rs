@@ -25,6 +25,7 @@ fn base_state() -> AppState {
     let locales = ruscker_admin::i18n::Locales::load().expect("load locales");
     AppState {
         config: Arc::new(config),
+        base_path: Arc::from(""),
         locales: Arc::new(locales),
         admin_auth: Default::default(),
         admin_sessions: Default::default(),

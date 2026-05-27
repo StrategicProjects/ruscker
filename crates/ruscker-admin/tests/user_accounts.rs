@@ -24,6 +24,7 @@ async fn state_with_db() -> (AppState, sqlx::SqlitePool) {
     let locales = ruscker_admin::i18n::Locales::load().expect("load locales");
     let state = AppState {
         config: Arc::new(config),
+        base_path: Arc::from(""),
         locales: Arc::new(locales),
         admin_auth: AdminAuth::with_token("break-glass-tok"),
         admin_sessions: Default::default(),

@@ -36,7 +36,7 @@ fn app_state() -> AppState {
         replicas: std::sync::Arc::new(tokio::sync::RwLock::new(Default::default())),
         cookie_key: ruscker_proxy::sticky::CookieKey::random(),
         spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
-        sessions: std::sync::Arc::new(ruscker_admin::sessions::SessionTracker::new()),
+        sessions: std::sync::Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
     }

@@ -57,16 +57,60 @@ struct SessionEntry {
     last_seen: Instant,
 }
 
-/// In-memory tracker. Shared across handlers via `Arc`. The
-/// internal map is `DashMap` so per-request `touch_or_register`
-/// only locks a single shard, never the whole structure.
+/// The session-tracking seam. The proxy and the idle sweeper depend on
+/// `Arc<dyn SessionStore>`, not a concrete type, so a multi-instance
+/// (Postgres-backed) store can drop in for HA later (Phase 7) without
+/// touching proxy code. The single-node default is
+/// [`InMemorySessionStore`].
+///
+/// `touch_or_register` and `sweep` take the [`ReplicaRegistry`] because
+/// the in-memory store keeps `Replica::sessions_active` as a live
+/// counter it mutates here. A future Postgres store would instead
+/// derive that count from shared rows — the registry argument stays in
+/// the signature so both shapes fit one trait.
+#[async_trait::async_trait]
+pub trait SessionStore: Send + Sync {
+    /// Record activity for `session_id`, registering it against
+    /// `(spec_id, replica_id)` (and incrementing the replica counter)
+    /// on first sight, else refreshing `last_seen`.
+    async fn touch_or_register(
+        &self,
+        registry: &RwLock<ReplicaRegistry>,
+        session_id: Uuid,
+        spec_id: &str,
+        replica_id: &ReplicaId,
+    ) -> TouchOutcome;
+
+    /// One idle-expiry pass: evict sessions past their (per-spec)
+    /// timeout and decrement the replica counter. Returns how many
+    /// were evicted.
+    async fn sweep(
+        &self,
+        registry: &RwLock<ReplicaRegistry>,
+        global_ms: i64,
+        overrides: &std::collections::HashMap<String, i64>,
+    ) -> usize;
+
+    /// Number of tracked sessions (used by graceful-shutdown drain and
+    /// the dashboard/metrics).
+    fn len(&self) -> usize;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// In-memory [`SessionStore`] — the single-node default. Shared across
+/// handlers via `Arc`. The internal map is `DashMap` so per-request
+/// `touch_or_register` only locks a single shard, never the whole
+/// structure.
 ///
 /// The registry write-lock is taken **only** on register/evict
 /// (counter mutation). `touch` for an existing session goes
 /// through DashMap alone — read traffic on a warm session never
 /// blocks on the registry RwLock.
 #[derive(Debug)]
-pub struct SessionTracker {
+pub struct InMemorySessionStore {
     sessions: DashMap<Uuid, SessionEntry>,
 }
 
@@ -80,20 +124,23 @@ pub enum TouchOutcome {
     Touched,
 }
 
-impl SessionTracker {
+impl InMemorySessionStore {
     pub fn new() -> Self {
         Self {
             sessions: DashMap::new(),
         }
     }
+}
 
+#[async_trait::async_trait]
+impl SessionStore for InMemorySessionStore {
     /// Record activity for `session_id`. If unknown, register it
     /// against `(spec_id, replica_id)` and increment the
     /// replica's counter. If known, just refresh `last_seen`.
     ///
     /// Returns whether this was a fresh registration so the
     /// caller can decide cookie-setting policy.
-    pub async fn touch_or_register(
+    async fn touch_or_register(
         &self,
         registry: &RwLock<ReplicaRegistry>,
         session_id: Uuid,
@@ -143,7 +190,7 @@ impl SessionTracker {
     /// are skipped. This lets a long-running Shiny app pin
     /// `heartbeat-timeout: -1` while the rest of the portal
     /// reaps idle sessions normally.
-    pub async fn sweep(
+    async fn sweep(
         &self,
         registry: &RwLock<ReplicaRegistry>,
         global_ms: i64,
@@ -181,16 +228,12 @@ impl SessionTracker {
     }
 
     /// Number of tracked sessions. For introspection / tests.
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         self.sessions.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.sessions.is_empty()
     }
 }
 
-impl Default for SessionTracker {
+impl Default for InMemorySessionStore {
     fn default() -> Self {
         Self::new()
     }
@@ -206,7 +249,7 @@ impl Default for SessionTracker {
 /// for the matching sessions — the sweep simply skips them, so
 /// there's no special no-op task branch anymore.
 pub fn spawn(
-    tracker: Arc<SessionTracker>,
+    tracker: Arc<dyn SessionStore>,
     registry: Arc<RwLock<ReplicaRegistry>>,
     config: Arc<ruscker_config::Config>,
 ) -> JoinHandle<()> {
@@ -257,12 +300,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn works_through_dyn_session_store() {
+        // The whole point of 7a: the proxy/sweeper depend on the trait
+        // object, not the concrete store. Exercise it through `dyn`.
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r = fake_replica("alpha");
+        let rid = r.id.clone();
+        reg.write().await.add(r);
+        let store: Arc<dyn SessionStore> = Arc::new(InMemorySessionStore::new());
+
+        let sid = Uuid::new_v4();
+        assert_eq!(
+            store.touch_or_register(&reg, sid, "alpha", &rid).await,
+            TouchOutcome::Registered
+        );
+        assert_eq!(store.len(), 1);
+        assert!(!store.is_empty());
+        // Idle sweep through the trait object (is_empty is the trait default).
+        let evicted = store
+            .sweep(&reg, 0, &std::collections::HashMap::new())
+            .await;
+        assert_eq!(evicted, 1);
+        assert!(store.is_empty());
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
+    }
+
+    #[tokio::test]
     async fn first_touch_registers_and_increments() {
         let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
         let r = fake_replica("alpha");
         let rid = r.id.clone();
         reg.write().await.add(r);
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
         let outcome = tracker
@@ -278,7 +347,7 @@ mod tests {
         let r = fake_replica("alpha");
         let rid = r.id.clone();
         reg.write().await.add(r);
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
         let _ = tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
@@ -294,7 +363,7 @@ mod tests {
         let r = fake_replica("alpha");
         let rid = r.id.clone();
         reg.write().await.add(r);
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
         tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
@@ -319,7 +388,7 @@ mod tests {
         let r = fake_replica("alpha");
         let rid = r.id.clone();
         reg.write().await.add(r);
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
         tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
@@ -347,7 +416,7 @@ mod tests {
             w.add(pinned);
             w.add(normal);
         }
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
         let s_pinned = Uuid::new_v4();
         let s_normal = Uuid::new_v4();
         tracker.touch_or_register(&reg, s_pinned, "pinned", &pid).await;
@@ -378,7 +447,7 @@ mod tests {
         let r = fake_replica("snappy");
         let rid = r.id.clone();
         reg.write().await.add(r);
-        let tracker = SessionTracker::new();
+        let tracker = InMemorySessionStore::new();
         let sid = Uuid::new_v4();
         tracker.touch_or_register(&reg, sid, "snappy", &rid).await;
         // 30s old.

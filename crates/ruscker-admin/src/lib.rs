@@ -108,7 +108,7 @@ pub struct AppState {
     /// live visitors. A background sweeper (started from
     /// `AdminServer::run`) evicts idle sessions after
     /// `proxy.heartbeat_timeout` ms.
-    pub sessions: std::sync::Arc<sessions::SessionTracker>,
+    pub sessions: std::sync::Arc<dyn sessions::SessionStore>,
 
     /// Per-replica metrics cache. Filled by a background
     /// refresher that fans out `backend.metrics()` calls every
@@ -162,7 +162,7 @@ impl AdminServer {
             cookie_key: ruscker_proxy::sticky::CookieKey::from_env_or_random()
                 .context("load sticky cookie key")?,
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
-            sessions: std::sync::Arc::new(sessions::SessionTracker::new()),
+            sessions: std::sync::Arc::new(sessions::InMemorySessionStore::new()),
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
@@ -334,7 +334,7 @@ impl AdminServer {
 ///    Streamlit) never close on their own, so without this the
 ///    in-flight wait would hang forever.
 /// 3. Wait for active sessions to drain, polling
-///    [`sessions::SessionTracker::len`], up to
+///    [`sessions::SessionStore::len`], up to
 ///    `proxy.shutdown-grace-ms`. Exits the wait early the moment
 ///    the last session ends.
 async fn shutdown_signal(state: AppState) {

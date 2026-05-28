@@ -261,7 +261,8 @@ async fn login_submit(
     state.login_limiter.record_success();
     let session_id = state
         .admin_sessions
-        .create(user.role, Some(user.username.clone()));
+        .create(user.role, Some(user.username.clone()))
+        .await;
     issue_session_cookie(&cookies, &headers, session_id);
 
     // First login with an admin-assigned password ⇒ ask whether to
@@ -364,7 +365,7 @@ async fn token_login(
     }
 
     state.login_limiter.record_success();
-    let session_id = state.admin_sessions.create(Role::Admin, None);
+    let session_id = state.admin_sessions.create(Role::Admin, None).await;
     issue_session_cookie(&cookies, &headers, session_id);
 
     // No admin account yet (and a DB to create one in) ⇒ run setup.
@@ -477,9 +478,12 @@ async fn setup_submit(
 
     // Swap the break-glass token session for a real account session.
     if let Some(c) = cookies.get(COOKIE_NAME) {
-        state.admin_sessions.remove(c.value());
+        state.admin_sessions.remove(c.value()).await;
     }
-    let session_id = state.admin_sessions.create(Role::Admin, Some(username));
+    let session_id = state
+        .admin_sessions
+        .create(Role::Admin, Some(username))
+        .await;
     issue_session_cookie(&cookies, &headers, session_id);
     Redirect::to("/admin/dashboard").into_response()
 }
@@ -627,7 +631,7 @@ async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Co
     // Invalidate the session server-side so a copied cookie is dead too,
     // then clear the browser's copy.
     if let Some(c) = cookies.get(COOKIE_NAME) {
-        state.admin_sessions.remove(c.value());
+        state.admin_sessions.remove(c.value()).await;
     }
     let mut c = Cookie::new(COOKIE_NAME, "");
     c.set_path("/");

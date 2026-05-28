@@ -33,6 +33,7 @@ pub mod logbuf;
 pub mod metrics_cache;
 pub mod ratelimit;
 pub mod routes;
+pub mod admin_sessions_pg;
 pub mod scaler;
 pub mod sessions;
 pub mod sessions_pg;
@@ -54,8 +55,10 @@ pub struct AppState {
     pub admin_auth: auth::AdminAuth,
     /// Opaque server-side admin session store. The cookie holds a
     /// random session id (not the token); shared so every cloned
-    /// `AppState` sees the same live sessions.
-    pub admin_sessions: Arc<auth::AdminSessions>,
+    /// `AppState` sees the same live sessions. `Arc<dyn …>` so the
+    /// in-memory default and the HA Postgres-backed store (#185) drop
+    /// in identically.
+    pub admin_sessions: Arc<dyn auth::AdminSessionStore>,
     /// Global rate limiter for `/admin/login` — bounds brute
     /// force against the admin token. Shared (Arc) so every
     /// cloned `AppState` sees the same window.
@@ -173,7 +176,7 @@ impl AdminServer {
             locales: Arc::new(locales),
             base_path: Arc::from(""),
             admin_auth: auth::AdminAuth::from_env(),
-            admin_sessions: Arc::new(auth::AdminSessions::default_policy()),
+            admin_sessions: Arc::new(auth::InMemoryAdminSessionStore::default_policy()),
             login_limiter: Arc::new(auth::LoginRateLimiter::default_policy()),
             api_limiter: Arc::new(ratelimit::ApiRateLimiter::new()),
             db: None,
@@ -268,6 +271,19 @@ impl AdminServer {
         store: std::sync::Arc<dyn sessions::SessionStore>,
     ) -> Self {
         self.state.sessions = store;
+        self
+    }
+
+    /// Replace the admin sign-in session store (#185). Default is
+    /// the in-memory [`auth::InMemoryAdminSessionStore`]; pass an
+    /// [`admin_sessions_pg::PostgresAdminSessionStore`] to make
+    /// sign-in sessions survive a load-balancer hop between HA
+    /// instances.
+    pub fn with_admin_session_store(
+        mut self,
+        store: std::sync::Arc<dyn auth::AdminSessionStore>,
+    ) -> Self {
+        self.state.admin_sessions = store;
         self
     }
 

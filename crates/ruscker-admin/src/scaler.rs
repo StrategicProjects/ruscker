@@ -534,7 +534,7 @@ mod tests {
             base_path: Arc::from(""),
             locales: Arc::new(crate::i18n::Locales::load().expect("load locales")),
             admin_auth: Default::default(),
-            admin_sessions: Default::default(),
+            admin_sessions: Arc::new(crate::auth::InMemoryAdminSessionStore::default()),
             log_buffer: None,
             login_limiter: Arc::new(crate::auth::LoginRateLimiter::default_policy()),
             api_limiter: Arc::new(crate::ratelimit::ApiRateLimiter::new()),

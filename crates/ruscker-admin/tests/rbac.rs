@@ -40,7 +40,7 @@ fn state() -> AppState {
         admin_auth: AdminAuth {
             admin: Some("admin-tok".into()),
         },
-        admin_sessions: Default::default(),
+        admin_sessions: Arc::new(ruscker_admin::auth::InMemoryAdminSessionStore::default()),
         log_buffer: None,
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
@@ -61,8 +61,11 @@ fn state() -> AppState {
 /// Mint a live session for `role` in the state's store and return the
 /// cookie header value to send it back. The store is behind an `Arc`
 /// shared with the router built from the same `state`.
-fn cookie_for(state: &AppState, role: Role) -> String {
-    let id = state.admin_sessions.create(role, Some("test-user".into()));
+async fn cookie_for(state: &AppState, role: Role) -> String {
+    let id = state
+        .admin_sessions
+        .create(role, Some("test-user".into()))
+        .await;
     format!("{COOKIE_NAME}={id}")
 }
 
@@ -81,7 +84,7 @@ async fn send(state: AppState, method: &str, uri: &str, cookie: Option<&str>) ->
 #[tokio::test]
 async fn viewer_can_view_dashboard() {
     let st = state();
-    let c = cookie_for(&st, Role::Viewer);
+    let c = cookie_for(&st, Role::Viewer).await;
     // No DB needed for the dashboard render, so this is a clean 200.
     assert_eq!(
         send(st, "GET", "/admin/dashboard", Some(&c)).await,
@@ -101,7 +104,7 @@ async fn viewer_cannot_reach_apps_or_admin_sections() {
         "/admin/logs",
     ] {
         let st = state();
-        let c = cookie_for(&st, Role::Viewer);
+        let c = cookie_for(&st, Role::Viewer).await;
         assert_eq!(
             send(st, "GET", uri, Some(&c)).await,
             StatusCode::FORBIDDEN,
@@ -113,7 +116,7 @@ async fn viewer_cannot_reach_apps_or_admin_sections() {
 #[tokio::test]
 async fn viewer_cannot_perform_dashboard_actions() {
     let st = state();
-    let c = cookie_for(&st, Role::Viewer);
+    let c = cookie_for(&st, Role::Viewer).await;
     let uri = "/admin/dashboard/replicas/11111111-2222-3333-4444-555555555555/stop";
     assert_eq!(
         send(st, "POST", uri, Some(&c)).await,
@@ -130,7 +133,7 @@ async fn editor_passes_guard_on_apps_and_media() {
     // no DB is attached. The point is it's NOT a 403.
     for uri in ["/admin/specs", "/admin/media"] {
         let st = state();
-        let c = cookie_for(&st, Role::Editor);
+        let c = cookie_for(&st, Role::Editor).await;
         let status = send(st, "GET", uri, Some(&c)).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "editor allowed on {uri}");
         assert_eq!(
@@ -145,7 +148,7 @@ async fn editor_passes_guard_on_apps_and_media() {
 async fn editor_can_perform_dashboard_actions() {
     // RequireEditor passes; no backend ⇒ 503, but crucially not 403.
     let st = state();
-    let c = cookie_for(&st, Role::Editor);
+    let c = cookie_for(&st, Role::Editor).await;
     let uri = "/admin/dashboard/replicas/11111111-2222-3333-4444-555555555555/stop";
     let status = send(st, "POST", uri, Some(&c)).await;
     assert_ne!(status, StatusCode::FORBIDDEN, "editor may stop/restart");
@@ -161,7 +164,7 @@ async fn editor_cannot_reach_admin_only_sections() {
         "/admin/logs",
     ] {
         let st = state();
-        let c = cookie_for(&st, Role::Editor);
+        let c = cookie_for(&st, Role::Editor).await;
         assert_eq!(
             send(st, "GET", uri, Some(&c)).await,
             StatusCode::FORBIDDEN,
@@ -183,7 +186,7 @@ async fn admin_passes_guard_everywhere() {
         "/admin/audit",
     ] {
         let st = state();
-        let c = cookie_for(&st, Role::Admin);
+        let c = cookie_for(&st, Role::Admin).await;
         assert_ne!(
             send(st, "GET", uri, Some(&c)).await,
             StatusCode::FORBIDDEN,

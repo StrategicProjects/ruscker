@@ -27,7 +27,7 @@ async fn state_with_db() -> (AppState, sqlx::SqlitePool) {
         base_path: Arc::from(""),
         locales: Arc::new(locales),
         admin_auth: AdminAuth::with_token("break-glass-tok"),
-        admin_sessions: Default::default(),
+        admin_sessions: Arc::new(ruscker_admin::auth::InMemoryAdminSessionStore::default()),
         log_buffer: None,
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
@@ -218,7 +218,7 @@ async fn setup_page_chrome_cluster_is_outside_the_setup_form() {
     // Twin of `login_page_chrome_cluster_is_outside_the_login_form` for
     // /admin/setup.
     let (state, _pool) = state_with_db().await;
-    let sid = state.admin_sessions.create(Role::Admin, None);
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
     let cookie = format!("{COOKIE_NAME}={sid}");
     let app = router(state);
     let resp = app
@@ -263,7 +263,8 @@ async fn last_admin_cannot_be_deleted() {
     // Mint an admin session directly (the shared store the router reads).
     let sid = state
         .admin_sessions
-        .create(Role::Admin, Some("root".into()));
+        .create(Role::Admin, Some("root".into()))
+        .await;
     let cookie = format!("{COOKIE_NAME}={sid}");
 
     let (status, loc) = post(state, "/admin/users/root/delete", "", Some(&cookie)).await;

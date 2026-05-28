@@ -63,7 +63,7 @@ async fn app_state(db: ConfigDb) -> AppState {
         admin_auth: AdminAuth {
             admin: Some(Arc::from("test-token")),
         },
-        admin_sessions: Default::default(),
+        admin_sessions: Arc::new(ruscker_admin::auth::InMemoryAdminSessionStore::default()),
         log_buffer: None,
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
@@ -129,7 +129,7 @@ async fn restricted_api_forbids_anonymous() {
 #[tokio::test]
 async fn admin_session_reaches_restricted_app() {
     let state = app_state(open_db().await).await;
-    let sid = state.admin_sessions.create(Role::Admin, None);
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
     assert_eq!(
         get(state, "/app/analysts-app/", Some(format!("{COOKIE_NAME}={sid}"))).await,
         ALLOWED,
@@ -154,7 +154,8 @@ async fn group_member_reaches_restricted_app() {
     let state = app_state(db).await;
     let sid = state
         .admin_sessions
-        .create(Role::Viewer, Some("alice".to_string()));
+        .create(Role::Viewer, Some("alice".to_string()))
+        .await;
     assert_eq!(
         get(state, "/app/analysts-app/", Some(format!("{COOKIE_NAME}={sid}"))).await,
         ALLOWED,
@@ -179,7 +180,8 @@ async fn non_member_forbidden_from_restricted_app() {
     let state = app_state(db).await;
     let sid = state
         .admin_sessions
-        .create(Role::Viewer, Some("dave".to_string()));
+        .create(Role::Viewer, Some("dave".to_string()))
+        .await;
     // Logged in but not in the group ⇒ 403, not a login redirect.
     assert_eq!(
         get(state, "/app/analysts-app/", Some(format!("{COOKIE_NAME}={sid}"))).await,

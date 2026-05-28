@@ -1200,7 +1200,7 @@ mod tests {
                 crate::i18n::Locales::load().expect("load locales"),
             ),
             admin_auth: Default::default(),
-            admin_sessions: Default::default(),
+            admin_sessions: StdArc::new(crate::auth::InMemoryAdminSessionStore::default()),
             log_buffer: None,
             login_limiter: StdArc::new(crate::auth::LoginRateLimiter::default_policy()),
             api_limiter: StdArc::new(crate::ratelimit::ApiRateLimiter::new()),

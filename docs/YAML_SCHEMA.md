@@ -174,7 +174,7 @@ proxy:
     # Sign-in visibility (anonymous viewers only)
     show-admin-link: true              # default true; false hides the entrance
 
-    # Custom HTML blocks (admin-managed; YAML round-trips via import/export)
+    # Custom HTML blocks (admin-managed in the live editor; see note below)
     blocks:
       - slot: top                       # `top` (after header) | `bottom` (after grid)
         title: "Maintenance banner"     # internal label, not shown publicly
@@ -215,9 +215,11 @@ Field reference:
 > the matching `*-origins` field, otherwise the landing's CSP blocks
 > it.
 
-Blocks are admin-managed in the live landing editor; YAML
-round-tripping means `ruscker export` writes them back here and
-`ruscker import` consumes them. SEO, analytics, and `show-admin-link`
+Blocks are **admin-managed in the live landing editor** and stored in
+their own DB table; the `blocks[]` slot in this YAML schema exists so
+a future `ruscker export` round-trip can serialize them, but at the
+moment the import/export path does **not** populate it — operators
+edit blocks from the admin UI. SEO, analytics, and `show-admin-link`
 are deploy-level policy and live only in this block.
 
 ## Specs

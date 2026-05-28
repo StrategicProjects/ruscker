@@ -116,10 +116,25 @@ async fn index(
         _ => Vec::new(),
     };
 
-    let mut cards: Vec<CardCtx<'_>> = state
-        .config
-        .proxy
-        .specs
+    // Specs source: DB when attached AND non-empty (operator-editable
+    // catalog plus the first-install showcase seed), YAML otherwise.
+    // An empty DB falls back to YAML so deployments that load specs
+    // exclusively from `proxy.specs` keep working — only when the DB
+    // actually has rows do they take precedence. Mirrors how
+    // `landing_customization` chooses below.
+    let db_specs: Vec<ruscker_config::Spec> = match state.db.as_ref() {
+        Some(db) => crate::db::specs::list_all(db).await.unwrap_or_else(|err| {
+            tracing::warn!(error = ?err, "specs DB fetch failed; falling back to YAML");
+            Vec::new()
+        }),
+        None => Vec::new(),
+    };
+    let owned_specs: Vec<ruscker_config::Spec> = if db_specs.is_empty() {
+        state.config.proxy.specs.clone()
+    } else {
+        db_specs
+    };
+    let mut cards: Vec<CardCtx<'_>> = owned_specs
         .iter()
         .filter(|spec| spec.access_allows(is_admin, username.as_deref(), &groups))
         .map(CardCtx::from_spec)

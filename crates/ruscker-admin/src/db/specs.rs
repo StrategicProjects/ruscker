@@ -118,6 +118,36 @@ fn import_diff(report: &ImportReport) -> Result<String> {
     }))?)
 }
 
+/// Every spec in the catalog, deserialized back to [`Spec`]. Used by
+/// the landing handler when a DB is attached so the public portal
+/// reflects DB edits + the showcase seed (rather than only the
+/// startup YAML's `proxy.specs`).
+///
+/// Insertion order is stable via `created_at` so the showcase cards
+/// keep the maintainer-curated order (Ruscker first, then the rest).
+pub async fn list_all(db: &ConfigDb) -> Result<Vec<Spec>> {
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(
+            "SELECT config_json FROM specs ORDER BY created_at, id",
+        )
+        .fetch_all(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(
+            "SELECT config_json FROM specs ORDER BY created_at, id",
+        )
+        .fetch_all(pool)
+        .await,
+    }
+    .context("list all specs")?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (json,) in rows {
+        let s: Spec =
+            serde_json::from_str(&json).context("deserialize spec row")?;
+        out.push(s);
+    }
+    Ok(out)
+}
+
 /// Fetch a single spec by id, deserializing `config_json` back to
 /// a [`Spec`]. Returns `None` if no row matches.
 ///

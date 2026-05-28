@@ -561,6 +561,59 @@ body {
   height: 0.5px; background: var(--border); margin: 4px 0;
 }
 
+/* ─── Welcome block (auto-seeded on first install) ───────────────
+ *
+ * Renders inside a `landing-block landing-block--bottom` slot — the
+ * outer wrapper comes from landing.html. These rules style the inner
+ * `<section class="ruscker-welcome">` markup the seed migration
+ * inserts. Operator can delete or edit the block via /admin/blocks.
+ *
+ * Each tech "chip" uses a `--tc` CSS var (the framework's primary
+ * brand hex) as its accent color, with the chip itself a low-opacity
+ * tint of that color and the label in the same color (full opacity).
+ * Defaults gracefully on themes the operator hasn't customized.
+ */
+.ruscker-welcome {
+  margin: 36px auto 0;
+  padding: 28px 24px 32px;
+  border-top: 0.5px solid var(--border);
+  text-align: center;
+}
+.ruscker-welcome-heading {
+  font-size: 16px; font-weight: 500;
+  margin: 0 0 6px;
+  color: var(--text);
+}
+.ruscker-welcome-sub {
+  font-size: 13px; color: var(--text-muted);
+  margin: 0 0 20px;
+}
+.ruscker-welcome-techs {
+  list-style: none; padding: 0; margin: 0 0 22px;
+  display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 8px 10px;
+}
+.ruscker-welcome-tech {
+  display: inline-flex; align-items: center;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 0.5px solid color-mix(in srgb, var(--tc) 35%, transparent);
+  background: color-mix(in srgb, var(--tc) 10%, var(--surface));
+  color: var(--tc);
+  font-size: 12px; font-weight: 500; letter-spacing: 0.02em;
+  line-height: 1;
+}
+.ruscker-welcome-docs {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 18px;
+  background: var(--text); color: var(--bg);
+  border-radius: 999px;
+  font-size: 13px; font-weight: 500;
+  text-decoration: none;
+  transition: opacity 0.15s;
+}
+.ruscker-welcome-docs:hover { opacity: 0.88; }
+
 /* ─── Admin login card ───────────────────────────────────────── */
 .admin-login-card {
   background: var(--surface);

@@ -634,9 +634,24 @@ mod tests {
         }
     }
 
+    /// Migration 0008 seeds a welcome block on fresh DBs. These tests
+    /// assert on counts/positions that predate it; wipe the table so
+    /// each test starts from a clean slate.
+    async fn wipe(db: &ConfigDb) {
+        match db {
+            ConfigDb::Sqlite(p) => {
+                sqlx::query("DELETE FROM landing_blocks").execute(p).await.unwrap();
+            }
+            ConfigDb::Postgres(p) => {
+                sqlx::query("DELETE FROM landing_blocks").execute(p).await.unwrap();
+            }
+        }
+    }
+
     #[tokio::test]
     async fn insert_appends_position_per_slot() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        wipe(&db).await;
         insert(&db, &input("top", "a"), None).await.unwrap();
         insert(&db, &input("top", "b"), None).await.unwrap();
         insert(&db, &input("bottom", "c"), None).await.unwrap();
@@ -652,6 +667,7 @@ mod tests {
     #[tokio::test]
     async fn move_block_swaps_within_slot() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        wipe(&db).await;
         let a = insert(&db, &input("top", "a"), None).await.unwrap();
         let _b = insert(&db, &input("top", "b"), None).await.unwrap();
         let c = insert(&db, &input("top", "c"), None).await.unwrap();
@@ -678,6 +694,7 @@ mod tests {
     #[tokio::test]
     async fn list_enabled_excludes_disabled() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        wipe(&db).await;
         let id = insert(&db, &input("top", "x"), None).await.unwrap();
         let mut off = input("top", "x");
         off.enabled = false;
@@ -690,8 +707,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn welcome_block_seeded_on_fresh_db() {
+        // Migration 0008 puts a single welcome block in `bottom` on
+        // a fresh DB so first-install operators see something useful
+        // on the landing (#187 #4+#5). It's gated `WHERE NOT EXISTS`,
+        // so a DB with any block at all skips the seed.
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let all = list_all(&db).await.unwrap();
+        assert_eq!(all.len(), 1, "fresh DB has the welcome seed");
+        assert_eq!(all[0].id, "welcome-seed");
+        assert_eq!(all[0].slot, "bottom");
+        assert!(all[0].enabled);
+        // Operator deletes it → next migration run (re-startup) does
+        // NOT re-seed, because the gate is `NOT EXISTS landing_blocks`
+        // and the operator may have inserted other blocks too. Sqlx
+        // also tracks applied migrations so 0008 only runs once.
+    }
+
+    #[tokio::test]
     async fn delete_removes() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        wipe(&db).await;
         let id = insert(&db, &input("bottom", "z"), None).await.unwrap();
         assert!(delete(&db, &id, None).await.unwrap());
         assert!(fetch_one(&db, &id).await.unwrap().is_none());

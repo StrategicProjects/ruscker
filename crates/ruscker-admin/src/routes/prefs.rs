@@ -77,6 +77,14 @@ fn persistent_cookie(name: &'static str, value: String) -> Cookie<'static> {
 fn redirect_back(headers: &HeaderMap) -> Redirect {
     // Same-origin only: an attacker-controlled `Referer` must not
     // turn this 303 into an open redirect off our origin.
+    //
+    // Note: unlike `admin::login_submit` this does NOT strip
+    // `state.base_path` first. It doesn't need to — the response
+    // middleware's `rewrite_url_base` skips already-prefixed
+    // `Location` headers (`t == base || t.starts_with("{base}/")`),
+    // so passing through `/box/admin/specs` here yields the same
+    // final `Location: /box/admin/specs`. The fallback path `/`
+    // becomes `/box/` via the middleware, which is correct.
     let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
     Redirect::to(&super::same_origin_path(referer, "/"))
 }

@@ -297,11 +297,25 @@ async fn login_submit(
 /// Strip a normalized base-path prefix (e.g. `/box`) from a
 /// same-origin path so the `/admin/...` and `/` matchers behave the
 /// same with or without subpath mounting. `base` is the already-
-/// normalized prefix from `AppState.base_path` (`""` for root).
+/// normalized prefix from `AppState.base_path` (`""` for root —
+/// leading slash, no trailing slash for everything else, see
+/// [`ruscker_config::normalize_base_path`]).
+///
+/// Query strings ride along: `strip_base_prefix("/box/x?q=1", "/box")`
+/// returns `"/x?q=1"`. Callers that only want the path part should
+/// split on `?` themselves; today the matchers use `starts_with` /
+/// equality, so the query suffix is just preserved as-is.
 fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
     if base.is_empty() {
         return path;
     }
+    // `base` is the normalized form from `AppState.base_path`. If a
+    // caller hands us a trailing-slashed or empty-as-`/` form, the
+    // strip logic below silently misbehaves.
+    debug_assert!(
+        !base.ends_with('/') && base != "/" && base.starts_with('/'),
+        "base must be normalized: leading slash, no trailing slash, never bare `/` ({base:?})"
+    );
     if let Some(rest) = path.strip_prefix(base) {
         // `/box` → "" (the canonical landing) or `/box/foo` → `/foo`.
         if rest.is_empty() {
@@ -655,5 +669,16 @@ mod tests {
         // `/boxes` starts with `/box` but is not under the prefix.
         assert_eq!(strip_base_prefix("/boxes", "/box"), "/boxes");
         assert_eq!(strip_base_prefix("/other/path", "/box"), "/other/path");
+    }
+
+    #[test]
+    fn strip_base_prefix_preserves_query_strings() {
+        // Query strings ride along the suffix — same matcher
+        // behavior as a no-base-path deployment.
+        assert_eq!(
+            strip_base_prefix("/box/admin/specs?page=2", "/box"),
+            "/admin/specs?page=2"
+        );
+        assert_eq!(strip_base_prefix("/box/?theme=dark", "/box"), "/?theme=dark");
     }
 }

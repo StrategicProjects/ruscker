@@ -157,7 +157,7 @@ admin-dashboard-state-failed = failed
 admin-dashboard-backend-missing = Docker backend is not connected — start the server with `--docker` to see containers here.
 
 # Admin login
-admin-login-title = Admin sign in
+admin-login-title = Sign in
 admin-login-help = Enter the admin token defined in RUSCKER_ADMIN_TOKEN.
 admin-login-token-label = Token
 admin-login-token-placeholder = Paste the token here

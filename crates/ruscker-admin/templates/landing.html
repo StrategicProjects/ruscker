@@ -20,12 +20,28 @@
   <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
     <div class="flex items-center gap-3">
       {# Small Ruscker mark left of the operator-provided title (#182).
-         Future: operators can override with `landing-customization.logo`. #}
-      <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
-        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
-        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
-        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
-      </svg>
+         When the operator hasn't set a custom `header-bg`, we render
+         in the brand teal palette — that works against the default
+         surface in both light and dark themes. When a custom header
+         is in play (`header_style` non-empty), one of the brand
+         polygons can collide with the chosen background (e.g. teal
+         on teal disappears) — so we drop to a monochrome `currentColor`
+         mark that inherits the header's text color and stays
+         high-contrast at zero cost. Future: operators can override
+         with `landing-customization.logo`. #}
+      {% if header_style.is_empty() %}
+        <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
+          <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+          <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+          <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+        </svg>
+      {% else %}
+        <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
+          <polygon points="14,52 40,40 66,52 40,64" fill="currentColor" opacity="0.45"/>
+          <polygon points="14,40 40,28 66,40 40,52" fill="currentColor" opacity="0.7"/>
+          <polygon points="14,28 40,16 66,28 40,40" fill="currentColor" opacity="1"/>
+        </svg>
+      {% endif %}
       <div>
         <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
         <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
@@ -164,9 +180,14 @@
               <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
           {% endmatch %}
           {% match card.logo %}{% when Some with (logo) %}
+            {# #187 finding F2: hide the <img> if the referenced asset
+               doesn't load — the tinted cover behind shows through
+               cleanly instead of the broken-image glyph. Operators
+               with bad paths see a clean card, not a jarring icon. #}
             <img src="{{ logo }}"
                  alt=""
                  loading="lazy"
+                 onerror="this.style.display='none'"
                  class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
           {% when None %}
             <span class="rcover-fallback">{{ card.id }}</span>

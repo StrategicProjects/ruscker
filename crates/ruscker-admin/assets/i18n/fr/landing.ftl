@@ -157,7 +157,7 @@ admin-dashboard-state-failed = échec
 admin-dashboard-backend-missing = Le backend Docker n'est pas connecté — démarrez le serveur avec `--docker` pour voir les conteneurs ici.
 
 # Admin login
-admin-login-title = Accès admin
+admin-login-title = Se connecter
 admin-login-help = Saisissez le jeton admin défini dans RUSCKER_ADMIN_TOKEN.
 admin-login-token-label = Jeton
 admin-login-token-placeholder = Collez le jeton ici

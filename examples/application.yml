@@ -37,6 +37,16 @@ proxy:
       es: "Portal de demostración de Ruscker. Use los filtros para encontrar apps, APIs y enlaces."
       fr: "Portail de démonstration de Ruscker. Utilisez les filtres pour trouver apps, APIs et liens."
 
+  # NOTE on `min-replicas: 0` below.
+  #
+  # The specs in this file point at fictional images (`org/X:latest`,
+  # `registry.example.com/...`) — they exist to demonstrate config
+  # features, not to actually spawn. The default `min-replicas` for a
+  # containerized spec is 1, which would make the scaler retry the
+  # (failing) pull every ~10s and flood the log. Setting min-replicas
+  # to 0 makes each spec on-demand only: the container spawns the
+  # first time someone hits `/app/<id>`, never before. Operators who
+  # want a warm pool override per spec (or leave the default off).
   specs:
 
     # ── Shiny / interactive apps ─────────────────────────────────
@@ -47,6 +57,7 @@ proxy:
       seats-per-container: 10
       max-lifetime: 360
       container-lifetime: 360
+      min-replicas: 0
       template-properties:
         logo: "/assets/img/sales.png"
         icon: lock
@@ -63,6 +74,7 @@ proxy:
       docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
       docker-registry-domain: registry.example.com
       seats-per-container: 10
+      min-replicas: 0
       template-properties:
         logo: "/assets/img/ops.png"
         icon: lock_open
@@ -75,6 +87,7 @@ proxy:
       description: "A respondent survey."
       container-image: org/survey:latest
       seats-per-container: 5
+      min-replicas: 0
       template-properties:
         type: app
         state: active
@@ -87,6 +100,7 @@ proxy:
       heartbeat-timeout: -1            # never expire
       container-memory-limit: 512m
       container-cpu-limit: 1.0
+      min-replicas: 0
       template-properties:
         type: app
         state: active
@@ -96,6 +110,7 @@ proxy:
       display-name: Legacy Viewer
       description: "Kept around but hidden from the landing."
       container-image: org/legacy-viewer:latest
+      min-replicas: 0
       template-properties:
         type: app
         state: inactive
@@ -112,7 +127,7 @@ proxy:
         health-path: /__healthz__
         rate-limit: 100/min
         cors: true
-      min-replicas: 1
+      min-replicas: 0
       max-replicas: 3
       template-properties:
         type: api

@@ -181,11 +181,14 @@ async fn forward(
     // cookie we may set at the end.
     let is_https = crate::auth::request_is_https(req.headers());
 
-    // 1. Find the spec.
-    let Some(spec) = find_spec(&state.config, &spec_id) else {
+    // 1. Find the spec. DB-first when attached (covers the showcase
+    // seed + operator edits via the admin), falling back to the YAML
+    // `proxy.specs` so deployments that load specs exclusively from
+    // the config file keep working. Matches the landing handler's
+    // spec source rule.
+    let Some(spec) = find_spec(&state, &spec_id).await else {
         return (StatusCode::NOT_FOUND, format!("spec `{spec_id}` not found")).into_response();
     };
-    let spec = spec.clone();
 
     // 2. External link: bounce.
     if spec.kind() == SpecKind::External {
@@ -553,8 +556,26 @@ fn cors_preflight_response() -> Response {
     resp
 }
 
-fn find_spec<'a>(config: &'a ruscker_config::Config, id: &str) -> Option<&'a Spec> {
-    config.proxy.specs.iter().find(|s| s.id == id)
+async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
+    // DB-first — the operator-editable catalog (admin UI + showcase
+    // seed) shadows the YAML for matching ids. Cheap: single indexed
+    // SELECT by primary key.
+    if let Some(db) = state.db.as_ref() {
+        match crate::db::specs::fetch_one(db, id).await {
+            Ok(Some(spec)) => return Some(spec),
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(error = ?err, spec_id = id, "spec DB lookup failed; falling back to YAML");
+            }
+        }
+    }
+    state
+        .config
+        .proxy
+        .specs
+        .iter()
+        .find(|s| s.id == id)
+        .cloned()
 }
 
 /// Returns the chosen `Replica`, the session_id we'll track this

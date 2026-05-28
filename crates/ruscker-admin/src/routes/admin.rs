@@ -271,21 +271,50 @@ async fn login_submit(
     }
 
     let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
-    let path = super::same_origin_path(referer, user.role.home());
+    let raw_path = super::same_origin_path(referer, user.role.home());
+    // Under a base path (#173), referer paths come in as
+    // `/box/admin/specs` — strip the prefix before the `/admin/`
+    // and `/` checks so a non-admin signing in from `/box/admin/X`
+    // returns to `X`, not the dashboard. The response middleware
+    // re-prefixes the `Location` on the way out.
+    let path = strip_base_prefix(&raw_path, &state.base_path);
     let target = if path == "/" {
         // Signed in from the public landing — return there so the
         // viewer sees the apps their groups unlock (#155), rather than
         // bouncing a non-admin into the panel.
-        path
+        path.to_string()
     } else if path.starts_with("/admin/")
         && !path.starts_with("/admin/login")
-        && user.role.can_access_section(section_for_admin_path(&path))
+        && user.role.can_access_section(section_for_admin_path(path))
     {
-        path
+        path.to_string()
     } else {
         user.role.home().to_string()
     };
     Redirect::to(&target).into_response()
+}
+
+/// Strip a normalized base-path prefix (e.g. `/box`) from a
+/// same-origin path so the `/admin/...` and `/` matchers behave the
+/// same with or without subpath mounting. `base` is the already-
+/// normalized prefix from `AppState.base_path` (`""` for root).
+fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
+    if base.is_empty() {
+        return path;
+    }
+    if let Some(rest) = path.strip_prefix(base) {
+        // `/box` → "" (the canonical landing) or `/box/foo` → `/foo`.
+        if rest.is_empty() {
+            "/"
+        } else if rest.starts_with('/') {
+            rest
+        } else {
+            // `/boxes` happens to start with `/box` but isn't under it.
+            path
+        }
+    } else {
+        path
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -600,5 +629,31 @@ pub(crate) fn render<T: Template>(t: &T) -> Response {
             tracing::error!(error = ?err, "admin template render failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "template error").into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_base_prefix;
+
+    #[test]
+    fn strip_base_prefix_root_is_noop() {
+        assert_eq!(strip_base_prefix("/admin/specs", ""), "/admin/specs");
+        assert_eq!(strip_base_prefix("/", ""), "/");
+    }
+
+    #[test]
+    fn strip_base_prefix_removes_matching_prefix() {
+        assert_eq!(strip_base_prefix("/box/admin/specs", "/box"), "/admin/specs");
+        assert_eq!(strip_base_prefix("/box/", "/box"), "/");
+        // Bare canonical landing under the prefix.
+        assert_eq!(strip_base_prefix("/box", "/box"), "/");
+    }
+
+    #[test]
+    fn strip_base_prefix_keeps_non_matching_paths() {
+        // `/boxes` starts with `/box` but is not under the prefix.
+        assert_eq!(strip_base_prefix("/boxes", "/box"), "/boxes");
+        assert_eq!(strip_base_prefix("/other/path", "/box"), "/other/path");
     }
 }

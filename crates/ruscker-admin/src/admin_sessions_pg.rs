@@ -137,6 +137,27 @@ async fn ensure_schema(pool: &PgPool) -> sqlx::Result<()> {
     .map(|_| ())
 }
 
+/// Clip a cache `valid_until` so it never outlives the DB-recorded
+/// `expires_at`. Returns the earlier of the two, so a positive
+/// cached answer is invalidated as soon as PG would refuse it.
+///
+/// Converts `expires_at` (calendar time) to a monotonic [`Instant`]
+/// by anchoring it against `Utc::now()` and `Instant::now()` — same
+/// pair sampled close together so monotonic-vs-wall-clock drift is
+/// negligible.
+fn clip_to_expiry(cache_until: Instant, expires_at: DateTime<Utc>) -> Instant {
+    let wall_now = Utc::now();
+    if expires_at <= wall_now {
+        // Already expired by wall clock — clamp to "now" so the cache
+        // entry is stale immediately on the next lookup.
+        return Instant::now();
+    }
+    // expires_at > wall_now ⇒ the delta is positive.
+    let delta = (expires_at - wall_now).to_std().unwrap_or_default();
+    let expiry_instant = Instant::now() + delta;
+    cache_until.min(expiry_instant)
+}
+
 fn role_to_str(role: Role) -> &'static str {
     match role {
         Role::Admin => "admin",
@@ -173,16 +194,27 @@ impl AdminSessionStore for PostgresAdminSessionStore {
             // The store-level contract is "best-effort" — if the DB is
             // unreachable we still return an id so the cookie path
             // doesn't 500. The local cache lets the just-signed-in user
-            // browse this node; a failover lands them at login.
-            warn!(error = ?e, "admin session insert failed; serving from local cache only");
+            // browse THIS node; a failover lands them at login because
+            // sibling instances never see the row. Log loud so ops
+            // notices the divergence in their dashboards.
+            tracing::error!(
+                error = ?e,
+                "admin session INSERT failed; cookie works on this node only — sibling instances will treat it as unknown until the DB recovers"
+            );
         }
         // Write-through to the cache so this node sees its own writes
-        // instantly without re-querying.
+        // instantly without re-querying. Clip the cache window to the
+        // session's `expires_at` so a cached positive answer never
+        // outlives the DB-recorded expiry (review on #196 finding #1).
+        // At default TTLs (24h session, 5s cache) the clip is a no-op;
+        // it matters at the boundary and in test configurations with
+        // short session TTLs.
+        let valid_until = clip_to_expiry(Instant::now() + self.cache_ttl, expires_at);
         self.cache.insert(
             id.clone(),
             CachedEntry {
                 info: Some(SessionInfo { role, actor }),
-                valid_until: Instant::now() + self.cache_ttl,
+                valid_until,
             },
         );
         id
@@ -208,7 +240,9 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         .fetch_optional(&self.pool)
         .await;
 
-        let info = match row {
+        // (info, expires_at-from-row) — the second slot is only used
+        // to clip the cache window on the positive branch.
+        let (info, expires_at): (Option<SessionInfo>, Option<DateTime<Utc>>) = match row {
             Ok(Some(r)) => {
                 let role_str: String = r.get("role");
                 let actor: Option<String> = r.get("actor");
@@ -234,12 +268,12 @@ impl AdminSessionStore for PostgresAdminSessionStore {
                         .bind(id)
                         .execute(&self.pool)
                         .await;
-                    None
+                    (None, None)
                 } else {
-                    Some(SessionInfo { role, actor })
+                    (Some(SessionInfo { role, actor }), Some(expires_at))
                 }
             }
-            Ok(None) => None,
+            Ok(None) => (None, None),
             Err(e) => {
                 // DB hiccup — log and fall back to "unknown". Don't poison
                 // the cache, so the next request retries instead of
@@ -250,12 +284,19 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         };
 
         // Cache the result (positive or negative) so a flood of the
-        // same sid stays single-DB-hit per TTL window.
+        // same sid stays single-DB-hit per TTL window. For positive
+        // answers, clip the cache window to the row's `expires_at` so
+        // a cached entry never outlives the DB-recorded expiry (review
+        // on #196 finding #1).
+        let valid_until = match expires_at {
+            Some(exp) => clip_to_expiry(now + self.cache_ttl, exp),
+            None => now + self.cache_ttl,
+        };
         self.cache.insert(
             id.to_string(),
             CachedEntry {
                 info: info.clone(),
-                valid_until: now + self.cache_ttl,
+                valid_until,
             },
         );
         info
@@ -415,6 +456,31 @@ mod postgres_it {
         assert!(
             b.validate(&sid).await.is_none(),
             "logout must propagate within cache_ttl"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_window_is_clipped_to_session_expiry() {
+        // #196 review finding #1: if the session is about to expire
+        // *before* the cache window ends, the cached entry must NOT
+        // outlive the row's `expires_at`. Set session_ttl smaller than
+        // cache_ttl so the clip actually fires.
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let session_ttl = Duration::from_millis(100);
+        let cache_ttl = Duration::from_secs(60); // would otherwise dominate
+        let store =
+            PostgresAdminSessionStore::connect_with(&pg_url(), session_ttl, cache_ttl)
+                .await
+                .unwrap();
+        reset_rows(&store.pool).await;
+        let sid = store.create(Role::Admin, None).await;
+        // Sleep past `session_ttl` but well inside `cache_ttl`. With
+        // the clip the cache window stopped at `expires_at`, so the
+        // next validate must NOT return the (now-expired) session.
+        tokio::time::sleep(session_ttl + Duration::from_millis(30)).await;
+        assert!(
+            store.validate(&sid).await.is_none(),
+            "cache window must be clipped to expires_at"
         );
     }
 

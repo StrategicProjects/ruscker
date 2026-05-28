@@ -173,8 +173,8 @@ struct SessionEntry {
     actor: Option<String>,
 }
 
-/// What [`AdminSessions::validate`] yields for a live session — the
-/// role and acting identity carried by the extractors.
+/// What [`AdminSessionStore::validate`] yields for a live session —
+/// the role and acting identity carried by the extractors.
 #[derive(Clone, Debug)]
 pub struct SessionInfo {
     pub role: Role,

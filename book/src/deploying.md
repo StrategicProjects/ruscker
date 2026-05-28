@@ -266,6 +266,12 @@ needed.
 This removes the need for a sticky LB. Round-robin (or least-conn) is
 fine; any node can serve any session-bearing path.
 
+> **One database, three tables.** `--config-db-url` (shared spec
+> catalog), `--session-store-url` (proxy `proxy_sessions` table from
+> Phase 7), and `--admin-session-store-url` (sign-in sessions, #185)
+> can all point at the **same** Postgres URL — each store creates and
+> owns its own table. No need to provision three databases.
+
 #### Fallback: sticky upstream
 
 If you can't host shared Postgres for admin sessions, pin the

@@ -75,9 +75,12 @@ Status: living document. Tracks the Phase 5 security audit
 - **[implemented]** Admin cookie is `HttpOnly` + `SameSite=Strict`
   + `Secure` (under TLS, see §7) — `routes::admin::login_submit`.
 - **[implemented]** Opaque server-side sessions (#77) — the cookie
-  carries a random 244-bit session id (`auth::AdminSessions`), never
-  the token. Logout and server restart revoke it; a stolen cookie
-  never exposes the token.
+  carries a random 244-bit session id (`auth::AdminSessionStore`),
+  never the token. Logout and server restart revoke it; a stolen
+  cookie never exposes the token. The store is in-memory by default
+  (`InMemoryAdminSessionStore`); for HA, point Ruscker at a shared
+  Postgres via `--admin-session-store-url` (#185) so sessions survive
+  a load-balancer hop.
 - **[implemented]** Role-based access control (#101/#107) — three
   roles (**Viewer** = dashboard read-only; **Editor** = apps + media +
   dashboard incl. stop/restart; **Admin** = everything, incl. user

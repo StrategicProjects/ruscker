@@ -2,13 +2,18 @@
 # ruscker-enable-docker — opt operators into the Docker backend without
 # hand-writing a systemd drop-in.
 #
-# What it does (idempotent):
-#   1. Drops a unit override at /etc/systemd/system/ruscker.service.d/docker.conf
-#      that replaces ExecStart with `... --docker --db /var/lib/ruscker/ruscker.db`
-#      and sets SupplementaryGroups=docker so the `ruscker` user can talk
-#      to /var/run/docker.sock.
+# What it does:
+#   1. Reads the unit's current effective ExecStart (so any operator
+#      customization to --bind / --config is preserved), appends
+#      --docker and --db (if missing), and writes a drop-in at
+#      /etc/systemd/system/ruscker.service.d/docker.conf with the new
+#      command + SupplementaryGroups=docker.
 #   2. systemctl daemon-reload + restart ruscker.
-#   3. Verifies /readyz returns 200.
+#   3. Verifies /readyz returns 200 on the bound port.
+#
+# Refuses to overwrite an existing drop-in or a unit that already runs
+# with --docker — both report "nothing to do" and exit 0. To re-run
+# from a clean slate, remove the drop-in first (see "To undo" below).
 #
 # Why this is opt-in: docker-group membership is effectively root on the
 # host (same trade-off ShinyProxy carries). The package does NOT do this
@@ -25,9 +30,7 @@ DROPIN_DIR=/etc/systemd/system/ruscker.service.d
 DROPIN=$DROPIN_DIR/docker.conf
 UNIT=ruscker.service
 SOCK=/var/run/docker.sock
-CONFIG=/etc/ruscker/application.yml
-DB=/var/lib/ruscker/ruscker.db
-PORT_HINT=8080
+DEFAULT_DB=/var/lib/ruscker/ruscker.db
 
 YES=0
 for a in "$@"; do
@@ -62,12 +65,73 @@ if [ ! -S "$SOCK" ]; then
     echo "  once dockerd is started (After=docker.service is already in the unit)."
 fi
 
+# Refuse to silently rewrite an existing drop-in — the operator may
+# have customized it. Make them take it down explicitly to re-run.
+if [ -f "$DROPIN" ]; then
+    echo "ruscker-enable-docker: $DROPIN already exists — nothing to do."
+    echo "  Inspect:  cat $DROPIN"
+    echo "  Re-run from a clean slate:"
+    echo "    sudo rm $DROPIN && sudo systemctl daemon-reload && sudo systemctl restart $UNIT"
+    echo "    sudo ruscker-enable-docker"
+    exit 0
+fi
+
+# Resolve the currently effective ExecStart so we can preserve the
+# operator's `--bind` / `--config` / any other custom args. In
+# systemd's load order the LAST non-empty `ExecStart=` line wins
+# (prior `ExecStart=` (empty) lines reset the list). `systemctl cat`
+# concatenates the base unit + every drop-in in load order, so we just
+# take the last non-empty hit.
+CURRENT_EXEC=$(systemctl cat "$UNIT" 2>/dev/null \
+    | awk '/^ExecStart=./ { sub(/^ExecStart=/, "", $0); last = $0 } END { print last }')
+[ -n "$CURRENT_EXEC" ] || die "could not read current ExecStart for $UNIT"
+
+# Idempotency: if --docker is already there, we have nothing to do.
+case " $CURRENT_EXEC " in
+    *' --docker '*)
+        echo "$UNIT already runs with --docker — nothing to do."
+        echo "  Current: $CURRENT_EXEC"
+        exit 0 ;;
+esac
+
+# Append --docker and --db (if --db isn't already in the command).
+NEW_EXEC="$CURRENT_EXEC --docker"
+case " $CURRENT_EXEC " in
+    *' --db '*) : ;;
+    *) NEW_EXEC="$NEW_EXEC --db $DEFAULT_DB" ;;
+esac
+
+# Derive the probe URL from --bind in the current command. 0.0.0.0:N
+# and [::]:N wildcard binds get probed on the loopback (the unit binds
+# on every interface but curl talks to one address); explicit binds
+# are probed as-is. Default `--bind` from the base unit is
+# `0.0.0.0:8080`, so the fallback matches that.
+BIND_ARG=$(printf '%s\n' "$CURRENT_EXEC" \
+    | sed -n 's/.*--bind \([^ ]*\).*/\1/p')
+BIND_ARG=${BIND_ARG:-0.0.0.0:8080}
+case "$BIND_ARG" in
+    '[::]:'*)
+        PROBE_HOST="[::1]" ; PROBE_PORT=${BIND_ARG##*:} ;;
+    '0.0.0.0:'*)
+        PROBE_HOST="127.0.0.1" ; PROBE_PORT=${BIND_ARG##*:} ;;
+    *)
+        # Explicit interface (e.g. `127.0.0.1:9000`, `[::1]:8080`) —
+        # use it verbatim.
+        PROBE_HOST=${BIND_ARG%:*} ; PROBE_PORT=${BIND_ARG##*:} ;;
+esac
+PROBE_URL="http://$PROBE_HOST:$PROBE_PORT/readyz"
+
 # ── Plan output ──────────────────────────────────────────────────────
 echo "Ruscker will be configured to talk to the Docker daemon:"
 echo
 note "drop-in:        $DROPIN"
-note "ExecStart:      adds --docker --db $DB"
+note "ExecStart:      preserves the current bind/config; adds --docker"
+case " $CURRENT_EXEC " in
+    *' --db '*) note "                (--db already present — left alone)" ;;
+    *)          note "                (adds --db $DEFAULT_DB)" ;;
+esac
 note "user group:     ruscker → docker (SupplementaryGroups=docker)"
+note "verify probe:   $PROBE_URL"
 note "daemon-reload + systemctl restart $UNIT"
 echo
 echo "Security note: members of the docker group can run privileged"
@@ -87,14 +151,15 @@ fi
 
 # ── Apply ─────────────────────────────────────────────────────────────
 mkdir -p "$DROPIN_DIR"
-# Note: this REPLACES ExecStart (the leading empty assignment is required
-# by systemd to override the unit's ExecStart rather than appending to it).
+# The leading empty `ExecStart=` is required: systemd treats ExecStart
+# as a list-valued option, so we have to reset the list before
+# re-defining it.
 cat > "$DROPIN" <<EOF
-# Written by ruscker-enable-docker. Safe to edit by hand; the helper
-# only checks for the file's presence, not its contents.
+# Written by ruscker-enable-docker. The helper refuses to overwrite
+# this file — edit by hand, or remove and re-run.
 [Service]
 ExecStart=
-ExecStart=/usr/bin/ruscker serve --config $CONFIG --bind 0.0.0.0:$PORT_HINT --docker --db $DB
+ExecStart=$NEW_EXEC
 SupplementaryGroups=docker
 EOF
 chmod 644 "$DROPIN"
@@ -106,9 +171,9 @@ systemctl restart "$UNIT"
 # Give the service a couple seconds to come up before probing.
 SLEPT=0
 while [ "$SLEPT" -lt 10 ]; do
-    if curl -fsS "http://127.0.0.1:$PORT_HINT/readyz" >/dev/null 2>&1; then
+    if curl -fsS "$PROBE_URL" >/dev/null 2>&1; then
         echo "✓ Ruscker is running with the Docker backend."
-        echo "  /readyz returned 200 on port $PORT_HINT."
+        echo "  $PROBE_URL returned 200."
         echo "  View status: systemctl status $UNIT"
         echo "  Tail logs:   journalctl -u $UNIT -f"
         exit 0
@@ -117,6 +182,6 @@ while [ "$SLEPT" -lt 10 ]; do
     sleep 1
 done
 
-echo "Drop-in written but /readyz didn't come up within 10s." >&2
+echo "Drop-in written but $PROBE_URL didn't come up within 10s." >&2
 echo "Check: systemctl status $UNIT && journalctl -u $UNIT -n 50" >&2
 exit 1

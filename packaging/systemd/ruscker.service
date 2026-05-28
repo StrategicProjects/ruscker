@@ -28,8 +28,10 @@ WorkingDirectory=/var/lib/ruscker
 
 # --- Hardening -------------------------------------------------------
 # Ruscker needs very little of the host. If you enable the --docker
-# backend, the `ruscker` user also needs access to the Docker socket;
-# uncomment SupplementaryGroups below (note: docker group ≈ root).
+# backend, the `ruscker` user also needs access to the Docker socket.
+# Preferred path: `sudo ruscker-enable-docker` (writes a drop-in with
+# --docker + SupplementaryGroups=docker; see README.Debian). Or
+# uncomment the line below by hand — note: docker group ≈ root.
 #SupplementaryGroups=docker
 NoNewPrivileges=true
 ProtectSystem=strict

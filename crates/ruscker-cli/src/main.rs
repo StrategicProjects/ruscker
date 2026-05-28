@@ -465,8 +465,9 @@ fn cmd_serve(
             // landing + admin still work in proxy-less mode).
             tracing::warn!(
                 "Docker socket is reachable at /var/run/docker.sock but --docker is OFF — \
-                 app containers will not spawn. On a Debian/Ubuntu install run \
-                 `sudo ruscker-enable-docker`; otherwise add --docker to the command line."
+                 app containers will not spawn. If you installed from the Ruscker .deb \
+                 package run `sudo ruscker-enable-docker`; otherwise add --docker to the \
+                 command line."
             );
         }
         // Config database: Postgres (shared HA catalog) takes precedence

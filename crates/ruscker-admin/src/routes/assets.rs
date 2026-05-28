@@ -35,6 +35,22 @@ const JOST_600: &[u8] = include_bytes!("../../assets/fonts/jost-latin-600-normal
 
 const ALPINE_JS: &[u8] = include_bytes!("../../assets/js/alpine.min.js");
 
+// Tech showcase logos — bundled into the binary so the seeded
+// showcase specs (see migration 0009) render covers on a fresh
+// install without operator-uploaded images. Files live under
+// crates/ruscker-admin/assets/showcase/ and were provided as a
+// package by the maintainer.
+const SHOWCASE_BOKEH: &[u8] = include_bytes!("../../assets/showcase/bokeh.svg");
+const SHOWCASE_DASH: &[u8] = include_bytes!("../../assets/showcase/dash.svg");
+const SHOWCASE_FASTAPI: &[u8] = include_bytes!("../../assets/showcase/fastapi.svg");
+const SHOWCASE_JUPYTER: &[u8] = include_bytes!("../../assets/showcase/jupyter.svg");
+const SHOWCASE_PLUMBER: &[u8] = include_bytes!("../../assets/showcase/plumber.svg");
+const SHOWCASE_QUARTO: &[u8] = include_bytes!("../../assets/showcase/quarto.svg");
+const SHOWCASE_RMARKDOWN: &[u8] = include_bytes!("../../assets/showcase/rmarkdown.svg");
+const SHOWCASE_SHINY: &[u8] = include_bytes!("../../assets/showcase/shiny.svg");
+const SHOWCASE_STREAMLIT: &[u8] = include_bytes!("../../assets/showcase/streamlit.svg");
+const SHOWCASE_VOILA: &[u8] = include_bytes!("../../assets/showcase/voila.svg");
+
 // Ruscker brand kit — see docs/BRAND.md for usage rules.
 const BRAND_MARK: &[u8] = include_bytes!("../../assets/brand/ruscker-mark.svg");
 const BRAND_MARK_FLAT: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-flat.svg");
@@ -79,6 +95,17 @@ pub fn routes() -> Router<AppState> {
             "/assets/js/alpine.min.js",
             get(|| serve(ALPINE_JS, "application/javascript; charset=utf-8")),
         )
+        // Tech showcase logos. URLs match the seeded specs in migration 0009.
+        .route("/assets/showcase/bokeh.svg", get(|| serve(SHOWCASE_BOKEH, SVG)))
+        .route("/assets/showcase/dash.svg", get(|| serve(SHOWCASE_DASH, SVG)))
+        .route("/assets/showcase/fastapi.svg", get(|| serve(SHOWCASE_FASTAPI, SVG)))
+        .route("/assets/showcase/jupyter.svg", get(|| serve(SHOWCASE_JUPYTER, SVG)))
+        .route("/assets/showcase/plumber.svg", get(|| serve(SHOWCASE_PLUMBER, SVG)))
+        .route("/assets/showcase/quarto.svg", get(|| serve(SHOWCASE_QUARTO, SVG)))
+        .route("/assets/showcase/rmarkdown.svg", get(|| serve(SHOWCASE_RMARKDOWN, SVG)))
+        .route("/assets/showcase/shiny.svg", get(|| serve(SHOWCASE_SHINY, SVG)))
+        .route("/assets/showcase/streamlit.svg", get(|| serve(SHOWCASE_STREAMLIT, SVG)))
+        .route("/assets/showcase/voila.svg", get(|| serve(SHOWCASE_VOILA, SVG)))
         // Brand kit. URLs match docs/BRAND.md.
         .route("/assets/brand/mark.svg", get(|| serve(BRAND_MARK, SVG)))
         .route("/assets/brand/mark-flat.svg", get(|| serve(BRAND_MARK_FLAT, SVG)))

@@ -36,7 +36,9 @@ proxy:
 
 /// A fresh, migrated SQLite at a unique temp path. (The crate's
 /// `open_memory` is `#[cfg(test)]`-only, so integration tests open a
-/// file instead.)
+/// file instead.) Wipes the showcase seed rows so the landing
+/// handler falls back to the YAML `proxy.specs` for the assertions
+/// below (the DB-empty-→-YAML fallback in `routes::landing`).
 async fn open_db() -> ConfigDb {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
@@ -46,7 +48,9 @@ async fn open_db() -> ConfigDb {
         N.fetch_add(1, Ordering::Relaxed)
     ));
     let _ = std::fs::remove_file(&path);
-    ConfigDb::Sqlite(ruscker_admin::db::open(&path).await.unwrap())
+    let pool = ruscker_admin::db::open(&path).await.unwrap();
+    sqlx::query("DELETE FROM specs").execute(&pool).await.unwrap();
+    ConfigDb::Sqlite(pool)
 }
 
 /// AppState with admin auth configured (so sessions resolve) and an

@@ -93,6 +93,12 @@ pub async fn open(path: impl AsRef<Path>) -> Result<SqlitePool> {
         .await
         .context("apply migrations")?;
 
+    // First-install showcase cards (idempotent via config_meta).
+    let cfg = ConfigDb::Sqlite(pool.clone());
+    if let Err(err) = showcase::seed_if_unseeded(&cfg).await {
+        tracing::warn!(error = ?err, "showcase seed skipped");
+    }
+
     Ok(pool)
 }
 
@@ -153,6 +159,7 @@ pub mod export;
 pub mod images;
 pub mod landing;
 pub mod landing_blocks;
+pub mod showcase;
 pub mod specs;
 pub mod users;
 

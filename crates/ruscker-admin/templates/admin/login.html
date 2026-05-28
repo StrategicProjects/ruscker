@@ -10,7 +10,14 @@
 <link rel="stylesheet" href="/assets/styles.css">
 <link rel="stylesheet" href="/assets/icons/tabler-icons.min.css">
 </head>
-<body class="min-h-screen flex flex-col items-center justify-center px-4">
+<body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
+
+{# Top-right chrome cluster (#182 + #183). Lives outside the login form
+   so its POSTs to /__set/{theme,locale} aren't shadowed by the outer
+   form's action. Absolute-positioned in the body corner. #}
+<div class="absolute top-4 right-4 z-50">
+  {% include "_chrome_cluster_anon.html" %}
+</div>
 
 <form method="post" action="{% if bootstrap %}/admin/login/token{% else %}/admin/login{% endif %}"
       class="admin-login-card" autocomplete="off">
@@ -62,32 +69,15 @@
     {{ self.t("admin-login-submit") }}
   </button>
 
-  <div class="admin-login-footer">
-    <div class="admin-login-footer-links">
-      {% if bootstrap %}
-        <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
-      {% else %}
-        <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
-      {% endif %}
-      <a href="/">{{ self.t("admin-login-back-portal") }}</a>
-    </div>
-    {# #181: nesting a `<form>` inside the outer login form is invalid HTML —
-       browsers silently ignore the inner action and submit the outer one,
-       so picking a locale was posting empty credentials to /admin/login.
-       Use `formaction` + `formnovalidate` to override the submission target
-       per-button without leaving the parent form. The base-path rewriter
-       already covers `button[formaction]`. #}
-    <div class="admin-login-locales" role="group" aria-label="{{ self.t("admin-login-locale-group") }}">
-      {% for loc in locales_all %}
-        <button type="submit" name="locale" value="{{ loc.code() }}"
-                formaction="/__set/locale" formmethod="post" formnovalidate
-                aria-label="{{ loc.native_name() }}"
-                {% if *loc == locale %}aria-current="true"{% endif %}
-                class="admin-login-locale {% if *loc == locale %}is-active{% endif %}">
-          {{ loc.code()|upper }}
-        </button>
-      {% endfor %}
-    </div>
+  {# Secondary links only — theme + language moved to the top-right
+     chrome cluster (#182 + #183). #}
+  <div class="admin-login-footer admin-login-footer--end">
+    {% if bootstrap %}
+      <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
+    {% else %}
+      <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
+    {% endif %}
+    <a href="/">{{ self.t("admin-login-back-portal") }}</a>
   </div>
 </form>
 

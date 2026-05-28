@@ -21,37 +21,11 @@
 
 {% block content %}{% endblock %}
 
-<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex flex-wrap items-center gap-6">
-  <div class="flex items-center gap-2">
-    <span>{{ self.t("footer-language") }}:</span>
-    <form method="post" action="/__set/locale" class="contents">
-      {% for loc in locales_all %}
-        <button type="submit" name="locale" value="{{ loc.code() }}"
-                class="px-2 py-0.5 rounded {% if *loc == locale %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}"
-                aria-current="{% if *loc == locale %}true{% else %}false{% endif %}">
-          {{ loc.native_name() }}
-        </button>
-      {% endfor %}
-    </form>
-  </div>
-
-  <div class="flex items-center gap-2">
-    <span>{{ self.t("footer-theme") }}:</span>
-    <form method="post" action="/__set/theme" class="contents">
-      <button type="submit" name="theme" value="light"
-              class="px-2 py-0.5 rounded {% if theme.is_light() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-light") }}</button>
-      <button type="submit" name="theme" value="dark"
-              class="px-2 py-0.5 rounded {% if theme.is_dark() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-dark") }}</button>
-      <button type="submit" name="theme" value="auto"
-              class="px-2 py-0.5 rounded {% if theme.is_auto() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-auto") }}</button>
-    </form>
-  </div>
-
-  {# "Powered by" lockup — uses the inline mark + wordmark text so
-     the typography matches whatever Jost variant the page already
-     loaded; doesn't require a second HTTP request for the SVG
-     lockup file. #}
-  <a class="ml-auto inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
+{# Footer slimmed down to just the "powered by" lockup (#182). Theme
+   and language pickers moved into the top-right chrome cluster on every
+   page. #}
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end">
+  <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
      href="https://github.com/StrategicProjects/ruscker"
      aria-label="Ruscker">
     <svg class="brand-mark-inline" viewBox="0 0 80 80" width="20" height="20" aria-hidden="true">

@@ -17,31 +17,21 @@
 
 <header class="border-b border-[color:var(--border)]"
         {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
-  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between">
-    <div>
-      <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
-      <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
+  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
+    <div class="flex items-center gap-3">
+      {# Small Ruscker mark left of the operator-provided title (#182).
+         Future: operators can override with `landing-customization.logo`. #}
+      <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <div>
+        <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
+        <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
+      </div>
     </div>
-    <div class="flex items-center gap-4 text-xs">
-      <span class="opacity-70">{{ counts.total }}</span>
-      {% if signed_in %}
-        {% if !viewer_name.is_empty() %}
-          <span class="opacity-70 hidden sm:inline">{{ self.t_with("landing-signed-in-as", "user", viewer_name.as_str()) }}</span>
-        {% endif %}
-        <a class="inline-flex items-center gap-1 opacity-80 hover:opacity-100" href="/admin/dashboard">
-          <i class="ti ti-layout-dashboard" aria-hidden="true"></i> {{ self.t("landing-panel") }}
-        </a>
-        <form method="post" action="/admin/logout" class="inline">
-          <button type="submit" class="inline-flex items-center gap-1 opacity-80 hover:opacity-100 bg-transparent border-0 cursor-pointer font-inherit text-inherit">
-            <i class="ti ti-logout" aria-hidden="true"></i> {{ self.t("landing-signout") }}
-          </button>
-        </form>
-      {% else if show_admin_link %}
-        <a class="inline-flex items-center gap-1 opacity-80 hover:opacity-100" href="/admin/login">
-          <i class="ti ti-login" aria-hidden="true"></i> {{ self.t("landing-signin") }}
-        </a>
-      {% endif %}
-    </div>
+    {% include "_chrome_cluster.html" %}
   </div>
 </header>
 

@@ -164,7 +164,6 @@ admin-login-token-placeholder = Collez le jeton ici
 admin-login-submit = Se connecter
 admin-login-error-wrong = Jeton incorrect. Réessayez.
 admin-login-back-portal = ← portail public
-admin-login-locale-group = Langue
 
 # Apps list
 admin-specs-title = Applications
@@ -352,11 +351,20 @@ card-state-inactive = Indisponible
 card-access-public = Accès public
 card-access-restricted = Accès restreint
 
-footer-language = Langue
-footer-theme = Thème
 theme-light = Clair
 theme-dark = Sombre
 theme-auto = Automatique
+
+# Top-right chrome cluster (#182 + #183)
+chrome-cluster-label = Préférences de la page
+chrome-theme-label = Thème
+chrome-language-label = Langue
+chrome-account-label = Compte
+chrome-signin = Se connecter
+chrome-signed-in-as-prefix = Connecté en tant que
+chrome-panel = Panneau
+chrome-change-password = Changer le mot de passe
+chrome-signout = Se déconnecter
 
 # Admin logs viewer
 admin-logs-title = Logs du conteneur

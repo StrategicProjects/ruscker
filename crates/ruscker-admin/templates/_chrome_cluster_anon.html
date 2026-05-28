@@ -1,0 +1,54 @@
+{# Anonymous variant of the chrome cluster: theme + language only. #}
+{# Used by /admin/login and /admin/setup — pages where the third slot #}
+{# (account) doesn't apply because the user is in the process of signing #}
+{# in. See `_chrome_cluster.html` for the full version. #}
+{# #}
+{# Required template fields: locale, theme, locales_all. #}
+{# #}
+{# This partial MUST sit outside the page's main form. The popovers wrap #}
+{# `<form>` tags, and HTML5 forbids nested forms — the calling template is #}
+{# responsible for positioning the cluster as a sibling of its main form #}
+{# (login.html / setup.html do this via `<div class="absolute top-4 right-4">` #}
+{# in `<body>` before the card form). #}
+<div class="chrome-cluster" role="group" aria-label="{{ self.t("chrome-cluster-label") }}">
+  <details class="chrome-disclosure" name="chrome-cluster">
+    <summary class="chrome-icon" aria-label="{{ self.t("chrome-theme-label") }}" title="{{ self.t("chrome-theme-label") }}">
+      {% if theme.is_light() %}<i class="ti ti-sun" aria-hidden="true"></i>
+      {% else if theme.is_dark() %}<i class="ti ti-moon" aria-hidden="true"></i>
+      {% else %}<i class="ti ti-device-desktop" aria-hidden="true"></i>{% endif %}
+    </summary>
+    <form method="post" action="/__set/theme" class="chrome-popover">
+      <button type="submit" name="theme" value="light"
+              class="chrome-popover-item {% if theme.is_light() %}is-current{% endif %}"
+              {% if theme.is_light() %}aria-current="true"{% endif %}>
+        <i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}
+      </button>
+      <button type="submit" name="theme" value="dark"
+              class="chrome-popover-item {% if theme.is_dark() %}is-current{% endif %}"
+              {% if theme.is_dark() %}aria-current="true"{% endif %}>
+        <i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}
+      </button>
+      <button type="submit" name="theme" value="auto"
+              class="chrome-popover-item {% if theme.is_auto() %}is-current{% endif %}"
+              {% if theme.is_auto() %}aria-current="true"{% endif %}>
+        <i class="ti ti-device-desktop" aria-hidden="true"></i> {{ self.t("theme-auto") }}
+      </button>
+    </form>
+  </details>
+
+  <details class="chrome-disclosure" name="chrome-cluster">
+    <summary class="chrome-icon" aria-label="{{ self.t("chrome-language-label") }}" title="{{ self.t("chrome-language-label") }}">
+      <i class="ti ti-world" aria-hidden="true"></i>
+      <span class="chrome-icon-badge">{{ locale.code()|upper }}</span>
+    </summary>
+    <form method="post" action="/__set/locale" class="chrome-popover">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="chrome-popover-item {% if *loc == locale %}is-current{% endif %}"
+                {% if *loc == locale %}aria-current="true"{% endif %}>
+          <span class="chrome-popover-code">{{ loc.code()|upper }}</span> {{ loc.native_name() }}
+        </button>
+      {% endfor %}
+    </form>
+  </details>
+</div>

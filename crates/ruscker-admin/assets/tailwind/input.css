@@ -451,6 +451,116 @@ body {
 .admin-nav-link--logout { color: var(--color-lock); }
 .admin-nav-link--logout:hover { background: var(--color-lock); color: #fff; }
 
+/* ─── Chrome cluster: theme + language + sign-in (#182 + #183) ──
+ *
+ * Three icon-buttons in a row, anchored top-right on every public-
+ * facing page. Replaces the older footer theme/language pickers.
+ *
+ * Disclosure uses native `<details>/<summary>` with `name=
+ * "chrome-cluster"` — the HTML ExclusiveAccordion pattern. Opening
+ * one popover closes its named siblings (Safari 17+, Firefox 124+,
+ * Chrome 120+). Older browsers fall back to "all stay open", which
+ * is graceful degradation. Keyboard nav: Tab moves between
+ * summaries, Enter/Space toggles the active one (native `<details>`
+ * doesn't close on Esc — clicking the summary again or another sibling
+ * is the dismiss path). No JS.
+ */
+.chrome-cluster {
+  display: flex; align-items: center; gap: 4px;
+  font-family: inherit;
+}
+.chrome-disclosure {
+  position: relative;
+}
+/* Kill the default disclosure triangle in every browser. */
+.chrome-disclosure summary { list-style: none; cursor: pointer; }
+.chrome-disclosure summary::-webkit-details-marker { display: none; }
+.chrome-disclosure summary::marker { content: ""; display: none; }
+
+.chrome-icon {
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  position: relative;
+  transition: background 0.12s, border-color 0.12s;
+}
+.chrome-icon:hover { background: var(--surface-soft); border-color: var(--border-strong); }
+.chrome-icon i { font-size: 16px; line-height: 1; }
+/* Open-state highlight on the summary itself (the parent details has
+   the `open` attribute, so we can target descendants via [open]). */
+.chrome-disclosure[open] > .chrome-icon {
+  background: var(--text); color: var(--bg); border-color: var(--text);
+}
+
+.chrome-icon-badge {
+  position: absolute; bottom: 3px; right: 3px;
+  font-size: 9px; font-weight: 600; letter-spacing: 0.04em;
+  padding: 0 3px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 4px;
+  line-height: 1.3;
+}
+.chrome-disclosure[open] > .chrome-icon .chrome-icon-badge {
+  background: var(--bg); color: var(--text); border-color: var(--bg);
+}
+
+/* Anonymous sign-in CTA — textual variant of the icon-button. */
+.chrome-signin {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  background: transparent;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  font-size: 12px; font-family: inherit;
+  text-decoration: none;
+}
+.chrome-signin:hover { background: var(--surface-soft); border-color: var(--border-strong); }
+.chrome-signin i { font-size: 14px; }
+
+/* Popover — anchored under the summary, right-aligned so it doesn't
+   spill off-screen on the cluster's rightmost slot. */
+.chrome-popover {
+  position: absolute; top: 38px; right: 0;
+  min-width: 168px;
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  padding: 5px;
+  display: flex; flex-direction: column;
+  z-index: 50;
+}
+.chrome-popover-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 0; border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit; font-size: 12.5px;
+  color: inherit; text-align: left; text-decoration: none;
+}
+.chrome-popover-item:hover { background: var(--surface-soft); }
+.chrome-popover-item.is-current { font-weight: 500; }
+.chrome-popover-item.is-current::after { content: "✓"; margin-left: auto; opacity: 0.7; }
+.chrome-popover-item i { font-size: 14px; opacity: 0.85; }
+.chrome-popover-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px; opacity: 0.55;
+  display: inline-block; width: 22px;
+}
+.chrome-popover-user {
+  padding: 8px 10px 4px;
+  font-size: 11px; color: var(--text-muted);
+}
+.chrome-popover-sep {
+  height: 0.5px; background: var(--border); margin: 4px 0;
+}
+
 /* ─── Admin login card ───────────────────────────────────────── */
 .admin-login-card {
   background: var(--surface);
@@ -531,18 +641,6 @@ body {
 .admin-login-footer--end { justify-content: flex-end; }
 .admin-login-footer a { color: var(--text-muted); text-decoration: none; }
 .admin-login-footer a:hover { color: var(--text); }
-.admin-login-footer-links { display: flex; align-items: center; gap: 14px; }
-.admin-login-locales { display: flex; align-items: center; gap: 2px; }
-.admin-login-locale {
-  background: transparent; border: none;
-  font-family: inherit; font-size: 10px;
-  color: var(--text-muted);
-  padding: 2px 5px; border-radius: 4px;
-  cursor: pointer; letter-spacing: 0.05em;
-}
-.admin-login-locale.is-active {
-  background: var(--text); color: var(--bg);
-}
 
 /* ─── Admin apps table ───────────────────────────────────────── */
 .admin-table {

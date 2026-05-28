@@ -92,20 +92,10 @@
   </div>
 
   <div class="admin-nav-actions">
-    <span class="admin-nav-role" title="{{ self.t("role-current") }}">
-      <i class="ti ti-user-shield" aria-hidden="true"></i>
-      <span>{{ self.t(role.label_key()) }}</span>
-    </span>
-    <a href="/" class="admin-nav-link" title="{{ self.t("admin-nav-portal") }}">
-      <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
-      <span>{{ self.t("admin-nav-portal") }}</span>
-    </a>
-    <form method="post" action="/admin/logout" class="contents">
-      <button type="submit" class="admin-nav-link admin-nav-link--logout">
-        <i class="ti ti-logout" aria-hidden="true"></i>
-        <span>{{ self.t("admin-nav-logout") }}</span>
-      </button>
-    </form>
+    {# #182 + #183: chrome cluster replaces the per-link role/portal/logout
+       trio. Theme + language + account-popover (panel/change-password/
+       logout) all live here now. #}
+    {% include "_chrome_cluster_admin.html" %}
   </div>
 </nav>
 {% endblock %}
@@ -159,35 +149,19 @@ window.ruscker.bgMode = (value) =>
   {% block content %}{% endblock %}
 </main>
 
-{# Preference footer — same language + theme options as the public
-   portal. Posts to the shared /__set/* endpoints, which set the
-   cookie and redirect back here (Referer), so the admin re-renders
-   in the chosen locale/theme. #}
-<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex flex-wrap items-center gap-6">
-  <div class="flex items-center gap-2">
-    <span>{{ self.t("footer-language") }}:</span>
-    <form method="post" action="/__set/locale" class="contents">
-      {% for loc in locales_all %}
-        <button type="submit" name="locale" value="{{ loc.code() }}"
-                class="px-2 py-0.5 rounded {% if *loc == locale %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}"
-                aria-current="{% if *loc == locale %}true{% else %}false{% endif %}">
-          {{ loc.native_name() }}
-        </button>
-      {% endfor %}
-    </form>
-  </div>
-
-  <div class="flex items-center gap-2">
-    <span>{{ self.t("footer-theme") }}:</span>
-    <form method="post" action="/__set/theme" class="contents">
-      <button type="submit" name="theme" value="light"
-              class="px-2 py-0.5 rounded {% if theme.is_light() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-light") }}</button>
-      <button type="submit" name="theme" value="dark"
-              class="px-2 py-0.5 rounded {% if theme.is_dark() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-dark") }}</button>
-      <button type="submit" name="theme" value="auto"
-              class="px-2 py-0.5 rounded {% if theme.is_auto() %}bg-[color:var(--text)] text-[color:var(--bg)] font-medium{% else %}hover:bg-[color:var(--border)]{% endif %}">{{ self.t("theme-auto") }}</button>
-    </form>
-  </div>
+{# Footer trimmed — theme + language pickers moved into the top-right
+   chrome cluster in the navbar (#182 + #183). #}
+<footer class="mt-auto border-t border-[color:var(--border)] py-3 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end">
+  <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
+     href="https://github.com/StrategicProjects/ruscker"
+     aria-label="Ruscker">
+    <svg class="brand-mark-inline" viewBox="0 0 80 80" width="18" height="18" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    <span class="brand-wordmark">ruscker · admin</span>
+  </a>
 </footer>
 
 </body>

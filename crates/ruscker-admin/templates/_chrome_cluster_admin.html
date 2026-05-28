@@ -38,8 +38,7 @@
   {# ── Language ───────────────────────────────────────────────── #}
   <details class="chrome-disclosure" name="chrome-cluster">
     <summary class="chrome-icon" aria-label="{{ self.t("chrome-language-label") }}" title="{{ self.t("chrome-language-label") }}">
-      <i class="ti ti-world" aria-hidden="true"></i>
-      <span class="chrome-icon-badge">{{ locale.code()|upper }}</span>
+      <span class="chrome-icon-lang">{{ locale.code()|upper }}</span>
     </summary>
     <form method="post" action="/__set/locale" class="chrome-popover">
       {% for loc in locales_all %}

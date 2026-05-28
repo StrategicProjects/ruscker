@@ -130,6 +130,47 @@ async fn first_login_with_must_change_redirects_to_password() {
 }
 
 #[tokio::test]
+async fn login_page_has_no_nested_form_and_uses_formaction_for_locale() {
+    // #181: the locale picker in /admin/login was wrapped in a second
+    // `<form action="/__set/locale">` inside the outer login form.
+    // Nested `<form>` is invalid HTML and browsers ignore the inner
+    // one — clicking a locale button posted empty credentials to
+    // /admin/login. The fix uses `formaction` + `formnovalidate` on the
+    // buttons so the per-button submission target is honored.
+    let (state, _pool) = state_with_db().await;
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&bytes).unwrap();
+
+    // Exactly one `<form>` on the page (the outer login form). The old
+    // nested-form bug would push this above 1.
+    let form_count = body.matches("<form ").count();
+    assert_eq!(form_count, 1, "expected exactly one <form>, got {form_count}");
+
+    // The locale buttons must override the submission via formaction.
+    assert!(
+        body.contains(r#"formaction="/__set/locale""#),
+        "locale buttons missing formaction"
+    );
+    assert!(
+        body.contains("formnovalidate"),
+        "locale buttons must skip required-field validation"
+    );
+}
+
+#[tokio::test]
 async fn last_admin_cannot_be_deleted() {
     let (state, pool) = state_with_db().await;
     ruscker_admin::db::users::create(&ruscker_admin::db::ConfigDb::Sqlite(pool.clone()), "root", "rootpass1", Role::Admin, false, &[], None)

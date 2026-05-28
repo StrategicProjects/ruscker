@@ -57,26 +57,35 @@
     </label>
   {% endif %}
 
-  <button type="submit" class="admin-login-btn">
+  <button type="submit" class="admin-login-btn admin-login-btn--primary">
     <i class="ti ti-login" aria-hidden="true"></i>
     {{ self.t("admin-login-submit") }}
   </button>
 
   <div class="admin-login-footer">
-    {% if bootstrap %}
-      <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
-    {% else %}
-      <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
-    {% endif %}
-    <a href="/">{{ self.t("admin-login-back-portal") }}</a>
-    <form method="post" action="/__set/locale" class="contents">
+    <div class="admin-login-footer-links">
+      {% if bootstrap %}
+        <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
+      {% else %}
+        <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
+      {% endif %}
+      <a href="/">{{ self.t("admin-login-back-portal") }}</a>
+    </div>
+    {# #181: nesting a `<form>` inside the outer login form is invalid HTML —
+       browsers silently ignore the inner action and submit the outer one,
+       so picking a locale was posting empty credentials to /admin/login.
+       Use `formaction` + `formnovalidate` to override the submission target
+       per-button without leaving the parent form. The base-path rewriter
+       already covers `button[formaction]`. #}
+    <div class="admin-login-locales">
       {% for loc in locales_all %}
         <button type="submit" name="locale" value="{{ loc.code() }}"
+                formaction="/__set/locale" formmethod="post" formnovalidate
                 class="admin-login-locale {% if *loc == locale %}is-active{% endif %}">
           {{ loc.code()|upper }}
         </button>
       {% endfor %}
-    </form>
+    </div>
   </div>
 </form>
 

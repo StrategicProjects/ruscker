@@ -502,6 +502,13 @@ body {
 }
 .admin-login-btn:hover { background: var(--color-teal-800); }
 .admin-login-btn i { font-size: 14px; }
+/* Primary CTA variant: fills the card so the submit reads as a
+   primary action stacked with the inputs above it (#181 polish). */
+.admin-login-btn--primary {
+  display: flex; width: 100%;
+  padding: 11px 12px;
+  margin-top: 4px;
+}
 .admin-login-error {
   display: flex; align-items: center; gap: 8px;
   background: rgba(239, 68, 68, 0.08);
@@ -514,11 +521,14 @@ body {
 .admin-login-error i { font-size: 14px; }
 .admin-login-footer {
   display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
   font-size: 11px;
   margin-top: 4px;
 }
 .admin-login-footer a { color: var(--text-muted); text-decoration: none; }
 .admin-login-footer a:hover { color: var(--text); }
+.admin-login-footer-links { display: flex; align-items: center; gap: 14px; }
+.admin-login-locales { display: flex; align-items: center; gap: 2px; }
 .admin-login-locale {
   background: transparent; border: none;
   font-family: inherit; font-size: 10px;

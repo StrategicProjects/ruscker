@@ -525,7 +525,7 @@ async fn logs_stream(
 ) -> Response {
     let rid = match parse_replica_id(&replica_id) {
         Ok(r) => r,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
     let Some(backend) = state.backend.clone() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
@@ -548,10 +548,14 @@ async fn logs_stream(
 
 /// Resolve a `{replica_id}` path param to a `ReplicaId`,
 /// 400ing on a malformed UUID. Shared by the action handlers.
-fn parse_replica_id(s: &str) -> Result<ReplicaId, Response> {
+///
+/// The `Err` is `Box<Response>` so the happy-path `Result` stays a
+/// thin pointer-sized value — axum's `Response` is ~heavy and clippy
+/// flagged the `Err` variant size otherwise. Callers `return *boxed`.
+fn parse_replica_id(s: &str) -> Result<ReplicaId, Box<Response>> {
     uuid::Uuid::parse_str(s)
         .map(ReplicaId)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "invalid replica id").into_response())
+        .map_err(|_| Box::new((StatusCode::BAD_REQUEST, "invalid replica id").into_response()))
 }
 
 /// POST `/admin/dashboard/replicas/{id}/stop` — stop a replica
@@ -570,7 +574,7 @@ async fn stop_replica(
 ) -> Response {
     let rid = match parse_replica_id(&replica_id) {
         Ok(r) => r,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
     let Some(backend) = state.backend.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
@@ -599,7 +603,7 @@ async fn restart_replica(
 ) -> Response {
     let rid = match parse_replica_id(&replica_id) {
         Ok(r) => r,
-        Err(resp) => return resp,
+        Err(resp) => return *resp,
     };
     let Some(backend) = state.backend.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();

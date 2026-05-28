@@ -311,7 +311,7 @@ mod tests {
     use crate::db::open_memory;
 
     fn fixed_key() -> MasterKey {
-        MasterKey::from_str(&"ab".repeat(32)).unwrap()
+        MasterKey::parse(&"ab".repeat(32)).unwrap()
     }
 
     #[tokio::test]

@@ -227,7 +227,7 @@ impl AdminServer {
     /// Override the credentials master key (default: pulled from
     /// `RUSCKER_MASTER_KEY`). Accepts hex (64ch) or base64 (44ch).
     pub fn with_master_key(mut self, raw: impl AsRef<str>) -> Result<Self> {
-        self.state.master_key = crypto::MasterKey::from_str(raw.as_ref())?;
+        self.state.master_key = crypto::MasterKey::parse(raw.as_ref())?;
         Ok(self)
     }
 

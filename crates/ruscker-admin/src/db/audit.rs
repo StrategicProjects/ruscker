@@ -115,7 +115,7 @@ where
         qb.push_bind(a.clone());
     }
     qb.push(" ORDER BY id DESC LIMIT ");
-    qb.push_bind(filter.limit.max(1).min(1000));
+    qb.push_bind(filter.limit.clamp(1, 1000));
 }
 
 const LIST_SELECT: &str =

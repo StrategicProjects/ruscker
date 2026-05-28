@@ -41,24 +41,50 @@ Validate a config before restarting:
 
 Enabling the container backend (--docker)
 -----------------------------------------
-To let Ruscker spawn app containers, it must talk to the Docker daemon:
+To let Ruscker spawn app containers, it must talk to the Docker daemon.
+On a host with a working Docker install (`docker.io` is a Recommends of
+this package), run the helper:
 
-1. Add `--docker` (and usually `--db /var/lib/ruscker/ruscker.db`) to
-   ExecStart. Use a drop-in so package upgrades don't clobber it:
+  sudo ruscker-enable-docker
 
-     sudo systemctl edit ruscker
-     # then add:
-     [Service]
-     ExecStart=
-     ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml \
-       --bind 0.0.0.0:8080 --docker --db /var/lib/ruscker/ruscker.db
+That writes a systemd drop-in at
+/etc/systemd/system/ruscker.service.d/docker.conf which:
 
-2. Give the `ruscker` user access to the Docker socket by uncommenting
-   `SupplementaryGroups=docker` in the same drop-in. NOTE: membership in
-   the docker group is effectively root on the host — the same trade-off
-   ShinyProxy carries.
+  - adds `--docker --db /var/lib/ruscker/ruscker.db` to ExecStart
+  - sets `SupplementaryGroups=docker` so the `ruscker` user can talk
+    to /var/run/docker.sock
 
-3. `sudo systemctl daemon-reload && sudo systemctl restart ruscker`
+then runs `systemctl daemon-reload && systemctl restart ruscker` and
+verifies /readyz comes up. Pass `--yes` to skip the confirmation prompt.
+
+SECURITY NOTE — docker group is effectively root. Members of the docker
+group can run privileged containers, which is equivalent to root on the
+host. The package therefore does NOT enable the backend silently; the
+helper requires explicit confirmation. This is the same trade-off
+ShinyProxy carries.
+
+To undo:
+
+  sudo rm /etc/systemd/system/ruscker.service.d/docker.conf
+  sudo systemctl daemon-reload && sudo systemctl restart ruscker
+
+Manual / advanced setup
+-----------------------
+If you can't or don't want to use the helper, write the drop-in by hand:
+
+  sudo systemctl edit ruscker
+  # then add:
+  [Service]
+  ExecStart=
+  ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml \
+    --bind 0.0.0.0:8080 --docker --db /var/lib/ruscker/ruscker.db
+  SupplementaryGroups=docker
+
+  sudo systemctl daemon-reload && sudo systemctl restart ruscker
+
+Tip: if Ruscker is running without --docker on a host where the Docker
+socket is reachable, it logs a one-line WARN at startup pointing back to
+this section — a reminder, not a hard requirement.
 
 Health probes for load balancers / orchestrators: GET /healthz
 (liveness) and /readyz (readiness).

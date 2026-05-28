@@ -348,6 +348,36 @@ fn discover_images_dir(config_path: &Path, config: &Config) -> Option<PathBuf> {
     None
 }
 
+/// Default Docker socket path on Linux. Pulled out as a constant so
+/// the boot-time check has a single source of truth (`is_local_docker_reachable`)
+/// and the unit test can swap in a tempdir path.
+const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
+
+/// Cheap, blocking probe: is the Docker socket reachable on this host?
+///
+/// Just checks the file system metadata for a Unix socket — does NOT
+/// open a connection or talk to `dockerd`. That's enough to decide
+/// whether to nudge the operator about `--docker`; the real connect
+/// only happens when the flag is set.
+fn is_local_docker_reachable() -> bool {
+    docker_socket_at(DEFAULT_DOCKER_SOCKET)
+}
+
+#[cfg(unix)]
+fn docker_socket_at(path: &str) -> bool {
+    use std::os::unix::fs::FileTypeExt;
+    std::fs::metadata(path)
+        .map(|m| m.file_type().is_socket())
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn docker_socket_at(_path: &str) -> bool {
+    // Windows / non-Unix: Docker Desktop exposes a named pipe; we don't
+    // probe it here. The nudge is for the Debian / systemd path.
+    false
+}
+
 fn cmd_serve(
     config_path: &PathBuf,
     bind_override: Option<std::net::SocketAddr>,
@@ -427,6 +457,17 @@ fn cmd_serve(
                 )
             };
             server = server.with_backend(backend);
+        } else if is_local_docker_reachable() {
+            // #184: the operator started without `--docker` on a host
+            // where the daemon socket is reachable. Spawning containers
+            // is the whole point of the proxy, so nudge them once at
+            // startup — this is a hint, not a hard requirement (the
+            // landing + admin still work in proxy-less mode).
+            tracing::warn!(
+                "Docker socket is reachable at /var/run/docker.sock but --docker is OFF — \
+                 app containers will not spawn. On a Debian/Ubuntu install run \
+                 `sudo ruscker-enable-docker`; otherwise add --docker to the command line."
+            );
         }
         // Config database: Postgres (shared HA catalog) takes precedence
         // over the SQLite path when both are given.
@@ -866,5 +907,34 @@ mod tests {
         let config =
             Config::from_yaml("proxy:\n  template-path: templates/x\n  specs: []\n").unwrap();
         assert!(discover_images_dir(&cfg_path, &config).is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_socket_at_detects_a_unix_socket() {
+        use std::os::unix::net::UnixListener;
+        let tmp = std::env::temp_dir().join(format!(
+            "ruscker-sock-{}-{}.sock",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        let _ = std::fs::remove_file(&tmp);
+
+        // Missing → false.
+        assert!(!docker_socket_at(tmp.to_str().unwrap()));
+
+        // Bind a real Unix socket → true.
+        let _listener = UnixListener::bind(&tmp).expect("bind unix socket");
+        assert!(docker_socket_at(tmp.to_str().unwrap()));
+
+        // A regular file under the same name → false.
+        std::fs::remove_file(&tmp).unwrap();
+        std::fs::write(&tmp, b"not a socket").unwrap();
+        assert!(!docker_socket_at(tmp.to_str().unwrap()));
+
+        std::fs::remove_file(&tmp).ok();
     }
 }

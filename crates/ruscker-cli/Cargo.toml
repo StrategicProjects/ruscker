@@ -25,6 +25,13 @@ priority = "optional"
 # addgroup/adduser to create the service account (Ubuntu 24.04 minimal no
 # longer ships it in the base set).
 depends = "$auto, ca-certificates, adduser"
+# `docker.io` is the canonical Docker engine package in Debian/Ubuntu
+# main. It's a Recommends, not a Depends, because Ruscker's landing +
+# admin still serve without a backend (#184). Any Docker-API-compatible
+# engine works (docker-ce, podman with podman-docker, …) — operators
+# who pull from a third-party APT source already know how to satisfy
+# this themselves.
+recommends = "docker.io"
 extended-description = """\
 Ruscker is a lightweight Rust alternative to ShinyProxy and Shiny Server \
 Free. It hosts and load-balances containerized interactive web apps \
@@ -33,6 +40,7 @@ proxy with a custom landing page and an admin panel. Ships as a single \
 binary with no JVM."""
 assets = [
     ["target/release/ruscker", "usr/bin/", "755"],
+    ["../../packaging/debian/ruscker-enable-docker", "usr/sbin/ruscker-enable-docker", "755"],
     ["../../packaging/application.example.yml", "etc/ruscker/application.yml", "644"],
     ["../../packaging/ruscker.env.example", "etc/ruscker/ruscker.env", "640"],
     ["../../packaging/README.Debian", "usr/share/doc/ruscker/README.Debian", "644"],

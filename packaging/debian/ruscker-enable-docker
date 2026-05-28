@@ -1,0 +1,122 @@
+#!/bin/sh
+# ruscker-enable-docker — opt operators into the Docker backend without
+# hand-writing a systemd drop-in.
+#
+# What it does (idempotent):
+#   1. Drops a unit override at /etc/systemd/system/ruscker.service.d/docker.conf
+#      that replaces ExecStart with `... --docker --db /var/lib/ruscker/ruscker.db`
+#      and sets SupplementaryGroups=docker so the `ruscker` user can talk
+#      to /var/run/docker.sock.
+#   2. systemctl daemon-reload + restart ruscker.
+#   3. Verifies /readyz returns 200.
+#
+# Why this is opt-in: docker-group membership is effectively root on the
+# host (same trade-off ShinyProxy carries). The package does NOT do this
+# silently at install time. See README.Debian.
+#
+# Run as root (sudo). To skip the confirmation prompt: pass --yes.
+#
+# To undo: `sudo rm /etc/systemd/system/ruscker.service.d/docker.conf &&
+#          sudo systemctl daemon-reload && sudo systemctl restart ruscker`.
+
+set -eu
+
+DROPIN_DIR=/etc/systemd/system/ruscker.service.d
+DROPIN=$DROPIN_DIR/docker.conf
+UNIT=ruscker.service
+SOCK=/var/run/docker.sock
+CONFIG=/etc/ruscker/application.yml
+DB=/var/lib/ruscker/ruscker.db
+PORT_HINT=8080
+
+YES=0
+for a in "$@"; do
+    case "$a" in
+        -y|--yes) YES=1 ;;
+        -h|--help)
+            sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        *)
+            echo "ruscker-enable-docker: unknown option '$a'" >&2
+            echo "Try: ruscker-enable-docker --help" >&2
+            exit 2 ;;
+    esac
+done
+
+die() { echo "ruscker-enable-docker: $*" >&2; exit 1; }
+note() { echo "  • $*"; }
+
+# ── Pre-flight checks ─────────────────────────────────────────────────
+[ "$(id -u)" -eq 0 ] || die "must run as root — try: sudo ruscker-enable-docker"
+
+command -v systemctl >/dev/null 2>&1 || die "systemctl not found (this helper assumes systemd)"
+systemctl list-unit-files "$UNIT" >/dev/null 2>&1 \
+    || die "$UNIT not installed — install the ruscker package first"
+
+getent group docker >/dev/null 2>&1 \
+    || die "the 'docker' group does not exist — install Docker first (apt install docker.io)"
+
+if [ ! -S "$SOCK" ]; then
+    echo "ruscker-enable-docker: warning — $SOCK is not a socket; the Docker"
+    echo "  daemon may not be running yet. Continuing — the unit will pick it up"
+    echo "  once dockerd is started (After=docker.service is already in the unit)."
+fi
+
+# ── Plan output ──────────────────────────────────────────────────────
+echo "Ruscker will be configured to talk to the Docker daemon:"
+echo
+note "drop-in:        $DROPIN"
+note "ExecStart:      adds --docker --db $DB"
+note "user group:     ruscker → docker (SupplementaryGroups=docker)"
+note "daemon-reload + systemctl restart $UNIT"
+echo
+echo "Security note: members of the docker group can run privileged"
+echo "containers, which is effectively root on this host. Only enable"
+echo "this on hosts where you trust everyone with write access to"
+echo "$SOCK."
+echo
+
+if [ "$YES" -ne 1 ]; then
+    printf "Proceed? [y/N] "
+    read -r ANS
+    case "$ANS" in
+        y|Y|yes|YES) : ;;
+        *) echo "Aborted."; exit 1 ;;
+    esac
+fi
+
+# ── Apply ─────────────────────────────────────────────────────────────
+mkdir -p "$DROPIN_DIR"
+# Note: this REPLACES ExecStart (the leading empty assignment is required
+# by systemd to override the unit's ExecStart rather than appending to it).
+cat > "$DROPIN" <<EOF
+# Written by ruscker-enable-docker. Safe to edit by hand; the helper
+# only checks for the file's presence, not its contents.
+[Service]
+ExecStart=
+ExecStart=/usr/bin/ruscker serve --config $CONFIG --bind 0.0.0.0:$PORT_HINT --docker --db $DB
+SupplementaryGroups=docker
+EOF
+chmod 644 "$DROPIN"
+
+systemctl daemon-reload
+systemctl restart "$UNIT"
+
+# ── Verify ────────────────────────────────────────────────────────────
+# Give the service a couple seconds to come up before probing.
+SLEPT=0
+while [ "$SLEPT" -lt 10 ]; do
+    if curl -fsS "http://127.0.0.1:$PORT_HINT/readyz" >/dev/null 2>&1; then
+        echo "✓ Ruscker is running with the Docker backend."
+        echo "  /readyz returned 200 on port $PORT_HINT."
+        echo "  View status: systemctl status $UNIT"
+        echo "  Tail logs:   journalctl -u $UNIT -f"
+        exit 0
+    fi
+    SLEPT=$((SLEPT + 1))
+    sleep 1
+done
+
+echo "Drop-in written but /readyz didn't come up within 10s." >&2
+echo "Check: systemctl status $UNIT && journalctl -u $UNIT -n 50" >&2
+exit 1

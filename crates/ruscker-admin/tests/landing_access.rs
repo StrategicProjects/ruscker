@@ -62,7 +62,7 @@ async fn app_state(db: ConfigDb) -> AppState {
         admin_auth: AdminAuth {
             admin: Some(Arc::from("test-token")),
         },
-        admin_sessions: Default::default(),
+        admin_sessions: Arc::new(ruscker_admin::auth::InMemoryAdminSessionStore::default()),
         log_buffer: None,
         login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
         api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
@@ -268,7 +268,7 @@ async fn admin_session_sees_every_spec() {
     let db = open_db().await;
     let state = app_state(db).await;
     // A break-glass token session: Admin role, no username.
-    let sid = state.admin_sessions.create(Role::Admin, None);
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
     let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
 
     assert!(has_card(&body, "open app"));
@@ -295,7 +295,8 @@ async fn group_member_sees_their_group_spec() {
     let state = app_state(db).await;
     let sid = state
         .admin_sessions
-        .create(Role::Viewer, Some("alice".to_string()));
+        .create(Role::Viewer, Some("alice".to_string()))
+        .await;
     let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
 
     assert!(has_card(&body, "open app"));
@@ -320,7 +321,8 @@ async fn named_user_sees_their_user_spec() {
     let state = app_state(db).await;
     let sid = state
         .admin_sessions
-        .create(Role::Viewer, Some("carol".to_string()));
+        .create(Role::Viewer, Some("carol".to_string()))
+        .await;
     let body = landing_body(state, Some(format!("{COOKIE_NAME}={sid}"))).await;
 
     assert!(has_card(&body, "open app"));

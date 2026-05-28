@@ -175,6 +175,15 @@ enum Command {
         #[arg(long, env = "RUSCKER_SESSION_STORE_URL")]
         session_store_url: Option<String>,
 
+        /// Postgres DSN for the shared HA admin-session store (#185).
+        /// When set, sign-in sessions survive a load-balancer hop
+        /// between Ruscker instances — removes the need for the
+        /// sticky-upstream workaround documented for #161. A short
+        /// local TTL cache keeps the proxy hot path effectively
+        /// DB-free. Omitted → the single-node in-memory store.
+        #[arg(long, env = "RUSCKER_ADMIN_SESSION_STORE_URL")]
+        admin_session_store_url: Option<String>,
+
         /// Serve the whole portal under a base path, for mounting behind
         /// a reverse proxy at a subpath when you can't make a subdomain
         /// (e.g. `--base-path /box` ⇒ `example.org/box/`). Overrides
@@ -213,6 +222,7 @@ fn main() -> Result<()> {
             master_key,
             docker,
             session_store_url,
+            admin_session_store_url,
             base_path,
         } => cmd_serve(ServeArgs {
             config_path: config,
@@ -224,6 +234,7 @@ fn main() -> Result<()> {
             master_key,
             docker,
             session_store_url,
+            admin_session_store_url,
             base_path_override: base_path,
             log_buffer,
         }),
@@ -392,6 +403,7 @@ struct ServeArgs {
     master_key: Option<String>,
     docker: bool,
     session_store_url: Option<String>,
+    admin_session_store_url: Option<String>,
     base_path_override: Option<String>,
     log_buffer: ruscker_admin::logbuf::LogBuffer,
 }
@@ -407,6 +419,7 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
         master_key,
         docker,
         session_store_url,
+        admin_session_store_url,
         base_path_override,
         log_buffer,
     } = args;
@@ -516,6 +529,13 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
                 .await
                 .context("connect to the Postgres session store")?;
             server = server.with_session_store(std::sync::Arc::new(store));
+        }
+        if let Some(url) = admin_session_store_url {
+            tracing::info!("HA admin-session store: Postgres");
+            let store = ruscker_admin::admin_sessions_pg::PostgresAdminSessionStore::connect(&url)
+                .await
+                .context("connect to the Postgres admin-session store")?;
+            server = server.with_admin_session_store(std::sync::Arc::new(store));
         }
         server.run().await
     })

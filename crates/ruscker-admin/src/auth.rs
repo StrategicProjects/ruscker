@@ -189,23 +189,44 @@ pub struct SessionInfo {
 /// session instead of just clearing the browser's copy. The stored
 /// [`Role`] is what route guards and the nav dispatch on.
 ///
-/// **HA note (#161):** this map is process-local. In active-active HA
-/// the admin catalog and `proxy_sessions` are shared, but sign-in
-/// sessions are not — a load-balancer hop to another instance re-prompts
-/// login (and, with per-group app visibility, the proxy on the other
-/// instance sees the request as anonymous). Until a shared session store
-/// lands, the deploy guide prescribes a **sticky upstream** for the
-/// session-bearing paths (`book/src/deploying.md` § "Sticky upstream for
-/// the sign-in session"). A signed stateless cookie was rejected on
-/// purpose — opaque server-side ids keep logout/restart revocable
-/// (SECURITY.md §1).
+/// **HA note (#161 → #185):** the default implementation
+/// ([`InMemoryAdminSessionStore`]) is process-local — in active-active
+/// HA, a load-balancer hop to another instance re-prompts login (and,
+/// with per-group app visibility, the proxy on the other instance sees
+/// the request as anonymous on `/app`). When operators wire up
+/// `--admin-session-store-url postgres://…` the trait dispatches to
+/// [`crate::admin_sessions_pg::PostgresAdminSessionStore`] instead,
+/// which backs the store in a shared Postgres table with a short-TTL
+/// local cache so the proxy hot path stays effectively DB-free.
+///
+/// A signed stateless cookie was rejected on purpose — opaque
+/// server-side ids keep logout/restart revocable (SECURITY.md §1).
+#[async_trait::async_trait]
+pub trait AdminSessionStore: Send + Sync + std::fmt::Debug {
+    /// Mint a new session for `role`/`actor` and return its opaque id.
+    /// `actor` is the DB username (or `None` for a break-glass token
+    /// session).
+    async fn create(&self, role: Role, actor: Option<String>) -> String;
+
+    /// Resolve `id` to its [`SessionInfo`] when the session is live, or
+    /// `None` if the id is unknown or expired. Implementations may
+    /// prune expired entries lazily on lookup.
+    async fn validate(&self, id: &str) -> Option<SessionInfo>;
+
+    /// Invalidate a session (logout / forced revoke).
+    async fn remove(&self, id: &str);
+}
+
+/// Single-node admin session store. The default; replaced by
+/// [`crate::admin_sessions_pg::PostgresAdminSessionStore`] when the
+/// operator passes `--admin-session-store-url`.
 #[derive(Debug)]
-pub struct AdminSessions {
+pub struct InMemoryAdminSessionStore {
     sessions: DashMap<String, SessionEntry>,
     ttl: Duration,
 }
 
-impl AdminSessions {
+impl InMemoryAdminSessionStore {
     pub fn new(ttl: Duration) -> Self {
         Self {
             sessions: DashMap::new(),
@@ -217,17 +238,23 @@ impl AdminSessions {
     pub fn default_policy() -> Self {
         Self::new(Duration::from_secs(24 * 60 * 60))
     }
+}
 
-    /// Mint a new session for `role`/`actor` and return its opaque id
-    /// (244 bits of random, unguessable). Caller stores the id in the
-    /// cookie. `actor` is the DB username (or `None` for a break-glass
-    /// token session).
-    pub fn create(&self, role: Role, actor: Option<String>) -> String {
-        let id = format!(
-            "{}{}",
-            uuid::Uuid::new_v4().simple(),
-            uuid::Uuid::new_v4().simple()
-        );
+/// Mint an opaque session id. Two concatenated UUID-v4 simples →
+/// 244 bits of random, unguessable. Shared between the in-memory and
+/// Postgres stores so the wire format stays uniform.
+pub(crate) fn mint_session_id() -> String {
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
+}
+
+#[async_trait::async_trait]
+impl AdminSessionStore for InMemoryAdminSessionStore {
+    async fn create(&self, role: Role, actor: Option<String>) -> String {
+        let id = mint_session_id();
         self.sessions.insert(
             id.clone(),
             SessionEntry {
@@ -239,10 +266,7 @@ impl AdminSessions {
         id
     }
 
-    /// The [`SessionInfo`] of a live (non-expired) session named by
-    /// `id`, or `None` if the id is unknown or expired. Expired entries
-    /// are pruned lazily on lookup.
-    pub fn validate(&self, id: &str) -> Option<SessionInfo> {
+    async fn validate(&self, id: &str) -> Option<SessionInfo> {
         let info = self.sessions.get(id).map(|e| {
             let v = e.value();
             (v.expiry, v.role, v.actor.clone())
@@ -259,13 +283,12 @@ impl AdminSessions {
         }
     }
 
-    /// Invalidate a session (logout).
-    pub fn remove(&self, id: &str) {
+    async fn remove(&self, id: &str) {
         self.sessions.remove(id);
     }
 }
 
-impl Default for AdminSessions {
+impl Default for InMemoryAdminSessionStore {
     fn default() -> Self {
         Self::default_policy()
     }
@@ -424,7 +447,7 @@ impl FromRequestParts<crate::AppState> for AdminSession {
         // the server-side store — not the token itself. A live session
         // yields its role + actor.
         match cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) {
-            Some(c) => match state.admin_sessions.validate(&c) {
+            Some(c) => match state.admin_sessions.validate(&c).await {
                 Some(info) => Ok(AdminSession {
                     role: info.role,
                     actor: info.actor,
@@ -560,37 +583,43 @@ mod tests {
     use axum::http::HeaderMap;
     use std::time::Duration;
 
-    #[test]
-    fn admin_sessions_create_validate_remove() {
-        let s = AdminSessions::default_policy();
-        let id = s.create(Role::Editor, Some("alice".into()));
-        let info = s.validate(&id).expect("freshly created session is valid");
+    #[tokio::test]
+    async fn admin_sessions_create_validate_remove() {
+        let s = InMemoryAdminSessionStore::default_policy();
+        let id = s.create(Role::Editor, Some("alice".into())).await;
+        let info = s
+            .validate(&id)
+            .await
+            .expect("freshly created session is valid");
         assert_eq!(info.role, Role::Editor);
         assert_eq!(info.actor.as_deref(), Some("alice"));
         assert!(
-            s.validate("not-a-real-id").is_none(),
+            s.validate("not-a-real-id").await.is_none(),
             "unknown id is invalid"
         );
-        s.remove(&id);
+        s.remove(&id).await;
         assert!(
-            s.validate(&id).is_none(),
+            s.validate(&id).await.is_none(),
             "removed (logged-out) session is invalid"
         );
     }
 
-    #[test]
-    fn admin_sessions_expire() {
-        let s = AdminSessions::new(Duration::from_millis(0));
-        let id = s.create(Role::Admin, None);
+    #[tokio::test]
+    async fn admin_sessions_expire() {
+        let s = InMemoryAdminSessionStore::new(Duration::from_millis(0));
+        let id = s.create(Role::Admin, None).await;
         std::thread::sleep(Duration::from_millis(2));
-        assert!(s.validate(&id).is_none(), "expired session is invalid");
+        assert!(
+            s.validate(&id).await.is_none(),
+            "expired session is invalid"
+        );
     }
 
-    #[test]
-    fn admin_session_ids_are_distinct_and_not_the_token() {
-        let s = AdminSessions::default_policy();
-        let a = s.create(Role::Viewer, None);
-        let b = s.create(Role::Viewer, None);
+    #[tokio::test]
+    async fn admin_session_ids_are_distinct_and_not_the_token() {
+        let s = InMemoryAdminSessionStore::default_policy();
+        let a = s.create(Role::Viewer, None).await;
+        let b = s.create(Role::Viewer, None).await;
         assert_ne!(a, b, "each session gets a fresh id");
         assert!(
             a.len() >= 32,

@@ -237,21 +237,42 @@ table is shared), so round-robin is fine for `/app` and `/api`. Keep
 `server.useForwardHeaders: true` and pass `X-Forwarded-*` as in the
 nginx section above.
 
-### Sticky upstream for the sign-in session (`/admin`, `/app`, `/api`)
+### Shared admin sessions (eliminate the sticky-upstream caveat)
 
-One thing is **not** shared across instances yet: the **sign-in session**
-(`AdminSessions`) is an in-memory map per process. So an admin — or, with
-per-group app visibility ([access control](./configuration.md)), any
-signed-in user — who logs into instance A and is then round-robined to
-instance B is bounced back to the login screen (B doesn't know the
-session), and on the proxy path B would treat them as anonymous (so a
-restricted app could 403/redirect even though they're entitled to it).
+By default the **sign-in session** (the cookie minted at `/admin/login`)
+lives in an in-memory map per process. An admin — or, with per-group app
+visibility ([access control](./configuration.md)), any signed-in user —
+who logs into instance A and is then round-robined to instance B is
+bounced back to the login screen (B doesn't know the session), and on
+the proxy path B would treat them as anonymous (so a restricted app
+could 403/redirect even though they're entitled to it).
 
-Until a shared session store lands ([#161]), pin the **session-bearing
-paths** to one instance with a sticky upstream. The simplest is
-`ip_hash` (route by client IP); a cookie-based sticky on the
-`ruscker_admin_session` cookie is more precise if you have nginx Plus or
-a similar LB.
+**Recommended fix:** point Ruscker at a shared Postgres for the admin
+session table (#185):
+
+```bash
+ruscker serve … --admin-session-store-url postgres://ruscker:pw@pg:5432/ruscker
+```
+
+(or `RUSCKER_ADMIN_SESSION_STORE_URL=…`). All instances then read and
+write the same `admin_sessions` table. A short node-local TTL cache
+(default **5 s**) means the hot path — every authenticated request and
+every `/app` proxy guard — keeps serving from memory; the DB is only
+hit on cache miss or after a write. Logout propagates to sibling
+instances within one cache window (worst case 5 s of "still signed in"
+on a peer). The table auto-creates on connect; no migration step is
+needed.
+
+This removes the need for a sticky LB. Round-robin (or least-conn) is
+fine; any node can serve any session-bearing path.
+
+#### Fallback: sticky upstream
+
+If you can't host shared Postgres for admin sessions, pin the
+session-bearing paths to one instance with a sticky upstream. The
+simplest is `ip_hash` (route by client IP); a cookie-based sticky on
+the `ruscker_admin_session` cookie is more precise if you have nginx
+Plus or a similar LB.
 
 ```nginx
 # Pin each client to one instance so its sign-in session is found.
@@ -268,14 +289,9 @@ server {
 }
 ```
 
-The shared catalog + session table mean **no data is lost** on a
-failover — the worst case is a re-login. If you can't make the LB
-sticky, document for your admins that a failover re-prompts login.
-
-> **Roadmap:** [#161] tracks backing `AdminSessions` with the shared
-> Postgres (a small `admin_sessions` table, fronted by a short-TTL local
-> cache so the hot proxy path stays DB-free) — that removes the need for
-> stickiness entirely.
+Either path — shared store or sticky upstream — keeps **no data lost**
+on a failover. The shared store skips the re-login; sticky upstream
+re-logs in the user only when the pinned node falls over.
 
 [#161]: https://github.com/StrategicProjects/ruscker/issues/161
 

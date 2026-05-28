@@ -289,6 +289,7 @@ impl SpecForm {
             // ── Not modelled by the form: preserve from `base` so an
             //    edit never silently drops YAML-imported config. ──────
             container_port: base.and_then(|b| b.container_port),
+            platform: base.and_then(|b| b.platform.clone()),
             placement: base.and_then(|b| b.placement),
             anti_affinity: base.and_then(|b| b.anti_affinity),
             access_groups: base.and_then(|b| b.access_groups.clone()),

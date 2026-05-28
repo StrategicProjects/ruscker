@@ -136,6 +136,11 @@ pub struct SpawnRequest {
     pub placement: ruscker_config::Placement,
     /// Prefer distinct hosts for this spec's replicas (anti-affinity).
     pub anti_affinity: bool,
+    /// Docker `--platform` target, e.g. `"linux/amd64"`. Forwarded to
+    /// the daemon on both pull and create so an operator on arm64 can
+    /// run an amd64-only image via the daemon's emulation
+    /// (QEMU / Rosetta). `None` ⇒ the daemon picks per the manifest.
+    pub platform: Option<String>,
 }
 
 impl SpawnRequest {
@@ -149,7 +154,13 @@ impl SpawnRequest {
             volumes: Vec::new(),
             placement: ruscker_config::Placement::default(),
             anti_affinity: false,
+            platform: None,
         }
+    }
+
+    pub fn with_platform(mut self, platform: impl Into<String>) -> Self {
+        self.platform = Some(platform.into());
+        self
     }
 
     pub fn with_placement(mut self, placement: ruscker_config::Placement) -> Self {

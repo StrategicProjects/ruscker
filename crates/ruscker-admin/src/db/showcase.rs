@@ -140,6 +140,7 @@ fn card(
     link_url: &str,
     container_image: Option<&str>,
     container_port: Option<u16>,
+    platform: Option<&str>,
 ) -> Result<Spec> {
     let mut tp = serde_json::Map::new();
     tp.insert("logo".into(), json!(logo_path));
@@ -160,6 +161,9 @@ fn card(
     spec_json.insert("template-properties".into(), json!(tp));
     if let Some(image) = container_image {
         spec_json.insert("container-image".into(), json!(image));
+        if let Some(p) = platform {
+            spec_json.insert("platform".into(), json!(p));
+        }
     } else {
         // External link card — explicit kind so Spec::kind() doesn't
         // need to infer.
@@ -187,8 +191,13 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://ruscker.com",
             None,
             None,
+            None,
         )?,
         // ── Containerized hello-world demos ─────────────────────────
+        // `rocker/shiny` ships an amd64-only manifest; pinning the
+        // platform lets the daemon run it via emulation on arm64
+        // hosts (Apple Silicon / Graviton). The other two images
+        // ship multi-arch manifests so they don't need the override.
         card(
             "shiny",
             "Shiny",
@@ -197,6 +206,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://shiny.posit.co",
             Some("rocker/shiny:latest"),
             Some(3838),
+            Some("linux/amd64"),
         )?,
         card(
             "jupyter",
@@ -206,6 +216,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://jupyter.org",
             Some("quay.io/jupyter/minimal-notebook:latest"),
             Some(8888),
+            None,
         )?,
         card(
             "rmarkdown",
@@ -215,6 +226,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://rmarkdown.rstudio.com",
             Some("rocker/rstudio:latest"),
             Some(8787),
+            None,
         )?,
         // ── External-link cards (no public hello image) ─────────────
         card(
@@ -223,6 +235,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "Data and machine-learning apps in Python.",
             "/assets/showcase/streamlit.svg",
             "https://streamlit.io",
+            None,
             None,
             None,
         )?,
@@ -234,6 +247,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://dash.plotly.com",
             None,
             None,
+            None,
         )?,
         card(
             "quarto",
@@ -241,6 +255,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "Open-source publishing system for technical documents.",
             "/assets/showcase/quarto.svg",
             "https://quarto.org",
+            None,
             None,
             None,
         )?,
@@ -252,6 +267,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://bokeh.org",
             None,
             None,
+            None,
         )?,
         card(
             "plumber",
@@ -259,6 +275,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "Turn R functions into HTTP APIs.",
             "/assets/showcase/plumber.svg",
             "https://www.rplumber.io",
+            None,
             None,
             None,
         )?,
@@ -270,6 +287,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "https://fastapi.tiangolo.com",
             None,
             None,
+            None,
         )?,
         card(
             "voila",
@@ -277,6 +295,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "Standalone web apps from Jupyter notebooks.",
             "/assets/showcase/voila.svg",
             "https://voila.readthedocs.io",
+            None,
             None,
             None,
         )?,

@@ -171,7 +171,8 @@ impl LocalDockerBackend {
 
         // 1. Pull image (idempotent — Docker no-ops when local).
         //    Errors bubble up through the stream-of-events.
-        self.ensure_image_pulled(&req.image, req.creds.as_ref()).await?;
+        self.ensure_image_pulled(&req.image, req.creds.as_ref(), req.platform.as_deref())
+            .await?;
 
         // 2. Create container with our labels + ephemeral host port.
         let port_key = format!("{inner_port}/tcp");
@@ -217,6 +218,10 @@ impl LocalDockerBackend {
         let container_name = format!("ruscker-{}-{}", req.spec_id, &replica_id.to_string()[..8]);
         let opts = CreateContainerOptions {
             name: Some(container_name.clone()),
+            // Same `platform` as the pull so the daemon doesn't try
+            // to pick a fresh manifest match. Empty string = no
+            // override (daemon picks per the image's manifest).
+            platform: req.platform.clone().unwrap_or_default(),
             ..Default::default()
         };
         let created = self
@@ -268,6 +273,7 @@ impl LocalDockerBackend {
         &self,
         image: &str,
         creds: Option<&ruscker_core::RegistryCredentials>,
+        platform: Option<&str>,
     ) -> CoreResult<()> {
         // bollard's create_image always hits the registry for the
         // manifest — even when the layers are already local. Skip
@@ -281,6 +287,12 @@ impl LocalDockerBackend {
         }
         let opts = CreateImageOptions {
             from_image: Some(image.to_string()),
+            // `platform` defaults to empty string → bollard sends no
+            // explicit platform → daemon picks per the manifest. Only
+            // set it when the spec carries one (e.g. `linux/amd64`
+            // on an arm64 host running an amd64-only image via
+            // emulation).
+            platform: platform.unwrap_or("").to_string(),
             ..Default::default()
         };
         // Convert our backend-neutral creds to bollard's native

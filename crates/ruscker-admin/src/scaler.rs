@@ -455,6 +455,9 @@ async fn spawn_one(
     if let Some(port) = inner_port {
         req = req.with_port(port);
     }
+    if let Some(platform) = spec.platform.as_deref() {
+        req = req.with_platform(platform);
+    }
     if let Some(c) = creds {
         req = req.with_creds(c);
     }

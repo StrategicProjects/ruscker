@@ -475,6 +475,15 @@ pub struct Spec {
     #[serde(rename = "container-port", alias = "port")]
     pub container_port: Option<u16>,
 
+    /// Docker target platform for the pull/run, e.g. `linux/amd64` or
+    /// `linux/arm64`. Lets an operator on an arm64 host (Apple
+    /// Silicon, Graviton) force emulation of an amd64-only image —
+    /// Docker Desktop wires that through QEMU/Rosetta transparently.
+    /// `None` ⇒ the daemon picks (multi-arch manifest's host match,
+    /// otherwise pull fails with `no matching manifest`).
+    #[serde(rename = "platform")]
+    pub platform: Option<String>,
+
     /// Maximum number of concurrent sessions on a single container.
     /// When all containers in a spec's pool reach this limit, the
     /// auto-scaler spawns a new replica (if `max_replicas` allows).

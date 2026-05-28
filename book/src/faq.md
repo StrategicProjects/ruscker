@@ -44,10 +44,15 @@ round-robin (APIs). It's all in [Configuration](./configuration.md).
 
 ### How does authentication work?
 
-The **admin panel** has user accounts with Viewer / Editor / Admin roles
-(plus a break-glass token). Gating *app access* per user (OIDC / SAML /
-LDAP, per-app ACLs) is [Phase 8](./roadmap.md) — today any visitor can
-reach a published app, as with Shiny Server Free.
+The **admin panel** has user accounts with Viewer / Editor / Admin
+roles (plus a break-glass token). The same accounts gate **per-app
+visibility**: every spec can declare `access-groups` / `access-users`
+and only matching users see the card and reach `/app` / `/api`
+(specs with no access keys remain open to anyone) —
+see [Per-user access](./configuration.md#per-user-access).
+External identity providers (OIDC / SAML / LDAP) for end-user
+sign-in are [Phase 8](./roadmap.md); user accounts are managed in
+the admin **Users** page until then.
 
 ### Where is configuration and state stored?
 
@@ -64,6 +69,11 @@ state, behind a load balancer; a Postgres advisory lock elects a single
 auto-scaler leader with automatic failover. There's a runnable two-node
 harness in `examples/ha/` — see the
 [active-active section](./deploying.md) of the deploy guide.
+One operational caveat: until a shared admin-session store ships, pin
+the **sign-in session** paths to a single upstream — see
+[Sticky upstream for the sign-in session][ha-sticky].
+
+[ha-sticky]: ./deploying.md#sticky-upstream-for-the-sign-in-session-admin-app-api
 
 ### Is it production-ready?
 

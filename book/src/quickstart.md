@@ -88,9 +88,17 @@ CPU/memory limits, registry credentials, routing, rate limits…).
 
 ## Next steps
 
-- [Configuration](./configuration.md) — the full YAML reference.
+- [Configuration](./configuration.md) — the full YAML reference. See
+  [Per-user access](./configuration.md#per-user-access) to restrict
+  apps by user / group.
 - [The admin panel](./admin.md) — manage specs, images, users, and the
   live dashboard without editing YAML.
 - [Deploying in production](./deploying.md) — systemd + nginx, TLS,
-  multi-host, and active-active HA.
+  multi-host, and active-active HA (including
+  [mounting the portal under a subpath][base-path] and the
+  [sticky-upstream requirement for sign-in sessions][ha-sticky] in
+  HA).
 - [Troubleshooting](./troubleshooting.md) — when an app won't load.
+
+[base-path]: ./deploying.md#4b-mounting-under-a-base-path-subpath
+[ha-sticky]: ./deploying.md#sticky-upstream-for-the-sign-in-session-admin-app-api

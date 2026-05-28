@@ -329,7 +329,7 @@ pub struct CardCounts {
 /// declaration order. This matches the "Recentes" sort the mockup
 /// shows as the default option.
 pub fn sort_by_recent(cards: &mut [CardCtx<'_>]) {
-    cards.sort_by(|a, b| b.updated_date.cmp(&a.updated_date));
+    cards.sort_by_key(|c| std::cmp::Reverse(c.updated_date));
 }
 
 /// Unique `subject` values across all cards, alphabetically sorted.

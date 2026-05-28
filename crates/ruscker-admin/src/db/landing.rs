@@ -211,12 +211,16 @@ mod tests {
     #[tokio::test]
     async fn update_then_fetch_roundtrip() {
         let pool = open_memory().await.unwrap();
-        let mut lc = LandingCustomization::default();
-        lc.header_bg = Some("#0f6e56".into());
-        lc.header_fg = Some("#ffffff".into());
-        lc.intro = Some("Welcome".into());
-        lc.intro_locales.insert("pt".into(), "Bem-vindo".into());
-        lc.intro_locales.insert("en".into(), "Welcome".into());
+        let mut intro_locales = std::collections::HashMap::new();
+        intro_locales.insert("pt".into(), "Bem-vindo".into());
+        intro_locales.insert("en".into(), "Welcome".into());
+        let lc = LandingCustomization {
+            header_bg: Some("#0f6e56".into()),
+            header_fg: Some("#ffffff".into()),
+            intro: Some("Welcome".into()),
+            intro_locales,
+            ..Default::default()
+        };
 
         update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
@@ -238,10 +242,12 @@ mod tests {
     #[tokio::test]
     async fn seo_fields_roundtrip() {
         let pool = open_memory().await.unwrap();
-        let mut lc = LandingCustomization::default();
-        lc.seo_title = Some("Demo Portal".into());
-        lc.seo_description = Some("Demo portal description".into());
-        lc.og_image = Some("/assets/img/og.png".into());
+        let lc = LandingCustomization {
+            seo_title: Some("Demo Portal".into()),
+            seo_description: Some("Demo portal description".into()),
+            og_image: Some("/assets/img/og.png".into()),
+            ..Default::default()
+        };
         update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.seo_title.as_deref(), Some("Demo Portal"));
@@ -257,9 +263,11 @@ mod tests {
         let pool = open_memory().await.unwrap();
         let snippet = "<script src=\"https://plausible.io/js/script.js\"></script>";
         let origins = "https://plausible.io";
-        let mut lc = LandingCustomization::default();
-        lc.analytics_html = Some(snippet.into());
-        lc.analytics_origins = Some(origins.into());
+        let lc = LandingCustomization {
+            analytics_html: Some(snippet.into()),
+            analytics_origins: Some(origins.into()),
+            ..Default::default()
+        };
         update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.analytics_html.as_deref(), Some(snippet));
@@ -269,9 +277,11 @@ mod tests {
     #[tokio::test]
     async fn empty_strings_collapse_to_none() {
         let pool = open_memory().await.unwrap();
-        let mut lc = LandingCustomization::default();
-        lc.header_bg = Some("   ".into()); // whitespace only
-        lc.intro = Some("".into());
+        let lc = LandingCustomization {
+            header_bg: Some("   ".into()), // whitespace only
+            intro: Some(String::new()),
+            ..Default::default()
+        };
         update(&ConfigDb::Sqlite(pool.clone()), &lc, None).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert!(got.header_bg.is_none(), "whitespace-only becomes None");

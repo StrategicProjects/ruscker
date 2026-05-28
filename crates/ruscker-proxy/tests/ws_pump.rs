@@ -21,6 +21,7 @@ async fn spawn_echo_upstream() -> String {
         if let Ok((stream, _)) = listener.accept().await {
             let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
             while let Some(Ok(msg)) = ws.next().await {
+                #[allow(clippy::collapsible_match)] // the natural read here is two statements
                 match msg {
                     Message::Text(_) | Message::Binary(_) => {
                         if ws.send(msg).await.is_err() {

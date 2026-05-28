@@ -214,19 +214,19 @@ fn main() -> Result<()> {
             docker,
             session_store_url,
             base_path,
-        } => cmd_serve(
-            &config,
-            bind,
-            images_dir,
-            db,
+        } => cmd_serve(ServeArgs {
+            config_path: config,
+            bind_override: bind,
+            images_dir_override: images_dir,
+            db_path: db,
             config_db_url,
             admin_token,
             master_key,
             docker,
             session_store_url,
-            base_path,
+            base_path_override: base_path,
             log_buffer,
-        ),
+        }),
     }
 }
 
@@ -378,8 +378,12 @@ fn docker_socket_at(_path: &str) -> bool {
     false
 }
 
-fn cmd_serve(
-    config_path: &PathBuf,
+/// All the knobs the `serve` subcommand reads. Packaged as a struct
+/// rather than positional arguments because there are too many — the
+/// clap `Serve` variant flattens into this on dispatch, and `cmd_serve`
+/// reads it field-by-field.
+struct ServeArgs {
+    config_path: PathBuf,
     bind_override: Option<std::net::SocketAddr>,
     images_dir_override: Option<PathBuf>,
     db_path: Option<PathBuf>,
@@ -390,8 +394,23 @@ fn cmd_serve(
     session_store_url: Option<String>,
     base_path_override: Option<String>,
     log_buffer: ruscker_admin::logbuf::LogBuffer,
-) -> Result<()> {
-    let config = Config::from_file(config_path).with_context(|| {
+}
+
+fn cmd_serve(args: ServeArgs) -> Result<()> {
+    let ServeArgs {
+        config_path,
+        bind_override,
+        images_dir_override,
+        db_path,
+        config_db_url,
+        admin_token,
+        master_key,
+        docker,
+        session_store_url,
+        base_path_override,
+        log_buffer,
+    } = args;
+    let config = Config::from_file(&config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
     })?;
 
@@ -408,7 +427,7 @@ fn cmd_serve(
     // Resolve the images dir: explicit flag wins, else auto-discover
     // next to the config / under the ShinyProxy template-path.
     let images_dir = images_dir_override.or_else(|| {
-        let found = discover_images_dir(config_path, &config);
+        let found = discover_images_dir(&config_path, &config);
         if let Some(dir) = &found {
             tracing::info!(dir = %dir.display(), "auto-discovered images dir");
         }

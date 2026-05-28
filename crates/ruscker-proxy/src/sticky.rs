@@ -94,7 +94,7 @@ impl CookieKey {
     /// will reset on restart" in the boot logs.
     pub fn from_env_or_random() -> Result<Self> {
         match std::env::var("RUSCKER_COOKIE_KEY").ok().filter(|s| !s.is_empty()) {
-            Some(raw) => Self::from_str(&raw),
+            Some(raw) => Self::parse(&raw),
             None => {
                 tracing::info!(
                     "RUSCKER_COOKIE_KEY not set; generated a random key. \
@@ -105,7 +105,12 @@ impl CookieKey {
         }
     }
 
-    pub fn from_str(raw: &str) -> Result<Self> {
+    /// Parse a cookie-key string (hex or base64) into the 32-byte key.
+    /// Named `parse` instead of `from_str` so it doesn't shadow the
+    /// [`std::str::FromStr`] convention — `T::from_str(s)` on an
+    /// inherent impl gets flagged by clippy because callers may expect
+    /// the trait semantics.
+    pub fn parse(raw: &str) -> Result<Self> {
         let raw = raw.trim();
         let bytes = if raw.len() == 64 && raw.chars().all(|c| c.is_ascii_hexdigit()) {
             let v = decode_hex(raw)?;
@@ -213,7 +218,7 @@ mod tests {
     use super::*;
 
     fn fixed_key() -> CookieKey {
-        CookieKey::from_str(&"ab".repeat(32)).unwrap()
+        CookieKey::parse(&"ab".repeat(32)).unwrap()
     }
 
     fn sample() -> StickySession {
@@ -260,7 +265,7 @@ mod tests {
     #[test]
     fn different_key_rejects_cookie() {
         let cookie = encode(&fixed_key(), &sample()).unwrap();
-        let other = CookieKey::from_str(&"cd".repeat(32)).unwrap();
+        let other = CookieKey::parse(&"cd".repeat(32)).unwrap();
         assert!(decode(&other, &cookie).is_err());
     }
 
@@ -289,8 +294,8 @@ mod tests {
         let bytes = vec![0xabu8; 32];
         let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
 
-        let kh = CookieKey::from_str(&hex).unwrap();
-        let kb = CookieKey::from_str(&b64).unwrap();
+        let kh = CookieKey::parse(&hex).unwrap();
+        let kb = CookieKey::parse(&b64).unwrap();
         let s = sample();
         assert_eq!(encode(&kh, &s).unwrap(), encode(&kb, &s).unwrap());
     }

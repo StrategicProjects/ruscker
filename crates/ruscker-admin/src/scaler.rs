@@ -1007,7 +1007,7 @@ proxy:
 
         update_idle_ticks(&mut counts, &snap);
         assert_eq!(counts.get(&idle.id), Some(&1));
-        assert!(counts.get(&busy.id).is_none(), "active replicas have no entry");
+        assert!(!counts.contains_key(&busy.id), "active replicas have no entry");
 
         update_idle_ticks(&mut counts, &snap);
         assert_eq!(counts.get(&idle.id), Some(&2));
@@ -1018,7 +1018,7 @@ proxy:
             ..idle.clone()
         };
         update_idle_ticks(&mut counts, &[now_active]);
-        assert!(counts.get(&idle.id).is_none(), "active replicas drop the counter");
+        assert!(!counts.contains_key(&idle.id), "active replicas drop the counter");
     }
 
     #[test]
@@ -1076,7 +1076,7 @@ proxy:
         // Tick 3: counter reaches 3 = threshold → drop.
         tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
         assert_eq!(state.replicas.read().await.replicas_of("graceful").len(), 1);
-        assert!(counts.get(&idle_id).is_none(), "dropped replica's counter GC'd");
+        assert!(!counts.contains_key(&idle_id), "dropped replica's counter GC'd");
     }
 
     // -------------------------------------------------------------
@@ -1123,7 +1123,7 @@ proxy:
         // Tick 3: counter reaches 3 → spawn → counter resets.
         tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, sat_threshold, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
-        assert!(sat_counts.get("hot").is_none(), "counter resets after spawn");
+        assert!(!sat_counts.contains_key("hot"), "counter resets after spawn");
         assert_eq!(state.replicas.read().await.replicas_of("hot").len(), 2);
     }
 
@@ -1161,7 +1161,7 @@ proxy:
         // Next tick: not saturated → counter cleared.
         tick(&state, &mut idle_counts, &mut sat_counts, &mut HashMap::new(), 1, 3, 0).await;
         assert!(
-            sat_counts.get("bursty").is_none(),
+            !sat_counts.contains_key("bursty"),
             "counter clears the instant saturation lifts"
         );
         assert_eq!(
@@ -1253,7 +1253,7 @@ proxy:
             reg.inc_sessions(&idle_id);
         }
         tick(&state, &mut counts, &mut HashMap::new(), &mut HashMap::new(), threshold, 1, 0).await;
-        assert!(counts.get(&idle_id).is_none(), "active replica's grace resets");
+        assert!(!counts.contains_key(&idle_id), "active replica's grace resets");
         assert_eq!(
             state.replicas.read().await.replicas_of("bouncy").len(),
             2,

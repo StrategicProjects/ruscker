@@ -209,7 +209,7 @@ async fn run_client() -> anyhow::Result<()> {
     // Polite close + drain.
     tx.send(TgMsg::Close(None)).await?;
     let _ = tokio::time::timeout(Duration::from_secs(1), async {
-        while let Some(_) = rx.next().await {}
+        while rx.next().await.is_some() {}
     })
     .await;
     Ok(())

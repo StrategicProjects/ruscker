@@ -46,10 +46,15 @@ impl MasterKey {
         if raw.is_empty() {
             return Ok(Self::default());
         }
-        Self::from_str(&raw)
+        Self::parse(&raw)
     }
 
-    pub fn from_str(raw: &str) -> Result<Self> {
+    /// Parse a master-key string (hex or base64) into a key. Named
+    /// `parse` instead of `from_str` so it doesn't shadow the
+    /// [`std::str::FromStr`] convention — a bare `from_str` on an
+    /// inherent impl gets flagged by clippy because callers writing
+    /// `T::from_str(s)` may expect the trait semantics.
+    pub fn parse(raw: &str) -> Result<Self> {
         let bytes = decode_key_material(raw)?;
         Ok(Self {
             inner: Some(Arc::new(Zeroizing::new(bytes))),
@@ -156,7 +161,7 @@ mod tests {
     fn fixed_key() -> MasterKey {
         // 32 bytes of zeroes — fine for tests. Real deployments
         // use `openssl rand -hex 32`.
-        MasterKey::from_str("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
+        MasterKey::parse("0000000000000000000000000000000000000000000000000000000000000000").unwrap()
     }
 
     #[test]
@@ -173,7 +178,7 @@ mod tests {
 
     #[test]
     fn accepts_hex_64() {
-        let k = MasterKey::from_str(&"ab".repeat(32)).unwrap();
+        let k = MasterKey::parse(&"ab".repeat(32)).unwrap();
         assert!(k.is_configured());
     }
 
@@ -182,13 +187,13 @@ mod tests {
         // 32 bytes of 0x42 → fixed base64
         let b64 = base64::engine::general_purpose::STANDARD.encode([0x42u8; 32]);
         assert_eq!(b64.len(), 44);
-        let k = MasterKey::from_str(&b64).unwrap();
+        let k = MasterKey::parse(&b64).unwrap();
         assert!(k.is_configured());
     }
 
     #[test]
     fn rejects_short_input() {
-        assert!(MasterKey::from_str("too-short").is_err());
+        assert!(MasterKey::parse("too-short").is_err());
     }
 
     #[test]

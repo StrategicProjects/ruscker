@@ -204,10 +204,12 @@ async fn login_page_chrome_cluster_is_outside_the_login_form() {
         body.contains(r#"class="chrome-cluster""#),
         "chrome cluster scaffolding missing"
     );
-    // Active locale carries aria-checked=true via the menuitemradio.
+    // Active locale + active theme carry aria-current="true" — the
+    // current-selection ARIA pattern (we dropped the menuitemradio
+    // role + aria-checked combo per the #195 review).
     assert!(
-        body.contains(r#"aria-checked="true""#),
-        "active locale/theme should carry aria-checked"
+        body.contains(r#"aria-current="true""#),
+        "active locale/theme should carry aria-current"
     );
 }
 

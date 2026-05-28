@@ -456,11 +456,14 @@ body {
  * Three icon-buttons in a row, anchored top-right on every public-
  * facing page. Replaces the older footer theme/language pickers.
  *
- * Disclosure uses native `<details>/<summary>`. Each popover is
- * absolutely positioned underneath its summary; only one is open at
- * a time because clicking a sibling toggles the others closed in the
- * browser's native handling. Keyboard nav: Tab moves between
- * summaries, Enter/Space opens, Esc closes. No JS.
+ * Disclosure uses native `<details>/<summary>` with `name=
+ * "chrome-cluster"` — the HTML ExclusiveAccordion pattern. Opening
+ * one popover closes its named siblings (Safari 17+, Firefox 124+,
+ * Chrome 120+). Older browsers fall back to "all stay open", which
+ * is graceful degradation. Keyboard nav: Tab moves between
+ * summaries, Enter/Space toggles the active one (native `<details>`
+ * doesn't close on Esc — clicking the summary again or another sibling
+ * is the dismiss path). No JS.
  */
 .chrome-cluster {
   display: flex; align-items: center; gap: 4px;

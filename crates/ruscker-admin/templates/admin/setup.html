@@ -54,13 +54,14 @@
     {{ self.t("admin-setup-submit") }}
   </button>
 
-  <div class="admin-login-footer">
-    <div class="admin-login-footer-links"></div>
+  <div class="admin-login-footer admin-login-footer--end">
     {# #181: see login.html — nested forms are invalid; use `formaction`. #}
-    <div class="admin-login-locales">
+    <div class="admin-login-locales" role="group" aria-label="{{ self.t("admin-login-locale-group") }}">
       {% for loc in locales_all %}
         <button type="submit" name="locale" value="{{ loc.code() }}"
                 formaction="/__set/locale" formmethod="post" formnovalidate
+                aria-label="{{ loc.native_name() }}"
+                {% if *loc == locale %}aria-current="true"{% endif %}
                 class="admin-login-locale {% if *loc == locale %}is-active{% endif %}">
           {{ loc.code()|upper }}
         </button>

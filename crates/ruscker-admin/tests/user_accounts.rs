@@ -168,6 +168,64 @@ async fn login_page_has_no_nested_form_and_uses_formaction_for_locale() {
         body.contains("formnovalidate"),
         "locale buttons must skip required-field validation"
     );
+    // Accessibility: the locale group + active locale must be
+    // announced (a screen-reader user otherwise hears "PT, submit
+    // button" four times in a row with no context).
+    // Role + a labelled group. Don't assert the label text — the
+    // default locale is pt-BR, so it'd be "Idioma"; assertion stays
+    // locale-agnostic by checking the attribute scaffolding only.
+    assert!(
+        body.contains(r#"class="admin-login-locales" role="group" aria-label="#),
+        "locale group should be announced as a labelled group"
+    );
+    assert!(
+        body.contains(r#"aria-current="true""#),
+        "active locale should carry aria-current"
+    );
+}
+
+#[tokio::test]
+async fn setup_page_has_no_nested_form_and_uses_formaction_for_locale() {
+    // Twin assertion of `login_page_has_no_nested_form_...` for the
+    // first-admin bootstrap (`/admin/setup`). The same nested-form
+    // bug existed here and was fixed in the same PR.
+    let (state, _pool) = state_with_db().await;
+    let sid = state.admin_sessions.create(Role::Admin, None);
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/setup")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&bytes).unwrap();
+
+    let form_count = body.matches("<form ").count();
+    assert_eq!(form_count, 1, "expected exactly one <form>, got {form_count}");
+    assert!(
+        body.contains(r#"formaction="/__set/locale""#),
+        "setup locale buttons missing formaction"
+    );
+    assert!(
+        body.contains("formnovalidate"),
+        "setup locale buttons must skip required-field validation"
+    );
+    // Role + a labelled group. Don't assert the label text — the
+    // default locale is pt-BR, so it'd be "Idioma"; assertion stays
+    // locale-agnostic by checking the attribute scaffolding only.
+    assert!(
+        body.contains(r#"class="admin-login-locales" role="group" aria-label="#),
+        "locale group should be announced as a labelled group"
+    );
 }
 
 #[tokio::test]

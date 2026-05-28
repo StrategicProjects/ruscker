@@ -525,6 +525,10 @@ body {
   font-size: 11px;
   margin-top: 4px;
 }
+/* Right-aligned variant for pages with no secondary links (setup,
+   password-reset) so the locale group doesn't sit on the left under
+   `space-between` with a single child. */
+.admin-login-footer--end { justify-content: flex-end; }
 .admin-login-footer a { color: var(--text-muted); text-decoration: none; }
 .admin-login-footer a:hover { color: var(--text); }
 .admin-login-footer-links { display: flex; align-items: center; gap: 14px; }

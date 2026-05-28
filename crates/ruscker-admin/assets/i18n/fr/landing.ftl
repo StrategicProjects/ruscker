@@ -164,6 +164,7 @@ admin-login-token-placeholder = Collez le jeton ici
 admin-login-submit = Se connecter
 admin-login-error-wrong = Jeton incorrect. Réessayez.
 admin-login-back-portal = ← portail public
+admin-login-locale-group = Langue
 
 # Apps list
 admin-specs-title = Applications

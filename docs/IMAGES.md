@@ -95,9 +95,9 @@ re-reads from disk on every request.
 ## Bundled examples
 
 The repository ships ~57 real card images at
-`examples/assets/img/` (extracted from the SEPE / Monitoramento
-Estratégico ShinyProxy install, sanitized). They cover every spec
-in `examples/application.yml` — running `ruscker serve --config
+`examples/assets/img/` (extracted from a real-world ShinyProxy
+install, sanitized). They cover every spec in
+`examples/application.yml` — running `ruscker serve --config
 examples/application.yml` shows the portal with all images visible.
 
 ## What we explicitly don't do

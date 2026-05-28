@@ -47,9 +47,10 @@ Tailwind 4. Specs and template properties drive what gets rendered.
   directory
 - [ ] Tailwind 4 build script (no Node required, uses standalone CLI)
 
-**Deliverable**: visit `localhost:8080` and see the SEPE portal
-rendered from the YAML, looking visually equivalent to today but in
-Tailwind. Cards are not yet clickable (no proxy yet).
+**Deliverable**: visit `localhost:8080` and see the bundled
+`examples/application.yml` portal rendered, looking visually
+equivalent to today but in Tailwind. Cards are not yet clickable
+(no proxy yet).
 
 ## Phase 2 — Persistence + admin CRUD (3 weeks)
 
@@ -160,8 +161,8 @@ drill into any container.
 
 ## Definition of "ready to replace ShinyProxy"
 
-After Phase 5, Ruscker can be deployed where SEPE currently runs
-ShinyProxy. The migration path:
+After Phase 5, Ruscker can be deployed as a drop-in replacement for
+existing ShinyProxy installations. The migration path:
 
 1. `ruscker import application.yml --db /var/ruscker/ruscker.db`
 2. Stop ShinyProxy

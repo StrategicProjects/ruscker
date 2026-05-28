@@ -28,9 +28,37 @@ server:
   servlet:
     session:
       timeout: 3600
+  context-path: /box                  # Mount portal under a subpath (see below)
+  # ShinyProxy's nested form is also accepted:
+  servlet.context-path: /box
 ```
 
 Resolved via `Server::session_timeout_secs()` — either form works.
+
+### `server.context-path` — subpath mounting
+
+Serves the whole portal under a URL prefix when you can't dedicate a
+subdomain (e.g. `example.org/box/` instead of `box.example.org/`).
+Normalized form: leading slash, no trailing slash (`"box"`,
+`"/box/"`, and `"/box"` all become `/box`). The CLI flag
+`--base-path /box` overrides the YAML.
+
+ShinyProxy emits this as `server.servlet.context-path`; the flat
+`server.context-path` form is also accepted. Empty / absent ⇒ served
+at the root (the default).
+
+Operational notes:
+
+- The health probes `/healthz` and `/readyz` stay at the root
+  regardless of the prefix — load balancers don't need to know it.
+- The chrome's root-absolute URLs (`/admin/...`, `/assets/...`,
+  redirects) are rewritten on the response so they all carry the
+  prefix; runtime fetches (`fetch`/`XMLHttpRequest`/`WebSocket`/
+  `EventSource`) get a small shim that prefixes them too.
+- Cookies set `Path=/` (already sent by browsers for `{base}/...`).
+- Configure your reverse proxy to pass requests through under the
+  same prefix — see the **Mounting under a base path** section of
+  `book/src/deploying.md`.
 
 Other `server.*` fields from Spring Boot are accepted by serde but
 ignored by Ruscker.
@@ -98,6 +126,7 @@ and `tls` mismatched with the scheme.
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |
 | `authentication` | enum | `none` | `none` (MVP) / `openid` / `ldap` / `saml` / `simple` |
+| `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
 | `specs` | array | `[]` | List of apps/links/APIs |
 
 ### Authentication
@@ -109,6 +138,87 @@ real auth support.
 
 For applications that handle their own auth internally (a common
 case), `none` is the correct choice — Ruscker just routes traffic.
+
+### `proxy.landing-customization`
+
+Branding, SEO, analytics, and custom-HTML overrides for the public
+landing. Every subfield is optional; an empty `landing-customization`
+block (the default) renders the stock landing.
+
+```yaml
+proxy:
+  landing-customization:
+    # Branding — CSS colors applied to the landing header
+    header-bg: "#0f6e56"               # any CSS color
+    header-fg: "#ffffff"               # contrast override when bg is dark
+
+    # Intro paragraph between header and filters
+    intro: "Welcome to the portal."    # single-language fallback
+    intro-locales:                     # per-language overrides; locale code → text
+      pt: "Bem-vindo ao portal."
+      en: "Welcome to the portal."
+      es: "Bienvenido al portal."
+      fr: "Bienvenue sur le portail."
+
+    # SEO / social-share meta tags injected into the landing `<head>`
+    seo-title: "Portal — Org Name"     # overrides `proxy.title` for <title>
+    seo-description: "Internal apps."  # <meta name="description"> + og:description
+    og-image: /assets/img/og.png       # path or absolute URL for og:image
+
+    # Analytics — admin-trusted, injected verbatim into landing <head>
+    analytics-html: |
+      <script defer src="https://plausible.io/js/script.js"
+              data-domain="example.org"></script>
+    analytics-origins: "https://plausible.io"   # space-separated; widens landing CSP
+
+    # Sign-in visibility (anonymous viewers only)
+    show-admin-link: true              # default true; false hides the entrance
+
+    # Custom HTML blocks (admin-managed; YAML round-trips via import/export)
+    blocks:
+      - slot: top                       # `top` (after header) | `bottom` (after grid)
+        title: "Maintenance banner"     # internal label, not shown publicly
+        html: '<div class="...">Scheduled downtime Sunday 02:00 UTC.</div>'
+        csp-origins: ""                 # space-separated origins this block needs
+        enabled: true                   # default true
+```
+
+Field reference:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `header-bg` | CSS color | none | Header background. Match your brand's primary color. |
+| `header-fg` | CSS color | none | Header text — set when `header-bg` is dark and the default loses contrast. |
+| `intro` | string | none | Plain text (no HTML); single-language fallback. |
+| `intro-locales` | map | `{}` | Locale code → intro string. Wins over `intro` for matching locales. |
+| `seo-title` | string | `proxy.title` | Override for `<title>`. |
+| `seo-description` | string | resolved intro | `<meta name="description">` + `og:description`. |
+| `og-image` | path / URL | none | `og:image` for social-share. |
+| `analytics-html` | string | none | **Trusted** raw HTML, injected verbatim into landing `<head>`. |
+| `analytics-origins` | string | none | Space-separated origins added to the landing CSP (`script-src`/`connect-src`/`img-src`). |
+| `show-admin-link` | bool | `true` | When `false`, anonymous visitors don't see the "Sign in" entrance. Logged-in users still see their panel link. |
+| `blocks[]` | list | `[]` | Custom HTML blocks (see below). |
+
+`blocks[]` subfields:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `slot` | enum | required | `top` or `bottom` — render position on the landing. |
+| `title` | string | required | Admin-only label; not rendered publicly. |
+| `html` | string | required | **Trusted** raw HTML, injected verbatim into the chosen slot. |
+| `csp-origins` | string | `""` | Space-separated origins this block's content needs, folded into the landing CSP. |
+| `enabled` | bool | `true` | Toggle without deleting. |
+
+> **Trust model:** `analytics-html` and `blocks[].html` are rendered
+> unescaped. Only set them from a trusted source. Anything the
+> snippet loads from outside Ruscker's origin must also be listed in
+> the matching `*-origins` field, otherwise the landing's CSP blocks
+> it.
+
+Blocks are admin-managed in the live landing editor; YAML
+round-tripping means `ruscker export` writes them back here and
+`ruscker import` consumes them. SEO, analytics, and `show-admin-link`
+are deploy-level policy and live only in this block.
 
 ## Specs
 

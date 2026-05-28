@@ -164,6 +164,7 @@ admin-login-token-placeholder = Paste the token here
 admin-login-submit = Sign in
 admin-login-error-wrong = Wrong token. Please try again.
 admin-login-back-portal = ← public portal
+admin-login-locale-group = Language
 
 # Apps list
 admin-specs-title = Apps

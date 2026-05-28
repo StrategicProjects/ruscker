@@ -171,6 +171,99 @@ async fn base_path_nests_the_portal_and_keeps_health_at_root() {
 }
 
 #[tokio::test]
+async fn login_under_base_path_honors_admin_referer() {
+    // #186 (#173 follow-up): a non-admin signing in from
+    // `/box/admin/specs` should land back on `/box/admin/specs`, not
+    // be bounced into `/box/admin/dashboard`. The handler must strip
+    // the base prefix before its `starts_with("/admin/")` check; the
+    // response middleware re-prefixes the `Location` on the way out.
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "alice",
+        "alicepass1",
+        Role::Admin,
+        false,
+        &[],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let mut state = app_state(db).await;
+    state.base_path = Arc::from("/box");
+    let app = router(state);
+
+    // Same-host referer mimicking what a real browser sends when the
+    // user submitted the form from `/box/admin/specs`.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/box/admin/login")
+        .header(header::HOST, "example.test")
+        .header(header::REFERER, "https://example.test/box/admin/specs")
+        .header(
+            header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(Body::from("username=alice&password=alicepass1"))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    assert_eq!(loc, "/box/admin/specs", "expected base-prefixed referer");
+}
+
+#[tokio::test]
+async fn login_under_base_path_honors_landing_referer() {
+    // The `/` short-circuit (#155) has to survive the base-path strip too:
+    // a non-admin signing in from `/box/` should land on `/box/`, not
+    // `/box/admin/dashboard`.
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &[],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let mut state = app_state(db).await;
+    state.base_path = Arc::from("/box");
+    let app = router(state);
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/box/admin/login")
+        .header(header::HOST, "example.test")
+        .header(header::REFERER, "https://example.test/box/")
+        .header(
+            header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(Body::from("username=alice&password=alicepass1"))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    // The handler emits `Location: /`; the middleware prefixes it to
+    // `/box/`. (The canonical landing is `/box`; the `/box/` form gets
+    // a 308 to it on the next request — that's covered elsewhere.)
+    assert_eq!(loc, "/box/", "landing referer should round-trip under prefix");
+}
+
+#[tokio::test]
 async fn admin_session_sees_every_spec() {
     let db = open_db().await;
     let state = app_state(db).await;

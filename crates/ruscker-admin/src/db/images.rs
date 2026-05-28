@@ -157,7 +157,7 @@ pub async fn fetch_by_filename(
 /// Shape of one row from the `images` listing query — kept as a type
 /// alias so the deeply-nested tuple doesn't drown the call site.
 /// Order matches the `SELECT` in [`list_all`].
-type ImageRow = (
+type ImageListRow = (
     String,         // id
     String,         // filename
     String,         // mime_type
@@ -172,7 +172,7 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<ImageMeta>> {
     let sql = "SELECT id, filename, mime_type, size_bytes, width, height, uploaded_at
                FROM images
               ORDER BY uploaded_at DESC, filename ASC";
-    let rows: Vec<ImageRow> =
+    let rows: Vec<ImageListRow> =
         match db {
             ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
             ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,

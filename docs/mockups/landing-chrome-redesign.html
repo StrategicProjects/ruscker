@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Chrome redesign — top-right cluster (#182 + #183)</title>
+<link rel="stylesheet" href="_shared.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.5.0/dist/tabler-icons.min.css">
+<style>
+  body { font-family: var(--font-sans); background: var(--color-background-tertiary); margin: 0; padding: 36px 24px; color: var(--color-text-primary); }
+  h1 { font-size: 18px; font-weight: 600; margin: 0 0 6px; }
+  .lede { color: var(--color-text-secondary); font-size: 13px; margin: 0 0 28px; max-width: 720px; line-height: 1.5; }
+
+  /* Each preview is a self-contained card with a fake browser frame
+     so the user can compare the three states side-by-side. */
+  .preview { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: 12px; overflow: hidden; margin-bottom: 22px; }
+  .preview-bar { padding: 6px 10px; background: var(--color-background-secondary); border-bottom: 0.5px solid var(--color-border-tertiary); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--color-text-secondary); display: flex; align-items: center; gap: 6px; }
+  .preview-bar .url { font-family: var(--font-mono); text-transform: none; letter-spacing: 0; }
+
+  /* ── Chrome (header + footer) ──────────────────────────────────── */
+
+  .ruscker-header { padding: 16px 24px; border-bottom: 0.5px solid var(--color-border-tertiary); display: flex; align-items: center; justify-content: space-between; gap: 18px; background: var(--color-background-primary); }
+  .ruscker-header.dark { background: #1f1f1f; color: #f0f0f0; border-bottom-color: rgba(255,255,255,0.08); }
+
+  .ruscker-brand { display: flex; align-items: center; gap: 10px; }
+  .ruscker-mark { flex: 0 0 28px; }
+  .ruscker-title { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.1; }
+  .ruscker-subtitle { font-size: 11px; opacity: 0.6; margin-top: 2px; line-height: 1.1; }
+
+  /* The cluster itself: three icon-buttons in a row.
+     Each is round-ish (10px radius), 32px tall, subtle border.
+     The active popover anchors directly underneath. */
+  .chrome-cluster { display: flex; align-items: center; gap: 4px; position: relative; }
+  .chrome-icon { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0.5px solid var(--color-border-tertiary); border-radius: 10px; cursor: pointer; color: inherit; transition: background 0.12s, border-color 0.12s; position: relative; font-size: 16px; }
+  .chrome-icon:hover { background: var(--color-background-secondary); border-color: var(--color-border-secondary); }
+  .chrome-icon.is-active { background: var(--color-text-primary); color: var(--color-background-primary); border-color: var(--color-text-primary); }
+  .dark .chrome-icon { border-color: rgba(255,255,255,0.1); }
+  .dark .chrome-icon:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.2); }
+  .chrome-icon i { font-size: 16px; line-height: 1; }
+
+  /* The little badge sub-letters on the locale icon, e.g. "EN".
+     Avoids needing a separate dropdown to read the current locale at a glance. */
+  .chrome-icon .badge { font-size: 9px; font-weight: 600; letter-spacing: 0.04em; position: absolute; bottom: 3px; right: 3px; background: var(--color-background-primary); border-radius: 4px; padding: 0 3px; line-height: 1.3; border: 0.5px solid var(--color-border-tertiary); }
+  .dark .chrome-icon .badge { background: #1f1f1f; border-color: rgba(255,255,255,0.1); }
+
+  /* Sign-in/Panel/Logout has a textual variant for anonymous viewers
+     since "click to sign in" is a primary CTA, not a settings popover. */
+  .chrome-signin { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; height: 32px; border-radius: 10px; border: 0.5px solid var(--color-border-tertiary); font-size: 12px; cursor: pointer; background: transparent; color: inherit; font-family: inherit; }
+  .chrome-signin:hover { background: var(--color-background-secondary); border-color: var(--color-border-secondary); }
+  .dark .chrome-signin { border-color: rgba(255,255,255,0.1); }
+  .dark .chrome-signin:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.2); }
+
+  /* Popover panel — anchored to the right of the cluster.
+     Pure CSS + <details>/<summary> for the disclosure semantics, so
+     a real implementation can keep zero JS for this. */
+  .chrome-popover { position: absolute; top: 38px; right: 0; min-width: 160px; background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: 10px; box-shadow: 0 6px 24px rgba(0,0,0,0.08); padding: 6px; display: flex; flex-direction: column; z-index: 10; }
+  .dark .chrome-popover { background: #1f1f1f; border-color: rgba(255,255,255,0.1); box-shadow: 0 6px 24px rgba(0,0,0,0.3); }
+  .chrome-popover button, .chrome-popover a { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: transparent; border: 0; cursor: pointer; font-family: inherit; font-size: 12.5px; text-align: left; border-radius: 6px; color: inherit; text-decoration: none; }
+  .chrome-popover button:hover, .chrome-popover a:hover { background: var(--color-background-secondary); }
+  .dark .chrome-popover button:hover, .dark .chrome-popover a:hover { background: rgba(255,255,255,0.06); }
+  .chrome-popover .is-current { font-weight: 500; }
+  .chrome-popover .is-current::after { content: "✓"; margin-left: auto; opacity: 0.7; }
+  .chrome-popover .sep { height: 0.5px; background: var(--color-border-tertiary); margin: 4px 0; }
+  .dark .chrome-popover .sep { background: rgba(255,255,255,0.08); }
+  .chrome-popover .user-row { padding: 7px 10px 4px; font-size: 11px; color: var(--color-text-tertiary); }
+  .dark .chrome-popover .user-row { color: rgba(255,255,255,0.5); }
+
+  /* ── Body filler (just so previews aren't empty) ──────────────── */
+  .body-stub { padding: 20px 24px; font-size: 13px; color: var(--color-text-secondary); background: var(--color-background-primary); min-height: 80px; }
+  .dark.body-stub { background: #1f1f1f; color: rgba(255,255,255,0.6); }
+
+  /* ── Footer: minimal — just powered-by + version + links ──────── */
+  .ruscker-footer { padding: 12px 24px; border-top: 0.5px solid var(--color-border-tertiary); display: flex; align-items: center; gap: 18px; font-size: 11px; color: var(--color-text-secondary); background: var(--color-background-primary); }
+  .ruscker-footer.dark { background: #1f1f1f; color: rgba(255,255,255,0.5); border-top-color: rgba(255,255,255,0.08); }
+  .ruscker-footer a { color: inherit; text-decoration: none; }
+  .ruscker-footer a:hover { color: var(--color-text-primary); }
+  .ruscker-footer .powered { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; opacity: 0.7; }
+
+  /* Section labels above each preview. */
+  .preview-label { font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--color-text-tertiary); margin: 0 0 8px 4px; }
+
+  .notes { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: 12px; padding: 18px 22px; max-width: 760px; font-size: 13px; line-height: 1.55; color: var(--color-text-secondary); }
+  .notes h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--color-text-primary); letter-spacing: 0.02em; }
+  .notes h2:not(:first-child) { margin-top: 16px; }
+  .notes ul { margin: 0; padding-left: 18px; }
+  .notes li { margin: 4px 0; }
+  .notes code { font-family: var(--font-mono); font-size: 12px; padding: 1px 5px; background: var(--color-background-secondary); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Chrome redesign — top-right cluster</h1>
+<p class="lede">
+  Proposal for #182 + #183: theme + language + sign-in move out of the footer into a
+  three-icon cluster anchored top-right on every public-facing page (landing,
+  <code>/admin/login</code>, <code>/admin/setup</code>, account-password). Footer keeps
+  only "powered by" / version / static links. Logo gets a small Ruscker mark to
+  the left of the operator-provided title. Dropdowns use <code>&lt;details&gt;</code> so
+  the implementation can stay zero-JS.
+</p>
+
+<!-- ── 1. Anonymous, light ──────────────────────────────────────── -->
+<p class="preview-label">1 · Public landing — anonymous viewer (light)</p>
+<div class="preview">
+  <div class="preview-bar"><i class="ti ti-lock"></i><span class="url">https://example.org/</span></div>
+  <header class="ruscker-header">
+    <div class="ruscker-brand">
+      <svg class="ruscker-mark" viewBox="0 0 80 80" width="28" height="28" aria-hidden="true">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <div>
+        <div class="ruscker-title">Portal · Example Org</div>
+        <div class="ruscker-subtitle">Internal apps &amp; dashboards</div>
+      </div>
+    </div>
+    <div class="chrome-cluster">
+      <button class="chrome-icon" type="button" aria-label="Theme: light" title="Theme (light)">
+        <i class="ti ti-sun"></i>
+      </button>
+      <button class="chrome-icon" type="button" aria-label="Language: English" title="Language">
+        <i class="ti ti-world"></i><span class="badge">EN</span>
+      </button>
+      <button class="chrome-signin" type="button" aria-label="Sign in">
+        <i class="ti ti-login"></i> Sign in
+      </button>
+    </div>
+  </header>
+  <div class="body-stub">Cards grid would render here.</div>
+  <footer class="ruscker-footer">
+    <a href="#">Status</a>
+    <a href="#">Docs</a>
+    <span class="powered">
+      <svg viewBox="0 0 80 80" width="14" height="14"><polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/><polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/><polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/></svg>
+      powered by Ruscker · v0.1.2
+    </span>
+  </footer>
+</div>
+
+<!-- ── 2. Anonymous, dark ───────────────────────────────────────── -->
+<p class="preview-label">2 · Public landing — anonymous viewer (dark)</p>
+<div class="preview">
+  <div class="preview-bar"><i class="ti ti-lock"></i><span class="url">https://example.org/</span></div>
+  <header class="ruscker-header dark">
+    <div class="ruscker-brand">
+      <svg class="ruscker-mark" viewBox="0 0 80 80" width="28" height="28" aria-hidden="true">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <div>
+        <div class="ruscker-title">Portal · Example Org</div>
+        <div class="ruscker-subtitle">Internal apps &amp; dashboards</div>
+      </div>
+    </div>
+    <div class="chrome-cluster">
+      <button class="chrome-icon" type="button" aria-label="Theme: dark">
+        <i class="ti ti-moon"></i>
+      </button>
+      <button class="chrome-icon" type="button" aria-label="Language: Português">
+        <i class="ti ti-world"></i><span class="badge">PT</span>
+      </button>
+      <button class="chrome-signin" type="button" aria-label="Sign in">
+        <i class="ti ti-login"></i> Sign in
+      </button>
+    </div>
+  </header>
+  <div class="body-stub dark">Cards grid would render here.</div>
+  <footer class="ruscker-footer dark">
+    <a href="#">Status</a>
+    <a href="#">Docs</a>
+    <span class="powered">
+      <svg viewBox="0 0 80 80" width="14" height="14"><polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/><polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/><polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/></svg>
+      powered by Ruscker · v0.1.2
+    </span>
+  </footer>
+</div>
+
+<!-- ── 3. Signed-in with dropdown open ─────────────────────────── -->
+<p class="preview-label">3 · Signed-in viewer — user dropdown open (theme icon active)</p>
+<div class="preview">
+  <div class="preview-bar"><i class="ti ti-lock"></i><span class="url">https://example.org/</span></div>
+  <header class="ruscker-header">
+    <div class="ruscker-brand">
+      <svg class="ruscker-mark" viewBox="0 0 80 80" width="28" height="28" aria-hidden="true">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <div>
+        <div class="ruscker-title">Portal · Example Org</div>
+        <div class="ruscker-subtitle">Internal apps &amp; dashboards</div>
+      </div>
+    </div>
+    <div class="chrome-cluster">
+      <button class="chrome-icon" type="button" aria-label="Theme: light"><i class="ti ti-sun"></i></button>
+      <button class="chrome-icon" type="button" aria-label="Language: English"><i class="ti ti-world"></i><span class="badge">EN</span></button>
+      <button class="chrome-icon is-active" type="button" aria-label="Account: alice" aria-expanded="true"><i class="ti ti-user"></i></button>
+      <!-- Popover absolutely positioned under the cluster -->
+      <div class="chrome-popover" style="min-width:180px">
+        <div class="user-row">Signed in as <strong style="color:var(--color-text-primary)">alice</strong></div>
+        <div class="sep"></div>
+        <a href="/admin/dashboard"><i class="ti ti-layout-dashboard"></i> Panel</a>
+        <a href="/admin/account/password"><i class="ti ti-key"></i> Change password</a>
+        <div class="sep"></div>
+        <button type="button"><i class="ti ti-logout"></i> Sign out</button>
+      </div>
+    </div>
+  </header>
+  <div class="body-stub">Cards grid would render here.</div>
+  <footer class="ruscker-footer">
+    <a href="#">Status</a>
+    <a href="#">Docs</a>
+    <span class="powered">
+      <svg viewBox="0 0 80 80" width="14" height="14"><polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/><polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/><polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/></svg>
+      powered by Ruscker · v0.1.2
+    </span>
+  </footer>
+</div>
+
+<!-- ── 4. Language popover open ─────────────────────────────────── -->
+<p class="preview-label">4 · Language popover open (anonymous)</p>
+<div class="preview">
+  <div class="preview-bar"><i class="ti ti-lock"></i><span class="url">https://example.org/admin/login</span></div>
+  <header class="ruscker-header">
+    <div class="ruscker-brand">
+      <svg class="ruscker-mark" viewBox="0 0 80 80" width="28" height="28" aria-hidden="true">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <div>
+        <div class="ruscker-title">Portal · Example Org</div>
+        <div class="ruscker-subtitle">Admin sign in</div>
+      </div>
+    </div>
+    <div class="chrome-cluster">
+      <button class="chrome-icon" type="button" aria-label="Theme: light"><i class="ti ti-sun"></i></button>
+      <button class="chrome-icon is-active" type="button" aria-label="Language" aria-expanded="true"><i class="ti ti-world"></i><span class="badge">EN</span></button>
+      <div class="chrome-popover" style="right:36px">
+        <button type="button"><span style="font-family:var(--font-mono);opacity:0.6;width:18px">PT</span> Português</button>
+        <button type="button" class="is-current"><span style="font-family:var(--font-mono);opacity:0.6;width:18px">EN</span> English</button>
+        <button type="button"><span style="font-family:var(--font-mono);opacity:0.6;width:18px">ES</span> Español</button>
+        <button type="button"><span style="font-family:var(--font-mono);opacity:0.6;width:18px">FR</span> Français</button>
+      </div>
+      <button class="chrome-signin" type="button" aria-label="Sign in"><i class="ti ti-login"></i> Sign in</button>
+    </div>
+  </header>
+  <div class="body-stub" style="min-height:160px;display:flex;align-items:center;justify-content:center">
+    <span style="opacity:0.5;font-size:12px">Login card would render here.</span>
+  </div>
+</div>
+
+<div class="notes">
+  <h2>Design notes</h2>
+  <ul>
+    <li><strong>Cluster anatomy:</strong> three slots — theme (icon-only) · language (icon + 2-letter badge) · account (icon-only when signed in, "Sign in" text-button when anonymous).</li>
+    <li><strong>Disclosure:</strong> the theme and language buttons open small popovers anchored under the cluster. Using native <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code> keeps it keyboard-accessible with zero JS — the form buttons inside POST to <code>/__set/theme</code> and <code>/__set/locale</code> just like today's footer.</li>
+    <li><strong>Account slot:</strong> anonymous viewers get a textual "Sign in" CTA (it's a primary action, not a settings menu). Signed-in viewers get a user-icon that opens a popover with the username, Panel link, Change-password link, and a Sign-out button.</li>
+    <li><strong>Logo:</strong> small Ruscker mark (28×28) left of the operator's title. When the operator later configures their own brand mark via <code>landing-customization.logo</code> (future), it slots into this same position.</li>
+    <li><strong>Footer:</strong> shrinks to status link + docs link + "powered by Ruscker · v0.1.2" right-aligned. Theme + language pickers leave the footer entirely.</li>
+  </ul>
+
+  <h2>Scope &amp; pages</h2>
+  <ul>
+    <li><code>templates/_layout.html</code> — replace footer chrome with the new cluster in the existing <code>templates/landing.html</code> header.</li>
+    <li><code>templates/landing.html</code> — host the cluster in the existing header row (already has the sign-in affordance from #155, easy to absorb).</li>
+    <li><code>templates/admin/login.html</code> + <code>setup.html</code> + <code>account_password.html</code> — replace the current bottom-of-card locale row with the same cluster at the top-right of the page (above the card).</li>
+    <li><code>templates/admin/_layout.html</code> — same cluster top-right of the admin chrome (replaces the footer pickers added in #53).</li>
+  </ul>
+
+  <h2>Open questions</h2>
+  <ul>
+    <li>Should the theme icon directly cycle on click (one click = next mode) instead of opening a popover? Faster but loses the visible "auto" state. The mockup uses popover for clarity; happy to swap.</li>
+    <li>Language popover shows native names ("English", "Português") with a 2-letter code prefix. Keep that, or just the code, or just the name?</li>
+    <li>Footer still has the "powered by Ruscker" lockup. Should the version number be a click-through to the GitHub release page?</li>
+  </ul>
+</div>
+
+</body>
+</html>

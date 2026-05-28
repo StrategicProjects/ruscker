@@ -129,14 +129,43 @@ async fn first_login_with_must_change_redirects_to_password() {
     assert_eq!(loc, "/admin/account/password");
 }
 
+/// Count `<form ` opens, then verify none of them is nested inside
+/// another `<form>`. Cheap structural check that doesn't need an HTML
+/// parser. Returns `(open_count, max_depth)`.
+fn form_nesting(body: &str) -> (usize, usize) {
+    let mut depth: usize = 0;
+    let mut max: usize = 0;
+    let mut opens: usize = 0;
+    let bytes = body.as_bytes();
+    let mut i = 0;
+    while i + 6 <= bytes.len() {
+        if &bytes[i..i + 6] == b"<form " {
+            opens += 1;
+            depth += 1;
+            if depth > max {
+                max = depth;
+            }
+            i += 6;
+        } else if i + 7 <= bytes.len() && &bytes[i..i + 7] == b"</form>" {
+            depth = depth.saturating_sub(1);
+            i += 7;
+        } else {
+            i += 1;
+        }
+    }
+    (opens, max)
+}
+
 #[tokio::test]
-async fn login_page_has_no_nested_form_and_uses_formaction_for_locale() {
-    // #181: the locale picker in /admin/login was wrapped in a second
-    // `<form action="/__set/locale">` inside the outer login form.
-    // Nested `<form>` is invalid HTML and browsers ignore the inner
-    // one — clicking a locale button posted empty credentials to
-    // /admin/login. The fix uses `formaction` + `formnovalidate` on the
-    // buttons so the per-button submission target is honored.
+async fn login_page_chrome_cluster_is_outside_the_login_form() {
+    // #182 + #183: theme + language pickers moved into a top-right
+    // chrome cluster that lives in `<body>` BEFORE the login form.
+    // Each picker is its own POST form sibling to the login form.
+    //
+    // Originally (#181) the cluster was inside the card and used
+    // `formaction` to escape the outer login form. With the cluster
+    // hoisted into the body, regular `<form>` wrappers are fine and
+    // the formaction trick is no longer needed.
     let (state, _pool) = state_with_db().await;
     let app = router(state);
     let resp = app
@@ -154,41 +183,38 @@ async fn login_page_has_no_nested_form_and_uses_formaction_for_locale() {
         .unwrap();
     let body = std::str::from_utf8(&bytes).unwrap();
 
-    // Exactly one `<form>` on the page (the outer login form). The old
-    // nested-form bug would push this above 1.
-    let form_count = body.matches("<form ").count();
-    assert_eq!(form_count, 1, "expected exactly one <form>, got {form_count}");
+    // 3 sibling forms expected: theme picker + locale picker + the
+    // outer login form. None nested.
+    let (opens, max_depth) = form_nesting(body);
+    assert_eq!(opens, 3, "expected 3 sibling <form> tags, got {opens}");
+    assert_eq!(max_depth, 1, "no <form> should be nested inside another");
 
-    // The locale buttons must override the submission via formaction.
+    // The chrome cluster's POSTs must target the same endpoints the
+    // old footer used.
     assert!(
-        body.contains(r#"formaction="/__set/locale""#),
-        "locale buttons missing formaction"
+        body.contains(r#"action="/__set/theme""#),
+        "chrome theme form should POST to /__set/theme"
     );
     assert!(
-        body.contains("formnovalidate"),
-        "locale buttons must skip required-field validation"
+        body.contains(r#"action="/__set/locale""#),
+        "chrome locale form should POST to /__set/locale"
     );
-    // Accessibility: the locale group + active locale must be
-    // announced (a screen-reader user otherwise hears "PT, submit
-    // button" four times in a row with no context).
-    // Role + a labelled group. Don't assert the label text — the
-    // default locale is pt-BR, so it'd be "Idioma"; assertion stays
-    // locale-agnostic by checking the attribute scaffolding only.
+    // The cluster itself.
     assert!(
-        body.contains(r#"class="admin-login-locales" role="group" aria-label="#),
-        "locale group should be announced as a labelled group"
+        body.contains(r#"class="chrome-cluster""#),
+        "chrome cluster scaffolding missing"
     );
+    // Active locale carries aria-checked=true via the menuitemradio.
     assert!(
-        body.contains(r#"aria-current="true""#),
-        "active locale should carry aria-current"
+        body.contains(r#"aria-checked="true""#),
+        "active locale/theme should carry aria-checked"
     );
 }
 
 #[tokio::test]
-async fn setup_page_has_no_nested_form_and_uses_formaction_for_locale() {
-    // Twin assertion of `login_page_has_no_nested_form_...` for the
-    // first-admin bootstrap (`/admin/setup`). The same nested-form
-    // bug existed here and was fixed in the same PR.
+async fn setup_page_chrome_cluster_is_outside_the_setup_form() {
+    // Twin of `login_page_chrome_cluster_is_outside_the_login_form` for
+    // /admin/setup.
     let (state, _pool) = state_with_db().await;
     let sid = state.admin_sessions.create(Role::Admin, None);
     let cookie = format!("{COOKIE_NAME}={sid}");
@@ -209,22 +235,20 @@ async fn setup_page_has_no_nested_form_and_uses_formaction_for_locale() {
         .unwrap();
     let body = std::str::from_utf8(&bytes).unwrap();
 
-    let form_count = body.matches("<form ").count();
-    assert_eq!(form_count, 1, "expected exactly one <form>, got {form_count}");
+    let (opens, max_depth) = form_nesting(body);
+    assert_eq!(opens, 3, "expected 3 sibling <form> tags, got {opens}");
+    assert_eq!(max_depth, 1, "no <form> should be nested inside another");
     assert!(
-        body.contains(r#"formaction="/__set/locale""#),
-        "setup locale buttons missing formaction"
+        body.contains(r#"action="/__set/theme""#),
+        "chrome theme form should POST to /__set/theme"
     );
     assert!(
-        body.contains("formnovalidate"),
-        "setup locale buttons must skip required-field validation"
+        body.contains(r#"action="/__set/locale""#),
+        "chrome locale form should POST to /__set/locale"
     );
-    // Role + a labelled group. Don't assert the label text — the
-    // default locale is pt-BR, so it'd be "Idioma"; assertion stays
-    // locale-agnostic by checking the attribute scaffolding only.
     assert!(
-        body.contains(r#"class="admin-login-locales" role="group" aria-label="#),
-        "locale group should be announced as a labelled group"
+        body.contains(r#"class="chrome-cluster""#),
+        "chrome cluster scaffolding missing"
     );
 }
 

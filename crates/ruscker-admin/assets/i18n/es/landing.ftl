@@ -164,7 +164,6 @@ admin-login-token-placeholder = Pegue el token aquí
 admin-login-submit = Entrar
 admin-login-error-wrong = Token incorrecto. Intente de nuevo.
 admin-login-back-portal = ← portal público
-admin-login-locale-group = Idioma
 
 # Apps list
 admin-specs-title = Aplicaciones
@@ -352,11 +351,20 @@ card-state-inactive = No disponible
 card-access-public = Acceso público
 card-access-restricted = Acceso restringido
 
-footer-language = Idioma
-footer-theme = Tema
 theme-light = Claro
 theme-dark = Oscuro
 theme-auto = Automático
+
+# Top-right chrome cluster (#182 + #183)
+chrome-cluster-label = Preferencias de la página
+chrome-theme-label = Tema
+chrome-language-label = Idioma
+chrome-account-label = Cuenta
+chrome-signin = Iniciar sesión
+chrome-signed-in-as-prefix = Conectado como
+chrome-panel = Panel
+chrome-change-password = Cambiar contraseña
+chrome-signout = Cerrar sesión
 
 # Admin logs viewer
 admin-logs-title = Logs del contenedor

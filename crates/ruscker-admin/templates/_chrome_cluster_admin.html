@@ -1,0 +1,80 @@
+{# Admin variant of the chrome cluster: theme + language + account. #}
+{# Used by admin/_layout.html and admin/account_password.html — pages #}
+{# that are always signed-in via AdminSession. The account slot reads #}
+{# the role directly (no username field needed on the calling struct). #}
+{# #}
+{# Required template fields: locale, theme, locales_all, role: Role. #}
+{# #}
+{# NOTE: this partial intentionally lives OUTSIDE any other form. The #}
+{# admin navbar is itself a top-level <nav>, not nested in a <form>. #}
+<div class="chrome-cluster" role="group" aria-label="{{ self.t("chrome-cluster-label") }}">
+
+  {# ── Theme ──────────────────────────────────────────────────── #}
+  <details class="chrome-disclosure">
+    <summary class="chrome-icon" aria-label="{{ self.t("chrome-theme-label") }}" title="{{ self.t("chrome-theme-label") }}">
+      {% if theme.is_light() %}<i class="ti ti-sun" aria-hidden="true"></i>
+      {% else if theme.is_dark() %}<i class="ti ti-moon" aria-hidden="true"></i>
+      {% else %}<i class="ti ti-device-desktop" aria-hidden="true"></i>{% endif %}
+    </summary>
+    <form method="post" action="/__set/theme" class="chrome-popover" role="menu">
+      <button type="submit" name="theme" value="light"
+              class="chrome-popover-item {% if theme.is_light() %}is-current{% endif %}"
+              role="menuitemradio" aria-checked="{% if theme.is_light() %}true{% else %}false{% endif %}">
+        <i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}
+      </button>
+      <button type="submit" name="theme" value="dark"
+              class="chrome-popover-item {% if theme.is_dark() %}is-current{% endif %}"
+              role="menuitemradio" aria-checked="{% if theme.is_dark() %}true{% else %}false{% endif %}">
+        <i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}
+      </button>
+      <button type="submit" name="theme" value="auto"
+              class="chrome-popover-item {% if theme.is_auto() %}is-current{% endif %}"
+              role="menuitemradio" aria-checked="{% if theme.is_auto() %}true{% else %}false{% endif %}">
+        <i class="ti ti-device-desktop" aria-hidden="true"></i> {{ self.t("theme-auto") }}
+      </button>
+    </form>
+  </details>
+
+  {# ── Language ───────────────────────────────────────────────── #}
+  <details class="chrome-disclosure">
+    <summary class="chrome-icon" aria-label="{{ self.t("chrome-language-label") }}" title="{{ self.t("chrome-language-label") }}">
+      <i class="ti ti-world" aria-hidden="true"></i>
+      <span class="chrome-icon-badge">{{ locale.code()|upper }}</span>
+    </summary>
+    <form method="post" action="/__set/locale" class="chrome-popover" role="menu">
+      {% for loc in locales_all %}
+        <button type="submit" name="locale" value="{{ loc.code() }}"
+                class="chrome-popover-item {% if *loc == locale %}is-current{% endif %}"
+                role="menuitemradio" aria-checked="{% if *loc == locale %}true{% else %}false{% endif %}">
+          <span class="chrome-popover-code">{{ loc.code()|upper }}</span> {{ loc.native_name() }}
+        </button>
+      {% endfor %}
+    </form>
+  </details>
+
+  {# ── Account ────────────────────────────────────────────────── #}
+  <details class="chrome-disclosure">
+    <summary class="chrome-icon" aria-label="{{ self.t("chrome-account-label") }}" title="{{ self.t("chrome-account-label") }}">
+      <i class="ti ti-user" aria-hidden="true"></i>
+    </summary>
+    <div class="chrome-popover" role="menu">
+      <div class="chrome-popover-user">
+        <span class="opacity-60">{{ self.t("role-current") }}:</span>
+        <strong>{{ self.t(role.label_key()) }}</strong>
+      </div>
+      <div class="chrome-popover-sep"></div>
+      <a class="chrome-popover-item" href="/" role="menuitem">
+        <i class="ti ti-arrow-back-up" aria-hidden="true"></i> {{ self.t("admin-nav-portal") }}
+      </a>
+      <a class="chrome-popover-item" href="/admin/account/password" role="menuitem">
+        <i class="ti ti-key" aria-hidden="true"></i> {{ self.t("chrome-change-password") }}
+      </a>
+      <div class="chrome-popover-sep"></div>
+      <form method="post" action="/admin/logout" class="contents">
+        <button type="submit" class="chrome-popover-item" role="menuitem">
+          <i class="ti ti-logout" aria-hidden="true"></i> {{ self.t("chrome-signout") }}
+        </button>
+      </form>
+    </div>
+  </details>
+</div>

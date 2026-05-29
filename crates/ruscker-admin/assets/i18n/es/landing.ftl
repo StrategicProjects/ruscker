@@ -463,3 +463,61 @@ admin-nav-logs = Registros
 admin-proclog-title = Registros
 admin-proclog-subtitle = Registro reciente del proceso Ruscker (en vivo).
 admin-proclog-unavailable = Búfer de registro no disponible (el servidor inició sin la capa de logging).
+
+# ── spec-form advanced params (#211/#212) ──────────────────────────
+spec-form-runtime-section = Runtime
+spec-form-container-port = Puerto del contenedor
+spec-help-container-port = Puerto en el que la app escucha dentro del contenedor. Vacío = predeterminado por tipo (3838 para Shiny). Defínelo para Streamlit (8501), Dash (8050) o Jupyter (8888).
+spec-form-platform = Plataforma
+spec-help-platform = Plataforma Docker (ej.: linux/amd64) para ejecutar una imagen de otra arquitectura por emulación. Vacío = el daemon elige según el manifiesto.
+spec-form-container-lifetime = Vida útil del contenedor (min)
+spec-help-container-lifetime = Límite suave en minutos antes de reciclar el contenedor. Vacío = sin límite suave.
+spec-form-stop-on-logout = Detener al cerrar sesión
+spec-help-stop-on-logout = Detiene el contenedor del usuario cuando cierra sesión. Desactivado por defecto.
+spec-form-env-section = Entorno + comando
+spec-form-container-env = Variables de entorno
+spec-form-container-env-help = Una por línea, NOMBRE=valor. Para secretos, referencia una variable de entorno en vez de pegar el valor.
+spec-help-container-env = Inyectadas en el contenedor (container-env). Vacío = ninguna. Para secretos, usa interpolación de variable de entorno.
+spec-form-container-cmd = Comando (sobrescribir)
+spec-form-container-cmd-help = Un argumento por línea. Vacío = usa el CMD de la imagen.
+spec-help-container-cmd = Sobrescribe el comando del contenedor (container-cmd), como lista de argumentos.
+spec-form-registry-section = Registro (imágenes privadas)
+spec-form-registry-domain = Dominio del registro
+spec-help-registry-domain = Host del registro para imágenes privadas (ej.: docker.io, ghcr.io). Vacío = Docker Hub.
+spec-form-registry-username = Usuario
+spec-help-registry-username = Usuario para autenticar la descarga de una imagen privada.
+spec-form-registry-password = Contraseña
+spec-help-registry-password = Usa una variable de entorno — nunca pegues la contraseña en texto. Solo se usa junto con el usuario.
+spec-form-registry-credential = Credencial guardada
+spec-help-registry-credential = Nombre de una credencial del almacén, en vez del usuario/contraseña en línea.
+spec-form-registry-help = Para imágenes privadas. Mantén los secretos en variables de entorno; el validador avisa de contraseñas en texto.
+spec-form-access-section = Acceso
+spec-form-access-groups = Grupos permitidos
+spec-help-access-groups = Grupos que pueden ver y acceder a la app (separados por comas). Vacío, con usuarios también vacío = abierto a todos.
+spec-form-access-users = Usuarios permitidos
+spec-help-access-users = Usuarios que pueden ver y acceder a la app (separados por comas).
+spec-form-access-help = Ambos vacíos = tarjeta abierta a todos (incluido anónimo). Con algún valor, solo usuarios conectados que coincidan — y los admins siempre.
+spec-form-cpu-request = Reserva de CPU
+spec-help-cpu-request = Reserva suave de CPU en núcleos (container-cpu-request). Vacío = sin reserva.
+spec-form-memory-request = Reserva de memoria
+spec-help-memory-request = Reserva suave de memoria, ej.: 256m. Vacío = sin reserva.
+spec-form-max-body-size = Tamaño máx. del cuerpo
+spec-help-max-body-size = Límite por spec del cuerpo de las solicitudes, ej.: 10m. Vacío = usa el límite global.
+spec-form-scale-up = Umbral de scale-up
+spec-help-scale-up = Fracción de utilización (0–1) que dispara crear una réplica. Vacío = predeterminado del scaler.
+spec-form-scale-down = Umbral de scale-down
+spec-help-scale-down = Fracción de utilización (0–1) por debajo de la cual se retira una réplica. Vacío = predeterminado del scaler.
+spec-form-scale-down-grace = Gracia de scale-down (s)
+spec-help-scale-down-grace = Segundos por debajo del umbral antes de retirar la réplica. Vacío = predeterminado.
+spec-form-drain-timeout = Tiempo de drenaje (s)
+spec-help-drain-timeout = Segundos para drenar las sesiones de una réplica antes de detenerla. Vacío = predeterminado.
+spec-form-routing-strategy = Estrategia de enrutamiento
+spec-help-routing-strategy = Cómo el balanceador elige la réplica. Vacío = predeterminado por tipo (least-connections para apps, round-robin para API).
+spec-form-routing-default = Predeterminado (por tipo)
+spec-form-placement = Ubicación (multi-host)
+spec-help-placement = Cómo distribuir réplicas entre hosts Docker. Vacío = spread. Solo relevante con proxy.hosts.
+spec-form-placement-default = Predeterminado (spread)
+spec-form-anti-affinity = Anti-afinidad
+spec-help-anti-affinity = Prefiere hosts distintos para las réplicas de este spec (multi-host). Desactivado por defecto.
+spec-form-error-port = El puerto debe ser un número entre 1 y 65535.
+spec-form-error-threshold = El umbral debe ser un número entre 0 y 1.

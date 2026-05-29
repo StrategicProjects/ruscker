@@ -467,3 +467,61 @@ admin-nav-logs = Logs
 admin-proclog-title = Logs
 admin-proclog-subtitle = Log recente do processo Ruscker (ao vivo).
 admin-proclog-unavailable = Buffer de log não disponível (o servidor iniciou sem a camada de logging).
+
+# ── spec-form advanced params (#211/#212) ──────────────────────────
+spec-form-runtime-section = Runtime
+spec-form-container-port = Porta do container
+spec-help-container-port = Porta em que o app escuta dentro do container. Em branco = padrão por tipo (3838 para Shiny). Defina para Streamlit (8501), Dash (8050) ou Jupyter (8888).
+spec-form-platform = Plataforma
+spec-help-platform = Plataforma Docker (ex.: linux/amd64) para rodar imagens de outra arquitetura via emulação. Em branco = o daemon escolhe pelo manifesto.
+spec-form-container-lifetime = Vida útil do container (min)
+spec-help-container-lifetime = Limite suave em minutos antes de reciclar o container. Em branco = sem limite suave.
+spec-form-stop-on-logout = Parar ao sair (logout)
+spec-help-stop-on-logout = Para o container do usuário quando ele faz logout. Desligado por padrão.
+spec-form-env-section = Ambiente + comando
+spec-form-container-env = Variáveis de ambiente
+spec-form-container-env-help = Uma por linha, NOME=valor. Para segredos, referencie uma variável de ambiente em vez de colar o valor.
+spec-help-container-env = Injetadas no container (container-env). Em branco = nenhuma. Para segredos, use interpolação de variável de ambiente.
+spec-form-container-cmd = Comando (sobrescrever)
+spec-form-container-cmd-help = Um argumento por linha. Em branco = usa o CMD da imagem.
+spec-help-container-cmd = Sobrescreve o comando do container (container-cmd), como lista de argumentos.
+spec-form-registry-section = Registro (imagens privadas)
+spec-form-registry-domain = Domínio do registro
+spec-help-registry-domain = Host do registro para imagens privadas (ex.: docker.io, ghcr.io). Em branco = Docker Hub.
+spec-form-registry-username = Usuário
+spec-help-registry-username = Usuário para autenticar no pull de uma imagem privada.
+spec-form-registry-password = Senha
+spec-help-registry-password = Use uma variável de ambiente — nunca cole a senha em texto. Só usada junto com o usuário.
+spec-form-registry-credential = Credencial salva
+spec-help-registry-credential = Nome de uma credencial do cofre, em vez de usuário/senha inline.
+spec-form-registry-help = Para imagens privadas. Mantenha segredos em variáveis de ambiente; o validador alerta sobre senhas em texto.
+spec-form-access-section = Acesso
+spec-form-access-groups = Grupos permitidos
+spec-help-access-groups = Grupos que podem ver e acessar o app (separados por vírgula). Em branco, com usuários também em branco = aberto a todos.
+spec-form-access-users = Usuários permitidos
+spec-help-access-users = Usuários que podem ver e acessar o app (separados por vírgula).
+spec-form-access-help = Ambos em branco = card aberto a todos (inclusive anônimos). Com algum valor, só usuários logados que combinam — e admins sempre.
+spec-form-cpu-request = Reserva de CPU
+spec-help-cpu-request = Reserva suave de CPU em núcleos (container-cpu-request). Em branco = sem reserva.
+spec-form-memory-request = Reserva de memória
+spec-help-memory-request = Reserva suave de memória, ex.: 256m. Em branco = sem reserva.
+spec-form-max-body-size = Tamanho máx. do corpo
+spec-help-max-body-size = Limite por spec do corpo das requisições, ex.: 10m. Em branco = usa o limite global.
+spec-form-scale-up = Limiar de scale-up
+spec-help-scale-up = Fração de utilização (0–1) que dispara subir uma réplica. Em branco = padrão do scaler.
+spec-form-scale-down = Limiar de scale-down
+spec-help-scale-down = Fração de utilização (0–1) abaixo da qual uma réplica é recolhida. Em branco = padrão do scaler.
+spec-form-scale-down-grace = Carência de scale-down (s)
+spec-help-scale-down-grace = Segundos abaixo do limiar antes de recolher a réplica. Em branco = padrão.
+spec-form-drain-timeout = Timeout de drenagem (s)
+spec-help-drain-timeout = Segundos para drenar as sessões de uma réplica antes de pará-la. Em branco = padrão.
+spec-form-routing-strategy = Estratégia de roteamento
+spec-help-routing-strategy = Como o balanceador escolhe a réplica. Em branco = padrão por tipo (least-connections para apps, round-robin para API).
+spec-form-routing-default = Padrão (por tipo)
+spec-form-placement = Posicionamento (multi-host)
+spec-help-placement = Como distribuir réplicas entre hosts Docker. Em branco = spread. Só relevante com proxy.hosts.
+spec-form-placement-default = Padrão (spread)
+spec-form-anti-affinity = Anti-afinidade
+spec-help-anti-affinity = Prefere hosts distintos para as réplicas deste spec (multi-host). Desligado por padrão.
+spec-form-error-port = A porta deve ser um número entre 1 e 65535.
+spec-form-error-threshold = O limiar deve ser um número entre 0 e 1.

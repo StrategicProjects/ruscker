@@ -398,6 +398,133 @@
             </div>
           </template>
 
+          {# Runtime — inner port, platform, lifecycle #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-runtime-section") }}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-cport" class="spec-form-label">{{ self.t("spec-form-container-port") }}</label>
+                {% call help(self.t("spec-help-container-port")) %}{% endcall %}
+              </div>
+              <input id="f-cport" type="number" name="container_port" min="1" max="65535"
+                     value="{{ form.container_port }}" placeholder="3838" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-platform" class="spec-form-label">{{ self.t("spec-form-platform") }}</label>
+                {% call help(self.t("spec-help-platform")) %}{% endcall %}
+              </div>
+              <input id="f-platform" type="text" name="platform" list="platform-options"
+                     value="{{ form.platform }}" placeholder="linux/amd64"
+                     class="spec-form-input spec-form-input--mono">
+              <datalist id="platform-options">
+                <option value="linux/amd64"></option>
+                <option value="linux/arm64"></option>
+              </datalist>
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-clife" class="spec-form-label">{{ self.t("spec-form-container-lifetime") }}</label>
+                {% call help(self.t("spec-help-container-lifetime")) %}{% endcall %}
+              </div>
+              <input id="f-clife" type="number" name="container_lifetime" min="0"
+                     value="{{ form.container_lifetime }}" placeholder="360" class="spec-form-input">
+            </div>
+            <div class="spec-form-field" style="align-self:end">
+              <label class="spec-form-check">
+                <input type="checkbox" name="stop_on_logout" value="on"
+                       {% if !form.stop_on_logout.is_empty() %}checked{% endif %}>
+                {{ self.t("spec-form-stop-on-logout") }}
+                {% call help(self.t("spec-help-stop-on-logout")) %}{% endcall %}
+              </label>
+            </div>
+          </div>
+
+          {# Environment + command #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-env-section") }}</div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-env" class="spec-form-label">{{ self.t("spec-form-container-env") }}</label>
+              {% call help(self.t("spec-help-container-env")) %}{% endcall %}
+            </div>
+            <textarea id="f-env" name="container_env" rows="3"
+                      placeholder="JUPYTER_TOKEN=&#10;DB_PASSWORD=${DB_PASSWORD}"
+                      class="spec-form-input spec-form-input--mono">{{ form.container_env }}</textarea>
+            <div class="spec-form-help">{{ self.t("spec-form-container-env-help") }}</div>
+          </div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-cmd" class="spec-form-label">{{ self.t("spec-form-container-cmd") }}</label>
+              {% call help(self.t("spec-help-container-cmd")) %}{% endcall %}
+            </div>
+            <textarea id="f-cmd" name="container_cmd" rows="3"
+                      placeholder="start-notebook.py&#10;--ServerApp.base_url=/"
+                      class="spec-form-input spec-form-input--mono">{{ form.container_cmd }}</textarea>
+            <div class="spec-form-help">{{ self.t("spec-form-container-cmd-help") }}</div>
+          </div>
+
+          {# Registry — pulling private images #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-registry-section") }}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-reg-domain" class="spec-form-label">{{ self.t("spec-form-registry-domain") }}</label>
+                {% call help(self.t("spec-help-registry-domain")) %}{% endcall %}
+              </div>
+              <input id="f-reg-domain" type="text" name="docker_registry_domain"
+                     value="{{ form.docker_registry_domain }}" placeholder="docker.io"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-reg-user" class="spec-form-label">{{ self.t("spec-form-registry-username") }}</label>
+                {% call help(self.t("spec-help-registry-username")) %}{% endcall %}
+              </div>
+              <input id="f-reg-user" type="text" name="docker_registry_username"
+                     value="{{ form.docker_registry_username }}" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-reg-pass" class="spec-form-label">{{ self.t("spec-form-registry-password") }}</label>
+                {% call help(self.t("spec-help-registry-password")) %}{% endcall %}
+              </div>
+              <input id="f-reg-pass" type="text" name="docker_registry_password"
+                     value="{{ form.docker_registry_password }}" placeholder="${DOCKER_REGISTRY_PASSWORD}"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
+                {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
+              </div>
+              <input id="f-reg-cred" type="text" name="docker_registry_credential"
+                     value="{{ form.docker_registry_credential }}" class="spec-form-input">
+            </div>
+          </div>
+          <div class="spec-form-help">{{ self.t("spec-form-registry-help") }}</div>
+
+          {# Access — who may see + reach this app (#155) #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-access-section") }}</div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-acl-groups" class="spec-form-label">{{ self.t("spec-form-access-groups") }}</label>
+                {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
+              </div>
+              <input id="f-acl-groups" type="text" name="access_groups"
+                     value="{{ form.access_groups }}" placeholder="staff, ops" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
+                {% call help(self.t("spec-help-access-users")) %}{% endcall %}
+              </div>
+              <input id="f-acl-users" type="text" name="access_users"
+                     value="{{ form.access_users }}" placeholder="alice, bob" class="spec-form-input">
+            </div>
+          </div>
+          <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
+
           {# Scaling — replica pool #}
           <div class="spec-form-subsection">{{ self.t("spec-form-scaling-section") }}</div>
           <div class="grid grid-cols-3 gap-3">
@@ -426,6 +553,40 @@
                      value="{{ form.concurrent_requests_per_replica }}" placeholder="100" class="spec-form-input">
             </div>
           </div>
+          <div class="grid grid-cols-2 gap-3" style="margin-top:8px">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-scale-up" class="spec-form-label">{{ self.t("spec-form-scale-up") }}</label>
+                {% call help(self.t("spec-help-scale-up")) %}{% endcall %}
+              </div>
+              <input id="f-scale-up" type="text" name="scale_up_threshold"
+                     value="{{ form.scale_up_threshold }}" placeholder="0.8" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-scale-down" class="spec-form-label">{{ self.t("spec-form-scale-down") }}</label>
+                {% call help(self.t("spec-help-scale-down")) %}{% endcall %}
+              </div>
+              <input id="f-scale-down" type="text" name="scale_down_threshold"
+                     value="{{ form.scale_down_threshold }}" placeholder="0.2" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-scale-grace" class="spec-form-label">{{ self.t("spec-form-scale-down-grace") }}</label>
+                {% call help(self.t("spec-help-scale-down-grace")) %}{% endcall %}
+              </div>
+              <input id="f-scale-grace" type="number" name="scale_down_grace" min="0"
+                     value="{{ form.scale_down_grace }}" placeholder="30" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-drain" class="spec-form-label">{{ self.t("spec-form-drain-timeout") }}</label>
+                {% call help(self.t("spec-help-drain-timeout")) %}{% endcall %}
+              </div>
+              <input id="f-drain" type="number" name="drain_timeout" min="0"
+                     value="{{ form.drain_timeout }}" placeholder="30" class="spec-form-input">
+            </div>
+          </div>
 
           {# Resources — per-container limits #}
           <div class="spec-form-subsection">{{ self.t("spec-form-resources-section") }}</div>
@@ -445,6 +606,32 @@
               </div>
               <input id="f-mem" type="text" name="container_memory_limit"
                      value="{{ form.container_memory_limit }}" placeholder="512m"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-cpu-req" class="spec-form-label">{{ self.t("spec-form-cpu-request") }}</label>
+                {% call help(self.t("spec-help-cpu-request")) %}{% endcall %}
+              </div>
+              <input id="f-cpu-req" type="text" name="container_cpu_request"
+                     value="{{ form.container_cpu_request }}" placeholder="0.25" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-mem-req" class="spec-form-label">{{ self.t("spec-form-memory-request") }}</label>
+                {% call help(self.t("spec-help-memory-request")) %}{% endcall %}
+              </div>
+              <input id="f-mem-req" type="text" name="container_memory_request"
+                     value="{{ form.container_memory_request }}" placeholder="256m"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-maxbody" class="spec-form-label">{{ self.t("spec-form-max-body-size") }}</label>
+                {% call help(self.t("spec-help-max-body-size")) %}{% endcall %}
+              </div>
+              <input id="f-maxbody" type="text" name="max_body_size"
+                     value="{{ form.max_body_size }}" placeholder="10m"
                      class="spec-form-input spec-form-input--mono">
             </div>
           </div>
@@ -472,6 +659,40 @@
               {% call help(self.t("spec-help-inject-base-href")) %}{% endcall %}
             </label>
             <div class="spec-form-help">{{ self.t("spec-form-inject-base-href-help") }}</div>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-routing" class="spec-form-label">{{ self.t("spec-form-routing-strategy") }}</label>
+                {% call help(self.t("spec-help-routing-strategy")) %}{% endcall %}
+              </div>
+              <select id="f-routing" name="routing_strategy" class="spec-form-input">
+                <option value="" {% if form.routing_strategy.is_empty() %}selected{% endif %}>{{ self.t("spec-form-routing-default") }}</option>
+                <option value="least-connections" {% if form.routing_strategy == "least-connections" %}selected{% endif %}>least-connections</option>
+                <option value="round-robin" {% if form.routing_strategy == "round-robin" %}selected{% endif %}>round-robin</option>
+                <option value="weighted-random" {% if form.routing_strategy == "weighted-random" %}selected{% endif %}>weighted-random</option>
+                <option value="resource-aware" {% if form.routing_strategy == "resource-aware" %}selected{% endif %}>resource-aware</option>
+              </select>
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-placement" class="spec-form-label">{{ self.t("spec-form-placement") }}</label>
+                {% call help(self.t("spec-help-placement")) %}{% endcall %}
+              </div>
+              <select id="f-placement" name="placement" class="spec-form-input">
+                <option value="" {% if form.placement.is_empty() %}selected{% endif %}>{{ self.t("spec-form-placement-default") }}</option>
+                <option value="spread" {% if form.placement == "spread" %}selected{% endif %}>spread</option>
+                <option value="bin-pack" {% if form.placement == "bin-pack" %}selected{% endif %}>bin-pack</option>
+              </select>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-check">
+              <input type="checkbox" name="anti_affinity" value="on"
+                     {% if !form.anti_affinity.is_empty() %}checked{% endif %}>
+              {{ self.t("spec-form-anti-affinity") }}
+              {% call help(self.t("spec-help-anti-affinity")) %}{% endcall %}
+            </label>
           </div>
 
           {# Lifecycle #}
@@ -562,7 +783,29 @@ window.ruscker.specForm = (initial) => ({
     (initial.api_rate_limit || '').trim() ||
     (initial.api_docs_path || '').trim() ||
     (initial.api_health_path || '').trim() ||
-    (initial.api_cors || '').trim()
+    (initial.api_cors || '').trim() ||
+    (initial.container_port || '').toString().trim() ||
+    (initial.platform || '').trim() ||
+    (initial.container_lifetime || '').toString().trim() ||
+    (initial.stop_on_logout || '').trim() ||
+    (initial.container_env || '').trim() ||
+    (initial.container_cmd || '').trim() ||
+    (initial.docker_registry_domain || '').trim() ||
+    (initial.docker_registry_username || '').trim() ||
+    (initial.docker_registry_password || '').trim() ||
+    (initial.docker_registry_credential || '').trim() ||
+    (initial.access_groups || '').trim() ||
+    (initial.access_users || '').trim() ||
+    (initial.container_cpu_request || '').toString().trim() ||
+    (initial.container_memory_request || '').trim() ||
+    (initial.max_body_size || '').trim() ||
+    (initial.scale_up_threshold || '').toString().trim() ||
+    (initial.scale_down_threshold || '').toString().trim() ||
+    (initial.scale_down_grace || '').toString().trim() ||
+    (initial.drain_timeout || '').toString().trim() ||
+    (initial.routing_strategy || '').trim() ||
+    (initial.placement || '').trim() ||
+    (initial.anti_affinity || '').trim()
   ),
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder). Seeded from any

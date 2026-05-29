@@ -283,7 +283,10 @@ async fn tick(
     let Some(backend) = state.backend.clone() else {
         return;
     };
-    let specs = state.config.proxy.specs.clone();
+    // DB-first catalog (admin edits + showcase seed), not just the YAML
+    // config — otherwise DB-only specs get no min/max-replicas or idle
+    // reaping (#257).
+    let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
 
     // Build a snapshot of every replica across every spec in one
     // read-lock acquisition. We use it for the idle-tick
@@ -291,10 +294,7 @@ async fn tick(
     // the registry (stopped, crashed, reconciled out).
     let registry_snap: Vec<ruscker_core::Replica> = {
         let reg = state.replicas.read().await;
-        state
-            .config
-            .proxy
-            .specs
+        specs
             .iter()
             .flat_map(|s| reg.replicas_of(&s.id).to_vec())
             .collect()
@@ -737,6 +737,32 @@ proxy:
         // Second tick: already at min, no more spawns.
         tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 3, "no extra spawns");
+    }
+
+    #[tokio::test]
+    async fn tick_scales_db_only_spec_to_min() {
+        // #257: a spec that lives only in the DB (admin-added / showcase
+        // seed), absent from the YAML config, must still get its
+        // min-replicas from the background scaler.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let mut state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let pool = crate::db::open_memory().await.unwrap();
+        let cdb = crate::db::ConfigDb::Sqlite(pool);
+        let spec: ruscker_config::Spec =
+            serde_yaml_ng::from_str("id: dbonly\ncontainer-image: nginx:alpine\nmin-replicas: 2")
+                .unwrap();
+        crate::db::specs::upsert_one(&cdb, &spec, None).await.unwrap();
+        state.db = Some(cdb);
+
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            2,
+            "DB-only spec scaled to its min-replicas"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("dbonly").len(), 2);
     }
 
     #[tokio::test]

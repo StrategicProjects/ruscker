@@ -24,6 +24,7 @@ use tower_cookies::CookieManagerLayer;
 use tracing::info;
 
 pub mod auth;
+pub mod catalog;
 pub mod crypto;
 pub mod db;
 pub mod i18n;
@@ -385,6 +386,7 @@ impl AdminServer {
                 self.state.replicas.clone(),
                 self.state.config.clone(),
                 self.state.leader.clone(),
+                self.state.db.clone(),
             );
             // Dashboard metrics: keep `state.metrics` fresh in
             // the background so dashboard renders are read-only

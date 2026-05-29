@@ -42,6 +42,12 @@ pub mod view_model;
 
 use sqlx::SqlitePool;
 
+/// The running Ruscker version, from the workspace `Cargo.toml` at
+/// compile time. Surfaced in the landing + admin footers (#241) and
+/// reported by `/healthz`. Pathed (`crate::APP_VERSION`) from the
+/// templates so it never drifts from a hardcoded string.
+pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Shared state injected into every request.
 #[derive(Clone)]
 pub struct AppState {

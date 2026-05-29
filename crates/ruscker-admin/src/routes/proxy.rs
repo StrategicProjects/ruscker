@@ -330,6 +330,45 @@ async fn forward(
         );
     }
 
+    // 3b. Cold-start splash (interactive apps only). A top-level
+    //     navigation to an app whose container isn't up yet gets an
+    //     elegant "starting…" interstitial that polls readiness, rather
+    //     than a blank wait through the whole image pull + boot. The
+    //     real spawn runs in the background (coalesced); the next
+    //     navigation, once a replica is `Ready`, proxies normally.
+    if route_prefix == APP_PREFIX && ws_upgrade.0.is_none() {
+        // Tiny readiness probe the splash polls. Never spawns or blocks.
+        if upstream_path == COLD_PROBE_PATH {
+            let body = if has_ready_replica(&state, &spec).await {
+                "{\"ready\":true}"
+            } else {
+                "{\"ready\":false}"
+            };
+            return (
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                body,
+            )
+                .into_response();
+        }
+        // Cold navigation → kick the spawn off in the background and show
+        // the splash. (Saturated-but-warm specs still serve immediately.)
+        if *req.method() == Method::GET
+            && wants_html(req.headers())
+            && !has_ready_replica(&state, &spec).await
+        {
+            let (st, sp) = (state.clone(), spec.clone());
+            tokio::spawn(async move {
+                if let Err(e) = crate::scaler::spawn_replica(&st, &sp).await {
+                    tracing::warn!(spec = %sp.id, error = ?e, "background spawn (splash) failed");
+                }
+            });
+            return cold_start_splash(&spec, &state.base_path);
+        }
+    }
+
     // 4. Resolve the replica: sticky-first, fall back to
     //    pick/spawn. Also pin down the session_id we'll track
     //    this visitor under so the cookie and the tracker share
@@ -645,6 +684,98 @@ fn set_sticky_cookie(
     // forgotten browser tab doesn't pin a container forever.
     c.set_max_age(Duration::hours(8));
     cookies.add(c);
+}
+
+// ── Cold-start splash (#…) ─────────────────────────────────────────
+
+/// Reserved `/app/{spec}` sub-path the splash polls for readiness.
+const COLD_PROBE_PATH: &str = "/__ruscker_ready";
+
+/// Whether `spec` has a replica that can serve right now (no spawn) —
+/// the same `pick_replica` test the forward path uses.
+async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
+    let routing = spec.effective_routing();
+    let reg = state.replicas.read().await;
+    pick_replica(reg.replicas_of(&spec.id), routing).is_some()
+}
+
+/// True for a top-level document navigation (a GET whose `Accept`
+/// prefers HTML) — the request that should get the splash. Subresource
+/// and fetch/XHR requests send other `Accept`s and fall through.
+fn wants_html(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .map(|a| a.contains("text/html"))
+        .unwrap_or(false)
+}
+
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+/// Inline cold-start interstitial template. `{{LOGO}}` / `{{NAME}}` /
+/// `{{PROBE}}` are substituted at render time. Self-contained — `/app`
+/// responses carry no CSP, so inline CSS/JS is fine.
+const SPLASH_TEMPLATE: &str = r##"<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Starting…</title>
+<style>
+  :root{color-scheme:light dark}
+  html,body{height:100%;margin:0}
+  body{display:flex;align-items:center;justify-content:center;
+    font-family:Jost,ui-sans-serif,system-ui,-apple-system,sans-serif;
+    color:#e8f0ec;background:#0c1512;
+    background:radial-gradient(1100px 560px at 50% -8%,#103a2e 0%,#0c1512 62%)}
+  .box{text-align:center;max-width:340px;padding:24px}
+  .logo{width:64px;height:64px;margin:0 auto 20px;display:block;
+    animation:pulse 2.4s ease-in-out infinite}
+  .ring{width:42px;height:42px;margin:0 auto 20px;border-radius:50%;
+    border:3px solid rgba(93,202,165,.22);border-top-color:#1D9E75;
+    animation:spin .9s linear infinite}
+  h1{font-size:18px;font-weight:600;margin:0 0 6px;letter-spacing:.2px}
+  p{font-size:13px;line-height:1.55;color:#9fb6ad;margin:0}
+  .app{color:#5DCAA5}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,100%{opacity:.85;transform:scale(1)}50%{opacity:1;transform:scale(1.05)}}
+</style></head>
+<body><div class="box">
+  <img class="logo" src="{{LOGO}}" alt="" onerror="this.style.display='none'">
+  <div class="ring" role="status" aria-label="loading"></div>
+  <h1>Starting <span class="app">{{NAME}}</span>…</h1>
+  <p>The container is booting — this can take a few seconds the first time.
+     This page opens it automatically when it's ready.</p>
+</div>
+<script>
+(function(){
+  var probe="{{PROBE}}";
+  function tick(){
+    fetch(probe,{cache:"no-store"}).then(function(r){return r.json()}).then(function(d){
+      if(d&&d.ready){location.reload()}else{setTimeout(tick,1200)}
+    }).catch(function(){setTimeout(tick,2000)});
+  }
+  setTimeout(tick,1000);
+})();
+</script></body></html>"##;
+
+/// Render the cold-start interstitial for `spec`. `base` is the portal
+/// base path (`""` or e.g. `/box`), used to build same-origin asset and
+/// probe URLs that survive sub-path mounting.
+fn cold_start_splash(spec: &Spec, base: &str) -> Response {
+    let name = html_escape(spec.display_name.as_deref().unwrap_or(&spec.id));
+    let html = SPLASH_TEMPLATE
+        .replace("{{LOGO}}", &format!("{base}/assets/brand/mark.svg"))
+        .replace("{{NAME}}", &name)
+        .replace("{{PROBE}}", &format!("{base}/app/{}{COLD_PROBE_PATH}", spec.id));
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        html,
+    )
+        .into_response()
 }
 
 /// Pick an existing replica or spawn a new one.
@@ -1424,6 +1555,41 @@ container-cpu-limit: -1.0
         // Negative CPU is filtered out; the rest of limits stays empty.
         let l = limits_from_spec(&s);
         assert!(l.cpu_fraction.is_none());
+    }
+
+    // ── Cold-start splash helpers (#…) ──────────────────────────
+
+    #[test]
+    fn wants_html_only_for_html_accept() {
+        let mut h = HeaderMap::new();
+        assert!(!wants_html(&h), "no Accept ⇒ not a navigation");
+        h.insert(header::ACCEPT, HeaderValue::from_static("application/json"));
+        assert!(!wants_html(&h), "json fetch ⇒ no splash");
+        h.insert(
+            header::ACCEPT,
+            HeaderValue::from_static("text/html,application/xhtml+xml,*/*"),
+        );
+        assert!(wants_html(&h), "document navigation ⇒ splash");
+    }
+
+    #[tokio::test]
+    async fn cold_start_splash_renders_name_probe_and_logo_under_base() {
+        let s = spec_yaml("id: nb\ndisplay-name: Jupyter\ncontainer-image: x");
+        let resp = cold_start_splash(&s, "/box");
+        assert_eq!(resp.status(), StatusCode::OK);
+        let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
+        assert!(ct.starts_with("text/html"));
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let html = String::from_utf8(body.to_vec()).unwrap();
+        assert!(html.contains("Starting <span class=\"app\">Jupyter</span>"));
+        assert!(html.contains("\"/box/app/nb/__ruscker_ready\""), "base-prefixed probe");
+        assert!(html.contains("src=\"/box/assets/brand/mark.svg\""), "base-prefixed logo");
+        assert!(!html.contains("{{"), "all template slots filled");
+    }
+
+    #[test]
+    fn html_escape_neutralizes_markup() {
+        assert_eq!(html_escape("a<b>&c"), "a&lt;b&gt;&amp;c");
     }
 
     #[test]

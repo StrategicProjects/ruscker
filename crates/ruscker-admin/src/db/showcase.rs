@@ -322,7 +322,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             "Plumber",
             "Turn R functions into HTTP APIs.",
             "/assets/showcase/plumber.svg",
-            "https://www.rplumber.io",
+            "https://plumber2.posit.co",
             None,
             None,
             None,

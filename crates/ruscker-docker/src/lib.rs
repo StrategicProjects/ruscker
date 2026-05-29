@@ -535,6 +535,22 @@ impl ContainerBackend for LocalDockerBackend {
         self.metrics_for_container(&container_id).await
     }
 
+    /// Use the caller-supplied `container_id` (from the registry) and
+    /// skip the `container_id_for_replica` `list_containers` lookup —
+    /// the metrics cache calls this for every replica every refresh, so
+    /// dropping that round-trip halves the per-refresh daemon traffic
+    /// (#282). Falls back to the label lookup if the id is empty.
+    async fn metrics_for(
+        &self,
+        replica_id: &ReplicaId,
+        container_id: &str,
+    ) -> CoreResult<ReplicaMetrics> {
+        if container_id.is_empty() {
+            return self.metrics(replica_id).await;
+        }
+        self.metrics_for_container(container_id).await
+    }
+
     async fn logs(&self, replica_id: &ReplicaId, tail: usize) -> CoreResult<Vec<String>> {
         let container_id = self.container_id_for_replica(replica_id).await?;
         self.logs_for_container(&container_id, tail).await

@@ -294,6 +294,20 @@ pub trait ContainerBackend: Send + Sync {
     /// Per-replica metrics (CPU, memory, network I/O).
     async fn metrics(&self, replica_id: &ReplicaId) -> CoreResult<ReplicaMetrics>;
 
+    /// Like [`metrics`](Self::metrics) but the caller passes the
+    /// `container_id` it already holds (from the registry), so the
+    /// backend can skip resolving the replica → container mapping.
+    /// The default ignores the hint and delegates to `metrics`; the
+    /// local Docker backend overrides it to avoid a per-call
+    /// `list_containers` on every metrics refresh (#282).
+    async fn metrics_for(
+        &self,
+        replica_id: &ReplicaId,
+        _container_id: &str,
+    ) -> CoreResult<ReplicaMetrics> {
+        self.metrics(replica_id).await
+    }
+
     /// Fetch the last `tail` lines of a replica's combined
     /// stdout+stderr. A one-shot snapshot (no follow) — the
     /// dashboard logs page uses it for "why did this container

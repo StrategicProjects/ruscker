@@ -916,9 +916,6 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
 /// just reject the pull). Lives next to the proxy spawn path
 /// so the scaler can reuse it via `pub(crate)`.
 ///
-/// The password comes through already env-interpolated by
-/// `ruscker-config`'s loader — there's no `${VAR}` left to
-/// resolve here.
 /// Build [`ResourceLimits`] from a spec's `container-*-limit` /
 /// `container-*-request` fields. Returns an empty (all-`None`)
 /// `ResourceLimits` when the spec sets nothing — the backend
@@ -934,13 +931,20 @@ pub(crate) fn limits_from_spec(spec: &Spec) -> ruscker_core::ResourceLimits {
     }
 }
 
+/// The password is stored as the literal `${VAR}` (never resolved into
+/// the DB / config in memory — #260), so we interpolate it **here**, at
+/// the point of use, right before a pull. Idempotent: a value with no
+/// `${...}` (or a `docker-registry-credential` flow) is unaffected. If a
+/// referenced env var is unset we keep the literal — the backend's
+/// pull then fails with a clear "still contains `${...}`" error rather
+/// than silently pulling anonymously.
 pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCredentials> {
     let user = spec.docker_registry_username.as_deref().filter(|s| !s.is_empty());
     let pass = spec.docker_registry_password.as_deref().filter(|s| !s.is_empty());
     match (user, pass) {
         (Some(u), Some(p)) => Some(ruscker_core::RegistryCredentials {
             username: u.to_string(),
-            password: p.to_string(),
+            password: ruscker_config::env::interpolate_value(p).unwrap_or_else(|_| p.to_string()),
             server_address: spec
                 .docker_registry_domain
                 .as_deref()
@@ -1518,6 +1522,26 @@ docker-registry-domain: priv.io
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("priv.io"));
+    }
+
+    #[test]
+    fn creds_from_spec_resolves_password_env_at_use() {
+        // #260: the password is stored as a `${VAR}` literal (never
+        // resolved into the DB/config); creds_from_spec resolves it at
+        // the point of use, right before the pull.
+        std::env::set_var("RUSCKER_TEST_REG_PW", "fromenv");
+        let s = spec_yaml(
+            r#"
+id: p
+display-name: P
+container-image: priv.io/app:1
+docker-registry-username: bot
+docker-registry-password: ${RUSCKER_TEST_REG_PW}
+"#,
+        );
+        let c = creds_from_spec(&s).expect("creds present");
+        assert_eq!(c.password, "fromenv", "resolved at use");
+        std::env::remove_var("RUSCKER_TEST_REG_PW");
     }
 
     #[test]

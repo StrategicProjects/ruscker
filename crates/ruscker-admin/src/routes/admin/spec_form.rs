@@ -265,7 +265,11 @@ impl SpecForm {
                 .unwrap_or_default(),
             docker_registry_domain: spec.docker_registry_domain.clone().unwrap_or_default(),
             docker_registry_username: spec.docker_registry_username.clone().unwrap_or_default(),
-            docker_registry_password: spec.docker_registry_password.clone().unwrap_or_default(),
+            // Never prefill the registry password (#260): the stored
+            // value is a `${VAR}` literal at best and a legacy cleartext
+            // secret at worst — neither should be rendered. Blank here +
+            // "blank ⇒ keep" in `into_spec` makes the field write-only.
+            docker_registry_password: String::new(),
             docker_registry_credential: spec.docker_registry_credential.clone().unwrap_or_default(),
             access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
@@ -408,7 +412,13 @@ impl SpecForm {
             container_cmd: lines_to_vec(&self.container_cmd),
             docker_registry_domain: empty_to_none(&self.docker_registry_domain),
             docker_registry_username: empty_to_none(&self.docker_registry_username),
-            docker_registry_password: empty_to_none(&self.docker_registry_password),
+            // Write-only (#260): a blank field keeps the existing stored
+            // value (the form never shows it), so editing a spec doesn't
+            // wipe the password; a non-blank value replaces it.
+            docker_registry_password: match empty_to_none(&self.docker_registry_password) {
+                Some(v) => Some(v),
+                None => base.and_then(|b| b.docker_registry_password.clone()),
+            },
             docker_registry_credential: empty_to_none(&self.docker_registry_credential),
             access_groups: list_to_vec(&self.access_groups),
             access_users: list_to_vec(&self.access_users),
@@ -1027,6 +1037,50 @@ proxy:
         // Form-managed advanced fields still round-trip.
         assert_eq!(merged.min_replicas, Some(1));
         assert_eq!(merged.max_replicas, Some(4));
+    }
+
+    /// #260: the registry password is write-only. The form never loads
+    /// it (`from_spec` blanks it), and a blank submit keeps the existing
+    /// stored value rather than wiping it; a typed value replaces it.
+    #[test]
+    fn registry_password_is_write_only() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: ops
+      display-name: Ops
+      container-image: registry.example.com/acme/ops:latest
+      docker-registry-username: acme
+      docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
+"#;
+        std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+        let cfg = Config::from_yaml(yaml).expect("parse fixture");
+        let original = &cfg.proxy.specs[0];
+        // Stored literal preserved at parse (the model from this PR).
+        assert_eq!(
+            original.docker_registry_password.as_deref(),
+            Some("${DOCKER_REGISTRY_PASSWORD}")
+        );
+
+        // The form never exposes it.
+        let form = SpecForm::from_spec(original);
+        assert_eq!(form.docker_registry_password, "");
+
+        // Blank submit ⇒ keep the stored value.
+        let kept = SpecForm::from_spec(original)
+            .into_spec(Some(original))
+            .expect("into_spec");
+        assert_eq!(
+            kept.docker_registry_password.as_deref(),
+            Some("${DOCKER_REGISTRY_PASSWORD}"),
+            "blank field must not wipe the stored password"
+        );
+
+        // A typed value replaces it.
+        let mut form = SpecForm::from_spec(original);
+        form.docker_registry_password = "${OTHER_VAR}".into();
+        let replaced = form.into_spec(Some(original)).expect("into_spec");
+        assert_eq!(replaced.docker_registry_password.as_deref(), Some("${OTHER_VAR}"));
     }
 
     /// A brand-new spec (no base) has no unmodelled fields to carry.

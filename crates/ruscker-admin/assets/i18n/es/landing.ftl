@@ -485,6 +485,7 @@ spec-help-registry-domain = Host del registro para imágenes privadas (ej.: dock
 spec-form-registry-username = Usuario
 spec-help-registry-username = Usuario para autenticar la descarga de una imagen privada.
 spec-form-registry-password = Contraseña
+spec-form-registry-password-keep = En blanco mantiene la contraseña actual
 spec-help-registry-password = Usa una variable de entorno — nunca pegues la contraseña en texto. Solo se usa junto con el usuario.
 spec-form-registry-credential = Credencial guardada
 spec-help-registry-credential = Nombre de una credencial del almacén, en vez del usuario/contraseña en línea.

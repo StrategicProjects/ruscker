@@ -535,8 +535,9 @@
                 <label for="f-reg-pass" class="spec-form-label">{{ self.t("spec-form-registry-password") }}</label>
                 {% call help(self.t("spec-help-registry-password")) %}{% endcall %}
               </div>
-              <input id="f-reg-pass" type="text" name="docker_registry_password"
-                     value="{{ form.docker_registry_password }}" placeholder="${DOCKER_REGISTRY_PASSWORD}"
+              <input id="f-reg-pass" type="password" name="docker_registry_password"
+                     value="" autocomplete="new-password"
+                     placeholder="{{ self.t("spec-form-registry-password-keep") }}"
                      class="spec-form-input spec-form-input--mono">
             </div>
             <div class="spec-form-field">

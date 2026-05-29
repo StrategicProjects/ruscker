@@ -489,6 +489,7 @@ spec-help-registry-domain = Host do registro para imagens privadas (ex.: docker.
 spec-form-registry-username = Usuário
 spec-help-registry-username = Usuário para autenticar no pull de uma imagem privada.
 spec-form-registry-password = Senha
+spec-form-registry-password-keep = Em branco mantém a senha atual
 spec-help-registry-password = Use uma variável de ambiente — nunca cole a senha em texto. Só usada junto com o usuário.
 spec-form-registry-credential = Credencial salva
 spec-help-registry-credential = Nome de uma credencial do cofre, em vez de usuário/senha inline.

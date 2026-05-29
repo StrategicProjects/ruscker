@@ -1116,6 +1116,10 @@ async fn do_forward(
     let fwd_host = req.headers().get(header::HOST).cloned();
 
     strip_hop_headers(req.headers_mut());
+    // Never forward Ruscker's own cookies (admin session, sticky,
+    // prefs) to the app container — the admin session id is a bearer
+    // (#258).
+    strip_ruscker_cookies(req.headers_mut());
 
     // Smart-routing headers — tell the upstream what public prefix,
     // scheme, and host it's mounted behind so it can self-route. Set
@@ -1176,6 +1180,44 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
     let _ = header::CONTENT_TYPE; // silence unused import in some builds
 }
 
+/// Ruscker-owned cookies that must never reach an upstream app
+/// container. The browser sends them on same-origin `/app` + `/api`
+/// requests (the admin/sticky/pref cookies are all `Path=/`), but the
+/// app has no business seeing them — and the admin session id is a
+/// bearer, so a malicious or compromised container could replay it
+/// against `/admin` (#258). Ruscker has already consumed the sticky
+/// cookie (replica resolution) before this runs, so dropping it here
+/// is safe.
+const RUSCKER_COOKIE_NAMES: &[&str] = &[
+    crate::auth::COOKIE_NAME,        // ruscker_admin_session
+    ruscker_proxy::sticky::COOKIE_NAME, // __ruscker_session
+    crate::theme::COOKIE_NAME,       // ruscker_theme
+    crate::i18n::COOKIE_NAME,        // ruscker_locale
+];
+
+/// Drop Ruscker's own cookies from the upstream-bound `Cookie` header,
+/// preserving any cookies the app itself set. If nothing remains, the
+/// header is removed entirely.
+fn strip_ruscker_cookies(headers: &mut HeaderMap) {
+    let Some(raw) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) else {
+        return;
+    };
+    let kept: Vec<&str> = raw
+        .split(';')
+        .map(str::trim)
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| {
+            let name = pair.split('=').next().unwrap_or("").trim();
+            !RUSCKER_COOKIE_NAMES.contains(&name)
+        })
+        .collect();
+    if kept.is_empty() {
+        headers.remove(header::COOKIE);
+    } else if let Ok(v) = HeaderValue::from_str(&kept.join("; ")) {
+        headers.insert(header::COOKIE, v);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1193,6 +1235,43 @@ mod tests {
         assert!(!h.contains_key("x-custom"));
         assert_eq!(h.get("content-type").unwrap(), "text/plain");
         assert_eq!(h.get("via").unwrap(), "1.1 ruscker");
+    }
+
+    #[test]
+    fn strip_ruscker_cookies_drops_ours_keeps_app_cookies() {
+        // The admin session id must never reach the upstream app (#258),
+        // while the app's own cookies pass through untouched.
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!(
+                "{}=secret-admin-sid; {}=abc; app_token=keepme; {}=dark; {}=pt",
+                crate::auth::COOKIE_NAME,
+                ruscker_proxy::sticky::COOKIE_NAME,
+                crate::theme::COOKIE_NAME,
+                crate::i18n::COOKIE_NAME,
+            ))
+            .unwrap(),
+        );
+        strip_ruscker_cookies(&mut h);
+        let got = h.get(header::COOKIE).unwrap().to_str().unwrap();
+        assert!(!got.contains("secret-admin-sid"), "admin cookie leaked: {got}");
+        assert!(!got.contains(crate::auth::COOKIE_NAME));
+        assert!(!got.contains(ruscker_proxy::sticky::COOKIE_NAME));
+        assert!(!got.contains(crate::theme::COOKIE_NAME));
+        assert!(!got.contains(crate::i18n::COOKIE_NAME));
+        assert!(got.contains("app_token=keepme"), "app cookie dropped: {got}");
+    }
+
+    #[test]
+    fn strip_ruscker_cookies_removes_header_when_only_ours() {
+        let mut h = HeaderMap::new();
+        h.insert(
+            header::COOKIE,
+            HeaderValue::from_str(&format!("{}=sid", crate::auth::COOKIE_NAME)).unwrap(),
+        );
+        strip_ruscker_cookies(&mut h);
+        assert!(!h.contains_key(header::COOKIE), "empty Cookie header should be removed");
     }
 
     #[test]

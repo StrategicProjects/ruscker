@@ -644,7 +644,8 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
-.admin-login-field input {
+.admin-login-field input,
+.admin-login-field select {
   appearance: none;
   background: var(--bg);
   border: 0.5px solid var(--border);
@@ -653,8 +654,19 @@ body {
   font-size: 13px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--text);
+  height: 39px;            /* one consistent control height across the row */
+  box-sizing: border-box;
 }
-.admin-login-field input:focus {
+/* The <select> loses its native arrow under appearance:none — give it a
+   muted chevron so it still reads as a dropdown, matching the inputs. */
+.admin-login-field select {
+  padding-right: 30px;
+  background-image: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="%235b6b66" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>');
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.admin-login-field input:focus,
+.admin-login-field select:focus {
   outline: none;
   border-color: var(--color-teal-600);
   box-shadow: 0 0 0 2px rgba(15, 110, 86, 0.15);

@@ -304,23 +304,26 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
         .len();
     let tracker_sessions = state.sessions.len();
 
-    // Resolve a display name per distinct spec_id once, DB-first
-    // (admin edits + showcase seed shadow the YAML), via the shared
-    // `find_spec` resolver — a config-first order showed the stale YAML
-    // name for a spec renamed in the admin (#275). Done up front so we
-    // don't re-resolve per row.
-    let mut name_of: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    for sid in snap
+    // Resolve display names from the effective catalog (DB ∪ YAML,
+    // DB-first) fetched **once** per snapshot — not a `find_spec` DB
+    // round-trip per spec, which on the 5s SSE tick (× every open tab)
+    // hammered the DB (#281). Still DB-first, so a renamed-in-admin spec
+    // shows its current name (#275).
+    let catalog = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
+    let name_of: std::collections::HashMap<String, String> = snap
         .iter()
         .map(|r| r.spec_id.clone())
         .collect::<std::collections::HashSet<_>>()
-    {
-        let name = crate::routes::proxy::find_spec(state, &sid)
-            .await
-            .and_then(|s| s.display_name.clone())
-            .unwrap_or_else(|| sid.clone());
-        name_of.insert(sid, name);
-    }
+        .into_iter()
+        .map(|sid| {
+            let name = catalog
+                .iter()
+                .find(|s| s.id == sid)
+                .and_then(|s| s.display_name.clone())
+                .unwrap_or_else(|| sid.clone());
+            (sid, name)
+        })
+        .collect();
 
     let mut total_memory_bytes: u64 = 0;
     let rows: Vec<ReplicaRow> = snap

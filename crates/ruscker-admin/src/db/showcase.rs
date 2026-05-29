@@ -208,16 +208,34 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             Some(3838),
             Some("linux/amd64"),
         )?,
-        card(
-            "jupyter",
-            "Jupyter",
-            "Interactive notebooks served as a web app.",
-            "/assets/showcase/jupyter.svg",
-            "https://jupyter.org",
-            Some("quay.io/jupyter/minimal-notebook:latest"),
-            Some(8888),
-            None,
-        )?,
+        {
+            // Jupyter needs runtime config to work behind the proxy: a
+            // notebook server otherwise demands a token nobody has and
+            // rejects the kernel WebSocket on an origin mismatch. The
+            // `container-cmd` below runs it token-less with a permissive
+            // origin so the showcase card opens out of the box. (Demo
+            // posture — the card is open; tighten with a token/auth for
+            // anything real.)
+            let mut jup = card(
+                "jupyter",
+                "Jupyter",
+                "Interactive notebooks served as a web app.",
+                "/assets/showcase/jupyter.svg",
+                "https://jupyter.org",
+                Some("quay.io/jupyter/minimal-notebook:latest"),
+                Some(8888),
+                None,
+            )?;
+            jup.container_cmd = Some(vec![
+                "start-notebook.py".into(),
+                "--IdentityProvider.token=".into(),
+                "--ServerApp.allow_origin=*".into(),
+                "--ServerApp.allow_remote_access=True".into(),
+                "--ServerApp.disable_check_xsrf=True".into(),
+                "--ServerApp.base_url=/".into(),
+            ]);
+            jup
+        },
         card(
             "rstudio",
             "RStudio Server",

@@ -264,6 +264,13 @@ A spec describes one app, API, or external link. Every spec has an
   volumes:                            # bind mounts (ShinyProxy-compatible)
     - /srv/myapp/data:/data           #   persistent data
     - /srv/myapp/www:/www:ro          #   static assets, read-only
+  container-env:                      # env vars injected into the container
+    DB_HOST: db.internal              #   (ShinyProxy-compatible)
+    DB_PASSWORD: ${DB_PASSWORD}       #   ${VAR} interpolated — keep secrets out
+  container-cmd:                      # override the image's CMD (argv list)
+    - R
+    - -e
+    - shiny::runApp('/app', port=3838, host='0.0.0.0')
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
 ```
@@ -273,6 +280,14 @@ A spec describes one app, API, or external link. Every spec has an
 as needed; editable in the admin **Advanced** form (one per line).
 **Bind-mounting host paths is root-equivalent and admin-only** — see
 `SECURITY.md`.
+
+`container-env` is a `NAME: value` map injected into the container as
+environment variables (Docker `Config.Env`). Values flow through the
+same `${VAR}` / `${VAR:-default}` interpolation as the rest of the YAML,
+so secrets stay in the environment and out of the file. `container-cmd`
+is an argv list that overrides the image's baked `CMD` (Docker
+`Config.Cmd`); omit it to keep the image default. Both are
+ShinyProxy-compatible and editable per spec.
 
 `access-groups` / `access-users` (ShinyProxy-compatible) scope who can
 **see** an app on the landing and **reach** it at `/app` / `/api`. A spec
@@ -521,8 +536,10 @@ ignored:
 - `proxy.specs[*].minimum-seats-available` — pre-warm pool (planned)
 - `proxy.specs[*].labels`, `proxy.specs[*].network-connections` — phase
   3.5
-- `proxy.specs[*].volumes`, `proxy.specs[*].environment` — phase 3
 - `proxy.docker.*` — global docker config (use defaults or env vars)
+
+(`proxy.specs[*].volumes` and `container-env` / `container-cmd` are now
+supported — see "Containerized specs" above.)
 
 Setting any of these will produce a startup warning but not an error.
 Run `ruscker validate --strict-compat <config>` to list every

@@ -450,6 +450,7 @@ async fn spawn_one(
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
         .with_limits(limits)
         .with_volumes(spec.volumes.clone().unwrap_or_default())
+        .with_env(spec.env_pairs())
         .with_placement(spec.effective_placement())
         .with_anti_affinity(spec.effective_anti_affinity());
     if let Some(port) = inner_port {
@@ -457,6 +458,9 @@ async fn spawn_one(
     }
     if let Some(platform) = spec.platform.as_deref() {
         req = req.with_platform(platform);
+    }
+    if let Some(cmd) = spec.container_cmd.clone() {
+        req = req.with_cmd(cmd);
     }
     if let Some(c) = creds {
         req = req.with_creds(c);

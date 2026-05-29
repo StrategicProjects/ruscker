@@ -212,6 +212,12 @@ impl LocalDockerBackend {
             exposed_ports: Some(vec![port_key.clone()]),
             labels: Some(labels),
             host_config: Some(host_config),
+            // `container-env` → `Config.Env` ("NAME=value"); `None`
+            // (not an empty Vec) when unset so we don't override the
+            // image's own env with nothing. `container-cmd` →
+            // `Config.Cmd`; `None` keeps the image's baked `CMD`.
+            env: (!req.env.is_empty()).then(|| req.env.clone()),
+            cmd: req.cmd.clone(),
             ..Default::default()
         };
 
@@ -983,5 +989,38 @@ mod tests {
         backend.stop(&replica.id).await.expect("stop");
         let after = backend.list().await.expect("list after stop");
         assert!(!after.iter().any(|r| r.id == replica.id));
+    }
+
+    /// `container-env` / `container-cmd` smoke: spawn with both set and
+    /// assert the real container's `Config.Env` / `Config.Cmd` carry
+    /// them (via `docker inspect`). Uses nginx's own argv as the cmd so
+    /// the container still listens on :80 and passes readiness.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn spawn_injects_env_and_cmd() {
+        let image = std::env::var("RUSCKER_IT_IMAGE")
+            .unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let cmd = vec!["nginx".to_string(), "-g".to_string(), "daemon off;".to_string()];
+        let req = ruscker_core::SpawnRequest::new("itest-envcmd", &image)
+            .with_port(80)
+            .with_env(vec!["RUSCKER_SMOKE=hello".to_string()])
+            .with_cmd(cmd.clone());
+        let replica = backend.spawn_request(&req).await.expect("spawn");
+
+        let info = backend
+            .docker
+            .inspect_container(&replica.container_id, None)
+            .await
+            .expect("inspect");
+        let cfg = info.config.expect("container config");
+        let env = cfg.env.unwrap_or_default();
+        assert!(
+            env.iter().any(|e| e == "RUSCKER_SMOKE=hello"),
+            "injected env missing from inspect: {env:?}"
+        );
+        assert_eq!(cfg.cmd, Some(cmd), "cmd override not applied");
+
+        backend.stop(&replica.id).await.expect("stop");
     }
 }

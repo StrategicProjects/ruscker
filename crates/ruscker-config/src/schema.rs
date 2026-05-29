@@ -377,6 +377,14 @@ pub struct LandingCustomization {
     #[serde(default, rename = "analytics-origins")]
     pub analytics_origins: Option<String>,
 
+    /// Operator-authored CSS, injected as a `<style>` near the end of
+    /// the landing `<head>` so it can override the built-in styles
+    /// (#232). Admin-managed via the landing editor. The landing CSP
+    /// already allows `style-src 'unsafe-inline'`, so no policy change.
+    /// Trusted (admin-only) — like `analytics-html`.
+    #[serde(default, rename = "custom-css")]
+    pub custom_css: Option<String>,
+
     /// Custom HTML blocks rendered in the landing slots (`top` /
     /// `bottom`). Admin-managed; this field exists so they survive
     /// `import` / `export` (YAML round-trip). Array order within a

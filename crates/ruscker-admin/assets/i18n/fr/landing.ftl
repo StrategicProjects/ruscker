@@ -533,3 +533,7 @@ admin-proclog-tail-note = Affichage des lignes les plus récentes
 admin-proclog-download = Télécharger le journal complet
 
 landing-empty = Rien ici pour l'instant.
+
+admin-landing-style = Style (CSS)
+admin-landing-custom-css = CSS personnalisé
+admin-landing-custom-css-help = CSS injecté à la fin du <head> de la landing — remplace les styles intégrés. Ciblez des classes/variables stables (.rcard, .tint-*, --color-link, variables d'en-tête). De confiance (admin) ; attention à ne pas casser la mise en page.

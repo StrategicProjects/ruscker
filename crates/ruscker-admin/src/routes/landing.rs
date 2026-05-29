@@ -58,6 +58,9 @@ struct LandingPage<'a> {
     /// Operator analytics snippet, injected verbatim into `<head>`
     /// (rendered with `|safe`). Empty ⇒ nothing injected.
     analytics_html: String,
+    /// Operator custom CSS (#232), injected as a `<style>` near the end
+    /// of `<head>` (rendered with `|safe`). Empty ⇒ nothing injected.
+    custom_css: String,
     /// Custom HTML blocks rendered after the header (`top` slot) and
     /// after the card grid (`bottom` slot), in `position` order.
     blocks_top: Vec<crate::db::landing_blocks::LandingBlock>,
@@ -184,6 +187,7 @@ async fn index(
     let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
     let og_image = not_blank(&lc.og_image).unwrap_or_default();
     let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
+    let custom_css = not_blank(&lc.custom_css).unwrap_or_default();
 
     // Custom HTML blocks (DB-only). Split into the two slots; collect
     // their CSP origins alongside the analytics ones so embedded
@@ -224,6 +228,7 @@ async fn index(
         seo_description,
         og_image,
         analytics_html,
+        custom_css,
         blocks_top,
         blocks_bottom,
         signed_in: session.is_some(),

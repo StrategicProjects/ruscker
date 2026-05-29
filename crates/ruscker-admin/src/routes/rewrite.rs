@@ -66,9 +66,19 @@
 //!   handles malformed HTML gracefully, and uses CSS selectors
 //!   instead of regex — robust against quote-style and
 //!   attribute-order changes from the upstream.
-//! - **Skip list** for absolute paths that already belong to a
-//!   Ruscker route (`/admin/...`, `/assets/...`, `/app/...`,
-//!   `/api/...`) so we don't double-prefix.
+//! - **Skip list** for absolute paths that already belong to
+//!   Ruscker's own chrome (`/admin/...`, `/assets/...`,
+//!   `/app/...`, …) so we don't double-prefix. Note `/api/` is
+//!   *not* skipped: under `/app/{spec}/` it's the app's own
+//!   namespace (Jupyter's REST + kernel WebSocket live there).
+//!
+//! ## Redirects
+//!
+//! A proxied app often answers `/app/{spec}/` with a `302` to a
+//! root-absolute path (Jupyter → `/lab`, `/login?next=/lab`). We
+//! prefix the `Location` header with the mount the same way, so
+//! the redirect stays inside the app instead of escaping to a
+//! Ruscker 404.
 
 use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderValue, Response};
@@ -85,15 +95,24 @@ const MAX_HTML_BYTES: usize = 2 * 1024 * 1024;
 /// either already routed by Ruscker, or they belong to the
 /// hosting host's chrome (e.g. a reverse proxy in front).
 ///
-/// `/app/` and `/api/` matter most: an app that emits
-/// `<a href="/app/other">` (cross-app link) should still work
-/// after rewriting kicks in.
+/// `/app/` is kept so a cross-app link (`<a href="/app/other">`)
+/// still resolves after rewriting kicks in.
+///
+/// **`/api/` is deliberately NOT here.** A containerized app
+/// mounted at `/app/{spec}/` is served with its prefix stripped,
+/// so from the app's point of view it lives at the host root —
+/// every root-absolute URL it emits, including `/api/...`, is the
+/// *app's own*. Notebook servers (Jupyter, Voilà) put their whole
+/// REST surface and the kernel WebSocket under `/api/...`; if we
+/// skipped it those calls would land on Ruscker's `/api/{spec}`
+/// router instead of the container and the app would never
+/// connect. The rare cross-spec link to a real Ruscker API can use
+/// an absolute URL.
 const SKIP_PREFIXES: &[&str] = &[
     "/admin/",
     "/admin",
     "/assets/",
     "/app/",
-    "/api/",
     "/__set/",
     "/__assets__/", // Streamlit's static assets — rewrite would break them
 ];
@@ -143,11 +162,24 @@ fn rewrite_url(value: &str, base_path: &str) -> Option<String> {
 /// proxy handler that calls this; the function now does both
 /// jobs.
 pub async fn inject_base_href(resp: Response<Body>, base_path: &str) -> Response<Body> {
-    if !is_html(&resp) {
-        return resp;
+    let (mut parts, body) = resp.into_parts();
+
+    // Redirects first — they carry no HTML body, so they'd otherwise
+    // slip past the `is_html` gate below untouched. Prefix a root-
+    // absolute `Location` with the mount (same rule as body URLs) so an
+    // app's `302 → /lab` stays under `/app/{spec}/` instead of escaping
+    // to a Ruscker 404.
+    if let Some(loc) = parts.headers.get(header::LOCATION).and_then(|v| v.to_str().ok()) {
+        if let Some(new_loc) = rewrite_url(loc, base_path) {
+            if let Ok(v) = HeaderValue::from_str(&new_loc) {
+                parts.headers.insert(header::LOCATION, v);
+            }
+        }
     }
 
-    let (mut parts, body) = resp.into_parts();
+    if !headers_are_html(&parts.headers) {
+        return Response::from_parts(parts, body);
+    }
 
     // Decide *before* consuming the body. A declared Content-Length over
     // the transform cap streams the original through untouched — we
@@ -209,8 +241,8 @@ pub async fn inject_base_href(resp: Response<Body>, base_path: &str) -> Response
     Response::from_parts(parts, Body::from(rewritten))
 }
 
-fn is_html(resp: &Response<Body>) -> bool {
-    resp.headers()
+fn headers_are_html(headers: &header::HeaderMap) -> bool {
+    headers
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| {
@@ -246,7 +278,7 @@ fn build_runtime_shim(base_path: &str) -> String {
     if (u.length === 0) return u;
     if (u.charAt(0) !== "/") return u;          // relative
     if (u.charAt(1) === "/") return u;           // protocol-relative
-    var skips = ["/admin/", "/admin", "/assets/", "/app/", "/api/", "/__set/", "/__assets__/"];
+    var skips = ["/admin/", "/admin", "/assets/", "/app/", "/__set/", "/__assets__/"];
     for (var i = 0; i < skips.length; i++) {{
       if (u.indexOf(skips[i]) === 0) return u;
     }}
@@ -645,7 +677,20 @@ mod tests {
         assert_eq!(rewrite_url("/admin/specs", "/app/x/"), None);
         assert_eq!(rewrite_url("/assets/styles.css", "/app/x/"), None);
         assert_eq!(rewrite_url("/app/other/page", "/app/x/"), None);
-        assert_eq!(rewrite_url("/api/something", "/app/x/"), None);
+    }
+
+    #[test]
+    fn rewrite_url_prefixes_api_path() {
+        // `/api/...` is the app's own namespace under the mount (Jupyter's
+        // REST + kernel WS), so it must be prefixed, not skipped.
+        assert_eq!(
+            rewrite_url("/api/contents", "/app/jupyter/").as_deref(),
+            Some("/app/jupyter/api/contents")
+        );
+        assert_eq!(
+            rewrite_url("/api/kernels/abc/channels", "/app/jupyter/").as_deref(),
+            Some("/app/jupyter/api/kernels/abc/channels")
+        );
     }
 
     #[test]
@@ -865,6 +910,53 @@ mod tests {
         assert_eq!(cl.as_deref(), Some("1234"));
         let s = body_string(out).await;
         assert!(s.is_empty(), "HEAD body stays empty");
+    }
+
+    #[tokio::test]
+    async fn inject_base_href_prefixes_redirect_location() {
+        // Jupyter's first hit: `302 → /lab`. The Location must land
+        // under the mount, not escape to a Ruscker 404.
+        let resp = Response::builder()
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, "/lab")
+            .body(Body::empty())
+            .unwrap();
+        let out = inject_base_href(resp, "/app/jupyter/").await;
+        assert_eq!(
+            out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
+            "/app/jupyter/lab"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_base_href_prefixes_api_location_with_query() {
+        // A login bounce keeps its `next=` query verbatim; only the
+        // leading path is prefixed. And `/api/...` redirects are
+        // prefixed now that `/api/` isn't skipped.
+        let resp = Response::builder()
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, "/login?next=/lab")
+            .body(Body::empty())
+            .unwrap();
+        let out = inject_base_href(resp, "/app/jupyter/").await;
+        assert_eq!(
+            out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
+            "/app/jupyter/login?next=/lab"
+        );
+    }
+
+    #[tokio::test]
+    async fn inject_base_href_leaves_external_location_alone() {
+        let resp = Response::builder()
+            .status(StatusCode::FOUND)
+            .header(header::LOCATION, "https://auth.example.com/sso")
+            .body(Body::empty())
+            .unwrap();
+        let out = inject_base_href(resp, "/app/jupyter/").await;
+        assert_eq!(
+            out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
+            "https://auth.example.com/sso"
+        );
     }
 
     #[tokio::test]

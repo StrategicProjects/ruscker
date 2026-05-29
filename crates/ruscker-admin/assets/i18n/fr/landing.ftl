@@ -463,3 +463,61 @@ admin-nav-logs = Journaux
 admin-proclog-title = Journaux
 admin-proclog-subtitle = Journal récent du processus Ruscker (en direct).
 admin-proclog-unavailable = Tampon de journal indisponible (le serveur a démarré sans la couche de journalisation).
+
+# ── spec-form advanced params (#211/#212) ──────────────────────────
+spec-form-runtime-section = Runtime
+spec-form-container-port = Port du conteneur
+spec-help-container-port = Port sur lequel l'app écoute dans le conteneur. Vide = défaut par type (3838 pour Shiny). À définir pour Streamlit (8501), Dash (8050) ou Jupyter (8888).
+spec-form-platform = Plateforme
+spec-help-platform = Plateforme Docker (ex. : linux/amd64) pour exécuter une image d'une autre architecture par émulation. Vide = le démon choisit selon le manifeste.
+spec-form-container-lifetime = Durée de vie du conteneur (min)
+spec-help-container-lifetime = Limite souple en minutes avant recyclage du conteneur. Vide = pas de limite souple.
+spec-form-stop-on-logout = Arrêter à la déconnexion
+spec-help-stop-on-logout = Arrête le conteneur de l'utilisateur à sa déconnexion. Désactivé par défaut.
+spec-form-env-section = Environnement + commande
+spec-form-container-env = Variables d'environnement
+spec-form-container-env-help = Une par ligne, NOM=valeur. Pour les secrets, référencez une variable d'environnement au lieu de coller la valeur.
+spec-help-container-env = Injectées dans le conteneur (container-env). Vide = aucune. Pour les secrets, utilisez l'interpolation de variable d'environnement.
+spec-form-container-cmd = Commande (remplacer)
+spec-form-container-cmd-help = Un argument par ligne. Vide = utilise le CMD de l'image.
+spec-help-container-cmd = Remplace la commande du conteneur (container-cmd), sous forme de liste d'arguments.
+spec-form-registry-section = Registre (images privées)
+spec-form-registry-domain = Domaine du registre
+spec-help-registry-domain = Hôte du registre pour les images privées (ex. : docker.io, ghcr.io). Vide = Docker Hub.
+spec-form-registry-username = Utilisateur
+spec-help-registry-username = Utilisateur pour authentifier le téléchargement d'une image privée.
+spec-form-registry-password = Mot de passe
+spec-help-registry-password = Utilisez une variable d'environnement — ne collez jamais le mot de passe en clair. Utilisé uniquement avec l'utilisateur.
+spec-form-registry-credential = Identifiant enregistré
+spec-help-registry-credential = Nom d'un identifiant du coffre, au lieu de l'utilisateur/mot de passe en ligne.
+spec-form-registry-help = Pour les images privées. Gardez les secrets dans des variables d'environnement ; le validateur alerte sur les mots de passe en clair.
+spec-form-access-section = Accès
+spec-form-access-groups = Groupes autorisés
+spec-help-access-groups = Groupes qui peuvent voir et atteindre l'app (séparés par des virgules). Vide, avec utilisateurs aussi vide = ouvert à tous.
+spec-form-access-users = Utilisateurs autorisés
+spec-help-access-users = Utilisateurs qui peuvent voir et atteindre l'app (séparés par des virgules).
+spec-form-access-help = Les deux vides = carte ouverte à tous (y compris anonyme). Avec une valeur, seuls les utilisateurs connectés correspondants — et toujours les admins.
+spec-form-cpu-request = Réservation CPU
+spec-help-cpu-request = Réservation souple de CPU en cœurs (container-cpu-request). Vide = pas de réservation.
+spec-form-memory-request = Réservation mémoire
+spec-help-memory-request = Réservation souple de mémoire, ex. : 256m. Vide = pas de réservation.
+spec-form-max-body-size = Taille max. du corps
+spec-help-max-body-size = Limite par spec du corps des requêtes, ex. : 10m. Vide = utilise la limite globale.
+spec-form-scale-up = Seuil de scale-up
+spec-help-scale-up = Fraction d'utilisation (0–1) qui déclenche la création d'une réplique. Vide = défaut du scaler.
+spec-form-scale-down = Seuil de scale-down
+spec-help-scale-down = Fraction d'utilisation (0–1) sous laquelle une réplique est retirée. Vide = défaut du scaler.
+spec-form-scale-down-grace = Délai de scale-down (s)
+spec-help-scale-down-grace = Secondes sous le seuil avant de retirer la réplique. Vide = défaut.
+spec-form-drain-timeout = Délai de drainage (s)
+spec-help-drain-timeout = Secondes pour drainer les sessions d'une réplique avant de l'arrêter. Vide = défaut.
+spec-form-routing-strategy = Stratégie de routage
+spec-help-routing-strategy = Comment l'équilibreur choisit une réplique. Vide = défaut par type (least-connections pour les apps, round-robin pour les API).
+spec-form-routing-default = Défaut (par type)
+spec-form-placement = Placement (multi-hôte)
+spec-help-placement = Comment répartir les répliques entre hôtes Docker. Vide = spread. Pertinent seulement avec proxy.hosts.
+spec-form-placement-default = Défaut (spread)
+spec-form-anti-affinity = Anti-affinité
+spec-help-anti-affinity = Préfère des hôtes distincts pour les répliques de ce spec (multi-hôte). Désactivé par défaut.
+spec-form-error-port = Le port doit être un nombre entre 1 et 65535.
+spec-form-error-threshold = Le seuil doit être un nombre entre 0 et 1.

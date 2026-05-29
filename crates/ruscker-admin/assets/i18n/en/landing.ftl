@@ -463,3 +463,61 @@ admin-nav-logs = Logs
 admin-proclog-title = Logs
 admin-proclog-subtitle = Recent Ruscker process log (live).
 admin-proclog-unavailable = Log buffer not wired (the server started without the logging layer).
+
+# ── spec-form advanced params (#211/#212) ──────────────────────────
+spec-form-runtime-section = Runtime
+spec-form-container-port = Container port
+spec-help-container-port = Port the app listens on inside the container. Blank = per-kind default (3838 for Shiny). Set it for Streamlit (8501), Dash (8050) or Jupyter (8888).
+spec-form-platform = Platform
+spec-help-platform = Docker platform (e.g. linux/amd64) to run a cross-arch image under emulation. Blank = the daemon picks per the manifest.
+spec-form-container-lifetime = Container lifetime (min)
+spec-help-container-lifetime = Soft cap in minutes before the container is recycled. Blank = no soft cap.
+spec-form-stop-on-logout = Stop on logout
+spec-help-stop-on-logout = Stop the user's container when they log out. Off by default.
+spec-form-env-section = Environment + command
+spec-form-container-env = Environment variables
+spec-form-container-env-help = One NAME=value per line. For secrets, reference an environment variable instead of pasting the value.
+spec-help-container-env = Injected into the container (container-env). Blank = none. For secrets, use environment-variable interpolation.
+spec-form-container-cmd = Command (override)
+spec-form-container-cmd-help = One argument per line. Blank = use the image's CMD.
+spec-help-container-cmd = Override the container command (container-cmd), as an argument list.
+spec-form-registry-section = Registry (private images)
+spec-form-registry-domain = Registry domain
+spec-help-registry-domain = Registry host for private images (e.g. docker.io, ghcr.io). Blank = Docker Hub.
+spec-form-registry-username = Username
+spec-help-registry-username = Username to authenticate the pull of a private image.
+spec-form-registry-password = Password
+spec-help-registry-password = Use an environment variable — never paste the password as text. Only used together with the username.
+spec-form-registry-credential = Stored credential
+spec-help-registry-credential = Name of a credential from the vault, instead of the inline username/password.
+spec-form-registry-help = For private images. Keep secrets in environment variables; the validator warns about plaintext passwords.
+spec-form-access-section = Access
+spec-form-access-groups = Allowed groups
+spec-help-access-groups = Groups that may see and reach the app (comma-separated). Blank, with users also blank = open to everyone.
+spec-form-access-users = Allowed users
+spec-help-access-users = Usernames that may see and reach the app (comma-separated).
+spec-form-access-help = Both blank = card is open to everyone (including anonymous). With any value, only matching logged-in users — and admins always.
+spec-form-cpu-request = CPU reservation
+spec-help-cpu-request = Soft CPU reservation in cores (container-cpu-request). Blank = no reservation.
+spec-form-memory-request = Memory reservation
+spec-help-memory-request = Soft memory reservation, e.g. 256m. Blank = no reservation.
+spec-form-max-body-size = Max body size
+spec-help-max-body-size = Per-spec cap on proxied request bodies, e.g. 10m. Blank = use the global limit.
+spec-form-scale-up = Scale-up threshold
+spec-help-scale-up = Utilization fraction (0–1) that triggers spawning a replica. Blank = scaler default.
+spec-form-scale-down = Scale-down threshold
+spec-help-scale-down = Utilization fraction (0–1) below which a replica is reaped. Blank = scaler default.
+spec-form-scale-down-grace = Scale-down grace (s)
+spec-help-scale-down-grace = Seconds below the threshold before reaping the replica. Blank = default.
+spec-form-drain-timeout = Drain timeout (s)
+spec-help-drain-timeout = Seconds to drain a replica's sessions before stopping it. Blank = default.
+spec-form-routing-strategy = Routing strategy
+spec-help-routing-strategy = How the balancer picks a replica. Blank = per-kind default (least-connections for apps, round-robin for APIs).
+spec-form-routing-default = Default (by kind)
+spec-form-placement = Placement (multi-host)
+spec-help-placement = How to spread replicas across Docker hosts. Blank = spread. Only relevant with proxy.hosts.
+spec-form-placement-default = Default (spread)
+spec-form-anti-affinity = Anti-affinity
+spec-help-anti-affinity = Prefer distinct hosts for this spec's replicas (multi-host). Off by default.
+spec-form-error-port = Port must be a number between 1 and 65535.
+spec-form-error-threshold = Threshold must be a number between 0 and 1.

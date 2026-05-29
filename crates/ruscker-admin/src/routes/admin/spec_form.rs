@@ -19,7 +19,10 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use ruscker_config::{ApiSpec, Spec, SpecKindOverride, TemplateProperties};
+use ruscker_config::{
+    ApiSpec, OrderedFloat, Placement, RoutingStrategy, Spec, SpecKindOverride, TemplateProperties,
+};
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;
@@ -104,6 +107,66 @@ pub struct SpecForm {
     /// headers, so the HTML transform is turned off. Defaults to
     /// checked on a new form.
     pub inject_base_href: String,
+
+    // ── Advanced · Runtime ──────────────────────────────────────
+    /// Inner port the app listens on (`container-port`). Blank ⇒
+    /// per-kind default (3838 Shiny). Needed for Streamlit (8501),
+    /// Dash (8050), Jupyter (8888), …
+    pub container_port: String,
+    /// Docker `--platform` (`linux/amd64`) for emulated images.
+    pub platform: String,
+    /// Soft lifetime cap in minutes (`container-lifetime`).
+    pub container_lifetime: String,
+    /// Checkbox ("on") ⇒ stop the container when the user logs out.
+    pub stop_on_logout: String,
+
+    // ── Advanced · Environment + command ────────────────────────
+    /// `container-env`, one `NAME=value` per line.
+    pub container_env: String,
+    /// `container-cmd`, one argv token per line.
+    pub container_cmd: String,
+
+    // ── Advanced · Registry (private images) ────────────────────
+    pub docker_registry_domain: String,
+    pub docker_registry_username: String,
+    pub docker_registry_password: String,
+    /// Name of a stored credential (credentials store) to use instead
+    /// of the inline username/password above.
+    pub docker_registry_credential: String,
+
+    // ── Advanced · Access (per-app, Phase 6 / #155) ─────────────
+    /// Groups allowed to see + reach this app — comma- or newline-
+    /// separated. Blank (and `access-users` blank) ⇒ open to everyone.
+    pub access_groups: String,
+    /// Usernames allowed to see + reach this app — comma/newline list.
+    pub access_users: String,
+
+    // ── Advanced · Resources (requests + body cap) ──────────────
+    /// Soft CPU reservation in fractional cores (`container-cpu-request`).
+    pub container_cpu_request: String,
+    /// Soft memory reservation (`container-memory-request`), e.g. `256m`.
+    pub container_memory_request: String,
+    /// Per-spec proxied-body cap (`max-body-size`), e.g. `10m`.
+    pub max_body_size: String,
+
+    // ── Advanced · Scaling thresholds ───────────────────────────
+    /// Utilization fraction (0–1) that triggers scale-up.
+    pub scale_up_threshold: String,
+    /// Utilization fraction (0–1) below which a replica is reaped.
+    pub scale_down_threshold: String,
+    /// Seconds below `scale-down-threshold` before reaping.
+    pub scale_down_grace: String,
+    /// Seconds to drain a replica's sessions before stopping it.
+    pub drain_timeout: String,
+
+    // ── Advanced · Routing + multi-host placement ───────────────
+    /// `routing-strategy`: ""(default) | least-connections |
+    /// round-robin | weighted-random | resource-aware.
+    pub routing_strategy: String,
+    /// `placement`: ""(default=spread) | spread | bin-pack.
+    pub placement: String,
+    /// Checkbox ("on") ⇒ prefer distinct hosts for this spec's replicas.
+    pub anti_affinity: String,
 }
 
 impl SpecForm {
@@ -187,6 +250,41 @@ impl SpecForm {
             } else {
                 String::new()
             },
+
+            // ── Advanced (new) ──────────────────────────────────
+            container_port: spec.container_port.map(|n| n.to_string()).unwrap_or_default(),
+            platform: spec.platform.clone().unwrap_or_default(),
+            container_lifetime: spec.container_lifetime.map(|n| n.to_string()).unwrap_or_default(),
+            stop_on_logout: checkbox(spec.stop_on_logout.unwrap_or(false)),
+            // `container-env` shown as sorted `NAME=value` lines.
+            container_env: spec.env_pairs().join("\n"),
+            container_cmd: spec
+                .container_cmd
+                .as_ref()
+                .map(|v| v.join("\n"))
+                .unwrap_or_default(),
+            docker_registry_domain: spec.docker_registry_domain.clone().unwrap_or_default(),
+            docker_registry_username: spec.docker_registry_username.clone().unwrap_or_default(),
+            docker_registry_password: spec.docker_registry_password.clone().unwrap_or_default(),
+            docker_registry_credential: spec.docker_registry_credential.clone().unwrap_or_default(),
+            access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
+            access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
+            container_cpu_request: spec
+                .container_cpu_request
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            container_memory_request: spec.container_memory_request.clone().unwrap_or_default(),
+            max_body_size: spec.max_body_size.clone().unwrap_or_default(),
+            scale_up_threshold: spec.scale_up_threshold.map(|f| f.0.to_string()).unwrap_or_default(),
+            scale_down_threshold: spec
+                .scale_down_threshold
+                .map(|f| f.0.to_string())
+                .unwrap_or_default(),
+            scale_down_grace: spec.scale_down_grace.map(|n| n.to_string()).unwrap_or_default(),
+            drain_timeout: spec.drain_timeout.map(|n| n.to_string()).unwrap_or_default(),
+            routing_strategy: spec.routing_strategy.map(routing_to_key).unwrap_or_default(),
+            placement: spec.placement.map(placement_to_key).unwrap_or_default(),
+            anti_affinity: checkbox(spec.anti_affinity.unwrap_or(false)),
         }
     }
 
@@ -279,11 +377,6 @@ impl SpecForm {
             max_replicas: parse_opt(&self.max_replicas),
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
             volumes: lines_to_vec(&self.volumes),
-            // Not modelled by the form yet — preserve from `base` so a
-            // YAML-imported `container-env` / `container-cmd` survives
-            // an admin edit instead of being silently dropped.
-            container_env: base.and_then(|b| b.container_env.clone()),
-            container_cmd: base.and_then(|b| b.container_cmd.clone()),
             // Checked ⇒ leave unset (the `true` default keeps the
             // exported YAML clean); unchecked ⇒ explicit `false`.
             inject_base_href: if self.inject_base_href.trim().is_empty() {
@@ -291,28 +384,32 @@ impl SpecForm {
             } else {
                 None
             },
-            // ── Not modelled by the form: preserve from `base` so an
-            //    edit never silently drops YAML-imported config. ──────
-            container_port: base.and_then(|b| b.container_port),
-            platform: base.and_then(|b| b.platform.clone()),
-            placement: base.and_then(|b| b.placement),
-            anti_affinity: base.and_then(|b| b.anti_affinity),
-            access_groups: base.and_then(|b| b.access_groups.clone()),
-            access_users: base.and_then(|b| b.access_users.clone()),
-            container_lifetime: base.and_then(|b| b.container_lifetime),
-            stop_on_logout: base.and_then(|b| b.stop_on_logout),
-            docker_registry_username: base.and_then(|b| b.docker_registry_username.clone()),
-            docker_registry_password: base.and_then(|b| b.docker_registry_password.clone()),
-            docker_registry_domain: base.and_then(|b| b.docker_registry_domain.clone()),
-            docker_registry_credential: base.and_then(|b| b.docker_registry_credential.clone()),
-            container_cpu_request: base.and_then(|b| b.container_cpu_request),
-            container_memory_request: base.and_then(|b| b.container_memory_request.clone()),
-            max_body_size: base.and_then(|b| b.max_body_size.clone()),
-            scale_up_threshold: base.and_then(|b| b.scale_up_threshold),
-            scale_down_threshold: base.and_then(|b| b.scale_down_threshold),
-            scale_down_grace: base.and_then(|b| b.scale_down_grace),
-            drain_timeout: base.and_then(|b| b.drain_timeout),
-            routing_strategy: base.and_then(|b| b.routing_strategy),
+            // ── Advanced fields: the form is authoritative now (it
+            //    pre-fills from the spec in `from_spec`), so blank ⇒
+            //    None ⇒ the schema/runtime default. Clearing a field
+            //    clears it; an untouched field round-trips. ──────────
+            container_port: parse_opt(&self.container_port),
+            platform: empty_to_none(&self.platform),
+            container_lifetime: parse_opt(&self.container_lifetime),
+            stop_on_logout: checkbox_opt(&self.stop_on_logout),
+            container_env: parse_env(&self.container_env),
+            container_cmd: lines_to_vec(&self.container_cmd),
+            docker_registry_domain: empty_to_none(&self.docker_registry_domain),
+            docker_registry_username: empty_to_none(&self.docker_registry_username),
+            docker_registry_password: empty_to_none(&self.docker_registry_password),
+            docker_registry_credential: empty_to_none(&self.docker_registry_credential),
+            access_groups: list_to_vec(&self.access_groups),
+            access_users: list_to_vec(&self.access_users),
+            container_cpu_request: parse_opt(&self.container_cpu_request),
+            container_memory_request: empty_to_none(&self.container_memory_request),
+            max_body_size: empty_to_none(&self.max_body_size),
+            scale_up_threshold: parse_opt::<f64>(&self.scale_up_threshold).map(OrderedFloat),
+            scale_down_threshold: parse_opt::<f64>(&self.scale_down_threshold).map(OrderedFloat),
+            scale_down_grace: parse_opt(&self.scale_down_grace),
+            drain_timeout: parse_opt(&self.drain_timeout),
+            routing_strategy: routing_from_key(&self.routing_strategy),
+            placement: placement_from_key(&self.placement),
+            anti_affinity: checkbox_opt(&self.anti_affinity),
         })
     }
 
@@ -344,6 +441,10 @@ impl SpecForm {
             &self.max_replicas,
             &self.concurrent_requests_per_replica,
             &self.api_port,
+            &self.container_port,
+            &self.container_lifetime,
+            &self.scale_down_grace,
+            &self.drain_timeout,
         ];
         if int_fields
             .iter()
@@ -351,19 +452,47 @@ impl SpecForm {
         {
             errs.push("spec-form-error-number");
         }
-
-        // CPU must be a positive, finite number of cores (catches `0,5`).
-        if !self.container_cpu_limit.trim().is_empty()
-            && !matches!(self.container_cpu_limit.trim().parse::<f64>(), Ok(v) if v.is_finite() && v > 0.0)
-        {
-            errs.push("spec-form-error-cpu");
+        // Ports are 1–65535.
+        for p in [&self.container_port, &self.api_port] {
+            if !p.trim().is_empty()
+                && !matches!(p.trim().parse::<u32>(), Ok(n) if (1..=65535).contains(&n))
+            {
+                errs.push("spec-form-error-port");
+                break;
+            }
         }
 
-        // Memory must be a Docker-style size (catches the `512mb` typo).
-        if !self.container_memory_limit.trim().is_empty()
-            && !ruscker_config::is_valid_memory_size(self.container_memory_limit.trim())
-        {
-            errs.push("spec-form-error-memory");
+        // CPU (limit + request) must be a positive, finite number of
+        // cores (catches `0,5`).
+        for cpu in [&self.container_cpu_limit, &self.container_cpu_request] {
+            if !cpu.trim().is_empty()
+                && !matches!(cpu.trim().parse::<f64>(), Ok(v) if v.is_finite() && v > 0.0)
+            {
+                errs.push("spec-form-error-cpu");
+                break;
+            }
+        }
+
+        // Memory-style sizes: limit, request, and the per-spec body cap.
+        for mem in [
+            &self.container_memory_limit,
+            &self.container_memory_request,
+            &self.max_body_size,
+        ] {
+            if !mem.trim().is_empty() && !ruscker_config::is_valid_memory_size(mem.trim()) {
+                errs.push("spec-form-error-memory");
+                break;
+            }
+        }
+
+        // Scaling thresholds are utilization fractions in (0, 1].
+        for th in [&self.scale_up_threshold, &self.scale_down_threshold] {
+            if !th.trim().is_empty()
+                && !matches!(th.trim().parse::<f64>(), Ok(v) if v.is_finite() && v > 0.0 && v <= 1.0)
+            {
+                errs.push("spec-form-error-threshold");
+                break;
+            }
         }
 
         // Replica pool: max must be >= min when both are given.
@@ -423,6 +552,82 @@ fn lines_to_vec(s: &str) -> Option<Vec<String>> {
     } else {
         Some(v)
     }
+}
+/// Checkbox value for `from_spec`: `"on"` when set, else empty.
+fn checkbox(on: bool) -> String {
+    if on { "on".into() } else { String::new() }
+}
+/// Checkbox parse: non-empty (`"on"`) ⇒ `Some(true)`; blank ⇒ `None`
+/// (the default-`false` semantics, kept out of the exported YAML).
+fn checkbox_opt(s: &str) -> Option<bool> {
+    if s.trim().is_empty() { None } else { Some(true) }
+}
+/// Parse `container-env` from a textarea: one `NAME=value` per line.
+/// The first `=` splits; blank lines and lines without `=` are skipped.
+/// `BTreeMap` so the resulting env list is deterministically ordered.
+/// `None` when nothing valid is present.
+fn parse_env(s: &str) -> Option<BTreeMap<String, String>> {
+    let map: BTreeMap<String, String> = s
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            if line.is_empty() {
+                return None;
+            }
+            let (k, v) = line.split_once('=')?;
+            let k = k.trim();
+            if k.is_empty() {
+                return None;
+            }
+            Some((k.to_string(), v.trim().to_string()))
+        })
+        .collect();
+    if map.is_empty() { None } else { Some(map) }
+}
+/// Parse an access list (`access-groups` / `access-users`) from a field
+/// that accepts commas and/or newlines. `None` when all blank.
+fn list_to_vec(s: &str) -> Option<Vec<String>> {
+    let v: Vec<String> = s
+        .split([',', '\n'])
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(String::from)
+        .collect();
+    if v.is_empty() { None } else { Some(v) }
+}
+/// `routing-strategy` ↔ form key (the enum's kebab serde value).
+fn routing_from_key(s: &str) -> Option<RoutingStrategy> {
+    match s.trim() {
+        "least-connections" => Some(RoutingStrategy::LeastConnections),
+        "round-robin" => Some(RoutingStrategy::RoundRobin),
+        "weighted-random" => Some(RoutingStrategy::WeightedRandom),
+        "resource-aware" => Some(RoutingStrategy::ResourceAware),
+        _ => None,
+    }
+}
+fn routing_to_key(r: RoutingStrategy) -> String {
+    match r {
+        RoutingStrategy::LeastConnections => "least-connections",
+        RoutingStrategy::RoundRobin => "round-robin",
+        RoutingStrategy::WeightedRandom => "weighted-random",
+        RoutingStrategy::ResourceAware => "resource-aware",
+    }
+    .into()
+}
+/// `placement` ↔ form key (the enum's kebab serde value).
+fn placement_from_key(s: &str) -> Option<Placement> {
+    match s.trim() {
+        "spread" => Some(Placement::Spread),
+        "bin-pack" => Some(Placement::BinPack),
+        _ => None,
+    }
+}
+fn placement_to_key(p: Placement) -> String {
+    match p {
+        Placement::Spread => "spread",
+        Placement::BinPack => "bin-pack",
+    }
+    .into()
 }
 fn is_kebab_id(s: &str) -> bool {
     !s.is_empty()
@@ -891,5 +1096,116 @@ proxy:
         f.heartbeat_timeout = "-1".into();
         let errs = f.validate(FormMode::New);
         assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    // ── #211: newly-modelled advanced fields ────────────────────
+
+    #[test]
+    fn new_advanced_fields_round_trip() {
+        // Build a spec carrying every newly-modelled field, load it into
+        // the form, and save it back unchanged — values must survive.
+        let yaml = r#"
+proxy:
+  specs:
+    - id: nb
+      display-name: Notebook
+      container-image: quay.io/jupyter/minimal-notebook:latest
+      container-port: 8888
+      platform: linux/amd64
+      container-env:
+        JUPYTER_TOKEN: ""
+        GRANT_SUDO: "yes"
+      container-cmd:
+        - start-notebook.py
+        - --ServerApp.base_url=/
+      access-groups: [staff, ops]
+      access-users: [alice]
+      placement: bin-pack
+      anti-affinity: true
+      routing-strategy: round-robin
+      scale-up-threshold: 0.8
+      scale-down-threshold: 0.2
+      scale-down-grace: 45
+      drain-timeout: 20
+      template-properties:
+        type: app
+        state: active
+"#;
+        let cfg = Config::from_yaml(yaml).expect("parse fixture");
+        let original = &cfg.proxy.specs[0];
+        let merged = SpecForm::from_spec(original)
+            .into_spec(Some(original))
+            .expect("into_spec");
+
+        assert_eq!(merged.container_port, Some(8888));
+        assert_eq!(merged.platform.as_deref(), Some("linux/amd64"));
+        assert_eq!(merged.env_pairs(), vec!["GRANT_SUDO=yes", "JUPYTER_TOKEN="]);
+        assert_eq!(
+            merged.container_cmd.as_deref(),
+            Some(&["start-notebook.py".into(), "--ServerApp.base_url=/".into()][..])
+        );
+        assert_eq!(merged.access_groups.as_deref(), Some(&["staff".into(), "ops".into()][..]));
+        assert_eq!(merged.access_users.as_deref(), Some(&["alice".into()][..]));
+        assert_eq!(merged.placement, Some(Placement::BinPack));
+        assert_eq!(merged.anti_affinity, Some(true));
+        assert_eq!(merged.routing_strategy, Some(RoutingStrategy::RoundRobin));
+        assert_eq!(merged.scale_up_threshold.map(|f| f.0), Some(0.8));
+        assert_eq!(merged.scale_down_grace, Some(45));
+        assert_eq!(merged.drain_timeout, Some(20));
+    }
+
+    #[test]
+    fn clearing_an_advanced_field_clears_it() {
+        // The form is authoritative: blanking a field that the base had
+        // set drops it to None (= inherit the default), not preserve.
+        let yaml = "proxy:\n  specs:\n    - id: a\n      container-image: x\n      platform: linux/amd64\n";
+        let cfg = Config::from_yaml(yaml).unwrap();
+        let base = &cfg.proxy.specs[0];
+        let mut form = SpecForm::from_spec(base);
+        assert_eq!(form.platform, "linux/amd64");
+        form.platform = "  ".into(); // operator clears it
+        let merged = form.into_spec(Some(base)).unwrap();
+        assert_eq!(merged.platform, None);
+    }
+
+    #[test]
+    fn parse_env_splits_on_first_equals_and_sorts() {
+        let m = parse_env("FOO=bar\n  BAZ = qux \n\nDSN=postgres://u:p@h/db?x=1\nnoequals\n=noval")
+            .expect("some");
+        assert_eq!(m.get("FOO").map(String::as_str), Some("bar"));
+        assert_eq!(m.get("BAZ").map(String::as_str), Some("qux"));
+        // value may itself contain '=' (only the first splits)
+        assert_eq!(m.get("DSN").map(String::as_str), Some("postgres://u:p@h/db?x=1"));
+        // lines without a key, or with an empty key, are skipped
+        assert!(!m.contains_key("noequals"));
+        assert_eq!(m.len(), 3);
+        assert!(parse_env("   \n\n").is_none());
+    }
+
+    #[test]
+    fn list_to_vec_accepts_commas_and_newlines() {
+        assert_eq!(
+            list_to_vec("staff, ops\nresearch").as_deref(),
+            Some(&["staff".into(), "ops".into(), "research".into()][..])
+        );
+        assert!(list_to_vec("  ,  \n").is_none());
+    }
+
+    #[test]
+    fn validate_flags_bad_port_and_threshold() {
+        let mut f = valid_form();
+        f.container_port = "70000".into();
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-port"));
+
+        let mut f = valid_form();
+        f.scale_up_threshold = "1.5".into();
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-threshold"));
+
+        let mut f = valid_form();
+        f.container_port = "8501".into();
+        f.scale_up_threshold = "0.8".into();
+        f.max_body_size = "10m".into();
+        f.container_cpu_request = "0.25".into();
+        assert!(f.validate(FormMode::New).is_empty());
     }
 }

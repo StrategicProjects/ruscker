@@ -41,6 +41,10 @@ pub mod schema;
 pub mod validate;
 
 pub use error::{Error, Result};
+/// Re-exported so consumers (e.g. the admin spec form) can construct
+/// the `Option<OrderedFloat<f64>>` scaling-threshold fields without
+/// depending on `ordered-float` directly.
+pub use ordered_float::OrderedFloat;
 pub use schema::{
     is_valid_memory_size, normalize_base_path, ApiSpec, Config, Host, HostTls, LandingBlock,
     LandingCustomization, Logging, Placement, Proxy, RatePolicy, RoutingStrategy, Server, Spec,

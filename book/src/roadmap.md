@@ -1,9 +1,11 @@
 # Roadmap
 
-Ruscker shipped **v0.1.0** — Phases 0 through 5 are done and the proxy
-is production-ready. Phases 6–8 are optional and demand-driven.
+Ruscker is at **v0.1.3** — Phases 0 through 7 are done and the proxy is
+production-ready and horizontally scalable. Phase 8 (external auth) is
+the main optional, demand-driven work left. For what changed in each
+release, see the [release notes](./news.md).
 
-![Roadmap timeline: phases 0–5 are shipped (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish — v0.1.0). Phases 6–8 are planned and optional: multi-host scheduling, high availability, and external auth.](images/roadmap.svg)
+![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish), and 6 (multi-host scheduling) and 7 (HA / multi-instance) followed in v0.1.1. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
 
 ## Shipped
 
@@ -54,21 +56,24 @@ installer, a **Homebrew tap**, and **cosign-signed** release artifacts.
 > **~540 MB to ~16 MB** (~30×). A real 31-spec config migrated with no
 > unsupported features.
 
-## Planned (optional)
-
-These are demand-driven — Ruscker is complete and useful without them.
-
-### Phase 6 — Multi-host scheduling
+### Phase 6 — Multi-host scheduling → **v0.1.1 / v0.1.2**
 A `MultiHostDockerBackend` that talks to several Docker hosts, with
 bin-pack vs spread placement and per-spec anti-affinity ("replicas on
-different hosts"). Slots in behind the existing `ContainerBackend`
-trait — no proxy changes.
+different hosts") — behind the existing `ContainerBackend` trait, no
+proxy changes. Shipped alongside per-group / per-user **app visibility**
+(`access-groups` / `access-users`) and **sub-path mounting**
+(`server.context-path` / `--base-path`).
 
-### Phase 7 — HA / multi-instance
-A Postgres `SessionStore` so two Ruscker instances behind an L4 load
-balancer can share session state and either can serve any session;
-coordination via Postgres advisory locks; failover testing. See
-[Deployment shapes](./architecture.md#deployment-shapes).
+### Phase 7 — HA / multi-instance → **v0.1.1**
+A Postgres `SessionStore` and a shared config catalog so several Ruscker
+instances behind an L4 load balancer can share state and any instance
+can serve any session; one scaler leader via Postgres advisory locks,
+with failover. A runnable 2-instance compose harness lives in
+`examples/ha/`. See [Deployment shapes](./architecture.md#deployment-shapes).
+
+## Planned (optional)
+
+Demand-driven — Ruscker is complete and useful without it.
 
 ### Phase 8 — External auth
 OIDC (Keycloak / Auth0 / Google), SAML, and LDAP, plus per-app access
@@ -93,6 +98,6 @@ After Phase 5, Ruscker can drop in where ShinyProxy runs today:
 3. Start Ruscker on the same port.
 4. Verify with the same browser URL.
 
-Phases 6+ are for organisations with more demanding scale or
-identity needs. Progress is tracked in the GitHub issues and
-`docs/ROADMAP.md`.
+Phase 8 is for organisations with federated-identity or
+fine-grained per-app access needs. Progress is tracked in the
+GitHub issues.

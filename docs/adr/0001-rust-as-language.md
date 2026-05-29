@@ -41,7 +41,7 @@ Rust.
 - **Smaller talent pool** in R/data-science world. The target users
   (Brazilian government IT teams, data scientists at universities) are
   unlikely to have Rust experience. Mitigated by:
-  - Heavy documentation (CLAUDE.md per crate, mockups, ADRs)
+  - Heavy documentation (per-crate developer guides, mockups, ADRs)
   - Conservative use of language features (no macros heavy magic, no
     fancy generic constraints)
   - Clear separation between domain code (pure Rust) and I/O
@@ -83,6 +83,6 @@ with the JVM.
 - Several transitive deps need pinning (`getrandom 0.2.15`,
   `indexmap 2.7.0`, `clap 4.5.20`, `uuid 1.10.0`) because their
   newer versions require Edition 2024. This is documented in the
-  root `CLAUDE.md`.
+  workspace developer notes.
 
 If MSRV ever bumps, we can lift the pins.

@@ -304,34 +304,21 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
         .len();
     let tracker_sessions = state.sessions.len();
 
-    // Resolve a display name per distinct spec_id once: the YAML config
-    // first, then the DB (showcase/admin specs live only there, #205),
-    // else the raw id. Done up front so we don't re-query per row.
+    // Resolve a display name per distinct spec_id once, DB-first
+    // (admin edits + showcase seed shadow the YAML), via the shared
+    // `find_spec` resolver — a config-first order showed the stale YAML
+    // name for a spec renamed in the admin (#275). Done up front so we
+    // don't re-resolve per row.
     let mut name_of: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for sid in snap
         .iter()
         .map(|r| r.spec_id.clone())
         .collect::<std::collections::HashSet<_>>()
     {
-        let from_config = state
-            .config
-            .proxy
-            .specs
-            .iter()
-            .find(|s| s.id == sid)
-            .and_then(|s| s.display_name.clone());
-        let name = match from_config {
-            Some(n) => n,
-            None => match state.db.as_ref() {
-                Some(db) => crate::db::specs::fetch_one(db, &sid)
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|s| s.display_name.clone())
-                    .unwrap_or_else(|| sid.clone()),
-                None => sid.clone(),
-            },
-        };
+        let name = crate::routes::proxy::find_spec(state, &sid)
+            .await
+            .and_then(|s| s.display_name.clone())
+            .unwrap_or_else(|| sid.clone());
         name_of.insert(sid, name);
     }
 
@@ -485,30 +472,26 @@ async fn logs(
             .into_response();
     };
 
-    // Resolve display_name + spec_id from the registry snapshot
-    // so the page heading is friendly even though logs come
-    // straight from the backend.
-    let (display_name, spec_id) = {
+    // Resolve display_name + spec_id for the heading. Read the spec id
+    // from the registry under the lock, then drop it before the DB-first
+    // name lookup (#275) so we never hold the registry lock across I/O.
+    let spec_id_of_replica = {
         let reg = state.replicas.read().await;
         let found = reg.all().find(|r| r.id == rid).map(|r| r.spec_id.clone());
-        match found {
-            Some(sid) => {
-                let dn = state
-                    .config
-                    .proxy
-                    .specs
-                    .iter()
-                    .find(|s| s.id == sid)
-                    .and_then(|s| s.display_name.clone())
-                    .unwrap_or_else(|| sid.clone());
-                (dn, sid)
-            }
-            // Replica not in registry — still try to fetch logs
-            // (it may have just been dropped from the registry
-            // but the container lingers). Heading falls back to
-            // the raw id.
-            None => (replica_id.clone(), String::new()),
+        found
+    };
+    let (display_name, spec_id) = match spec_id_of_replica {
+        Some(sid) => {
+            let dn = crate::routes::proxy::find_spec(&state, &sid)
+                .await
+                .and_then(|s| s.display_name.clone())
+                .unwrap_or_else(|| sid.clone());
+            (dn, sid)
         }
+        // Replica not in registry — still try to fetch logs (it may have
+        // just been dropped from the registry but the container lingers).
+        // Heading falls back to the raw id.
+        None => (replica_id.clone(), String::new()),
     };
 
     let lines = match backend.logs(&rid, LOGS_TAIL).await {

@@ -11,6 +11,9 @@
 <meta name="twitter:card" content="{% if !og_image.is_empty() %}summary_large_image{% else %}summary{% endif %}">
 {# Operator analytics snippet — rendered verbatim (admin-trusted). #}
 {% if !analytics_html.is_empty() %}{{ analytics_html|safe }}{% endif %}
+{# Operator custom CSS (#232) — injected last so it overrides the
+   built-in styles. Admin-trusted; landing CSP allows inline styles. #}
+{% if !custom_css.is_empty() %}<style>{{ custom_css|safe }}</style>{% endif %}
 {% endblock %}
 
 {% block content %}

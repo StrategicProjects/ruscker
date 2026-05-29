@@ -29,10 +29,11 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         Option<String>, // og_image
         Option<String>, // analytics_html
         Option<String>, // analytics_origins
+        Option<String>, // custom_css
     );
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
-                analytics_html, analytics_origins
+                analytics_html, analytics_origins, custom_css
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -51,6 +52,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             og_image,
             analytics_html,
             analytics_origins,
+            custom_css,
         )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
@@ -64,6 +66,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 og_image,
                 analytics_html,
                 analytics_origins,
+                custom_css,
                 // Blocks live in their own table; callers that render
                 // or export them load via `landing_blocks`.
                 blocks: Vec::new(),
@@ -134,7 +137,7 @@ pub(crate) async fn update_in_tx(
             SET header_bg = ?, header_fg = ?, intro = ?,
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
-                updated_at = ?
+                custom_css = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -146,6 +149,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.og_image))
     .bind(none_if_empty(&lc.analytics_html))
     .bind(none_if_empty(&lc.analytics_origins))
+    .bind(none_if_empty(&lc.custom_css))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -168,7 +172,7 @@ pub(crate) async fn update_in_tx_pg(
             SET header_bg = $1, header_fg = $2, intro = $3,
                 intro_locales_json = $4, seo_title = $5, seo_description = $6,
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
-                updated_at = $10
+                custom_css = $10, updated_at = $11
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -180,6 +184,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.og_image))
     .bind(none_if_empty(&lc.analytics_html))
     .bind(none_if_empty(&lc.analytics_origins))
+    .bind(none_if_empty(&lc.custom_css))
     .bind(now)
     .execute(&mut **tx)
     .await

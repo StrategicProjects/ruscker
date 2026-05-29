@@ -82,6 +82,7 @@ pub struct LandingForm {
     pub og_image: String,
     pub analytics_html: String,
     pub analytics_origins: String,
+    pub custom_css: String,
 }
 
 impl LandingForm {
@@ -100,6 +101,7 @@ impl LandingForm {
             og_image: lc.og_image.clone().unwrap_or_default(),
             analytics_html: lc.analytics_html.clone().unwrap_or_default(),
             analytics_origins: lc.analytics_origins.clone().unwrap_or_default(),
+            custom_css: lc.custom_css.clone().unwrap_or_default(),
         }
     }
 
@@ -126,6 +128,7 @@ impl LandingForm {
             og_image: empty_to_none(self.og_image),
             analytics_html: empty_to_none(self.analytics_html),
             analytics_origins: empty_to_none(self.analytics_origins),
+            custom_css: empty_to_none(self.custom_css),
             // The landing editor doesn't manage blocks (their own
             // screen does); `landing::update` ignores this field, so
             // an empty Vec here never clobbers stored blocks.

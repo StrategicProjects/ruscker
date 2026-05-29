@@ -17,7 +17,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 
 use crate::auth::{RequireEditor, Role};
@@ -36,6 +36,10 @@ pub fn routes() -> Router<AppState> {
         // "Docker images" confusion (#9). The DB table + Rust
         // module stay `images` — that's internal and accurate.
         .route("/admin/media", get(index).post(upload))
+        // Inline upload from the spec form (#213): same pipeline, JSON
+        // response so the form can add + select the image without a
+        // full page navigation to the media library.
+        .route("/admin/media/upload-inline", post(upload_inline))
         .route("/admin/media/{id}/delete", post(delete))
         // 301 from the old path so any bookmarks / in-flight
         // links keep working.
@@ -198,6 +202,80 @@ async fn upload(
         last_error,
     )
     .await
+}
+
+/// JSON shape returned by [`upload_inline`]. On success `filename` +
+/// `url` are set; on failure `error` carries an operator-facing string.
+#[derive(serde::Serialize)]
+struct InlineUpload {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+fn inline_err(status: StatusCode, msg: impl Into<String>) -> Response {
+    (
+        status,
+        Json(InlineUpload {
+            filename: None,
+            url: None,
+            error: Some(msg.into()),
+        }),
+    )
+        .into_response()
+}
+
+/// Upload a single image and return JSON (`{filename, url}`), used by
+/// the spec form's inline picker. Same `process_upload` + `insert`
+/// pipeline as [`upload`]; only the response shape differs.
+async fn upload_inline(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return inline_err(StatusCode::SERVICE_UNAVAILABLE, "no database");
+    };
+    loop {
+        let field = match multipart.next_field().await {
+            Ok(Some(f)) => f,
+            Ok(None) => break,
+            Err(err) => return inline_err(StatusCode::BAD_REQUEST, format!("multipart: {err}")),
+        };
+        if field.name() != Some("file") {
+            continue;
+        }
+        let filename = field.file_name().unwrap_or("upload").to_string();
+        let mime = field.content_type().map(|s| s.to_string());
+        let bytes = match field.bytes().await {
+            Ok(b) => b.to_vec(),
+            Err(err) => return inline_err(StatusCode::BAD_REQUEST, format!("read upload: {err}")),
+        };
+        if bytes.is_empty() {
+            continue;
+        }
+        let processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+            Ok(p) => p,
+            Err(err) => return inline_err(StatusCode::UNPROCESSABLE_ENTITY, err.to_string()),
+        };
+        let name = processed.filename.clone();
+        return match db::images::insert(pool, processed, Some(editor.actor())).await {
+            Ok(_) => Json(InlineUpload {
+                url: Some(format!("/assets/img/{name}")),
+                filename: Some(name),
+                error: None,
+            })
+            .into_response(),
+            Err(err) => {
+                tracing::error!(error = ?err, "inline image insert failed");
+                inline_err(StatusCode::INTERNAL_SERVER_ERROR, "save failed")
+            }
+        };
+    }
+    inline_err(StatusCode::BAD_REQUEST, "no file field in upload")
 }
 
 async fn delete(

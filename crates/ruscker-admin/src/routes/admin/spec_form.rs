@@ -684,6 +684,12 @@ impl<'a> SpecFormPage<'a> {
         serde_json::to_string(&self.form).unwrap_or_else(|_| "{}".into())
     }
 
+    /// Media-library filenames as a JSON array, seeding the Alpine logo
+    /// picker so an inline upload can push new thumbnails reactively.
+    fn logo_images_json(&self) -> String {
+        serde_json::to_string(&self.logo_images).unwrap_or_else(|_| "[]".into())
+    }
+
     /// Options for the kind picker: (key, label-fluent-key, tabler-icon).
     /// Order intentional — mirrors the public landing chip order.
     fn display_type_options(&self) -> &'static [(&'static str, &'static str, &'static str)] {

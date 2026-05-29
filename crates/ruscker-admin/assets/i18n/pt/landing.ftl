@@ -525,3 +525,11 @@ spec-form-anti-affinity = Anti-afinidade
 spec-help-anti-affinity = Prefere hosts distintos para as réplicas deste spec (multi-host). Desligado por padrão.
 spec-form-error-port = A porta deve ser um número entre 1 e 65535.
 spec-form-error-threshold = O limiar deve ser um número entre 0 e 1.
+
+# ── spec-form image picker (#213) ──────────────────────────────────
+spec-form-logo-upload = Enviar imagem
+spec-form-logo-clear = Remover
+spec-form-logo-none = Sem imagem — usa um tom gerado pelo tipo.
+spec-form-logo-path-advanced = Avançado: colar um caminho ou URL
+spec-form-cover-image = Imagem
+spec-form-cover-image-help = Escolha uma imagem da biblioteca (ou envie uma) como fundo do card.

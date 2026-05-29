@@ -649,17 +649,12 @@ async fn restart_replica(
     let Some(spec_id) = spec_id else {
         return (StatusCode::NOT_FOUND, "replica not found").into_response();
     };
-    let spec = state
-        .config
-        .proxy
-        .specs
-        .iter()
-        .find(|s| s.id == spec_id)
-        .cloned();
-    let Some(spec) = spec else {
+    // DB-first (admin edits + showcase seed), not just the YAML config —
+    // otherwise a DB-only spec's replica couldn't be restarted (#257).
+    let Some(spec) = crate::routes::proxy::find_spec(&state, &spec_id).await else {
         return (
             StatusCode::CONFLICT,
-            format!("spec `{spec_id}` no longer in config; cannot restart"),
+            format!("spec `{spec_id}` no longer exists; cannot restart"),
         )
             .into_response();
     };

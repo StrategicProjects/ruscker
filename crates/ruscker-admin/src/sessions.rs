@@ -264,18 +264,12 @@ pub fn spawn(
     registry: Arc<RwLock<ReplicaRegistry>>,
     config: Arc<ruscker_config::Config>,
     leader: Arc<dyn crate::leader::LeaderElector>,
+    db: Option<crate::db::ConfigDb>,
 ) -> JoinHandle<()> {
     let global_ms = config.proxy.heartbeat_timeout;
-    let overrides: std::collections::HashMap<String, i64> = config
-        .proxy
-        .specs
-        .iter()
-        .filter_map(|s| s.heartbeat_timeout.map(|t| (s.id.clone(), t)))
-        .collect();
     tokio::spawn(async move {
         info!(
             global_ms,
-            per_spec_overrides = overrides.len(),
             interval = ?SWEEPER_INTERVAL,
             "session sweeper started"
         );
@@ -283,6 +277,16 @@ pub fn spawn(
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             ticker.tick().await;
+            // Per-spec `heartbeat-timeout` overrides, rebuilt each tick
+            // from the effective (DB-first) catalog — so DB-only specs'
+            // overrides apply and a runtime edit takes effect without a
+            // restart (#257). One cheap `list` query per tick.
+            let overrides: std::collections::HashMap<String, i64> =
+                crate::catalog::effective_specs(db.as_ref(), &config)
+                    .await
+                    .iter()
+                    .filter_map(|s| s.heartbeat_timeout.map(|t| (s.id.clone(), t)))
+                    .collect();
             // Only the leader issues the idle-eviction DELETEs in a
             // shared (HA) store; the reconcile runs regardless (#159 C3).
             // `AlwaysLeader` (single-node) is always true.

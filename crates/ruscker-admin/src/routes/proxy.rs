@@ -614,7 +614,7 @@ fn mount_prefix(base_path: &str, route_prefix: &str, spec_id: &str) -> String {
     format!("{base_path}{route_prefix}{spec_id}")
 }
 
-async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
+pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
     // DB-first — the operator-editable catalog (admin UI + showcase
     // seed) shadows the YAML for matching ids. Cheap: single indexed
     // SELECT by primary key.

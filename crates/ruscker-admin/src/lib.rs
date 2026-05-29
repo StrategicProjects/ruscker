@@ -635,8 +635,13 @@ async fn security_headers(
 /// `img-src`, `connect-src`). The landing uses this to allow an
 /// operator-configured analytics provider without loosening the
 /// policy for every other page. `'unsafe-inline'` on script/style is
-/// still required by the inline landing/dashboard scripts (a
-/// nonce-based CSP is a tracked follow-up).
+/// still required by the inline landing/dashboard scripts, and
+/// `'unsafe-eval'` by Alpine.js (its default evaluator builds
+/// functions via `new Function`, which a CSP without `'unsafe-eval'`
+/// blocks with an `EvalError` — breaking every Alpine directive:
+/// the card filters, help popovers, cover editor, spec form, etc.).
+/// The strict path (Alpine's CSP build + a nonce, dropping both
+/// `unsafe-*`) is a tracked follow-up.
 pub(crate) fn content_security_policy(extra_origins: &str) -> String {
     // Sanitize operator-supplied origins before they reach the header:
     // a stray `*`, `'unsafe-eval'`, or a `;`-smuggled directive would
@@ -649,7 +654,7 @@ pub(crate) fn content_security_policy(extra_origins: &str) -> String {
     };
     format!(
         "default-src 'self'; \
-         script-src 'self' 'unsafe-inline'{extra}; \
+         script-src 'self' 'unsafe-inline' 'unsafe-eval'{extra}; \
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data:{extra}; \
          font-src 'self'; \
@@ -712,7 +717,7 @@ mod csp_tests {
     #[test]
     fn base_policy_is_self_only() {
         let csp = content_security_policy("");
-        assert!(csp.contains("script-src 'self' 'unsafe-inline';"));
+        assert!(csp.contains("script-src 'self' 'unsafe-inline' 'unsafe-eval';"));
         assert!(csp.contains("connect-src 'self';"));
         assert!(!csp.contains("plausible"));
     }
@@ -720,7 +725,7 @@ mod csp_tests {
     #[test]
     fn extra_origins_widen_script_img_connect() {
         let csp = content_security_policy("https://plausible.io");
-        assert!(csp.contains("script-src 'self' 'unsafe-inline' https://plausible.io;"));
+        assert!(csp.contains("script-src 'self' 'unsafe-inline' 'unsafe-eval' https://plausible.io;"));
         assert!(csp.contains("img-src 'self' data: https://plausible.io;"));
         assert!(csp.contains("connect-src 'self' https://plausible.io;"));
         // Directives that must NOT be widened.
@@ -738,7 +743,10 @@ mod csp_tests {
         // Only the one clean host source survives.
         assert!(csp.contains("https://ok.example.com"));
         assert!(!csp.contains('*'));
-        assert!(!csp.contains("unsafe-eval"));
+        // The base `script-src` carries exactly one `'unsafe-eval'`
+        // (for Alpine). The operator's injected copy must be stripped,
+        // so it appears once — not duplicated into img-src/connect-src.
+        assert_eq!(csp.matches("unsafe-eval").count(), 1);
         // The `evil.com;script-src` token (directive smuggling) is gone.
         assert!(!csp.contains("evil.com"));
         // The base policy is intact.

@@ -33,67 +33,30 @@ pub fn routes() -> Router<AppState> {
 
 // ── List ─────────────────────────────────────────────────────────
 
-#[derive(Template)]
-#[template(path = "admin/blocks.html")]
-struct BlocksPage<'a> {
-    locale: Locale,
-    theme: Theme,
-    locales: &'a Locales,
-    locales_all: &'static [Locale],
-    nav_section: &'static str,
-    /// Current session role - drives nav gating.
-    role: Role,
-    /// Blocks grouped per slot (in `SLOTS` order) so the template can
-    /// render one drag-reorder list per slot.
-    groups: Vec<SlotGroup>,
+/// One slot's blocks, in render (position) order. The blocks editor
+/// is folded into the Portal page (#242), so the `LandingPage` reuses
+/// this type + [`grouped_blocks`] to render the same per-slot lists.
+pub(crate) struct SlotGroup {
+    pub(crate) slot: &'static str,
+    pub(crate) blocks: Vec<LandingBlock>,
 }
 
-/// One slot's blocks, in render (position) order.
-struct SlotGroup {
-    slot: &'static str,
-    blocks: Vec<LandingBlock>,
-}
-
-impl BlocksPage<'_> {
-    fn t(&self, key: &str) -> String {
-        self.locales.t(self.locale, key, None)
-    }
-}
-
-async fn index(
-    _: RequireAdmin,
-    State(state): State<AppState>,
-    loc: Locale,
-    theme: Theme,
-) -> Response {
-    let Some(pool) = state.db.as_ref() else {
-        return no_db();
-    };
-    let blocks = match landing_blocks::list_all(pool).await {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::error!(error = ?e, "list blocks failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
-        }
-    };
-    // `list_all` already orders by (slot, position); split it into one
-    // group per known slot for the per-slot reorder lists.
-    let groups: Vec<SlotGroup> = SLOTS
+/// Split a flat, `(slot, position)`-ordered block list into one group
+/// per known slot (in `SLOTS` order) for the per-slot reorder lists.
+pub(crate) fn grouped_blocks(blocks: &[LandingBlock]) -> Vec<SlotGroup> {
+    SLOTS
         .iter()
         .map(|&slot| SlotGroup {
             slot,
             blocks: blocks.iter().filter(|b| b.slot == slot).cloned().collect(),
         })
-        .collect();
-    super::render(&BlocksPage {
-        locale: loc,
-        theme,
-        locales: &state.locales,
-        locales_all: &Locale::ALL,
-        nav_section: "blocks",
-        role: Role::Admin,
-        groups,
-    })
+        .collect()
+}
+
+/// The standalone blocks list page was folded into the Portal page
+/// (#242); the route stays so old links/bookmarks still resolve.
+async fn index(_: RequireAdmin) -> Response {
+    Redirect::to("/admin/landing").into_response()
 }
 
 // ── Form (new / edit) ────────────────────────────────────────────
@@ -230,7 +193,7 @@ async fn create(
         return no_db();
     };
     match landing_blocks::insert(pool, &form.into_input(), Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/blocks").into_response(),
+        Ok(_) => Redirect::to("/admin/landing").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "create block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
@@ -248,7 +211,7 @@ async fn update(
         return no_db();
     };
     match landing_blocks::update(pool, &id, &form.into_input(), Some(admin.actor())).await {
-        Ok(true) => Redirect::to("/admin/blocks").into_response(),
+        Ok(true) => Redirect::to("/admin/landing").into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "block not found").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "update block failed");
@@ -266,7 +229,7 @@ async fn delete(
         return no_db();
     };
     match landing_blocks::delete(pool, &id, Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/blocks").into_response(),
+        Ok(_) => Redirect::to("/admin/landing").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "delete block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
@@ -288,7 +251,7 @@ async fn move_block(
         _ => return (StatusCode::BAD_REQUEST, "dir must be up|down").into_response(),
     };
     match landing_blocks::move_block(pool, &id, up, Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/blocks").into_response(),
+        Ok(_) => Redirect::to("/admin/landing").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "move block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()

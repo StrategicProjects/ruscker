@@ -22,8 +22,10 @@ use ruscker_config::LandingCustomization;
 use serde::Deserialize;
 use std::collections::HashMap;
 
+use super::blocks::{grouped_blocks, SlotGroup};
 use crate::auth::{RequireAdmin, Role};
 use crate::db;
+use crate::db::landing_blocks;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
@@ -48,6 +50,9 @@ struct LandingPage<'a> {
     /// The portal title (read from config — operator can't change
     /// it through this form yet; it's set in the YAML).
     portal_title: String,
+    /// Custom HTML blocks, grouped per slot. The blocks editor is
+    /// folded into this page (#242) and rendered below the form.
+    groups: Vec<SlotGroup>,
 }
 
 impl<'a> LandingPage<'a> {
@@ -203,6 +208,16 @@ async fn render(
             }
         },
     };
+    // Custom HTML blocks live in their own table; the editor is folded
+    // into this page (#242), so load + group them here. `list_all`
+    // already orders by (slot, position).
+    let groups = match landing_blocks::list_all(database).await {
+        Ok(blocks) => grouped_blocks(&blocks),
+        Err(err) => {
+            tracing::error!(error = ?err, "list blocks failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
     let page = LandingPage {
         locale: loc,
         theme,
@@ -214,6 +229,7 @@ async fn render(
         flash_saved,
         flash_error,
         portal_title: state.config.proxy.title.trim().to_string(),
+        groups,
     };
     super::render(&page)
 }

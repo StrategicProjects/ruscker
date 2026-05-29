@@ -238,22 +238,31 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             jup.kind_override = Some(ruscker_config::SpecKindOverride::App);
             jup
         },
-        // RStudio Server is a docs link, not a containerized card (#230):
-        // RStudio doesn't reverse-proxy cleanly behind a prefix-stripped
-        // sub-path — it needs `www-root-path` and the prefix preserved,
-        // so the session WebSocket/RPC never connects ("unable to connect
-        // to the RStudio server"). Run it as your own spec if you need it
-        // (with the right `www-root-path`); the showcase just links out.
-        card(
-            "rstudio",
-            "RStudio Server",
-            "The RStudio IDE for R and Python — Posit's open-source server.",
-            "/assets/showcase/rstudio.svg",
-            "https://posit.co/products/open-source/rstudio-server/",
-            None,
-            None,
-            None,
-        )?,
+        {
+            // RStudio Server works behind the proxy via the
+            // `X-RStudio-Root-Path` header (set in
+            // `apply_smart_routing_headers`) — RStudio's official
+            // "behind a path-rewriting proxy" mechanism, the same one
+            // ShinyProxy uses (#230). The demo runs auth-less so it opens
+            // without rocker's random password; set a PASSWORD / real
+            // auth for anything sensitive.
+            let mut rst = card(
+                "rstudio",
+                "RStudio Server",
+                "The RStudio IDE in your browser, served per session.",
+                "/assets/showcase/rstudio.svg",
+                "https://posit.co/products/open-source/rstudio-server/",
+                Some("rocker/rstudio:latest"),
+                Some(8787),
+                None,
+            )?;
+            rst.container_env = Some(std::collections::BTreeMap::from([(
+                "DISABLE_AUTH".to_string(),
+                "true".to_string(),
+            )]));
+            rst.kind_override = Some(ruscker_config::SpecKindOverride::App);
+            rst
+        },
         // R Markdown isn't a server — it's a document format. Linked to
         // its docs rather than launching a container (the RStudio Server
         // card above is what actually renders/previews `.Rmd` files).
@@ -372,14 +381,15 @@ mod tests {
 
     #[test]
     fn showcase_card_kinds() {
-        // #231: a containerized non-Shiny card (Jupyter) is tagged `App`
-        // → InteractiveApp, not the Shiny default. Shiny stays Shiny.
-        // #230: RStudio is a docs link (External), not containerized.
+        // #231: containerized non-Shiny cards (Jupyter, RStudio) are
+        // tagged `App` → InteractiveApp, not the Shiny default. Shiny
+        // stays Shiny. (#230: RStudio works behind the proxy via the
+        // X-RStudio-Root-Path header, so it's a real container again.)
         let specs = showcase_specs().unwrap();
         let kind = |id: &str| specs.iter().find(|s| s.id == id).unwrap().kind();
         assert_eq!(kind("jupyter"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("rstudio"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("shiny"), ruscker_config::SpecKind::Shiny, "shiny stays Shiny");
-        assert_eq!(kind("rstudio"), ruscker_config::SpecKind::External, "rstudio is a docs link");
     }
 
     #[tokio::test]

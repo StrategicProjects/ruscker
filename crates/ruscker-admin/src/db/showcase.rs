@@ -234,18 +234,25 @@ fn showcase_specs() -> Result<Vec<Spec>> {
                 "--ServerApp.disable_check_xsrf=True".into(),
                 "--ServerApp.base_url=/".into(),
             ]);
+            // Generic interactive app, not Shiny (#231).
+            jup.kind_override = Some(ruscker_config::SpecKindOverride::App);
             jup
         },
-        card(
-            "rstudio",
-            "RStudio Server",
-            "The RStudio IDE in your browser, served per session.",
-            "/assets/showcase/rstudio.svg",
-            "https://posit.co/products/open-source/rstudio-server/",
-            Some("rocker/rstudio:latest"),
-            Some(8787),
-            None,
-        )?,
+        {
+            let mut rst = card(
+                "rstudio",
+                "RStudio Server",
+                "The RStudio IDE in your browser, served per session.",
+                "/assets/showcase/rstudio.svg",
+                "https://posit.co/products/open-source/rstudio-server/",
+                Some("rocker/rstudio:latest"),
+                Some(8787),
+                None,
+            )?;
+            // Generic interactive app, not Shiny (#231).
+            rst.kind_override = Some(ruscker_config::SpecKindOverride::App);
+            rst
+        },
         // R Markdown isn't a server — it's a document format. Linked to
         // its docs rather than launching a container (the RStudio Server
         // card above is what actually renders/previews `.Rmd` files).
@@ -360,6 +367,17 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(row.0, "Ruscker");
+    }
+
+    #[test]
+    fn jupyter_and_rstudio_are_interactive_apps_not_shiny() {
+        // #231: containerized non-Shiny cards default to Shiny without an
+        // explicit kind; the seed tags them `App` → InteractiveApp.
+        let specs = showcase_specs().unwrap();
+        let kind = |id: &str| specs.iter().find(|s| s.id == id).unwrap().kind();
+        assert_eq!(kind("jupyter"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("rstudio"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("shiny"), ruscker_config::SpecKind::Shiny, "shiny stays Shiny");
     }
 
     #[tokio::test]

@@ -302,7 +302,19 @@ impl SpecForm {
         // App/API/External set an explicit kind; Talk/Report are purely
         // visual, so keep whatever run-kind override `base` carried.
         let kind_override = match dt {
-            DisplayType::App => Some(SpecKindOverride::Shiny),
+            // "App" badge covers Shiny + generic interactive apps. Preserve
+            // an existing app-family run-kind (App/Streamlit/Dash/Voilà) so
+            // editing e.g. a Jupyter card doesn't silently revert it to
+            // Shiny (#231); a brand-new "app" still defaults to Shiny.
+            DisplayType::App => match base.and_then(|b| b.kind_override) {
+                Some(
+                    k @ (SpecKindOverride::App
+                    | SpecKindOverride::Streamlit
+                    | SpecKindOverride::Dash
+                    | SpecKindOverride::Voila),
+                ) => Some(k),
+                _ => Some(SpecKindOverride::Shiny),
+            },
             DisplayType::Talk | DisplayType::Report => base.and_then(|b| b.kind_override),
             DisplayType::Package | DisplayType::Link => Some(SpecKindOverride::External),
             DisplayType::Api => Some(SpecKindOverride::Api),
@@ -1105,6 +1117,29 @@ proxy:
     }
 
     // ── #211: newly-modelled advanced fields ────────────────────
+
+    #[test]
+    fn editing_an_app_card_preserves_interactive_kind() {
+        // #231: a Jupyter/RStudio card is kind App (InteractiveApp). The
+        // form's "app" badge must keep that on save, not revert to Shiny.
+        let base: Spec = serde_yaml_ng::from_str(
+            "id: nb\ndisplay-name: Jupyter\ncontainer-image: x\ntype: app",
+        )
+        .unwrap();
+        assert_eq!(base.kind(), ruscker_config::SpecKind::InteractiveApp);
+        let mut form = SpecForm::from_spec(&base);
+        form.display_name = "Jupyter (edited)".into();
+        let merged = form.into_spec(Some(&base)).unwrap();
+        assert_eq!(merged.kind(), ruscker_config::SpecKind::InteractiveApp, "App kept, not Shiny");
+
+        // A brand-new "app" (no base) still defaults to Shiny.
+        let fresh = SpecForm {
+            id: "s".into(), display_name: "S".into(), display_type: "app".into(),
+            state: "active".into(), access: "lock".into(), container_image: "x".into(),
+            ..Default::default()
+        };
+        assert_eq!(fresh.into_spec(None).unwrap().kind(), ruscker_config::SpecKind::Shiny);
+    }
 
     #[test]
     fn new_advanced_fields_round_trip() {

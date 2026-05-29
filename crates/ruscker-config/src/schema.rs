@@ -727,6 +727,9 @@ impl TemplateProperties {
 #[serde(rename_all = "lowercase")]
 pub enum SpecKindOverride {
     Shiny,
+    /// Generic interactive container app (Jupyter, RStudio, …) that
+    /// isn't Shiny specifically. Maps to [`SpecKind::InteractiveApp`].
+    App,
     Streamlit,
     Dash,
     Voila,
@@ -769,9 +772,12 @@ impl Spec {
         match self.kind_override {
             Some(SpecKindOverride::Api) => SpecKind::Api,
             Some(SpecKindOverride::Shiny) => SpecKind::Shiny,
-            Some(SpecKindOverride::Streamlit | SpecKindOverride::Dash | SpecKindOverride::Voila) => {
-                SpecKind::InteractiveApp
-            }
+            Some(
+                SpecKindOverride::App
+                | SpecKindOverride::Streamlit
+                | SpecKindOverride::Dash
+                | SpecKindOverride::Voila,
+            ) => SpecKind::InteractiveApp,
             Some(SpecKindOverride::External) => SpecKind::External,
             None => {
                 if self.container_image.is_some() {

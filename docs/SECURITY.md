@@ -169,7 +169,28 @@ Status: living document. Tracks the Phase 5 security audit
   reduces a `Referer` to a same-origin path; used by `/__set/*`
   and the login redirect.
 - **[implemented]** CSRF defense — admin cookie is
-  `SameSite=Strict`, so a cross-site POST can't carry it.
+  `SameSite=Strict`, so a cross-site POST can't carry it, **and** a
+  server-side guard (`csrf_guard`, #259) rejects state-changing chrome
+  requests that aren't same-origin: it trusts `Sec-Fetch-Site`
+  (`same-origin`/`none` only) when present, else falls back to an
+  `Origin` vs `Host` check. Requests with neither header (curl, the
+  break-glass token POST) pass — they aren't browser CSRF.
+- **[implemented]** Ruscker cookies are stripped before forwarding
+  upstream (#258) — `strip_ruscker_cookies` removes the admin session,
+  the sticky cookie, and the theme/locale prefs from the upstream-bound
+  `Cookie` header so an app container never sees them (the admin session
+  id is a bearer).
+- **[accepted limitation — needs origin separation]** Admin and apps
+  share one origin by default. A script inside an **untrusted** app
+  served at `/app/{spec}` is genuinely *same-origin* with `/admin`, so
+  neither `SameSite=Strict` nor the same-origin CSRF guard can stop it
+  from issuing credentialed `fetch('/admin/...')` calls. The cookie
+  strip (#258) stops the app from *reading* the session, but a
+  same-origin request from the browser still carries it. **If you host
+  third-party / untrusted apps, serve the admin on a separate
+  hostname/origin** (e.g. `admin.example.org` vs `apps.example.org`) so
+  the browser's same-origin policy isolates them. Trusted, first-party
+  apps on one origin are fine.
 - **[implemented]** Sticky-cookie cross-app defense — the handler
   checks `session.spec_id == spec.id` before honoring a sticky
   cookie, even though its `Path=/` spans apps.

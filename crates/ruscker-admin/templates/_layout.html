@@ -24,7 +24,10 @@
 {# Footer slimmed down to just the "powered by" lockup (#182). Theme
    and language pickers moved into the top-right chrome cluster on every
    page. #}
-<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end">
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end gap-3">
+  <a class="opacity-60 hover:opacity-100 transition-opacity"
+     href="https://github.com/StrategicProjects/ruscker/releases/tag/v{{ crate::APP_VERSION }}"
+     title="Release notes">v{{ crate::APP_VERSION }}</a>
   <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
      href="https://github.com/StrategicProjects/ruscker"
      aria-label="Ruscker">

@@ -144,7 +144,7 @@
                     @click="form.logo = '/assets/img/' + name"
                     class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
                     :class="form.logo === '/assets/img/' + name ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-              <img :src="assetUrl('/assets/img/' + name)" :alt="name" loading="lazy" class="w-full h-full object-cover">
+              <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
             </button>
           </template>
         </div>
@@ -248,7 +248,7 @@
               <button type="button" :title="name" @click="setCoverImage(name)"
                       class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
                       :class="form.cover.indexOf('/assets/img/' + name) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-                <img :src="assetUrl('/assets/img/' + name)" :alt="name" loading="lazy" class="w-full h-full object-cover">
+                <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
               </button>
             </template>
           </div>

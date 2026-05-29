@@ -12,15 +12,36 @@
 //! the binary itself does), so they all carry a one-year
 //! `cache-control: immutable` header — safe to cache aggressively.
 
+use std::sync::LazyLock;
+
 use axum::{
-    extract::{Path as AxumPath, State},
+    extract::{Path as AxumPath, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
 };
+use dashmap::DashMap;
 
 use crate::AppState;
+
+/// Max dimension (px) for a gallery thumbnail (`/assets/img/x?thumb`).
+/// The picker tiles render at ~48 px; 96 covers HiDPI.
+const THUMB_MAX_DIM: u32 = 96;
+
+/// Process-wide cache of generated thumbnails, keyed by filename.
+/// Uploaded images are immutable per filename (a new upload gets a new
+/// name), so an entry never goes stale; the map is bounded by the size
+/// of the media library. First request for an image pays the
+/// decode+resize; the rest hit this cache.
+static THUMB_CACHE: LazyLock<DashMap<String, Vec<u8>>> = LazyLock::new(DashMap::new);
+
+/// `?thumb` query flag on `/assets/img/{filename}`.
+#[derive(serde::Deserialize)]
+struct ImgQuery {
+    #[serde(default)]
+    thumb: Option<String>,
+}
 
 // ── Embedded assets ───────────────────────────────────────────────
 
@@ -129,6 +150,7 @@ pub fn routes() -> Router<AppState> {
 async fn serve_card_image(
     State(state): State<AppState>,
     AxumPath(filename): AxumPath<String>,
+    Query(q): Query<ImgQuery>,
 ) -> Response {
     // Don't allow `../` or directory components — Axum's path
     // extractor already collapses path segments per route, but
@@ -137,27 +159,79 @@ async fn serve_card_image(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    // 1. DB lookup
-    if let Some(pool) = state.db.as_ref() {
-        match crate::db::images::fetch_by_filename(pool, &filename).await {
-            Ok(Some((mime, bytes))) => return serve_dynamic(bytes, &mime),
-            Ok(None) => {}
+    // Thumbnail fast path: serve a cached small WebP if we've already
+    // made one for this (immutable) filename (#283).
+    let want_thumb = q.thumb.is_some();
+    if want_thumb {
+        if let Some(cached) = THUMB_CACHE.get(&filename) {
+            return serve_thumbnail_bytes(cached.clone());
+        }
+    }
+
+    // Resolve the full image bytes: DB first, then the on-disk fallback.
+    let Some((mime, bytes)) = fetch_image_bytes(&state, &filename).await else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+
+    // Vector / no resize needed → serve as-is. Raster + `?thumb` →
+    // generate a thumbnail (off the async worker), cache, and serve.
+    if want_thumb && mime != "image/svg+xml" {
+        let fname = filename.clone();
+        let src = bytes.clone();
+        match tokio::task::spawn_blocking(move || {
+            crate::images::thumbnail_webp(&src, THUMB_MAX_DIM)
+        })
+        .await
+        {
+            Ok(Ok(thumb)) => {
+                THUMB_CACHE.insert(fname, thumb.clone());
+                return serve_thumbnail_bytes(thumb);
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(error = ?err, filename, "thumbnail generation failed; serving full image");
+            }
             Err(err) => {
-                tracing::error!(error = ?err, filename, "image DB lookup failed");
+                tracing::warn!(error = ?err, filename, "thumbnail task join failed; serving full image");
             }
         }
     }
 
-    // 2. Disk fallback
-    if let Some(dir) = state.images_dir.as_ref() {
-        let candidate = dir.join(&filename);
-        if let Ok(bytes) = tokio::fs::read(&candidate).await {
-            let mime = mime_from_extension(&filename);
-            return serve_dynamic(bytes, mime);
+    serve_dynamic(bytes, &mime)
+}
+
+/// Fetch an operator-uploaded image's `(mime, bytes)` — DB first, then
+/// the on-disk `images_dir` fallback. `None` if it isn't found anywhere.
+async fn fetch_image_bytes(state: &AppState, filename: &str) -> Option<(String, Vec<u8>)> {
+    if let Some(pool) = state.db.as_ref() {
+        match crate::db::images::fetch_by_filename(pool, filename).await {
+            Ok(Some((mime, bytes))) => return Some((mime, bytes)),
+            Ok(None) => {}
+            Err(err) => tracing::error!(error = ?err, filename, "image DB lookup failed"),
         }
     }
+    if let Some(dir) = state.images_dir.as_ref() {
+        let candidate = dir.join(filename);
+        if let Ok(bytes) = tokio::fs::read(&candidate).await {
+            return Some((mime_from_extension(filename).to_string(), bytes));
+        }
+    }
+    None
+}
 
-    StatusCode::NOT_FOUND.into_response()
+/// Serve a generated WebP thumbnail. Derived deterministically from an
+/// immutable filename, so it can be cached hard (a day).
+fn serve_thumbnail_bytes(body: Vec<u8>) -> Response {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/webp"));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    (StatusCode::OK, headers, body).into_response()
 }
 
 fn mime_from_extension(name: &str) -> &'static str {

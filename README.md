@@ -256,9 +256,14 @@ cargo build
 cargo test                                   # 300+ tests, no Docker needed
 cargo test -p ruscker-docker --features docker-it   # + real Docker daemon
 cargo test -p ruscker-cli --features e2e            # + full proxy/WS e2e
-cargo fmt && cargo clippy --all-targets
+cargo clippy --all-targets -- -D warnings
 ./scripts/i18n-check.sh                      # enforce locale key parity
 ```
+
+> Hand-format only the lines you touch — don't run `cargo fmt`
+> crate-wide. `main` isn't fmt-clean under the current rustfmt, so a
+> workspace `cargo fmt` produces a large unrelated diff; `cargo fmt
+> --check` is intentionally **not** part of the gate.
 
 ## License
 

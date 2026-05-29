@@ -51,6 +51,25 @@ container on a machine with full internet, or in CI — and copy the
 artifact over. Docker pulls and the `build.rs` Tailwind download (from
 GitHub) still work from a connected builder.
 
+## `perl: warning: Setting locale failed` during `apt`/`dpkg`
+Cosmetic — the install still succeeds. It means a locale your SSH
+session forwards (commonly `LC_CTYPE=UTF-8` from a macOS client via
+`SendEnv LC_*`) isn't a valid locale name on the Linux host (which has
+`C.UTF-8` / `en_US.UTF-8`, not bare `UTF-8`), so perl-based maintainer
+scripts fall back to `C.UTF-8`. It comes from `apt`'s own machinery,
+not Ruscker's package scripts. To silence it, either fix the host
+locale and stop forwarding the bogus one:
+```bash
+sudo locale-gen en_US.UTF-8 && sudo update-locale LANG=en_US.UTF-8
+# optionally drop `AcceptEnv LC_*` from the host's sshd_config,
+# or remove `SendEnv LC_*` for that host in your local ~/.ssh/config
+```
+or just prefix the install in your deploy/auto-update script:
+```bash
+export LC_ALL=C.UTF-8 LANGUAGE=
+sudo apt-get install -y ./ruscker_<version>_amd64.deb
+```
+
 ## Users bounce between replicas / lose their session after a restart
 The sticky-session cookie is signed with `RUSCKER_COOKIE_KEY`. If you
 don't set it, Ruscker generates a random key on each start — so every

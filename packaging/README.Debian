@@ -16,13 +16,21 @@ the admin panel, and the proxy on 0.0.0.0:8080.
   systemctl status ruscker
   curl http://localhost:8080/healthz
 
-Admin token
------------
-On first install the package generates a strong, unique admin token
-and prints it ONCE in the install output (there is no default
-password). It is stored in /etc/ruscker/ruscker.env as
-RUSCKER_ADMIN_TOKEN. Log in at /admin/login with it. To see it again
-or rotate it:
+Generated secrets
+-----------------
+On install the package generates three strong, unique secrets into
+/etc/ruscker/ruscker.env (root:ruscker 0640), so the box works out of
+the box with no default credentials:
+
+  RUSCKER_ADMIN_TOKEN   break-glass admin login — printed ONCE in the
+                        install output (first install only).
+  RUSCKER_MASTER_KEY    enables the encrypted credentials store.
+  RUSCKER_COOKIE_KEY    signs sticky-session cookies (stable across
+                        restarts / HA replicas).
+
+None are ever regenerated once set; the master/cookie keys are also
+filled in on upgrade if an older install was missing them. Log in at
+/admin/login with the admin token. To see it again or rotate it:
 
   sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env
   # to rotate: edit the value, then  sudo systemctl restart ruscker

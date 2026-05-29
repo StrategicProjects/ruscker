@@ -3,6 +3,21 @@
 # cargo-deb injects the systemd enable/start logic at the marker below.
 set -e
 
+# Write VAR=<32-byte hex> to $ENVF if it isn't set yet (placeholder or
+# absent). Idempotent and upgrade-safe: never overwrites a value the
+# operator already set. Uses /dev/urandom + od (coreutils) — no openssl
+# dependency. Caller fixes ownership/permissions afterwards.
+gen_key() {
+    var="$1"
+    grep -qE "^${var}=." "$ENVF" 2>/dev/null && return 0
+    val=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    if grep -qE "^#*${var}=" "$ENVF" 2>/dev/null; then
+        sed -i "s|^#*${var}=.*|${var}=${val}|" "$ENVF"
+    else
+        printf '\n%s=%s\n' "$var" "$val" >> "$ENVF"
+    fi
+}
+
 case "$1" in
     configure)
         # System group + user the unit runs as. No login, no home dir
@@ -24,6 +39,14 @@ case "$1" in
         # The secrets file must not be world-readable.
         ENVF=/etc/ruscker/ruscker.env
         if [ -f "$ENVF" ]; then
+            # Infra keys: the credentials store needs RUSCKER_MASTER_KEY,
+            # and RUSCKER_COOKIE_KEY keeps sticky-session cookies valid
+            # across restarts (and signable cross-instance in HA) instead
+            # of a fresh random key per process. Generate them if missing
+            # — on first install AND self-healing an older box that never
+            # had them. Never regenerated once set.
+            gen_key RUSCKER_MASTER_KEY
+            gen_key RUSCKER_COOKIE_KEY
             chown root:ruscker "$ENVF" || true
             chmod 640 "$ENVF" || true
         fi

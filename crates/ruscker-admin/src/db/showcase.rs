@@ -177,7 +177,7 @@ fn card(
         .with_context(|| format!("build showcase spec {id}"))
 }
 
-/// The 11 cards seeded on first install. Order matters: Ruscker's
+/// The 12 cards seeded on first install. Order matters: Ruscker's
 /// own docs card is first; the rest follow the order the maintainer
 /// curated for the showcase.
 fn showcase_specs() -> Result<Vec<Spec>> {
@@ -219,13 +219,26 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             None,
         )?,
         card(
-            "rmarkdown",
-            "R Markdown",
-            "Reproducible R documents — preview via RStudio Server.",
-            "/assets/showcase/rmarkdown.svg",
-            "https://rmarkdown.rstudio.com",
+            "rstudio",
+            "RStudio Server",
+            "The RStudio IDE in your browser, served per session.",
+            "/assets/showcase/rstudio.svg",
+            "https://posit.co/products/open-source/rstudio-server/",
             Some("rocker/rstudio:latest"),
             Some(8787),
+            None,
+        )?,
+        // R Markdown isn't a server — it's a document format. Linked to
+        // its docs rather than launching a container (the RStudio Server
+        // card above is what actually renders/previews `.Rmd` files).
+        card(
+            "rmarkdown",
+            "R Markdown",
+            "Reproducible R documents — author and render in RStudio.",
+            "/assets/showcase/rmarkdown.svg",
+            "https://rmarkdown.rstudio.com",
+            None,
+            None,
             None,
         )?,
         // ── External-link cards (no public hello image) ─────────────
@@ -310,7 +323,7 @@ mod tests {
     use crate::db::{open_memory, ConfigDb};
 
     #[tokio::test]
-    async fn seed_inserts_all_eleven_cards_on_empty_db() {
+    async fn seed_inserts_all_twelve_cards_on_empty_db() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
         seed_if_unseeded(&db).await.unwrap();
         let pool = match &db {
@@ -321,7 +334,7 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        assert_eq!(n, 11, "11 showcase specs seeded");
+        assert_eq!(n, 12, "12 showcase specs seeded");
         // The Ruscker docs card is the canonical first entry.
         let row: (String,) =
             sqlx::query_as("SELECT display_name FROM specs WHERE id = 'ruscker-docs'")

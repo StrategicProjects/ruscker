@@ -214,15 +214,18 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
 async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
-    // We DO want browser caching, but `immutable` makes Chrome never
-    // revalidate — even on a hard reload — which surprises users when
-    // the binary ships a new asset under the same URL. `no-cache` here
-    // means "always revalidate", not "never cache". A proper fix
-    // (Phase 5) is hash-bearing URLs (`/assets/styles-<hash>.css`)
-    // served back with the immutable header.
+    // Cache for a short window (no `must-revalidate`) so the admin's
+    // full-page-reload navigation doesn't fire a conditional-GET
+    // round-trip for every bundled asset on every click — the main
+    // source of the "menus feel slow" jank (#269). 5 minutes is long
+    // enough to cover an active browsing session and short enough that
+    // a new binary's assets are picked up promptly (a hard reload
+    // always bypasses the cache). `immutable` would be wrong here — the
+    // bytes change across upgrades under the same URL; the proper
+    // long-term fix is hash-bearing URLs (`/assets/styles-<hash>.css`).
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=0, must-revalidate"),
+        HeaderValue::from_static("public, max-age=300"),
     );
     (StatusCode::OK, headers, body).into_response()
 }

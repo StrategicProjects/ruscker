@@ -463,5 +463,5 @@ git checkout -b phase-1/landing-page
 Cada PR deve:
 - Referenciar a issue da fase (`refs #N`).
 - Ter pelo menos 1 teste (snapshot, unit ou integração).
-- Passar `cargo fmt --check && cargo clippy --all-targets`.
+- Passar `cargo test`, `cargo clippy --all-targets -- -D warnings` e `./scripts/i18n-check.sh`. (NÃO rodar `cargo fmt` crate-wide — `main` não é fmt-clean sob o rustfmt atual; formatar à mão só as linhas tocadas. `cargo fmt --check` não faz parte do gate.)
 - Ser pequeno o suficiente para revisar em <30 min.

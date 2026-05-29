@@ -47,6 +47,7 @@ const SHOWCASE_JUPYTER: &[u8] = include_bytes!("../../assets/showcase/jupyter.sv
 const SHOWCASE_PLUMBER: &[u8] = include_bytes!("../../assets/showcase/plumber.svg");
 const SHOWCASE_QUARTO: &[u8] = include_bytes!("../../assets/showcase/quarto.svg");
 const SHOWCASE_RMARKDOWN: &[u8] = include_bytes!("../../assets/showcase/rmarkdown.svg");
+const SHOWCASE_RSTUDIO: &[u8] = include_bytes!("../../assets/showcase/rstudio.svg");
 const SHOWCASE_SHINY: &[u8] = include_bytes!("../../assets/showcase/shiny.svg");
 const SHOWCASE_STREAMLIT: &[u8] = include_bytes!("../../assets/showcase/streamlit.svg");
 const SHOWCASE_VOILA: &[u8] = include_bytes!("../../assets/showcase/voila.svg");
@@ -103,6 +104,7 @@ pub fn routes() -> Router<AppState> {
         .route("/assets/showcase/plumber.svg", get(|| serve(SHOWCASE_PLUMBER, SVG)))
         .route("/assets/showcase/quarto.svg", get(|| serve(SHOWCASE_QUARTO, SVG)))
         .route("/assets/showcase/rmarkdown.svg", get(|| serve(SHOWCASE_RMARKDOWN, SVG)))
+        .route("/assets/showcase/rstudio.svg", get(|| serve(SHOWCASE_RSTUDIO, SVG)))
         .route("/assets/showcase/shiny.svg", get(|| serve(SHOWCASE_SHINY, SVG)))
         .route("/assets/showcase/streamlit.svg", get(|| serve(SHOWCASE_STREAMLIT, SVG)))
         .route("/assets/showcase/voila.svg", get(|| serve(SHOWCASE_VOILA, SVG)))

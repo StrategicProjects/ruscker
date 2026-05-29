@@ -284,15 +284,15 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
     // Snapshot the registry once. Cloning `Replica` is cheap
     // (a few strings + a SocketAddr + small ints) and keeps the
     // read-lock window tight.
+    //
+    // Iterate the registry itself, not `config.proxy.specs` — replicas
+    // can belong to specs that live only in the DB (the showcase seed
+    // #202 / admin-added specs), which aren't in the YAML config. The
+    // old config-keyed walk silently dropped every such replica from
+    // the dashboard even though it was running.
     let snap: Vec<Replica> = {
         let reg = state.replicas.read().await;
-        state
-            .config
-            .proxy
-            .specs
-            .iter()
-            .flat_map(|s| reg.replicas_of(&s.id).to_vec())
-            .collect()
+        reg.all().cloned().collect()
     };
 
     let total_containers = snap.len();
@@ -304,17 +304,44 @@ async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
         .len();
     let tracker_sessions = state.sessions.len();
 
+    // Resolve a display name per distinct spec_id once: the YAML config
+    // first, then the DB (showcase/admin specs live only there, #205),
+    // else the raw id. Done up front so we don't re-query per row.
+    let mut name_of: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for sid in snap
+        .iter()
+        .map(|r| r.spec_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+    {
+        let from_config = state
+            .config
+            .proxy
+            .specs
+            .iter()
+            .find(|s| s.id == sid)
+            .and_then(|s| s.display_name.clone());
+        let name = match from_config {
+            Some(n) => n,
+            None => match state.db.as_ref() {
+                Some(db) => crate::db::specs::fetch_one(db, &sid)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.display_name.clone())
+                    .unwrap_or_else(|| sid.clone()),
+                None => sid.clone(),
+            },
+        };
+        name_of.insert(sid, name);
+    }
+
     let mut total_memory_bytes: u64 = 0;
     let rows: Vec<ReplicaRow> = snap
         .into_iter()
         .map(|r| {
-            let display_name = state
-                .config
-                .proxy
-                .specs
-                .iter()
-                .find(|s| s.id == r.spec_id)
-                .and_then(|s| s.display_name.clone())
+            let display_name = name_of
+                .get(&r.spec_id)
+                .cloned()
                 .unwrap_or_else(|| r.spec_id.clone());
             let container_short = r.container_id.chars().take(12).collect();
             let uptime = format_uptime(Utc::now() - r.started_at);

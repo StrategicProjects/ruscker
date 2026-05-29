@@ -266,7 +266,8 @@ A spec describes one app, API, or external link. Every spec has an
     - /srv/myapp/www:/www:ro          #   static assets, read-only
   container-env:                      # env vars injected into the container
     DB_HOST: db.internal              #   (ShinyProxy-compatible)
-    DB_PASSWORD: ${DB_PASSWORD}       #   ${VAR} interpolated — keep secrets out
+    DB_PASSWORD: ${DB_PASSWORD}       #   ${VAR} resolved at spawn, not at parse —
+                                      #   the literal is stored; secret never hits the DB
   container-cmd:                      # override the image's CMD (argv list)
     - R
     - -e
@@ -282,9 +283,12 @@ as needed; editable in the admin **Advanced** form (one per line).
 `SECURITY.md`.
 
 `container-env` is a `NAME: value` map injected into the container as
-environment variables (Docker `Config.Env`). Values flow through the
-same `${VAR}` / `${VAR:-default}` interpolation as the rest of the YAML,
-so secrets stay in the environment and out of the file. `container-cmd`
+environment variables (Docker `Config.Env`). `${VAR}` /
+`${VAR:-default}` references in the values are **resolved at spawn**, not
+at parse: the `${VAR}` literal is what gets stored (config / DB / export),
+and the real value is only ever materialized when the container is
+created — so an app secret passed this way never lands in the database.
+`container-cmd`
 is an argv list that overrides the image's baked `CMD` (Docker
 `Config.Cmd`); omit it to keep the image default. Both are
 ShinyProxy-compatible and editable per spec.

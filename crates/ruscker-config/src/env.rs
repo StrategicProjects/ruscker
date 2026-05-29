@@ -50,15 +50,47 @@ pub const SECRET_KEYS: &[&str] = &["docker-registry-password"];
 pub fn interpolate(input: &str) -> Result<String> {
     let mut output = String::with_capacity(input.len());
 
+    // Indentation of an open `container-env:` block, if any. Its child
+    // lines (more indented) keep their `${VAR}` verbatim — app secrets
+    // are resolved at spawn, not at parse (#272), so they never land in
+    // the DB on `import`. Same "literal in the DB, resolve at use"
+    // model as the secret scalar keys below (#260).
+    let mut env_block_indent: Option<usize> = None;
+
     for line in input.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
+        let content = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = content.trim_start();
+        let indent = content.len() - trimmed.len();
+
+        // Comments / blank lines: emit verbatim, don't change state.
+        if trimmed.is_empty() || trimmed.starts_with('#') {
             output.push_str(line);
             continue;
         }
-        // Leave secret-keyed lines (e.g. `docker-registry-password:
-        // ${VAR}`) untouched — resolved at use, not at parse (#260).
-        if is_secret_key_line(trimmed) {
+        // A line at/below the block key's indent closes the block.
+        if env_block_indent.is_some_and(|bi| indent <= bi) {
+            env_block_indent = None;
+        }
+        // Inside a `container-env:` block → preserve the child verbatim.
+        if env_block_indent.is_some() {
+            output.push_str(line);
+            continue;
+        }
+        let key = trimmed
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('-')
+            .trim();
+        // `container-env:` opens a block whose child values are secrets;
+        // a secret scalar key (`docker-registry-password`) is preserved
+        // directly. Both are resolved at use, not parse.
+        if key == "container-env" {
+            env_block_indent = Some(indent);
+            output.push_str(line);
+            continue;
+        }
+        if SECRET_KEYS.contains(&key) {
             output.push_str(line);
             continue;
         }
@@ -73,19 +105,6 @@ pub fn interpolate(input: &str) -> Result<String> {
 /// no `${...}` comes back unchanged.
 pub fn interpolate_value(value: &str) -> Result<String> {
     interpolate_line(value)
-}
-
-/// Does this (already left-trimmed) YAML line assign a [`SECRET_KEYS`]
-/// key? Matches the key before the first `:`, tolerating a leading `- `
-/// for a list-item mapping's first key.
-fn is_secret_key_line(trimmed: &str) -> bool {
-    let key = trimmed
-        .split(':')
-        .next()
-        .unwrap_or("")
-        .trim_start_matches('-')
-        .trim();
-    SECRET_KEYS.contains(&key)
 }
 
 fn interpolate_line(line: &str) -> Result<String> {
@@ -164,6 +183,32 @@ mod tests {
                 "secret line preserved verbatim: {out}"
             );
             assert!(!out.contains("s3cret"), "secret never resolved at parse");
+        });
+    }
+
+    #[test]
+    fn preserves_container_env_block() {
+        // #272: every `${VAR}` *under* container-env is preserved at
+        // parse; a sibling key after the block interpolates normally.
+        with_env("RUSCKER_DB_PW", "s3cret", || {
+            let yaml = "\
+proxy:
+  specs:
+  - id: db
+    container-image: nginx:${RUSCKER_NEVER_SET:-latest}
+    container-env:
+      DB_PASSWORD: ${RUSCKER_DB_PW}
+      API_KEY: ${RUSCKER_DB_PW}
+    description: tag-${RUSCKER_NEVER_SET:-x}
+";
+            let out = interpolate(yaml).unwrap();
+            assert!(out.contains("DB_PASSWORD: ${RUSCKER_DB_PW}"), "env value preserved");
+            assert!(out.contains("API_KEY: ${RUSCKER_DB_PW}"), "all env values preserved");
+            assert!(!out.contains("s3cret"), "no env secret resolved at parse");
+            // The image (before the block) and the sibling key (after the
+            // block, dedented) still interpolate.
+            assert!(out.contains("nginx:latest"));
+            assert!(out.contains("description: tag-x"));
         });
     }
 

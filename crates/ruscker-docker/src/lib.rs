@@ -300,6 +300,19 @@ impl LocalDockerBackend {
             platform: platform.unwrap_or("").to_string(),
             ..Default::default()
         };
+        // A password still carrying `${...}` means the env var the spec
+        // referenced wasn't set — interpolation upstream couldn't resolve
+        // it (#273). Fail with a clear message instead of pulling with a
+        // literal `${VAR}` password (which would surface as a confusing
+        // registry-auth error).
+        if let Some(c) = creds {
+            if c.password.contains("${") {
+                return Err(CoreError::Backend(format!(
+                    "registry password for image {image} still contains an unresolved \
+                     ${{VAR}} — is the referenced environment variable set?"
+                )));
+            }
+        }
         // Convert our backend-neutral creds to bollard's native
         // type only at the pull boundary. `None` keeps the pull
         // anonymous (Docker Hub public images).

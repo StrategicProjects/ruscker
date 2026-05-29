@@ -238,21 +238,22 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             jup.kind_override = Some(ruscker_config::SpecKindOverride::App);
             jup
         },
-        {
-            let mut rst = card(
-                "rstudio",
-                "RStudio Server",
-                "The RStudio IDE in your browser, served per session.",
-                "/assets/showcase/rstudio.svg",
-                "https://posit.co/products/open-source/rstudio-server/",
-                Some("rocker/rstudio:latest"),
-                Some(8787),
-                None,
-            )?;
-            // Generic interactive app, not Shiny (#231).
-            rst.kind_override = Some(ruscker_config::SpecKindOverride::App);
-            rst
-        },
+        // RStudio Server is a docs link, not a containerized card (#230):
+        // RStudio doesn't reverse-proxy cleanly behind a prefix-stripped
+        // sub-path — it needs `www-root-path` and the prefix preserved,
+        // so the session WebSocket/RPC never connects ("unable to connect
+        // to the RStudio server"). Run it as your own spec if you need it
+        // (with the right `www-root-path`); the showcase just links out.
+        card(
+            "rstudio",
+            "RStudio Server",
+            "The RStudio IDE for R and Python — Posit's open-source server.",
+            "/assets/showcase/rstudio.svg",
+            "https://posit.co/products/open-source/rstudio-server/",
+            None,
+            None,
+            None,
+        )?,
         // R Markdown isn't a server — it's a document format. Linked to
         // its docs rather than launching a container (the RStudio Server
         // card above is what actually renders/previews `.Rmd` files).
@@ -370,14 +371,15 @@ mod tests {
     }
 
     #[test]
-    fn jupyter_and_rstudio_are_interactive_apps_not_shiny() {
-        // #231: containerized non-Shiny cards default to Shiny without an
-        // explicit kind; the seed tags them `App` → InteractiveApp.
+    fn showcase_card_kinds() {
+        // #231: a containerized non-Shiny card (Jupyter) is tagged `App`
+        // → InteractiveApp, not the Shiny default. Shiny stays Shiny.
+        // #230: RStudio is a docs link (External), not containerized.
         let specs = showcase_specs().unwrap();
         let kind = |id: &str| specs.iter().find(|s| s.id == id).unwrap().kind();
         assert_eq!(kind("jupyter"), ruscker_config::SpecKind::InteractiveApp);
-        assert_eq!(kind("rstudio"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("shiny"), ruscker_config::SpecKind::Shiny, "shiny stays Shiny");
+        assert_eq!(kind("rstudio"), ruscker_config::SpecKind::External, "rstudio is a docs link");
     }
 
     #[tokio::test]

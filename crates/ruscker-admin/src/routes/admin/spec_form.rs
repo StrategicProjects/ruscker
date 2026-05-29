@@ -890,6 +890,13 @@ async fn update(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // This is the *edit* path — the spec must already exist. Without
+    // this guard `into_spec(None)` + `upsert_one` would silently
+    // (re)create a spec at this id (e.g. a stale tab POSTing to a
+    // since-deleted spec). #261
+    if base.is_none() {
+        return (StatusCode::NOT_FOUND, format!("spec `{id}` not found")).into_response();
+    }
 
     let spec = match form.into_spec(base.as_ref()) {
         Ok(s) => s,

@@ -51,7 +51,15 @@ pub async fn import_all(db: &ConfigDb, config: &Config) -> Result<ImportReport> 
                 tally(&mut report, upsert_in_tx(&mut tx, spec, now).await?);
             }
             super::landing::update_in_tx(&mut tx, lc, now).await?;
-            super::landing_blocks::replace_all_in_tx(&mut tx, &lc.blocks, now).await?;
+            // #199: only replace landing_blocks when the imported YAML
+            // actually carries a `blocks:` list. The parser ignores
+            // `blocks` today (DB-only — see YAML_SCHEMA.md), so this is
+            // always skipped on import and the welcome seed / operator-
+            // authored blocks survive. An unconditional replace here
+            // wiped the table with an empty list.
+            if !lc.blocks.is_empty() {
+                super::landing_blocks::replace_all_in_tx(&mut tx, &lc.blocks, now).await?;
+            }
             upsert_meta(&mut tx, "proxy", &proxy_meta, now).await?;
             upsert_meta(&mut tx, "server", &server_meta, now).await?;
             upsert_meta(&mut tx, "logging", &logging_meta, now).await?;
@@ -74,7 +82,11 @@ pub async fn import_all(db: &ConfigDb, config: &Config) -> Result<ImportReport> 
                 tally(&mut report, upsert_in_tx_pg(&mut tx, spec, now).await?);
             }
             super::landing::update_in_tx_pg(&mut tx, lc, now).await?;
-            super::landing_blocks::replace_all_in_tx_pg(&mut tx, &lc.blocks, now).await?;
+            // #199: see the SQLite arm — only replace when the import
+            // carries a non-empty `blocks:` list (never, today).
+            if !lc.blocks.is_empty() {
+                super::landing_blocks::replace_all_in_tx_pg(&mut tx, &lc.blocks, now).await?;
+            }
             upsert_meta_pg(&mut tx, "proxy", &proxy_meta, now).await?;
             upsert_meta_pg(&mut tx, "server", &server_meta, now).await?;
             upsert_meta_pg(&mut tx, "logging", &logging_meta, now).await?;
@@ -615,6 +627,33 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audit_count.0, 2);
+    }
+
+    // #199: import must not wipe landing_blocks. Migration 0008 seeds a
+    // `welcome-seed` block on a fresh DB; importing a YAML that carries
+    // no `blocks:` (the parser ignores it — DB-only) must leave it be.
+    #[tokio::test]
+    async fn import_preserves_existing_landing_blocks() {
+        let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
+        let count = |p: sqlx::SqlitePool| async move {
+            let n: (i64,) =
+                sqlx::query_as("SELECT COUNT(*) FROM landing_blocks WHERE id = 'welcome-seed'")
+                    .fetch_one(&p)
+                    .await
+                    .unwrap();
+            n.0
+        };
+        assert_eq!(count(pool.clone()).await, 1, "welcome-seed present before import");
+
+        let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
+        import_all(&db, &cfg).await.unwrap();
+
+        assert_eq!(
+            count(pool.clone()).await,
+            1,
+            "import must not delete pre-existing landing_blocks"
+        );
     }
 
     #[tokio::test]

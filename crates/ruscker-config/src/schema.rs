@@ -17,7 +17,7 @@
 
 use ordered_float::OrderedFloat;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 
 /// Root of the configuration tree, equivalent to the top of `application.yml`.
@@ -575,6 +575,22 @@ pub struct Spec {
     #[serde(default)]
     pub volumes: Option<Vec<String>>,
 
+    /// Environment variables injected into the container, as a map of
+    /// `NAME: value` (ShinyProxy `container-env`). Values flow through
+    /// the same `${VAR}` interpolation as the rest of the YAML, so
+    /// secrets stay out of the file (`container-env: { DB_PASS:
+    /// "${DB_PASSWORD}" }`). The local Docker backend passes these as
+    /// `Config.Env` (`NAME=value`). A `BTreeMap` so the resulting env
+    /// list is deterministically ordered.
+    #[serde(rename = "container-env", default)]
+    pub container_env: Option<BTreeMap<String, String>>,
+
+    /// Override the container's command (ShinyProxy `container-cmd`),
+    /// as an argv list (`["R", "-e", "..."]`). Maps to Docker
+    /// `Config.Cmd`. `None` ⇒ the image's baked `CMD` is used.
+    #[serde(rename = "container-cmd", default)]
+    pub container_cmd: Option<Vec<String>>,
+
     /// Groups allowed to see and reach this app (ShinyProxy
     /// `access-groups`). A spec with neither `access-groups` nor
     /// `access-users` is **open** (visible to everyone, including
@@ -734,6 +750,16 @@ pub enum SpecKind {
 }
 
 impl Spec {
+    /// Container environment as Docker `NAME=value` strings, sorted for
+    /// determinism (the field is a `BTreeMap`). Empty when no
+    /// `container-env` is set. Consumed by the backend at spawn time.
+    pub fn env_pairs(&self) -> Vec<String> {
+        self.container_env
+            .as_ref()
+            .map(|m| m.iter().map(|(k, v)| format!("{k}={v}")).collect())
+            .unwrap_or_default()
+    }
+
     /// Compute the effective [`SpecKind`].
     ///
     /// Priority:
@@ -1339,6 +1365,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            container_env: None,
+            container_cmd: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1356,6 +1384,7 @@ proxy:
             placement: None,
             anti_affinity: None,
             concurrent_requests_per_replica: None,
+            platform: None,
         };
         assert_eq!(spec.kind(), SpecKind::External);
         assert!(!spec.needs_sticky_sessions());
@@ -1383,6 +1412,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            container_env: None,
+            container_cmd: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1400,6 +1431,7 @@ proxy:
             placement: None,
             anti_affinity: None,
             concurrent_requests_per_replica: None,
+            platform: None,
         };
         assert_eq!(spec.kind(), SpecKind::Shiny);
         assert!(spec.needs_sticky_sessions());
@@ -1427,6 +1459,8 @@ proxy:
             container_memory_request: None,
             max_body_size: None,
             volumes: None,
+            container_env: None,
+            container_cmd: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1444,6 +1478,7 @@ proxy:
             placement: None,
             anti_affinity: None,
             concurrent_requests_per_replica: None,
+            platform: None,
         };
         spec.kind_override = Some(SpecKindOverride::Api);
         assert_eq!(spec.kind(), SpecKind::Api);
@@ -1453,6 +1488,59 @@ proxy:
 
     fn parse_spec(yaml: &str) -> Spec {
         serde_yaml_ng::from_str(yaml).expect("parse spec")
+    }
+
+    #[test]
+    fn parses_container_env_and_cmd() {
+        let s = parse_spec(
+            "\
+id: nb
+container-image: jupyter/minimal-notebook
+container-env:
+  JUPYTER_TOKEN: ''
+  GRANT_SUDO: 'yes'
+container-cmd:
+- start-notebook.sh
+- --ServerApp.base_url=/
+",
+        );
+        // BTreeMap ⇒ env_pairs() is sorted (G before J), deterministic.
+        assert_eq!(s.env_pairs(), vec!["GRANT_SUDO=yes", "JUPYTER_TOKEN="]);
+        assert_eq!(
+            s.container_cmd.as_deref(),
+            Some(&["start-notebook.sh".to_string(), "--ServerApp.base_url=/".to_string()][..])
+        );
+    }
+
+    #[test]
+    fn env_pairs_empty_when_unset() {
+        let s = parse_spec("id: a\ncontainer-image: x");
+        assert!(s.env_pairs().is_empty());
+        assert!(s.container_cmd.is_none());
+    }
+
+    #[test]
+    fn container_env_values_are_env_interpolated() {
+        // `${VAR}` in a container-env value resolves via the same
+        // whole-document interpolation the rest of the YAML uses, so
+        // secrets never sit in the file. Guard the env var so the test
+        // is hermetic regardless of the host environment.
+        // SAFETY: single-threaded test; we set and unset around use.
+        unsafe { std::env::set_var("RUSCKER_TEST_DB_PASS", "s3cret") };
+        let cfg = crate::Config::from_yaml(
+            "\
+proxy:
+  specs:
+  - id: db
+    container-image: x
+    container-env:
+      DB_PASSWORD: ${RUSCKER_TEST_DB_PASS}
+",
+        )
+        .expect("parse config");
+        unsafe { std::env::remove_var("RUSCKER_TEST_DB_PASS") };
+        let spec = &cfg.proxy.specs[0];
+        assert_eq!(spec.env_pairs(), vec!["DB_PASSWORD=s3cret"]);
     }
 
     #[test]

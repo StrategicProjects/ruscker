@@ -231,10 +231,9 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
         "network-connections",
         "container network wiring is not implemented (phase 3.5)",
     ),
-    (
-        "environment",
-        "per-spec environment injection is not implemented (phase 3)",
-    ),
+    // NOTE: per-spec env/cmd injection IS now supported — map your
+    // ShinyProxy `container-env` / `container-cmd` straight across. They
+    // are intentionally absent from this ignored-fields list.
 ];
 
 /// Top-level `proxy.*` keys that are unsupported.

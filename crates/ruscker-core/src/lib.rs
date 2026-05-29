@@ -141,6 +141,16 @@ pub struct SpawnRequest {
     /// run an amd64-only image via the daemon's emulation
     /// (QEMU / Rosetta). `None` ⇒ the daemon picks per the manifest.
     pub platform: Option<String>,
+
+    /// Environment variables for the container as Docker `NAME=value`
+    /// strings (from the spec's `container-env`). Empty ⇒ none injected;
+    /// the local backend maps these to `Config.Env`.
+    pub env: Vec<String>,
+
+    /// Command override (the spec's `container-cmd`), as an argv list.
+    /// `None` ⇒ the image's baked `CMD` is used; the local backend maps
+    /// this to `Config.Cmd`.
+    pub cmd: Option<Vec<String>>,
 }
 
 impl SpawnRequest {
@@ -155,6 +165,8 @@ impl SpawnRequest {
             placement: ruscker_config::Placement::default(),
             anti_affinity: false,
             platform: None,
+            env: Vec::new(),
+            cmd: None,
         }
     }
 
@@ -186,6 +198,14 @@ impl SpawnRequest {
     }
     pub fn with_volumes(mut self, volumes: Vec<String>) -> Self {
         self.volumes = volumes;
+        self
+    }
+    pub fn with_env(mut self, env: Vec<String>) -> Self {
+        self.env = env;
+        self
+    }
+    pub fn with_cmd(mut self, cmd: Vec<String>) -> Self {
+        self.cmd = Some(cmd);
         self
     }
 }
@@ -452,6 +472,20 @@ mod registry_tests {
             sessions_max: 5,
             host: None,
         }
+    }
+
+    #[test]
+    fn spawn_request_carries_env_and_cmd() {
+        let req = SpawnRequest::new("nb", "jupyter")
+            .with_env(vec!["JUPYTER_TOKEN=".into(), "GRANT_SUDO=yes".into()])
+            .with_cmd(vec!["start-notebook.sh".into()]);
+        assert_eq!(req.env, vec!["JUPYTER_TOKEN=", "GRANT_SUDO=yes"]);
+        assert_eq!(req.cmd.as_deref(), Some(&["start-notebook.sh".to_string()][..]));
+
+        // Defaults: no env, no cmd override (image's baked CMD wins).
+        let bare = SpawnRequest::new("a", "img");
+        assert!(bare.env.is_empty());
+        assert!(bare.cmd.is_none());
     }
 
     #[test]

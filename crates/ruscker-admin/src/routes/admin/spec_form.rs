@@ -279,6 +279,11 @@ impl SpecForm {
             max_replicas: parse_opt(&self.max_replicas),
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
             volumes: lines_to_vec(&self.volumes),
+            // Not modelled by the form yet — preserve from `base` so a
+            // YAML-imported `container-env` / `container-cmd` survives
+            // an admin edit instead of being silently dropped.
+            container_env: base.and_then(|b| b.container_env.clone()),
+            container_cmd: base.and_then(|b| b.container_cmd.clone()),
             // Checked ⇒ leave unset (the `true` default keeps the
             // exported YAML clean); unchecked ⇒ explicit `false`.
             inject_base_href: if self.inject_base_href.trim().is_empty() {

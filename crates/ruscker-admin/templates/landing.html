@@ -223,9 +223,12 @@
   </section>
 
   {# ── Empty state ───────────────────────────────────────────── #}
-  <p x-show="visible === 0"
+  {# `x-cloak` so it stays hidden until Alpine has computed `visible`
+     — otherwise it flashes (or sticks, if Alpine is slow) on a portal
+     that actually has cards. #}
+  <p x-show="visible === 0" x-cloak
      class="text-center text-sm text-[color:var(--text-muted)] py-12">
-    Nada por aqui.
+    {{ self.t("landing-empty") }}
   </p>
 
 </main>

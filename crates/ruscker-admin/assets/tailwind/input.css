@@ -296,8 +296,10 @@ body {
 }
 .rcover-bg {
   position: absolute; inset: 0;
-  opacity: 0.6;
   z-index: 0;
+  /* The tint classes paint a light, brand-hued radial (bright centre →
+     soft tint at the edges) so a logo sitting on top reads clearly —
+     see `.tint-*`. Full opacity: the gradients are already subtle. */
 }
 
 /* Real images: fill the cover, crop to fit. SVG and PNG logos with
@@ -320,17 +322,20 @@ body {
 .rcover-fallback {
   position: absolute; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px; color: rgba(255, 255, 255, 0.92);
+  font-size: 11px; color: rgba(15, 40, 33, 0.55);
   z-index: 1; pointer-events: none;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
 }
 
-.tint-app     { background: #06d6a0; }
-.tint-talk    { background: #ffd166; }
-.tint-report  { background: #ef476f; }
-.tint-package { background: #26547c; }
-.tint-api     { background: #06b6d4; }
-.tint-link    { background: #26547c; }
+/* Card covers: a light, brand-hued radial — a bright centre (where the
+ * logo sits) fading to a soft tint at the edges — so colourful brand
+ * marks pop instead of getting muddied by a flat saturated fill (#229).
+ * Light in both themes: a logo "plate" reads the same on light/dark. */
+.tint-app     { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #cdeee4 100%); }
+.tint-talk    { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #ffe7b3 100%); }
+.tint-report  { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #ffd0db 100%); }
+.tint-package { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #ccd9f0 100%); }
+.tint-api     { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #c7ebf3 100%); }
+.tint-link    { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #ccd9f0 100%); }
 
 .rbadge {
   position: absolute; top: 8px; left: 8px;

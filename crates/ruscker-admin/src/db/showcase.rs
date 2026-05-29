@@ -132,6 +132,10 @@ async fn drop_old_welcome_block(db: &ConfigDb) -> Result<()> {
 /// would be all noise. Serde reads exactly what we set and fills the
 /// rest with `None` / defaults via the `#[serde(default)]` on each
 /// field.
+// Internal seed-only helper with self-documenting positional args
+// (id, name, description, logo, link, image, port, platform). Bundling
+// them into a struct buys nothing for 12 fixed call sites in one file.
+#[allow(clippy::too_many_arguments)]
 fn card(
     id: &str,
     display_name: &str,

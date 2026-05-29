@@ -77,9 +77,9 @@ the **sign-in session** paths to a single upstream — see
 
 ### Is it production-ready?
 
-Ruscker is on **v0.1.3** and runs in production. Releases are multi-arch
-and cosign-signed; see the [release notes](./news.md) for what changed
-in each version. The [Roadmap](./roadmap.md) tracks what's shipped
+Ruscker runs in production. Releases are multi-arch
+and cosign-signed; see the [release notes](./news.md) for the current
+version and what changed in each. The [Roadmap](./roadmap.md) tracks what's shipped
 (Phases 0–7) and what's planned (Phase 8: external auth).
 
 ### What platforms does it run on?

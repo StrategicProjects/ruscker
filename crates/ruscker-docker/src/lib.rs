@@ -228,7 +228,6 @@ impl LocalDockerBackend {
             // to pick a fresh manifest match. Empty string = no
             // override (daemon picks per the image's manifest).
             platform: req.platform.clone().unwrap_or_default(),
-            ..Default::default()
         };
         let created = self
             .docker

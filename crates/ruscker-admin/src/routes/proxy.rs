@@ -426,10 +426,16 @@ async fn forward(
 
     // 6. HTTP forward.
     // The mount prefix we advertise to the upstream via
-    // `X-Forwarded-Prefix` / `X-Script-Name` — the public path the
-    // spec is reachable at, with no trailing slash (`route_prefix`
-    // already carries one), e.g. `/app/my-shiny` or `/api/my-api`.
-    let forwarded_prefix = format!("{route_prefix}{}", spec.id);
+    // `X-Forwarded-Prefix` / `X-Script-Name` / `X-RStudio-Root-Path` —
+    // the *public* path the spec is reachable at, with no trailing
+    // slash (`route_prefix` already carries one), e.g. `/app/my-shiny`
+    // or `/api/my-api`. Must include the base path (#173): under
+    // `--base-path /box` the spec lives at `/box/app/my-shiny`, and an
+    // app that builds its own URLs from this header (RStudio via
+    // `X-RStudio-Root-Path`, Jupyter via `X-Script-Name`) would
+    // otherwise emit `/app/...` links/redirects that 404 behind the
+    // base-path reverse proxy. Mirrors `inject_base_href`'s `base`.
+    let forwarded_prefix = mount_prefix(&state.base_path, route_prefix, &spec.id);
     tracing::debug!(
         spec = %spec.id, replica = %replica.id,
         upstream = %replica.upstream, path = %upstream_path,
@@ -593,6 +599,19 @@ fn cors_preflight_response() -> Response {
     let mut resp = StatusCode::NO_CONTENT.into_response();
     apply_cors_headers(resp.headers_mut());
     resp
+}
+
+/// The public mount prefix advertised to the upstream via
+/// `X-Forwarded-Prefix` / `X-Script-Name` / `X-RStudio-Root-Path`.
+///
+/// `base_path` is the portal's base path (`""` or e.g. `/box`),
+/// `route_prefix` carries its own trailing slash (`/app/` or `/api/`).
+/// The result has no trailing slash, e.g. `/box/app/my-shiny`. Apps
+/// that build their own absolute URLs from these headers (RStudio,
+/// Jupyter) rely on the base path being present, or their links 404
+/// behind a base-path reverse proxy (#173).
+fn mount_prefix(base_path: &str, route_prefix: &str, spec_id: &str) -> String {
+    format!("{base_path}{route_prefix}{spec_id}")
 }
 
 async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
@@ -1496,6 +1515,19 @@ container-cpu-limit: 1.5
     }
 
     // ── Smart-routing headers (#102) ────────────────────────────────
+
+    #[test]
+    fn mount_prefix_includes_base_path() {
+        // Root deploy (no base path) — unchanged behaviour.
+        assert_eq!(mount_prefix("", "/app/", "my-shiny"), "/app/my-shiny");
+        assert_eq!(mount_prefix("", "/api/", "data"), "/api/data");
+        // Under `--base-path /box` the advertised prefix MUST carry it,
+        // or RStudio/Jupyter build `/app/...` URLs that 404 behind the
+        // base-path proxy (the cast 404 / blank-page bug). No trailing
+        // slash — `route_prefix` already has one.
+        assert_eq!(mount_prefix("/box", "/app/", "rstudio"), "/box/app/rstudio");
+        assert_eq!(mount_prefix("/box", "/api/", "data-api"), "/box/api/data-api");
+    }
 
     #[test]
     fn smart_routing_headers_set_prefix_proto_and_host() {

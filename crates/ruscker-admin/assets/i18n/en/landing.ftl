@@ -485,6 +485,7 @@ spec-help-registry-domain = Registry host for private images (e.g. docker.io, gh
 spec-form-registry-username = Username
 spec-help-registry-username = Username to authenticate the pull of a private image.
 spec-form-registry-password = Password
+spec-form-registry-password-keep = Blank keeps the current password
 spec-help-registry-password = Use an environment variable — never paste the password as text. Only used together with the username.
 spec-form-registry-credential = Stored credential
 spec-help-registry-credential = Name of a credential from the vault, instead of the inline username/password.

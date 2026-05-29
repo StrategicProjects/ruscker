@@ -110,6 +110,20 @@ Status: living document. Tracks the Phase 5 security audit
 - **[implemented]** DB credential store wired to image pulls —
   `db::credentials::resolve` decrypts only at pull time, in the
   spawn path, never echoed to the UI.
+- **[implemented]** `${VAR}` secrets stay literal end-to-end (#260) —
+  `docker-registry-password` (and any [`env::SECRET_KEYS`] key) is
+  **not** interpolated at parse: the `${VAR}` placeholder is preserved
+  through `import` into the DB and through `export` output, and resolved
+  only at the point of use (`creds_from_spec`, right before a pull). So
+  the resolved secret never lands in the config DB or an export. The
+  admin spec form treats the password as **write-only** — never
+  pre-filled or rendered; a blank field keeps the stored value.
+  `docker-registry-credential` (the AES-encrypted store) is preferred
+  for new flows.
+- **[legacy]** A spec imported by an older build may hold a *resolved*
+  password in its `config_json`. Re-import the YAML (which now preserves
+  the literal) or rotate the secret to the credentials store; the
+  `scan_raw_text` validator still flags inline cleartext in YAML.
 - **[implemented]** Plaintext secrets never logged: pull path
   logs `with_creds=<bool>` + registry host, not the password;
   audit-log inserts carry action/target, not secret values.

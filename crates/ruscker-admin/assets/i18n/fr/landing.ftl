@@ -485,6 +485,7 @@ spec-help-registry-domain = Hôte du registre pour les images privées (ex. : do
 spec-form-registry-username = Utilisateur
 spec-help-registry-username = Utilisateur pour authentifier le téléchargement d'une image privée.
 spec-form-registry-password = Mot de passe
+spec-form-registry-password-keep = Vide conserve le mot de passe actuel
 spec-help-registry-password = Utilisez une variable d'environnement — ne collez jamais le mot de passe en clair. Utilisé uniquement avec l'utilisateur.
 spec-form-registry-credential = Identifiant enregistré
 spec-help-registry-credential = Nom d'un identifiant du coffre, au lieu de l'utilisateur/mot de passe en ligne.

@@ -82,7 +82,7 @@ fn classifies_specs_correctly() {
 }
 
 #[test]
-fn env_interpolation_works_on_credentials() {
+fn registry_secret_is_preserved_literal_and_resolved_at_use() {
     let config = load_with_env();
     let ops = config
         .proxy
@@ -90,11 +90,22 @@ fn env_interpolation_works_on_credentials() {
         .iter()
         .find(|s| s.id == "ops-report")
         .expect("ops-report spec must exist");
+    // #260: the registry password is a *secret* key — its `${VAR}` is
+    // preserved verbatim at parse (so it never lands resolved in the DB
+    // on import or in export output) and resolved only at the point of
+    // use.
     assert_eq!(
         ops.docker_registry_password.as_deref(),
-        Some("test-pat-not-real"),
-        "${{DOCKER_REGISTRY_PASSWORD}} should have been interpolated"
+        Some("${DOCKER_REGISTRY_PASSWORD}"),
+        "the registry password stays a ${{VAR}} literal at parse"
     );
+    assert_eq!(
+        ruscker_config::env::interpolate_value(ops.docker_registry_password.as_deref().unwrap())
+            .unwrap(),
+        "test-pat-not-real",
+        "and resolves at use"
+    );
+    // Non-secret fields still interpolate at parse as before.
     assert_eq!(ops.docker_registry_username.as_deref(), Some("acme"));
 }
 

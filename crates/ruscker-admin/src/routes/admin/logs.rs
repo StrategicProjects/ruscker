@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use askama::Template;
 use axum::extract::State;
+use axum::http::header;
 use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use futures_util::Stream;
@@ -22,11 +23,16 @@ use crate::AppState;
 
 const TICK: Duration = Duration::from_secs(1);
 const KEEPALIVE: Duration = Duration::from_secs(15);
+/// How many of the most recent lines the initial page renders. The SSE
+/// stream appends anything newer; the full buffer is a download away.
+/// Matches the per-replica logs viewer's tail (#200).
+const INITIAL_TAIL: usize = 500;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/logs", get(index))
         .route("/admin/logs/stream", get(stream))
+        .route("/admin/logs/download", get(download))
 }
 
 #[derive(Template)]
@@ -39,11 +45,22 @@ struct LogsPage<'a> {
     nav_section: &'static str,
     /// Current session role (always Admin here) - drives nav gating.
     role: Role,
-    /// Current buffered lines, oldest-first. Empty when no buffer is
-    /// wired (e.g. started without the CLI's tracing layer).
+    /// The most recent buffered lines (capped at [`INITIAL_TAIL`]),
+    /// oldest-first. Empty when no buffer is wired (e.g. started without
+    /// the CLI's tracing layer).
     lines: Vec<String>,
+    /// Total lines currently buffered — drives the "showing last N of M"
+    /// notice + download affordance when the render is truncated.
+    total: usize,
     /// Whether a log buffer is actually wired.
     available: bool,
+}
+
+impl LogsPage<'_> {
+    /// Whether the render is a truncated tail of a larger buffer.
+    fn truncated(&self) -> bool {
+        self.total > self.lines.len()
+    }
 }
 
 impl LogsPage<'_> {
@@ -58,9 +75,14 @@ async fn index(
     loc: Locale,
     theme: Theme,
 ) -> Response {
-    let (lines, available) = match &state.log_buffer {
-        Some(b) => (b.snapshot(), true),
-        None => (Vec::new(), false),
+    let (lines, total, available) = match &state.log_buffer {
+        // Only the most recent slice — the SSE stream appends what's
+        // newer, and the full buffer is one download away (#200).
+        Some(b) => {
+            let (lines, total) = b.tail(INITIAL_TAIL);
+            (lines, total, true)
+        }
+        None => (Vec::new(), 0, false),
     };
     super::render(&LogsPage {
         locale: loc,
@@ -70,8 +92,29 @@ async fn index(
         nav_section: "logs",
         role: Role::Admin,
         lines,
+        total,
         available,
     })
+}
+
+/// Full buffer as a `text/plain` attachment — for forensics, since the
+/// page renders only the recent tail. Admin-gated like the rest.
+async fn download(_: RequireAdmin, State(state): State<AppState>) -> Response {
+    let body = match &state.log_buffer {
+        Some(b) => b.snapshot().join("\n"),
+        None => String::new(),
+    };
+    (
+        [
+            (header::CONTENT_TYPE, "text/plain; charset=utf-8"),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=\"ruscker.log\"",
+            ),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// SSE feed of lines appended since the client connected. The page

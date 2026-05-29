@@ -144,28 +144,32 @@ async fn refresh_once(
     backend: &dyn ContainerBackend,
     replicas: &RwLock<ruscker_core::ReplicaRegistry>,
 ) {
-    // Snapshot replica ids under the read lock, then release it
-    // before issuing any I/O.
-    let ids: Vec<ReplicaId> = {
+    // Snapshot (replica id, container id) under the read lock, then
+    // release it before issuing any I/O. Passing the container id the
+    // registry already knows lets the backend skip a per-replica
+    // `list_containers` lookup on each refresh (#282).
+    let targets: Vec<(ReplicaId, String)> = {
         let reg = replicas.read().await;
-        reg.all().map(|r| r.id.clone()).collect()
+        reg.all().map(|r| (r.id.clone(), r.container_id.clone())).collect()
     };
-    if ids.is_empty() {
+    if targets.is_empty() {
         cache.replace(Vec::new());
         return;
     }
 
-    // Fan out `backend.metrics()` calls in parallel. Each call
+    // Fan out `backend.metrics_for()` calls in parallel. Each call
     // is independent so they should overlap their Docker stats
     // round-trips.
     use futures_util::future::join_all;
-    let results: Vec<(ReplicaId, Result<ReplicaMetrics, _>)> = join_all(ids.into_iter().map(|id| {
-        let id_for_err = id.clone();
-        async move {
-            let r = backend.metrics(&id).await;
-            (id_for_err, r)
-        }
-    }))
+    let results: Vec<(ReplicaId, Result<ReplicaMetrics, _>)> = join_all(targets.into_iter().map(
+        |(id, container_id)| {
+            let id_for_err = id.clone();
+            async move {
+                let r = backend.metrics_for(&id, &container_id).await;
+                (id_for_err, r)
+            }
+        },
+    ))
     .await;
 
     let mut fresh = Vec::with_capacity(results.len());

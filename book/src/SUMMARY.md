@@ -19,4 +19,5 @@
 
 - [Architecture](./architecture.md)
 - [Roadmap](./roadmap.md)
+- [Release notes](./news.md)
 - [Security](./security.md)

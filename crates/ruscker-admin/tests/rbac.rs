@@ -205,3 +205,32 @@ async fn unauthenticated_is_redirected_to_login() {
         "no session ⇒ redirect to login, got {status}"
     );
 }
+
+// ── Inline image upload (#213) — same RequireEditor guard ───────────
+
+#[tokio::test]
+async fn inline_upload_is_editor_gated() {
+    // Viewer: forbidden before the handler runs.
+    let st = state();
+    let c = cookie_for(&st, Role::Viewer).await;
+    assert_eq!(
+        send(st, "POST", "/admin/media/upload-inline", Some(&c)).await,
+        StatusCode::FORBIDDEN,
+        "viewer cannot upload images"
+    );
+    // Editor: guard passes (empty body ⇒ a 4xx/503 from the handler,
+    // never 403).
+    let st = state();
+    let c = cookie_for(&st, Role::Editor).await;
+    assert_ne!(
+        send(st, "POST", "/admin/media/upload-inline", Some(&c)).await,
+        StatusCode::FORBIDDEN,
+        "editor may upload inline"
+    );
+    // Anonymous: redirected to login, never a public write endpoint.
+    let status = send(state(), "POST", "/admin/media/upload-inline", None).await;
+    assert!(
+        status.is_redirection(),
+        "anon upload ⇒ redirect to login, got {status}"
+    );
+}

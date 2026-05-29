@@ -17,7 +17,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.specForm({{ form_initial_json() }})" x-cloak>
+<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
@@ -117,35 +117,57 @@
 
       <div class="spec-form-section-title">{{ self.t("spec-form-visual") }}</div>
 
+      {# ── Card logo (#213) — pick from the library, upload inline, or
+         (advanced) paste a path/URL. Picker-first: no path typing in the
+         common case. The submitted value is the hidden `logo` input. ── #}
       <div class="spec-form-field">
         <div class="spec-form-label-row">
-          <label for="f-logo" class="spec-form-label">{{ self.t("spec-form-logo") }}</label>
+          <label class="spec-form-label">{{ self.t("spec-form-logo") }}</label>
           {% call help(self.t("spec-help-logo")) %}{% endcall %}
         </div>
-        <input id="f-logo" type="text" name="logo"
-               value="{{ form.logo }}"
-               x-model="form.logo"
-               placeholder="/assets/img/myapp.png"
-               class="spec-form-input spec-form-input--mono">
-        <div class="spec-form-help">{{ self.t("spec-form-logo-help") }}</div>
+        {# The value actually submitted — driven by the picker / upload /
+           clear / advanced path field below. #}
+        <input type="hidden" name="logo" x-model="form.logo">
 
-        {# Logo picker — choose from the media library (#54). Clicking a
-           thumbnail sets form.logo; the text field still accepts manual
-           paths / external URLs. Hidden when the library is empty. #}
-        {% if !logo_images.is_empty() %}
-        <div class="flex flex-wrap gap-2 mt-2" x-cloak>
-          {% for name in logo_images %}
-          <button type="button" title="{{ name }}"
-                  @click="form.logo = '/assets/img/{{ name }}'"
-                  class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
-                  :class="form.logo === '/assets/img/{{ name }}' ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-            <img src="/assets/img/{{ name }}" alt="{{ name }}" loading="lazy"
-                 class="w-full h-full object-cover">
-          </button>
-          {% endfor %}
+        <div class="flex flex-wrap gap-2" x-cloak>
+          {# Upload tile #}
+          <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
+                 :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
+                 :title="'{{ self.t("spec-form-logo-upload") }}'">
+            <input type="file" accept="image/*" class="hidden"
+                   @change="uploadImage($event, 'logo')">
+            <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
+          </label>
+          {# Library thumbnails (reactive — inline uploads push here) #}
+          <template x-for="name in logoImages" :key="name">
+            <button type="button" :title="name"
+                    @click="form.logo = '/assets/img/' + name"
+                    class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
+                    :class="form.logo === '/assets/img/' + name ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
+              <img :src="'/assets/img/' + name" :alt="name" loading="lazy" class="w-full h-full object-cover">
+            </button>
+          </template>
         </div>
-        <div class="spec-form-help">{{ self.t("spec-form-logo-pick-help") }}</div>
-        {% endif %}
+
+        {# Upload error (e.g. unsupported type / too large) #}
+        <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
+
+        {# Current selection + clear #}
+        <div class="spec-form-help flex items-center gap-2" x-show="form.logo" x-cloak>
+          <span class="truncate" x-text="form.logo"></span>
+          <button type="button" class="admin-nav-link" @click="form.logo = ''"
+                  title="{{ self.t("spec-form-logo-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+        </div>
+        <div class="spec-form-help" x-show="!form.logo" x-cloak>{{ self.t("spec-form-logo-none") }}</div>
+
+        {# Advanced: paste a path or external URL #}
+        <details class="mt-1">
+          <summary class="spec-form-help cursor-pointer">{{ self.t("spec-form-logo-path-advanced") }}</summary>
+          <input type="text" x-model="form.logo"
+                 placeholder="/assets/img/myapp.png"
+                 class="spec-form-input spec-form-input--mono mt-1">
+          <div class="spec-form-help">{{ self.t("spec-form-logo-help") }}</div>
+        </details>
       </div>
 
       {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}
@@ -161,6 +183,8 @@
                   @click="setCoverMode('solid')">{{ self.t("admin-grad-solid") }}</button>
           <button type="button" class="grad-mode" :class="coverMode === 'gradient' ? 'is-active' : ''"
                   @click="setCoverMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          <button type="button" class="grad-mode" :class="coverMode === 'image' ? 'is-active' : ''"
+                  @click="setCoverMode('image')">{{ self.t("spec-form-cover-image") }}</button>
         </div>
 
         {# AUTO: nothing to configure — the kind tint is used. The
@@ -209,6 +233,29 @@
           <input type="text" name="cover" x-model="form.cover" readonly
                  :disabled="coverMode !== 'gradient'"
                  class="spec-form-input spec-form-input--mono grad-output">
+        </div>
+
+        {# IMAGE — same library + inline upload as the logo picker (#213). #}
+        <div x-show="coverMode === 'image'" x-cloak>
+          <div class="flex flex-wrap gap-2 mt-1">
+            <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
+                   :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
+                   :title="'{{ self.t("spec-form-logo-upload") }}'">
+              <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'cover')">
+              <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
+            </label>
+            <template x-for="name in logoImages" :key="'cov-' + name">
+              <button type="button" :title="name" @click="setCoverImage(name)"
+                      class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
+                      :class="form.cover.indexOf('/assets/img/' + name) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
+                <img :src="'/assets/img/' + name" :alt="name" loading="lazy" class="w-full h-full object-cover">
+              </button>
+            </template>
+          </div>
+          <div class="spec-form-help">{{ self.t("spec-form-cover-image-help") }}</div>
+          <input type="text" name="cover" x-model="form.cover" readonly
+                 :disabled="coverMode !== 'image'"
+                 class="spec-form-input spec-form-input--mono">
         </div>
       </div>
 
@@ -768,8 +815,13 @@
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
-window.ruscker.specForm = (initial) => ({
+window.ruscker.specForm = (initial, logoImages) => ({
   form: initial,
+  // Media-library filenames for the logo/cover pickers (#213). Inline
+  // uploads unshift new names here so a fresh thumbnail appears at once.
+  logoImages: Array.isArray(logoImages) ? logoImages : [],
+  imgUploading: false,
+  imgError: '',
   // Open the Advanced section on load if it already carries any value,
   // so edits to existing advanced config are visible.
   advancedOpen: !!(
@@ -812,7 +864,9 @@ window.ruscker.specForm = (initial) => ({
   // existing `cover` value.
   coverMode: !((initial.cover || '').trim())
     ? 'auto'
-    : window.ruscker.bgMode(initial.cover),
+    : ((initial.cover || '').trim().indexOf('url(') === 0
+        ? 'image'
+        : window.ruscker.bgMode(initial.cover)),
   grad: window.ruscker.gradientDefault(),
   applyCoverGrad() {
     this.form.cover = window.ruscker.gradientCss(this.grad);
@@ -833,8 +887,42 @@ window.ruscker.specForm = (initial) => ({
     this.coverMode = mode;
     if (mode === 'auto') this.form.cover = '';
     else if (mode === 'gradient') this.applyCoverGrad();
-    // 'solid' keeps whatever's in form.cover (or the picker
-    // default once the operator touches it).
+    // 'solid' / 'image' keep whatever's in form.cover until the
+    // operator picks a color / image.
+  },
+  // Set the cover to a library image as a CSS background (#213).
+  setCoverImage(name) {
+    this.coverMode = 'image';
+    this.form.cover = "url('/assets/img/" + name + "') center / cover no-repeat";
+  },
+  // Inline upload to the media library, then select the result for
+  // `target` ('logo' or 'cover'). Reuses the same pipeline as the
+  // media page; no navigation. Honors RUSCKER_BASE for subpath mounts.
+  async uploadImage(event, target) {
+    const input = event.target;
+    const file = input.files && input.files[0];
+    if (!file) return;
+    this.imgError = '';
+    this.imgUploading = true;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const base = (window.RUSCKER_BASE || '');
+      const resp = await fetch(base + '/admin/media/upload-inline', { method: 'POST', body: fd });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.filename) {
+        this.imgError = data.error || ('upload failed (' + resp.status + ')');
+        return;
+      }
+      if (this.logoImages.indexOf(data.filename) === -1) this.logoImages.unshift(data.filename);
+      if (target === 'cover') this.setCoverImage(data.filename);
+      else this.form.logo = data.url || ('/assets/img/' + data.filename);
+    } catch (e) {
+      this.imgError = String(e);
+    } finally {
+      this.imgUploading = false;
+      input.value = ''; // let the same file be chosen again
+    }
   },
   needsContainer() {
     return ['app', 'api', 'talk', 'report'].includes(this.form.display_type);

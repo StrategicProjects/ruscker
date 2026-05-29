@@ -535,3 +535,5 @@ spec-form-cover-image = Imagem
 spec-form-cover-image-help = Escolha uma imagem da biblioteca (ou envie uma) como fundo do card.
 admin-proclog-tail-note = Mostrando as linhas mais recentes
 admin-proclog-download = Baixar log completo
+
+landing-empty = Nada por aqui.

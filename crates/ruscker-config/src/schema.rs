@@ -771,6 +771,29 @@ impl Spec {
             .unwrap_or_default()
     }
 
+    /// Like [`env_pairs`](Self::env_pairs) but with each value's
+    /// `${VAR}` resolved at the point of use (spawn).
+    ///
+    /// `container-env` values are kept as `${VAR}` literals in the
+    /// config/DB (#272) — they're only resolved here, right before the
+    /// container is created, so an app secret never lands in the DB.
+    /// Idempotent: a value with no `${...}` is unchanged. An unset var
+    /// with no default keeps the literal (the operator should set it).
+    /// Use this on the spawn path; `env_pairs` (raw) is for display.
+    pub fn resolved_env_pairs(&self) -> Vec<String> {
+        self.env_pairs()
+            .into_iter()
+            .map(|kv| match kv.split_once('=') {
+                Some((k, v)) => {
+                    let resolved =
+                        crate::env::interpolate_value(v).unwrap_or_else(|_| v.to_string());
+                    format!("{k}={resolved}")
+                }
+                None => kv,
+            })
+            .collect()
+    }
+
     /// Compute the effective [`SpecKind`].
     ///
     /// Priority:
@@ -1534,12 +1557,12 @@ container-cmd:
     }
 
     #[test]
-    fn container_env_values_are_env_interpolated() {
-        // `${VAR}` in a container-env value resolves via the same
-        // whole-document interpolation the rest of the YAML uses, so
-        // secrets never sit in the file. Guard the env var so the test
-        // is hermetic regardless of the host environment.
-        // SAFETY: single-threaded test; we set and unset around use.
+    fn container_env_secret_is_literal_at_parse_resolved_at_use() {
+        // #272: a `${VAR}` in a container-env value is preserved verbatim
+        // at parse — so an app secret never sits in the config/DB — and
+        // resolved only at the point of use (spawn) via
+        // `resolved_env_pairs`. Same model as the registry password (#260).
+        // SAFETY: single-threaded test; unique var name; set/unset around use.
         unsafe { std::env::set_var("RUSCKER_TEST_DB_PASS", "s3cret") };
         let cfg = crate::Config::from_yaml(
             "\
@@ -1552,9 +1575,13 @@ proxy:
 ",
         )
         .expect("parse config");
-        unsafe { std::env::remove_var("RUSCKER_TEST_DB_PASS") };
         let spec = &cfg.proxy.specs[0];
-        assert_eq!(spec.env_pairs(), vec!["DB_PASSWORD=s3cret"]);
+        // Literal preserved at parse — the resolved secret never reaches
+        // the Spec (and thus never the DB on import).
+        assert_eq!(spec.env_pairs(), vec!["DB_PASSWORD=${RUSCKER_TEST_DB_PASS}"]);
+        // Resolved only at use.
+        assert_eq!(spec.resolved_env_pairs(), vec!["DB_PASSWORD=s3cret"]);
+        unsafe { std::env::remove_var("RUSCKER_TEST_DB_PASS") };
     }
 
     #[test]

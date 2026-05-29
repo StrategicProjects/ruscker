@@ -119,7 +119,12 @@ Status: living document. Tracks the Phase 5 security audit
   admin spec form treats the password as **write-only** — never
   pre-filled or rendered; a blank field keeps the stored value.
   `docker-registry-credential` (the AES-encrypted store) is preferred
-  for new flows.
+  for new flows. **`container-env` values** get the same treatment
+  (#272): a `${VAR}` in a `container-env` value is preserved literal at
+  parse and resolved only at spawn (`Spec::resolved_env_pairs`), so an
+  app secret passed via `${VAR}` never lands in the DB either. A missing
+  env var fails the pull/spawn with a clear message rather than passing
+  a literal `${VAR}` (#273).
 - **[legacy]** A spec imported by an older build may hold a *resolved*
   password in its `config_json`. Re-import the YAML (which now preserves
   the literal) or rotate the secret to the credentials store; the

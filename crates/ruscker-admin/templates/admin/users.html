@@ -24,10 +24,12 @@
 {% endif %}
 
 {# ── Create a new user ─────────────────────────────────────────── #}
-<form method="post" action="/admin/users" class="rcard" style="padding:16px;margin-bottom:20px" autocomplete="off">
+<form method="post" action="/admin/users"
+      style="padding:16px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px"
+      autocomplete="off">
   <div class="text-sm font-medium mb-2">{{ self.t("admin-users-new") }}</div>
   <div class="flex flex-wrap items-end gap-3">
-    <label class="admin-login-field" style="margin:0">
+    <label class="admin-login-field" style="margin:0;flex:1 1 180px">
       <span class="admin-login-label">{{ self.t("admin-login-username-label") }}</span>
       <input type="text" name="username" required autocapitalize="none" placeholder="jane">
     </label>
@@ -43,7 +45,7 @@
         {% endfor %}
       </select>
     </label>
-    <label class="admin-login-field" style="margin:0">
+    <label class="admin-login-field" style="margin:0;flex:1 1 220px">
       <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
       <input type="text" name="groups" autocapitalize="none" placeholder="{{ self.t("admin-users-groups-placeholder") }}">
     </label>

@@ -37,12 +37,16 @@
 //! container.
 
 use crate::AppState;
+use dashmap::DashMap;
 use ruscker_config::{Spec, SpecKind};
 use ruscker_core::ReplicaId;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::time::Duration;
+use std::hash::{Hash, Hasher};
+use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Default cadence between ticks. Operators can override per-
 /// deployment later once we add a config knob.
@@ -89,6 +93,100 @@ pub const DEFAULT_SCALE_DOWN_COOLDOWN_TICKS: u32 = 6;
 /// handle is dropped at shutdown — there's no graceful stop
 /// because the loop only does idempotent work; an abrupt drop
 /// leaves the registry consistent.
+/// How long an identical, still-failing spawn stays quiet (logged at
+/// `debug`) before we escalate back to a `WARN` so a persistent failure
+/// stays visible. A *different* error re-arms immediately.
+const FAILURE_WARN_WINDOW: Duration = Duration::from_secs(300);
+
+/// Per-spec spawn-failure log dedup/backoff (#204).
+///
+/// A spec with a typo'd / unreachable `container-image` is retried every
+/// tick; without this every retry emitted a full `WARN`, drowning the
+/// log. This logs the **first** occurrence of an error loudly, then
+/// keeps the same error quiet (`debug`) for [`FAILURE_WARN_WINDOW`],
+/// then escalates back to `WARN` so the operator sees it's still
+/// failing. A new error (fixed-then-broke-differently, registry back
+/// then down) re-arms at once. It only affects **log volume** — the
+/// scaler still retries at the same cadence.
+///
+/// A process-wide singleton because the scaler is one background task;
+/// the state machine itself is pure and unit-tested directly.
+#[derive(Default)]
+struct FailureLog {
+    inner: DashMap<String, FailState>,
+}
+
+struct FailState {
+    /// Hash of the last error message seen for this spec.
+    hash: u64,
+    /// Consecutive failures with that same error.
+    count: u32,
+    /// Earliest instant we'll escalate the same error back to `WARN`.
+    next_warn: Instant,
+}
+
+/// What [`FailureLog::observe`] decided for one failure.
+enum FailVerdict {
+    /// Log loudly (first time, changed error, or window elapsed).
+    Warn { count: u32 },
+    /// Same error within the window — log at `debug` only.
+    Quiet { count: u32 },
+}
+
+impl FailureLog {
+    fn observe(&self, spec_id: &str, error: &str, now: Instant) -> FailVerdict {
+        let mut h = DefaultHasher::new();
+        error.hash(&mut h);
+        let hash = h.finish();
+
+        if let Some(mut st) = self.inner.get_mut(spec_id) {
+            if st.hash == hash {
+                st.count += 1;
+                return if now >= st.next_warn {
+                    st.next_warn = now + FAILURE_WARN_WINDOW;
+                    FailVerdict::Warn { count: st.count }
+                } else {
+                    FailVerdict::Quiet { count: st.count }
+                };
+            }
+            // Different error — fall through to re-arm (the `get_mut`
+            // guard drops at the end of this block, before `insert`).
+        }
+        self.inner.insert(
+            spec_id.to_string(),
+            FailState {
+                hash,
+                count: 1,
+                next_warn: now + FAILURE_WARN_WINDOW,
+            },
+        );
+        FailVerdict::Warn { count: 1 }
+    }
+
+    /// Forget a spec's failure history — called after a successful
+    /// spawn so the next failure logs fresh.
+    fn clear(&self, spec_id: &str) {
+        self.inner.remove(spec_id);
+    }
+}
+
+/// Process-wide spawn-failure log state (see [`FailureLog`]).
+static SPAWN_FAILURES: LazyLock<FailureLog> = LazyLock::new(FailureLog::default);
+
+/// Log a spawn failure through the dedup/backoff filter (#204). `phase`
+/// is a short tag for the log message ("scale-up", "saturation").
+fn log_spawn_failure(spec_id: &str, phase: &str, err: &anyhow::Error) {
+    let msg = format!("{err}");
+    match SPAWN_FAILURES.observe(spec_id, &msg, Instant::now()) {
+        FailVerdict::Warn { count } => {
+            warn!(spec = %spec_id, error = %msg, failures = count, "{phase} spawn failed");
+        }
+        FailVerdict::Quiet { count } => {
+            debug!(spec = %spec_id, error = %msg, failures = count, "{phase} spawn still failing (suppressed)");
+        }
+    }
+}
+
 pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
     tokio::spawn(async move {
         info!(
@@ -256,9 +354,10 @@ async fn tick(
             info!(spec = %spec.id, count, min, to_spawn, "scaling up to min-replicas");
             for _ in 0..to_spawn {
                 if let Err(e) = spawn_one(state, spec, backend.as_ref()).await {
-                    warn!(spec = %spec.id, error = ?e, "scale-up spawn failed");
+                    log_spawn_failure(&spec.id, "scale-up", &e);
                     break;
                 }
+                SPAWN_FAILURES.clear(&spec.id);
             }
             saturation_ticks.remove(&spec.id);
             continue;
@@ -292,7 +391,9 @@ async fn tick(
                     "saturation sustained — scaling up by 1"
                 );
                 if let Err(e) = spawn_one(state, spec, backend.as_ref()).await {
-                    warn!(spec = %spec.id, error = ?e, "saturation spawn failed");
+                    log_spawn_failure(&spec.id, "saturation", &e);
+                } else {
+                    SPAWN_FAILURES.clear(&spec.id);
                 }
                 // Reset so the next spawn requires another full
                 // grace window of sustained saturation —
@@ -490,6 +591,55 @@ mod tests {
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+
+    // ── #204: spawn-failure log dedup/backoff state machine ─────────
+
+    #[test]
+    fn failure_log_dedups_then_escalates_then_rearms() {
+        let log = FailureLog::default();
+        let t0 = Instant::now();
+        let warn = |v: &FailVerdict| matches!(v, FailVerdict::Warn { .. });
+        let count = |v: &FailVerdict| match v {
+            FailVerdict::Warn { count } | FailVerdict::Quiet { count } => *count,
+        };
+
+        // First failure → loud.
+        let v = log.observe("app", "pull: not found", t0);
+        assert!(warn(&v));
+
+        // Same error, still inside the window → quiet, count climbs.
+        let v = log.observe("app", "pull: not found", t0 + Duration::from_secs(10));
+        assert!(matches!(v, FailVerdict::Quiet { count: 2 }));
+        let v = log.observe("app", "pull: not found", t0 + Duration::from_secs(20));
+        assert!(matches!(v, FailVerdict::Quiet { count: 3 }));
+
+        // Same error after the window elapses → escalate back to WARN.
+        let v = log.observe("app", "pull: not found", t0 + FAILURE_WARN_WINDOW + Duration::from_secs(1));
+        assert!(warn(&v) && count(&v) == 4, "re-warn keeps the running count");
+
+        // A *different* error re-arms immediately, count resets.
+        let v = log.observe("app", "network unreachable", t0 + FAILURE_WARN_WINDOW + Duration::from_secs(2));
+        assert!(matches!(v, FailVerdict::Warn { count: 1 }));
+
+        // clear() forgets history → next failure is a fresh first.
+        log.clear("app");
+        let v = log.observe("app", "network unreachable", t0 + FAILURE_WARN_WINDOW + Duration::from_secs(3));
+        assert!(matches!(v, FailVerdict::Warn { count: 1 }));
+    }
+
+    #[test]
+    fn failure_log_tracks_specs_independently() {
+        let log = FailureLog::default();
+        let t0 = Instant::now();
+        assert!(matches!(log.observe("a", "boom", t0), FailVerdict::Warn { count: 1 }));
+        // A different spec's first failure is loud even with the same error.
+        assert!(matches!(log.observe("b", "boom", t0), FailVerdict::Warn { count: 1 }));
+        // And "a" is still deduped.
+        assert!(matches!(
+            log.observe("a", "boom", t0 + Duration::from_secs(1)),
+            FailVerdict::Quiet { count: 2 }
+        ));
+    }
 
     struct CountingBackend {
         spawns: AtomicU32,

@@ -47,10 +47,23 @@ impl LogBuffer {
         }
     }
 
-    /// Current snapshot, oldest-first — for the initial page render.
+    /// Current snapshot, oldest-first — full buffer (e.g. the download
+    /// endpoint).
     pub fn snapshot(&self) -> Vec<String> {
         let g = self.inner.lock().unwrap();
         g.lines.iter().map(|(_, l)| l.clone()).collect()
+    }
+
+    /// The last `n` lines (oldest-first within the tail) plus the total
+    /// number of buffered lines. Caps the initial `/admin/logs` render so
+    /// a long-lived buffer doesn't ship the whole ring on every load
+    /// (#200); the SSE stream then appends what's new.
+    pub fn tail(&self, n: usize) -> (Vec<String>, usize) {
+        let g = self.inner.lock().unwrap();
+        let total = g.lines.len();
+        let start = total.saturating_sub(n);
+        let lines = g.lines.iter().skip(start).map(|(_, l)| l.clone()).collect();
+        (lines, total)
     }
 
     /// The next sequence number that will be assigned — an SSE follower
@@ -86,6 +99,26 @@ mod tests {
         }
         let snap = b.snapshot();
         assert_eq!(snap, vec!["line 2", "line 3", "line 4"], "kept the last 3");
+    }
+
+    #[test]
+    fn tail_returns_recent_slice_and_total() {
+        let b = LogBuffer::new(100);
+        for i in 0..10 {
+            b.push_line(format!("line {i}"));
+        }
+        // Fewer than asked → all, total reported.
+        let (lines, total) = b.tail(3);
+        assert_eq!(lines, vec!["line 7", "line 8", "line 9"]);
+        assert_eq!(total, 10);
+        // n >= len → everything, no panic.
+        let (all, total) = b.tail(100);
+        assert_eq!(all.len(), 10);
+        assert_eq!(total, 10);
+        // Empty buffer.
+        let (none, total) = LogBuffer::new(10).tail(5);
+        assert!(none.is_empty());
+        assert_eq!(total, 0);
     }
 
     #[test]

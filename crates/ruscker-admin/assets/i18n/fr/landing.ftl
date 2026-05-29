@@ -529,3 +529,5 @@ spec-form-logo-none = Pas d'image — une teinte selon le type est utilisée.
 spec-form-logo-path-advanced = Avancé : coller un chemin ou une URL
 spec-form-cover-image = Image
 spec-form-cover-image-help = Choisissez une image de la bibliothèque (ou téléversez-en une) comme fond de la carte.
+admin-proclog-tail-note = Affichage des lignes les plus récentes
+admin-proclog-download = Télécharger le journal complet

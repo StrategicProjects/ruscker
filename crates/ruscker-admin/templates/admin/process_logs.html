@@ -27,6 +27,16 @@
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-proclog-title") }}</h1>
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-proclog-subtitle") }}</p>
   </div>
+  {% if available %}
+  <div class="text-xs text-[color:var(--text-muted)] flex items-center gap-3">
+    {% if self.truncated() %}
+    <span>{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</span>
+    {% endif %}
+    <a href="/admin/logs/download" class="admin-nav-link" download>
+      <i class="ti ti-download" aria-hidden="true"></i> {{ self.t("admin-proclog-download") }}
+    </a>
+  </div>
+  {% endif %}
 </div>
 
 {% if !available %}

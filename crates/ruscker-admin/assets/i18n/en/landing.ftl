@@ -529,3 +529,5 @@ spec-form-logo-none = No image — a kind-based tint is used.
 spec-form-logo-path-advanced = Advanced: paste a path or URL
 spec-form-cover-image = Image
 spec-form-cover-image-help = Pick a library image (or upload one) as the card background.
+admin-proclog-tail-note = Showing the most recent lines
+admin-proclog-download = Download full log

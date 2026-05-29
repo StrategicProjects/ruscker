@@ -144,7 +144,7 @@
                     @click="form.logo = '/assets/img/' + name"
                     class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
                     :class="form.logo === '/assets/img/' + name ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-              <img :src="'/assets/img/' + name" :alt="name" loading="lazy" class="w-full h-full object-cover">
+              <img :src="assetUrl('/assets/img/' + name)" :alt="name" loading="lazy" class="w-full h-full object-cover">
             </button>
           </template>
         </div>
@@ -248,7 +248,7 @@
               <button type="button" :title="name" @click="setCoverImage(name)"
                       class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
                       :class="form.cover.indexOf('/assets/img/' + name) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-                <img :src="'/assets/img/' + name" :alt="name" loading="lazy" class="w-full h-full object-cover">
+                <img :src="assetUrl('/assets/img/' + name)" :alt="name" loading="lazy" class="w-full h-full object-cover">
               </button>
             </template>
           </div>
@@ -765,9 +765,9 @@
         <div class="rcover">
           <div class="rcover-bg"
                :class="form.cover ? '' : 'tint-' + form.display_type"
-               :style="form.cover ? `background:${form.cover};` : ''"></div>
+               :style="coverStyle()"></div>
           <template x-if="form.logo">
-            <img :src="form.logo" alt="" class="rcover-img">
+            <img :src="assetUrl(form.logo)" alt="" class="rcover-img">
           </template>
           <template x-if="!form.logo">
             <span class="rcover-fallback" x-text="form.id || '—'"></span>
@@ -821,6 +821,27 @@ window.ruscker.specForm = (initial, logoImages) => ({
   // Media-library filenames for the logo/cover pickers (#213). Inline
   // uploads unshift new names here so a fresh thumbnail appears at once.
   logoImages: Array.isArray(logoImages) ? logoImages : [],
+  // Prefix the base path on a root-absolute asset URL (#270). These
+  // <img :src> values are set by Alpine at runtime, so the base-path
+  // response rewriter (which only touches static HTML) never sees them
+  // — under `--base-path /box` a bare `/assets/img/x` would 404. The
+  // stored value stays base-agnostic; only the rendered URL gets the
+  // prefix. A non-`/` value (full URL) is returned as-is.
+  assetUrl(p) {
+    return p && p.charAt(0) === '/' ? (window.RUSCKER_BASE || '') + p : (p || '');
+  },
+  // Cover background for the preview. `form.cover` is a CSS value that
+  // may embed `url('/assets/img/x')`; prefix the base path on those
+  // root-absolute asset URLs for *display only* (#270). The submitted
+  // `form.cover` stays base-agnostic.
+  coverStyle() {
+    if (!this.form.cover) return '';
+    const base = window.RUSCKER_BASE || '';
+    const css = base
+      ? this.form.cover.replace(/url\((['"]?)\/assets\//g, 'url($1' + base + '/assets/')
+      : this.form.cover;
+    return 'background:' + css + ';';
+  },
   imgUploading: false,
   imgError: '',
   // Open the Advanced section on load if it already carries any value,

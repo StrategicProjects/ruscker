@@ -220,13 +220,6 @@
         <div class="spec-form-help">{{ self.t("admin-landing-custom-css-help") }}</div>
       </div>
 
-      <div class="info-box">
-        <i class="ti ti-info-circle" aria-hidden="true"></i>
-        <div>
-          <strong>{{ self.t("admin-landing-future-title") }}</strong>
-          <div class="text-[11px] opacity-80 mt-1">{{ self.t("admin-landing-future-help") }}</div>
-        </div>
-      </div>
     </form>
 
     {# ── RIGHT: live preview ──────────────────────────────── #}
@@ -263,6 +256,9 @@
 
   </div>
 </div>
+
+{# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
+{% include "admin/_blocks_editor.html" %}
 
 <script src="/assets/js/alpine.min.js" defer></script>
 <script>

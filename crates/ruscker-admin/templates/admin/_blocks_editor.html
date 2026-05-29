@@ -1,0 +1,120 @@
+{# Custom HTML blocks editor — folded into the Portal page (#242).
+   Included from admin/landing.html, so `self` is the LandingPage and
+   `groups` is its Vec<SlotGroup>. Reachable POST routes still live
+   under /admin/blocks (the form pages, create/update/delete/move/
+   reorder); only the standalone list page was dropped. #}
+<section class="mt-10 pt-8 border-t border-[color:var(--border)]">
+  <div class="flex items-end justify-between mb-5">
+    <div>
+      <h2 class="text-lg font-medium tracking-tight">{{ self.t("admin-blocks-title") }}</h2>
+      <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-blocks-subtitle") }}</p>
+    </div>
+    <a href="/admin/blocks/new"
+       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-[#0f6e56] text-white hover:bg-[#0c5a47]">
+      <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-blocks-new") }}
+    </a>
+  </div>
+
+  <p class="text-xs text-[color:var(--text-faint)] mb-4">
+    <i class="ti ti-arrows-move" aria-hidden="true"></i> {{ self.t("admin-blocks-drag-hint") }}
+  </p>
+
+  {% for g in groups %}
+    <section class="mb-6">
+      <h3 class="text-xs font-medium uppercase tracking-wide text-[color:var(--text-muted)] mb-2">
+        {% if g.slot == "top" %}{{ self.t("admin-blocks-slot-top") }}{% else %}{{ self.t("admin-blocks-slot-bottom") }}{% endif %}
+      </h3>
+
+      <div class="block-list" data-slot="{{ g.slot }}">
+        {% for b in g.blocks %}
+        <div class="block-row" draggable="true" data-id="{{ b.id }}">
+          <i class="ti ti-grip-vertical block-grip" aria-hidden="true"></i>
+          <span class="block-row-title">
+            {% if b.title.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ b.title }}{% endif %}
+          </span>
+          {% if b.enabled %}
+            <span class="text-xs text-[#0f6e56] whitespace-nowrap">● {{ self.t("admin-blocks-enabled") }}</span>
+          {% else %}
+            <span class="text-xs text-[color:var(--text-faint)] whitespace-nowrap">○ {{ self.t("admin-blocks-disabled") }}</span>
+          {% endif %}
+          <span class="block-row-actions whitespace-nowrap">
+            <form method="post" action="/admin/blocks/{{ b.id }}/move/up" class="inline">
+              <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-1"
+                      title="{{ self.t("admin-blocks-move-up") }}" aria-label="{{ self.t("admin-blocks-move-up") }}">
+                <i class="ti ti-arrow-up" aria-hidden="true"></i>
+              </button>
+            </form>
+            <form method="post" action="/admin/blocks/{{ b.id }}/move/down" class="inline">
+              <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-3"
+                      title="{{ self.t("admin-blocks-move-down") }}" aria-label="{{ self.t("admin-blocks-move-down") }}">
+                <i class="ti ti-arrow-down" aria-hidden="true"></i>
+              </button>
+            </form>
+            <a href="/admin/blocks/{{ b.id }}" class="text-[color:var(--text-muted)] hover:text-[color:var(--text)] mr-3">{{ self.t("admin-blocks-edit") }}</a>
+            <form method="post" action="/admin/blocks/{{ b.id }}/delete" class="inline"
+                  onsubmit="return confirm('{{ self.t("admin-blocks-delete-confirm") }}')">
+              <button type="submit" class="text-[color:var(--text-faint)] hover:text-red-500">{{ self.t("admin-blocks-delete") }}</button>
+            </form>
+          </span>
+        </div>
+        {% else %}
+        <p class="text-sm text-[color:var(--text-faint)] py-3 px-2">{{ self.t("admin-blocks-slot-empty") }}</p>
+        {% endfor %}
+      </div>
+    </section>
+  {% endfor %}
+</section>
+
+<script>
+// Drag-and-drop reorder, scoped per slot. On drop we read the slot's
+// DOM order and POST it server-side; the ↑/↓ buttons remain as an
+// accessible, JS-free fallback. (fetch is base-path-aware via the
+// #173 runtime shim, so the bare path resolves under /box too.)
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.block-list').forEach((list) => {
+    let dragEl = null;
+
+    list.addEventListener('dragstart', (e) => {
+      dragEl = e.target.closest('.block-row');
+      if (dragEl) { dragEl.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
+    });
+
+    list.addEventListener('dragend', () => {
+      if (!dragEl) return;
+      dragEl.classList.remove('dragging');
+      dragEl = null;
+      persist(list);
+    });
+
+    list.addEventListener('dragover', (e) => {
+      if (!dragEl) return;
+      e.preventDefault();
+      const after = afterElement(list, e.clientY);
+      if (after == null) list.appendChild(dragEl);
+      else list.insertBefore(dragEl, after);
+    });
+  });
+
+  function afterElement(list, y) {
+    const rows = [...list.querySelectorAll('.block-row:not(.dragging)')];
+    let best = { offset: -Infinity, el: null };
+    for (const row of rows) {
+      const box = row.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > best.offset) best = { offset, el: row };
+    }
+    return best.el;
+  }
+
+  function persist(list) {
+    const slot = list.dataset.slot;
+    const ids = [...list.querySelectorAll('.block-row')].map((r) => r.dataset.id);
+    fetch('/admin/blocks/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slot, ids }),
+    }).then((r) => { if (!r.ok) location.reload(); })
+      .catch(() => location.reload());
+  }
+});
+</script>

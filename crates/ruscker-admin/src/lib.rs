@@ -521,7 +521,11 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::assets::routes())
         .merge(routes::prefs::routes())
         .merge(routes::admin::routes())
-        .layer(axum::middleware::from_fn(security_headers));
+        .layer(axum::middleware::from_fn(security_headers))
+        // CSRF defense for the chrome's mutations (#259). Layered on the
+        // chrome only — NOT the proxy routes (apps legitimately take
+        // cross-origin POSTs). Safe methods pass through untouched.
+        .layer(axum::middleware::from_fn(csrf_guard));
 
     // Base-path mounting (#173): when served under a subpath, rewrite the
     // chrome's root-absolute URLs / redirects to carry the prefix. Only
@@ -636,6 +640,68 @@ async fn security_headers(
     resp
 }
 
+/// CSRF defense for the chrome's state-changing requests (#259).
+///
+/// Belt-and-suspenders with the `SameSite=Strict` session cookie:
+/// rejects POST/PUT/PATCH/DELETE that aren't same-origin. Uses **Fetch
+/// Metadata** when the browser sends it (`Sec-Fetch-Site`: only
+/// `same-origin` / `none` may mutate), falling back to an **Origin vs
+/// Host** check for clients that don't. Requests with neither header
+/// (curl, the break-glass token POST) pass — they aren't browser CSRF.
+///
+/// IMPORTANT — this does NOT isolate *untrusted apps* hosted on the same
+/// origin: a script in an app at `/app/{spec}` is genuinely same-origin
+/// with `/admin`, so it passes this check. Hosting third-party apps
+/// requires a **separate origin/hostname for the admin** (see
+/// `docs/SECURITY.md`).
+async fn csrf_guard(
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::http::Method;
+    use axum::response::IntoResponse;
+    let state_changing = matches!(
+        *req.method(),
+        Method::POST | Method::PUT | Method::PATCH | Method::DELETE
+    );
+    if state_changing && request_is_cross_origin(req.headers()) {
+        tracing::warn!(
+            method = %req.method(), uri = %req.uri(),
+            "CSRF guard refused a cross-origin state-changing request"
+        );
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            "cross-origin request refused",
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
+/// `true` when a state-changing request looks cross-origin. See
+/// [`csrf_guard`] for the policy.
+fn request_is_cross_origin(h: &axum::http::HeaderMap) -> bool {
+    use axum::http::header;
+    // Modern browsers: trust Fetch Metadata.
+    if let Some(site) = h.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
+        return !matches!(site, "same-origin" | "none");
+    }
+    // Fallback: reject only when an Origin is present and disagrees with
+    // the request host. No Origin ⇒ not a browser form/fetch ⇒ allow.
+    let Some(origin) = h.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
+        return false;
+    };
+    let host = h
+        .get("x-forwarded-host")
+        .or_else(|| h.get(header::HOST))
+        .and_then(|v| v.to_str().ok());
+    match host {
+        // Strip the scheme from the Origin and compare host[:port].
+        Some(host) => origin.split("://").nth(1).unwrap_or(origin) != host,
+        None => false,
+    }
+}
+
 /// Build the Content-Security-Policy for Ruscker's own pages.
 ///
 /// `extra_origins` (space-separated, may be empty) is appended to the
@@ -716,6 +782,57 @@ fn is_safe_csp_source(t: &str) -> bool {
             .is_some_and(|c| c.is_ascii_alphanumeric());
     // Must look like a host (has a dot or a port) — rejects bare words.
     valid && (body.contains('.') || body.contains(':'))
+}
+
+#[cfg(test)]
+mod csrf_tests {
+    use super::request_is_cross_origin;
+    use axum::http::{header, HeaderMap, HeaderValue};
+
+    fn hm(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                header::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn fetch_metadata_decides_when_present() {
+        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "same-origin")])));
+        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "none")])));
+        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "cross-site")])));
+        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "same-site")])));
+    }
+
+    #[test]
+    fn no_headers_is_allowed() {
+        // curl / the break-glass token POST send neither header.
+        assert!(!request_is_cross_origin(&HeaderMap::new()));
+    }
+
+    #[test]
+    fn origin_fallback_compares_host() {
+        // Same host (scheme stripped) → allowed.
+        assert!(!request_is_cross_origin(&hm(&[
+            ("origin", "https://portal.example.org"),
+            ("host", "portal.example.org"),
+        ])));
+        // Behind a proxy, compare against X-Forwarded-Host.
+        assert!(!request_is_cross_origin(&hm(&[
+            ("origin", "https://portal.example.org"),
+            ("x-forwarded-host", "portal.example.org"),
+            ("host", "127.0.0.1:8080"),
+        ])));
+        // Different host → cross-origin.
+        assert!(request_is_cross_origin(&hm(&[
+            ("origin", "https://evil.example.com"),
+            ("host", "portal.example.org"),
+        ])));
+    }
 }
 
 #[cfg(test)]

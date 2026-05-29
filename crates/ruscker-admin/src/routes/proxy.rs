@@ -1058,7 +1058,13 @@ fn apply_smart_routing_headers(
 ) {
     if let Ok(v) = HeaderValue::from_str(forwarded_prefix) {
         headers.insert("x-forwarded-prefix", v.clone());
-        headers.insert("x-script-name", v);
+        headers.insert("x-script-name", v.clone());
+        // RStudio Server's official "behind a path-rewriting proxy"
+        // mechanism: we strip `/app/{spec}/` on the way in and tell
+        // RStudio its public root via this header, so it rewrites its
+        // own URLs / redirects / session WebSocket with the prefix
+        // (#230). Harmless for apps that don't read it.
+        headers.insert("x-rstudio-root-path", v);
     }
     headers.insert(
         "x-forwarded-proto",

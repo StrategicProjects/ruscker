@@ -196,11 +196,12 @@
           <td>{% if row.host.is_empty() %}<span style="color:var(--text-faint)">local</span>{% else %}{{ row.host }}{% endif %}</td>
           <td class="dash-mono">{{ row.container_short }}</td>
           <td style="white-space: nowrap;">
+            {# logs + stop/restart are all Editor/Admin only (matched by
+               the RequireEditor route guards) — logs can carry sensitive
+               data (#261). #}
+            {% if role.can_manage() %}
             <a href="/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
                class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
-            {# stop/restart are operational actions — Editor and Admin
-               only (matched by the RequireEditor route guard). #}
-            {% if role.can_manage() %}
             <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/restart"
                   style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
               <button type="submit" class="dash-action" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh"></i></button>
@@ -276,6 +277,9 @@
       ? escapeHtml(row.memory_display)
       : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
     var actions = !canManage ? '' : ''
+      + '<a href="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
+        + '" title="' + escapeHtml(logsTitle)
+        + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
       + '<form method="post" action="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
         + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
         + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
@@ -300,9 +304,6 @@
       + '<td>' + (row.host ? escapeHtml(row.host) : '<span style="color:var(--text-faint)">local</span>') + '</td>'
       + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
       + '<td style="white-space: nowrap;">'
-        + '<a href="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
-          + '" title="' + escapeHtml(logsTitle)
-          + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
         + actions
       + '</td>';
   }

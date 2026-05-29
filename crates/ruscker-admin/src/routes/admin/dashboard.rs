@@ -464,7 +464,9 @@ async fn events(
 /// that no longer maps to a container → the backend returns an
 /// error which we surface as 404.
 async fn logs(
-    session: AdminSession,
+    // Container logs can carry sensitive data — gate behind Editor+
+    // (Viewers can see the dashboard, not the logs). #261
+    editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -527,7 +529,7 @@ async fn logs(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         nav_section: "dashboard",
-        role: session.role,
+        role: editor.role,
         display_name,
         spec_id,
         replica_id,
@@ -546,7 +548,7 @@ async fn logs(
 /// Seeded with the last 100 lines so turning Live on shows
 /// recent context, not just lines that arrive after connect.
 async fn logs_stream(
-    _: AdminSession,
+    _: RequireEditor,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {

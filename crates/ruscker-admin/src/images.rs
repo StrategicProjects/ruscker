@@ -181,6 +181,27 @@ fn encode_to_webp(bytes: &[u8]) -> Result<(Vec<u8>, u32, u32)> {
     Ok((out, w, h))
 }
 
+/// Decode `bytes`, scale to fit within `max_dim`×`max_dim` (aspect
+/// preserved, never upscaled), and re-encode as WebP. Serves small
+/// gallery thumbnails so the spec form / media page don't ship the
+/// full-size blob per `<img>` (#283). Raster formats only — the caller
+/// skips SVG (vector, already tiny).
+pub fn thumbnail_webp(bytes: &[u8], max_dim: u32) -> Result<Vec<u8>> {
+    let img = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .context("guess format")?
+        .decode()
+        .context("decode source image")?;
+    // `thumbnail` preserves aspect ratio and never upscales, using a
+    // fast filter — fine for a small tile.
+    let thumb = img.thumbnail(max_dim, max_dim);
+    let mut out: Vec<u8> = Vec::new();
+    thumb
+        .write_to(&mut Cursor::new(&mut out), image::ImageFormat::WebP)
+        .context("write WebP thumbnail")?;
+    Ok(out)
+}
+
 fn decode_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
     let img = ImageReader::new(Cursor::new(bytes))
         .with_guessed_format()?
@@ -191,6 +212,23 @@ fn decode_dimensions(bytes: &[u8]) -> Result<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn thumbnail_webp_scales_within_max_dim_preserving_aspect() {
+        // 200×100 source → fits within 96×96, aspect kept (96×48).
+        let src = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            200,
+            100,
+            image::Rgba([10, 20, 30, 255]),
+        ));
+        let mut png = Vec::new();
+        src.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        let thumb = thumbnail_webp(&png, 96).unwrap();
+        let (w, h) = decode_dimensions(&thumb).unwrap();
+        assert_eq!((w, h), (96, 48), "scaled to fit, aspect preserved");
+        assert!(thumb.len() < 5000, "thumbnail is compact: {} bytes", thumb.len());
+    }
 
     #[test]
     fn sanitize_strips_paths_and_normalizes() {

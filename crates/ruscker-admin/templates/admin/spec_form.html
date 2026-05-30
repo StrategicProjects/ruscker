@@ -138,8 +138,9 @@
                    @change="uploadImage($event, 'logo')">
             <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
           </label>
-          {# Library thumbnails (reactive — inline uploads push here) #}
-          <template x-for="name in logoImages" :key="name">
+          {# Library thumbnails (reactive — inline uploads push here).
+             Only the first `logoShown` render initially (#293). #}
+          <template x-for="name in logoImages.slice(0, logoShown)" :key="name">
             <button type="button" :title="name"
                     @click="form.logo = '/assets/img/' + name"
                     class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
@@ -147,6 +148,9 @@
               <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
             </button>
           </template>
+          <button type="button" x-show="logoImages.length > logoShown" x-cloak
+                  @click="logoShown += galleryPage" class="admin-nav-link self-center text-xs"
+                  x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - logoShown) + ')'"></button>
         </div>
 
         {# Upload error (e.g. unsupported type / too large) #}
@@ -244,13 +248,16 @@
               <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'cover')">
               <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
             </label>
-            <template x-for="name in logoImages" :key="'cov-' + name">
+            <template x-for="name in logoImages.slice(0, coverShown)" :key="'cov-' + name">
               <button type="button" :title="name" @click="setCoverImage(name)"
                       class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
                       :class="form.cover.indexOf('/assets/img/' + name) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
                 <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
               </button>
             </template>
+            <button type="button" x-show="logoImages.length > coverShown" x-cloak
+                    @click="coverShown += galleryPage" class="admin-nav-link self-center text-xs"
+                    x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - coverShown) + ')'"></button>
           </div>
           <div class="spec-form-help">{{ self.t("spec-form-cover-image-help") }}</div>
           <input type="text" name="cover" x-model="form.cover" readonly
@@ -826,6 +833,12 @@ window.ruscker.specForm = (initial, logoImages) => ({
   // Media-library filenames for the logo/cover pickers (#213). Inline
   // uploads unshift new names here so a fresh thumbnail appears at once.
   logoImages: Array.isArray(logoImages) ? logoImages : [],
+  // How many gallery tiles to render initially (#293) — keeps the DOM +
+  // thumbnail requests bounded on a large media library. "Show more"
+  // reveals another page.
+  logoShown: 24,
+  coverShown: 24,
+  galleryPage: 24,
   // Prefix the base path on a root-absolute asset URL (#270). These
   // <img :src> values are set by Alpine at runtime, so the base-path
   // response rewriter (which only touches static HTML) never sees them

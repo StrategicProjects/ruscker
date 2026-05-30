@@ -301,7 +301,7 @@ impl SpecForm {
     /// being silently dropped. `base` is `None` for a brand-new spec.
     /// Empty optional strings become `None`; numeric strings parse
     /// optimistically.
-    pub fn into_spec(self, base: Option<&Spec>) -> Result<Spec> {
+    pub fn into_spec(self, base: Option<&Spec>, role: Role) -> Result<Spec> {
         let dt = DisplayType::parse(&self.display_type).unwrap_or(DisplayType::App);
         // App/API/External set an explicit kind; Talk/Report are purely
         // visual, so keep whatever run-kind override `base` carried.
@@ -392,7 +392,15 @@ impl SpecForm {
             min_replicas: parse_opt(&self.min_replicas),
             max_replicas: parse_opt(&self.max_replicas),
             concurrent_requests_per_replica: parse_opt(&self.concurrent_requests_per_replica),
-            volumes: lines_to_vec(&self.volumes),
+            // Bind-mount volumes are an Admin-only field (#302): they map
+            // to `HostConfig.binds`, i.e. host access. An Editor's submit
+            // keeps the base spec's volumes; only an Admin can set/change
+            // them. (The form also hides the field for non-Admins.)
+            volumes: if role == Role::Admin {
+                lines_to_vec(&self.volumes)
+            } else {
+                base.and_then(|b| b.volumes.clone())
+            },
             // Checked ⇒ leave unset (the `true` default keeps the
             // exported YAML clean); unchecked ⇒ explicit `false`.
             inject_base_href: if self.inject_base_href.trim().is_empty() {
@@ -842,7 +850,7 @@ async fn create(
     }
 
     let id = form.id.trim().to_string();
-    let spec = match form.into_spec(None) {
+    let spec = match form.into_spec(None, editor.role) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = ?e, "form → spec failed");
@@ -908,7 +916,7 @@ async fn update(
         return (StatusCode::NOT_FOUND, format!("spec `{id}` not found")).into_response();
     }
 
-    let spec = match form.into_spec(base.as_ref()) {
+    let spec = match form.into_spec(base.as_ref(), editor.role) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = ?e, "form → spec failed");
@@ -1009,7 +1017,7 @@ proxy:
         // Round-trip: load into the form, change a managed field, save.
         let mut form = SpecForm::from_spec(original);
         form.display_name = "Ops (edited)".into();
-        let merged = form.into_spec(Some(original)).expect("into_spec");
+        let merged = form.into_spec(Some(original), Role::Admin).expect("into_spec");
 
         // Managed field changed.
         assert_eq!(merged.display_name.as_deref(), Some("Ops (edited)"));
@@ -1037,6 +1045,28 @@ proxy:
         // Form-managed advanced fields still round-trip.
         assert_eq!(merged.min_replicas, Some(1));
         assert_eq!(merged.max_replicas, Some(4));
+    }
+
+    #[test]
+    fn volumes_are_admin_only() {
+        // #302: bind mounts map to HostConfig.binds (host access), so an
+        // Editor's submit must NOT add/change them — only an Admin can.
+        let base: Spec =
+            serde_yaml_ng::from_str("id: x\ncontainer-image: nginx\nvolumes:\n  - /host:/data")
+                .unwrap();
+        assert_eq!(base.volumes.as_deref(), Some(&["/host:/data".to_string()][..]));
+
+        // Editor tries to add a dangerous mount → ignored, base kept.
+        let mut form = SpecForm::from_spec(&base);
+        form.volumes = "/:/host\n/var/run/docker.sock:/sock".into();
+        let editor_spec = form.into_spec(Some(&base), Role::Editor).unwrap();
+        assert_eq!(editor_spec.volumes, base.volumes, "Editor can't change volumes");
+
+        // Admin's submit takes effect.
+        let mut form = SpecForm::from_spec(&base);
+        form.volumes = "/srv/new:/data".into();
+        let admin_spec = form.into_spec(Some(&base), Role::Admin).unwrap();
+        assert_eq!(admin_spec.volumes.as_deref(), Some(&["/srv/new:/data".to_string()][..]));
     }
 
     /// #260: the registry password is write-only. The form never loads
@@ -1068,7 +1098,7 @@ proxy:
 
         // Blank submit ⇒ keep the stored value.
         let kept = SpecForm::from_spec(original)
-            .into_spec(Some(original))
+            .into_spec(Some(original), Role::Admin)
             .expect("into_spec");
         assert_eq!(
             kept.docker_registry_password.as_deref(),
@@ -1079,7 +1109,7 @@ proxy:
         // A typed value replaces it.
         let mut form = SpecForm::from_spec(original);
         form.docker_registry_password = "${OTHER_VAR}".into();
-        let replaced = form.into_spec(Some(original)).expect("into_spec");
+        let replaced = form.into_spec(Some(original), Role::Admin).expect("into_spec");
         assert_eq!(replaced.docker_registry_password.as_deref(), Some("${OTHER_VAR}"));
     }
 
@@ -1094,7 +1124,7 @@ proxy:
             access: "lock".into(),
             ..Default::default()
         };
-        let spec = form.into_spec(None).expect("into_spec");
+        let spec = form.into_spec(None, Role::Admin).expect("into_spec");
         assert_eq!(spec.id, "fresh");
         assert_eq!(spec.container_lifetime, None);
         assert_eq!(spec.docker_registry_username, None);
@@ -1144,7 +1174,7 @@ proxy:
     fn volumes_round_trip_and_validate() {
         let mut f = valid_form();
         f.volumes = "/srv/data:/data\n/srv/www:/www:ro\n".into();
-        let spec = f.into_spec(None).expect("into_spec");
+        let spec = f.into_spec(None, Role::Admin).expect("into_spec");
         assert_eq!(
             spec.volumes,
             Some(vec![
@@ -1190,7 +1220,7 @@ proxy:
         assert_eq!(base.kind(), ruscker_config::SpecKind::InteractiveApp);
         let mut form = SpecForm::from_spec(&base);
         form.display_name = "Jupyter (edited)".into();
-        let merged = form.into_spec(Some(&base)).unwrap();
+        let merged = form.into_spec(Some(&base), Role::Admin).unwrap();
         assert_eq!(merged.kind(), ruscker_config::SpecKind::InteractiveApp, "App kept, not Shiny");
 
         // A brand-new "app" (no base) still defaults to Shiny.
@@ -1199,7 +1229,7 @@ proxy:
             state: "active".into(), access: "lock".into(), container_image: "x".into(),
             ..Default::default()
         };
-        assert_eq!(fresh.into_spec(None).unwrap().kind(), ruscker_config::SpecKind::Shiny);
+        assert_eq!(fresh.into_spec(None, Role::Admin).unwrap().kind(), ruscker_config::SpecKind::Shiny);
     }
 
     #[test]
@@ -1236,7 +1266,7 @@ proxy:
         let cfg = Config::from_yaml(yaml).expect("parse fixture");
         let original = &cfg.proxy.specs[0];
         let merged = SpecForm::from_spec(original)
-            .into_spec(Some(original))
+            .into_spec(Some(original), Role::Admin)
             .expect("into_spec");
 
         assert_eq!(merged.container_port, Some(8888));
@@ -1266,7 +1296,7 @@ proxy:
         let mut form = SpecForm::from_spec(base);
         assert_eq!(form.platform, "linux/amd64");
         form.platform = "  ".into(); // operator clears it
-        let merged = form.into_spec(Some(base)).unwrap();
+        let merged = form.into_spec(Some(base), Role::Admin).unwrap();
         assert_eq!(merged.platform, None);
     }
 

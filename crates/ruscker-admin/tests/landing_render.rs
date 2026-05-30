@@ -113,7 +113,8 @@ async fn landing_emits_data_theme_when_set() {
 #[tokio::test]
 async fn landing_stylesheet_link_is_present() {
     let (_, body) = get_with_cookie(None).await;
-    assert!(body.contains(r#"href="/assets/styles.css""#));
+    // The URL carries a `?v=<version>` cache-buster (#289).
+    assert!(body.contains(r#"href="/assets/styles.css?v="#));
 }
 
 #[tokio::test]

@@ -70,6 +70,10 @@ struct LoginPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// URL prefix the portal is mounted under (`""` at root, `/box`
+    /// under `--base-path`). Templates emit `{{ base }}/admin/...` so the
+    /// HTML is already correct and needs no response-body rewrite (#294).
+    base: std::sync::Arc<str>,
     /// Inline error banner key: "" | "wrong-login" | "wrong-token".
     error: &'static str,
     /// `true` ⇒ render the break-glass **token** form (bootstrap or
@@ -90,6 +94,8 @@ struct SetupPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294); see [`LoginPage`].
+    base: std::sync::Arc<str>,
     /// "" | "mismatch" | "short" | "exists" | "db".
     error: &'static str,
 }
@@ -107,6 +113,8 @@ struct AccountPasswordPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294); see [`LoginPage`].
+    base: std::sync::Arc<str>,
     nav_section: &'static str,
     role: Role,
     /// First-login prompt — shows the "keep current password" skip.
@@ -183,6 +191,7 @@ async fn login_form(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         error: "",
         bootstrap,
     };
@@ -201,6 +210,7 @@ fn login_error(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         error,
         bootstrap,
     };
@@ -409,6 +419,7 @@ async fn setup_form(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         error: "",
     })
 }
@@ -447,6 +458,7 @@ async fn setup_submit(
             theme,
             locales: &state.locales,
             locales_all: &Locale::ALL,
+            base: state.base_path.clone(),
             error,
         })
     };
@@ -514,6 +526,7 @@ async fn password_form(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "",
         role: session.role,
         first,
@@ -567,6 +580,7 @@ async fn password_submit(
             theme,
             locales: &state.locales,
             locales_all: &Locale::ALL,
+            base: state.base_path.clone(),
             nav_section: "",
             role: session.role,
             first,

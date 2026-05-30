@@ -24,7 +24,7 @@
 {% endif %}
 
 {# ── Create a new user ─────────────────────────────────────────── #}
-<form method="post" action="/admin/users"
+<form method="post" action="{{ base }}/admin/users"
       style="padding:16px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px"
       autocomplete="off">
   <div class="text-sm font-medium mb-2">{{ self.t("admin-users-new") }}</div>
@@ -77,7 +77,7 @@
           {% if u.must_change_password %}<i class="ti ti-alert-triangle" title="{{ self.t("admin-users-must-change") }}" style="color:var(--text-faint)"></i>{% endif %}
         </td>
         <td>
-          <form method="post" action="/admin/users/{{ u.username }}/role" style="display:flex;gap:6px;align-items:center">
+          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/role" style="display:flex;gap:6px;align-items:center">
             <select name="role">
               {% for r in self.all_roles() %}
                 <option value="{{ r.as_str() }}"{% if r == u.role %} selected{% endif %}>{{ self.role_label(r) }}</option>
@@ -87,7 +87,7 @@
           </form>
         </td>
         <td>
-          <form method="post" action="/admin/users/{{ u.username }}/groups" style="display:flex;gap:6px;align-items:center">
+          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/groups" style="display:flex;gap:6px;align-items:center">
             <input type="text" name="groups" value="{{ u.groups|join(", ") }}" autocapitalize="none"
                    placeholder="{{ self.t("admin-users-groups-placeholder") }}" style="width:160px">
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-groups") }}"><i class="ti ti-check"></i></button>
@@ -96,13 +96,13 @@
         <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>
         <td style="text-align:right;white-space:nowrap">
           {# Reset password — reveals a tiny inline form. #}
-          <form method="post" action="/admin/users/{{ u.username }}/password"
+          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/password"
                 style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
             <input type="text" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
                    style="width:120px" autocomplete="off">
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
           </form>
-          <form method="post" action="/admin/users/{{ u.username }}/delete" style="display:inline"
+          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
                 onsubmit="return confirm('{{ self.t("admin-users-confirm-delete") }}')">
             <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>
           </form>

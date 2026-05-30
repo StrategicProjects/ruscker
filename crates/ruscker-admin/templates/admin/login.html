@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#0f6e56">
 <meta name="robots" content="noindex,nofollow">
 <title>{{ self.t("admin-login-title") }} · Ruscker</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/assets/styles.css?v={{ crate::APP_VERSION }}">
-<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+<link rel="icon" type="image/svg+xml" href="{{ base }}/favicon.svg">
+<link rel="stylesheet" href="{{ base }}/assets/styles.css?v={{ crate::APP_VERSION }}">
+<link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
 
@@ -19,7 +19,7 @@
   {% include "_chrome_cluster_anon.html" %}
 </div>
 
-<form method="post" action="{% if bootstrap %}/admin/login/token{% else %}/admin/login{% endif %}"
+<form method="post" action="{% if bootstrap %}{{ base }}/admin/login/token{% else %}{{ base }}/admin/login{% endif %}"
       class="admin-login-card" autocomplete="off">
 
   <div class="admin-login-brand">
@@ -73,11 +73,11 @@
      chrome cluster (#182 + #183). #}
   <div class="admin-login-footer admin-login-footer--end">
     {% if bootstrap %}
-      <a href="/admin/login">{{ self.t("admin-login-use-password") }}</a>
+      <a href="{{ base }}/admin/login">{{ self.t("admin-login-use-password") }}</a>
     {% else %}
-      <a href="/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
+      <a href="{{ base }}/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
     {% endif %}
-    <a href="/">{{ self.t("admin-login-back-portal") }}</a>
+    <a href="{{ base }}/">{{ self.t("admin-login-back-portal") }}</a>
   </div>
 </form>
 

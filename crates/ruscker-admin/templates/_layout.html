@@ -8,16 +8,19 @@
 <title>{% block title %}{{ self.t("landing-title") }}{% endblock %}</title>
 {% block head_extra %}{% endblock %}
 
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="mask-icon" href="/assets/brand/mark.svg" color="#0f6e56">
-<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" type="image/svg+xml" href="{{ base }}/favicon.svg">
+<link rel="mask-icon" href="{{ base }}/assets/brand/mark.svg" color="#0f6e56">
+<link rel="apple-touch-icon" href="{{ base }}/apple-touch-icon.png">
 
-<link rel="preload" href="/assets/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="preload" href="/assets/fonts/jost-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ base }}/assets/fonts/jost-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="{{ base }}/assets/fonts/jost-latin-500-normal.woff2" as="font" type="font/woff2" crossorigin>
 <!-- Preload the icon font (448 KB) so the table/menu glyphs don't pop in late (#269). -->
-<link rel="preload" href="/assets/icons/tabler-icons.woff2" as="font" type="font/woff2" crossorigin>
-<link rel="stylesheet" href="/assets/styles.css?v={{ crate::APP_VERSION }}">
-<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+<link rel="preload" href="{{ base }}/assets/icons/tabler-icons.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="{{ base }}/assets/styles.css?v={{ crate::APP_VERSION }}">
+<link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+{# Mount prefix for page JS that builds URLs at runtime (#294). Replaces
+   the old response-rewriter shim — templates now self-prefix. #}
+<script>window.RUSCKER_BASE = "{{ base }}";</script>
 </head>
 <body class="min-h-screen flex flex-col">
 

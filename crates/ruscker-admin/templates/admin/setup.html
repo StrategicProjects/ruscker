@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#0f6e56">
 <meta name="robots" content="noindex,nofollow">
 <title>{{ self.t("admin-setup-title") }} · Ruscker</title>
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="stylesheet" href="/assets/styles.css?v={{ crate::APP_VERSION }}">
-<link rel="stylesheet" href="/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+<link rel="icon" type="image/svg+xml" href="{{ base }}/favicon.svg">
+<link rel="stylesheet" href="{{ base }}/assets/styles.css?v={{ crate::APP_VERSION }}">
+<link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
 
@@ -17,7 +17,7 @@
   {% include "_chrome_cluster_anon.html" %}
 </div>
 
-<form method="post" action="/admin/setup" class="admin-login-card" autocomplete="off">
+<form method="post" action="{{ base }}/admin/setup" class="admin-login-card" autocomplete="off">
 
   <div class="admin-login-brand">
     <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">

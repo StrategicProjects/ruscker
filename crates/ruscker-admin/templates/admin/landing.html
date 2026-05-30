@@ -16,7 +16,7 @@
       <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-landing-subtitle") }}</p>
     </div>
     <div class="flex items-center gap-2">
-      <a href="/" target="_blank" class="admin-nav-link" title="{{ self.t("admin-landing-open-portal") }}">
+      <a href="{{ base }}/" target="_blank" class="admin-nav-link" title="{{ self.t("admin-landing-open-portal") }}">
         <i class="ti ti-external-link" aria-hidden="true"></i>
         {{ self.t("admin-landing-open-portal") }}
       </a>
@@ -44,7 +44,7 @@
   <div class="spec-form-layout">
 
     {# ── LEFT: form ────────────────────────────────────────── #}
-    <form id="landing-form" method="post" action="/admin/landing"
+    <form id="landing-form" method="post" action="{{ base }}/admin/landing"
           class="spec-form-fields" autocomplete="off">
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
@@ -260,7 +260,7 @@
 {# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
 {% include "admin/_blocks_editor.html" %}
 
-<script src="/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 // Gradient helpers (gradientCss / gradientDefault / bgMode) are
 // defined in admin/_layout.html so they're shared with the

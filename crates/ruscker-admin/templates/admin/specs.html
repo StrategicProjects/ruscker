@@ -17,7 +17,7 @@
       <i class="ti ti-file-upload" aria-hidden="true"></i>
       {{ self.t("admin-import-button") }}
     </button>
-    <a href="/admin/specs/new" class="admin-login-btn" style="padding:6px 10px;font-size:12px">
+    <a href="{{ base }}/admin/specs/new" class="admin-login-btn" style="padding:6px 10px;font-size:12px">
       <i class="ti ti-plus" aria-hidden="true"></i>
       {{ self.t("admin-specs-add") }}
     </a>
@@ -31,7 +31,7 @@
 {% endmatch %}
 
 <dialog id="import-modal" class="import-dialog">
-  <form method="post" action="/admin/specs/import" enctype="multipart/form-data" class="import-form">
+  <form method="post" action="{{ base }}/admin/specs/import" enctype="multipart/form-data" class="import-form">
     <h2 class="text-base font-medium mb-1">{{ self.t("admin-import-title") }}</h2>
     <p class="text-xs text-[color:var(--text-muted)] mb-3">{{ self.t("admin-import-help") }}</p>
     <label class="block text-xs mb-1">{{ self.t("admin-import-file") }}</label>
@@ -111,7 +111,7 @@
           <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
           <td class="actions-cell">
-            <a href="/admin/specs/{{ spec.id }}/edit"
+            <a href="{{ base }}/admin/specs/{{ spec.id }}/edit"
                class="admin-nav-link"
                title="{{ self.t("admin-specs-edit") }}">
               <i class="ti ti-edit" aria-hidden="true"></i>

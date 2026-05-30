@@ -151,6 +151,7 @@ async fn serve_card_image(
     State(state): State<AppState>,
     AxumPath(filename): AxumPath<String>,
     Query(q): Query<ImgQuery>,
+    req_headers: HeaderMap,
 ) -> Response {
     // Don't allow `../` or directory components — Axum's path
     // extractor already collapses path segments per route, but
@@ -196,7 +197,13 @@ async fn serve_card_image(
         }
     }
 
-    serve_dynamic(bytes, &mime)
+    // Full image: ETag-validated so a revalidation returns a cheap 304
+    // instead of re-sending the blob (#290).
+    let etag = etag_for(&bytes);
+    if if_none_match(&req_headers, &etag) {
+        return not_modified(&etag);
+    }
+    serve_dynamic(bytes, &mime, &etag)
 }
 
 /// Fetch an operator-uploaded image's `(mime, bytes)` — DB first, then
@@ -263,7 +270,7 @@ fn mime_from_extension(name: &str) -> &'static str {
 ///   sources). Does NOT interfere with the common
 ///   `<img src="/assets/img/x.svg">` use — scripts never run in
 ///   `<img>` context anyway.
-fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
+fn serve_dynamic(body: Vec<u8>, content_type: &str, etag: &str) -> Response {
     let mut headers = HeaderMap::new();
     if let Ok(ct) = HeaderValue::from_str(content_type) {
         headers.insert(header::CONTENT_TYPE, ct);
@@ -272,6 +279,11 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
         header::CACHE_CONTROL,
         HeaderValue::from_static("public, max-age=60, must-revalidate"),
     );
+    // ETag so a revalidation can return a cheap 304 instead of re-sending
+    // the whole blob (#290).
+    if let Ok(v) = HeaderValue::from_str(etag) {
+        headers.insert(header::ETAG, v);
+    }
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
@@ -281,6 +293,38 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
         HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; sandbox"),
     );
     (StatusCode::OK, headers, body).into_response()
+}
+
+/// A weak-ish ETag for an image blob — a fast non-crypto hash of the
+/// bytes (it's a cache validator, not a security control). Changes iff
+/// the content changes.
+fn etag_for(bytes: &[u8]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    format!("\"{:x}\"", h.finish())
+}
+
+/// Does the request's `If-None-Match` match `etag` (or `*`)?
+fn if_none_match(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .map(|inm| inm.split(',').any(|t| t.trim() == etag || t.trim() == "*"))
+        .unwrap_or(false)
+}
+
+/// `304 Not Modified` carrying the validator + cache directives.
+fn not_modified(etag: &str) -> Response {
+    let mut headers = HeaderMap::new();
+    if let Ok(v) = HeaderValue::from_str(etag) {
+        headers.insert(header::ETAG, v);
+    }
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=60, must-revalidate"),
+    );
+    (StatusCode::NOT_MODIFIED, headers).into_response()
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -334,10 +378,11 @@ mod tests {
     async fn serve_dynamic_hardens_user_uploaded_images() {
         // A served (operator-uploaded) image must carry the
         // SVG-script mitigations regardless of its real type.
-        let resp = serve_dynamic(b"<svg/>".to_vec(), "image/svg+xml");
+        let resp = serve_dynamic(b"<svg/>".to_vec(), "image/svg+xml", "\"abc\"");
         let h = resp.headers();
         assert_eq!(h.get(header::CONTENT_TYPE).unwrap(), "image/svg+xml");
         assert_eq!(h.get(header::X_CONTENT_TYPE_OPTIONS).unwrap(), "nosniff");
+        assert_eq!(h.get(header::ETAG).unwrap(), "\"abc\"");
         let csp = h
             .get(header::CONTENT_SECURITY_POLICY)
             .unwrap()

@@ -1075,8 +1075,9 @@ mod parse_memory_tests {
 
     #[test]
     fn metrics_interval_defaults_to_5s_else_honors_config() {
-        // Unset / 0 ⇒ 5 s default.
-        assert_eq!(Proxy::default().effective_metrics_interval_secs(), 5);
+        // Unset / 0 ⇒ 5 s default. (`Proxy` lives in the parent module;
+        // this test mod only imports `parse_memory_string`.)
+        assert_eq!(super::Proxy::default().effective_metrics_interval_secs(), 5);
         // `proxy.metrics-interval: 12` is honored.
         let cfg = crate::Config::from_yaml("proxy:\n  metrics-interval: 12\n").unwrap();
         assert_eq!(cfg.proxy.metrics_interval_secs, 12);

@@ -184,6 +184,9 @@ async fn upload(
         let stored_name = processed.filename.clone();
         match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_id) => {
+                // A re-upload replaced the bytes behind this filename —
+                // drop any cached thumbnail so the new image shows (#301).
+                crate::routes::assets::invalidate_thumb(&stored_name);
                 last_uploaded_name = Some(stored_name);
             }
             Err(err) => {
@@ -263,12 +266,15 @@ async fn upload_inline(
         };
         let name = processed.filename.clone();
         return match db::images::insert(pool, processed, Some(editor.actor())).await {
-            Ok(_) => Json(InlineUpload {
-                url: Some(format!("/assets/img/{name}")),
-                filename: Some(name),
-                error: None,
-            })
-            .into_response(),
+            Ok(_) => {
+                crate::routes::assets::invalidate_thumb(&name); // #301
+                Json(InlineUpload {
+                    url: Some(format!("/assets/img/{name}")),
+                    filename: Some(name),
+                    error: None,
+                })
+                .into_response()
+            }
             Err(err) => {
                 tracing::error!(error = ?err, "inline image insert failed");
                 inline_err(StatusCode::INTERNAL_SERVER_ERROR, "save failed")
@@ -287,7 +293,13 @@ async fn delete(
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::images::delete_one(pool, &id, Some(editor.actor())).await {
-        Ok(_) => Redirect::to("/admin/media").into_response(),
+        Ok(filename) => {
+            // Drop the cached thumbnail of the deleted image (#301).
+            if let Some(name) = filename {
+                crate::routes::assets::invalidate_thumb(&name);
+            }
+            Redirect::to("/admin/media").into_response()
+        }
         Err(err) => {
             tracing::error!(error = ?err, id, "image delete failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response()

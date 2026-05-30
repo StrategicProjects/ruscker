@@ -525,6 +525,7 @@ spec-form-error-threshold = Le seuil doit être un nombre entre 0 et 1.
 
 # ── spec-form image picker (#213) ──────────────────────────────────
 spec-form-logo-upload = Téléverser une image
+spec-form-gallery-more = Afficher plus
 spec-form-logo-clear = Retirer
 spec-form-logo-none = Pas d'image — une teinte selon le type est utilisée.
 spec-form-logo-path-advanced = Avancé : coller un chemin ou une URL

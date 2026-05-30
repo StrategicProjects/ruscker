@@ -525,6 +525,7 @@ spec-form-error-threshold = El umbral debe ser un número entre 0 y 1.
 
 # ── spec-form image picker (#213) ──────────────────────────────────
 spec-form-logo-upload = Subir imagen
+spec-form-gallery-more = Mostrar más
 spec-form-logo-clear = Quitar
 spec-form-logo-none = Sin imagen — se usa un tono según el tipo.
 spec-form-logo-path-advanced = Avanzado: pegar una ruta o URL

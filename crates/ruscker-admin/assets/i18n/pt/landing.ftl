@@ -529,6 +529,7 @@ spec-form-error-threshold = O limiar deve ser um número entre 0 e 1.
 
 # ── spec-form image picker (#213) ──────────────────────────────────
 spec-form-logo-upload = Enviar imagem
+spec-form-gallery-more = Mostrar mais
 spec-form-logo-clear = Remover
 spec-form-logo-none = Sem imagem — usa um tom gerado pelo tipo.
 spec-form-logo-path-advanced = Avançado: colar um caminho ou URL

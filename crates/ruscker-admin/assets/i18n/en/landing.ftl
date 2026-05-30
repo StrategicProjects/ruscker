@@ -525,6 +525,7 @@ spec-form-error-threshold = Threshold must be a number between 0 and 1.
 
 # ── spec-form image picker (#213) ──────────────────────────────────
 spec-form-logo-upload = Upload image
+spec-form-gallery-more = Show more
 spec-form-logo-clear = Remove
 spec-form-logo-none = No image — a kind-based tint is used.
 spec-form-logo-path-advanced = Advanced: paste a path or URL

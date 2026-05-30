@@ -44,6 +44,12 @@ pub struct SpecRow {
     pub state: String,
     pub updated_at: DateTime<Utc>,
     pub version: i64,
+    /// `true` for a spec that exists only in the YAML `--config`, not the
+    /// DB (#303) — it runs + shows on the landing but is **read-only**
+    /// here (edit the file to change it). `#[sqlx(default)]` so the DB
+    /// `SELECT` (which doesn't have the column) still maps.
+    #[sqlx(default)]
+    pub config_only: bool,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -152,13 +158,47 @@ async fn index(
         crate::db::ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
         crate::db::ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
     };
-    let specs: Vec<SpecRow> = match loaded {
+    let mut specs: Vec<SpecRow> = match loaded {
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(error = ?err, "load specs failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+
+    // Append specs that exist only in the YAML `--config` (not the DB) as
+    // read-only "config-defined" rows (#303). They run + show on the
+    // landing, so showing them here avoids the "where did my spec go?"
+    // confusion; they can't be edited/deleted from the admin (the file is
+    // their source).
+    {
+        use std::collections::HashSet;
+        let db_ids: HashSet<String> = specs.iter().map(|s| s.id.clone()).collect();
+        for s in &state.config.proxy.specs {
+            if db_ids.contains(&s.id) {
+                continue;
+            }
+            let kind = match s.kind() {
+                ruscker_config::SpecKind::Shiny => "shiny",
+                ruscker_config::SpecKind::InteractiveApp => "interactive",
+                ruscker_config::SpecKind::Api => "api",
+                ruscker_config::SpecKind::External => "external",
+            };
+            specs.push(SpecRow {
+                id: s.id.clone(),
+                display_name: s.display_name.clone(),
+                kind: kind.to_string(),
+                state: if s.template_properties.is_active() {
+                    "active".into()
+                } else {
+                    "inactive".into()
+                },
+                updated_at: Utc::now(), // not shown for config rows
+                version: 0,
+                config_only: true,
+            });
+        }
+    }
 
     let flash = build_flash(&state.locales, loc, &flash);
     let page = SpecsPage {

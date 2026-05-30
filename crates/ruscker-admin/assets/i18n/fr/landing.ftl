@@ -181,6 +181,8 @@ admin-specs-filter-search = Rechercher par id ou nom…
 admin-specs-filter-kind-all = Tous les types
 admin-specs-filter-state-all = Actifs et inactifs
 admin-specs-edit = Modifier
+admin-specs-config-badge = config
+admin-specs-config-defined = Défini dans le YAML — lecture seule ici; modifiez le fichier
 admin-specs-delete = Supprimer
 
 # Spec form (new / edit)

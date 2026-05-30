@@ -684,7 +684,11 @@
             </div>
           </div>
 
-          {# Volumes — one bind per line, as many as needed #}
+          {# Volumes — one bind per line. Bind mounts map to
+             HostConfig.binds (host access), so they're Admin-only
+             (#302); an Editor's submit can't add/change them and the
+             field is hidden. #}
+          {% if role == Role::Admin %}
           <div class="spec-form-subsection">{{ self.t("spec-form-volumes-section") }}</div>
           <div class="spec-form-field">
             <div class="spec-form-label-row">
@@ -696,6 +700,7 @@
                       class="spec-form-input spec-form-input--mono">{{ form.volumes }}</textarea>
             <div class="spec-form-help">{{ self.t("spec-form-volumes-help") }}</div>
           </div>
+          {% endif %}
 
           {# Routing — how requests reach the upstream app #}
           <div class="spec-form-subsection">{{ self.t("spec-form-routing-section") }}</div>

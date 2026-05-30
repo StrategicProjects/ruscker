@@ -94,6 +94,13 @@ Status: living document. Tracks the Phase 5 security audit
   remaining admin. Audit entries record the acting username (or
   `token` for a break-glass session). Per-app ACLs and external IdPs
   (OIDC/SAML/LDAP) remain Phase 8.
+- **[implemented]** Bind-mount **`volumes` are Admin-only** (#302). A
+  spec's `volumes` map to Docker `HostConfig.binds` — i.e. host
+  filesystem / `docker.sock` access — so an Editor (who can otherwise
+  create/edit apps) cannot set or change them: the spec-form field is
+  hidden for non-Admins and, server-side, `into_spec` keeps the base
+  spec's volumes when the actor isn't Admin. Treat **Admin** as
+  host-trusted and **Editor** as app-config-trusted.
 - **[accepted limitation]** Login lockout can be triggered by a
   flood of bad attempts (the global limiter's trade-off). Self-
   heals within the 60 s window.

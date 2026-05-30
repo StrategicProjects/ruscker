@@ -91,11 +91,11 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/assets/styles.css",
-            get(|| serve(STYLES_CSS, "text/css; charset=utf-8")),
+            get(|q| serve_versioned(q, STYLES_CSS, "text/css; charset=utf-8")),
         )
         .route(
             "/assets/icons/tabler-icons.min.css",
-            get(|| serve(TABLER_CSS, "text/css; charset=utf-8")),
+            get(|q| serve_versioned(q, TABLER_CSS, "text/css; charset=utf-8")),
         )
         .route(
             "/assets/icons/tabler-icons.woff2",
@@ -115,7 +115,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/assets/js/alpine.min.js",
-            get(|| serve(ALPINE_JS, "application/javascript; charset=utf-8")),
+            get(|q| serve_versioned(q, ALPINE_JS, "application/javascript; charset=utf-8")),
         )
         // Tech showcase logos. URLs match the seeded specs in migration 0009.
         .route("/assets/showcase/bokeh.svg", get(|| serve(SHOWCASE_BOKEH, SVG)))
@@ -285,23 +285,44 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str) -> Response {
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
+/// `?v=<version>` cache-busting flag on a bundled asset URL (#289).
+#[derive(serde::Deserialize)]
+struct AssetVer {
+    v: Option<String>,
+}
+
+fn serve_with_cache(body: &'static [u8], content_type: &'static str, cache: &'static str) -> Response {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    (StatusCode::OK, headers, body).into_response()
+}
+
+async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
     // Cache for a short window (no `must-revalidate`) so the admin's
     // full-page-reload navigation doesn't fire a conditional-GET
-    // round-trip for every bundled asset on every click — the main
-    // source of the "menus feel slow" jank (#269). 5 minutes is long
-    // enough to cover an active browsing session and short enough that
-    // a new binary's assets are picked up promptly (a hard reload
-    // always bypasses the cache). `immutable` would be wrong here — the
-    // bytes change across upgrades under the same URL; the proper
-    // long-term fix is hash-bearing URLs (`/assets/styles-<hash>.css`).
-    headers.insert(
-        header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=300"),
-    );
-    (StatusCode::OK, headers, body).into_response()
+    // round-trip for every bundled asset on every click (#269). 5 min
+    // covers an active session; a new binary's assets are picked up
+    // promptly (a hard reload always bypasses). `immutable` would be
+    // wrong for an un-versioned URL — the bytes change across upgrades.
+    serve_with_cache(body, content_type, "public, max-age=300")
+}
+
+/// Serve a bundled asset whose URL carries `?v=<version>` (#289). The
+/// version stamps the URL per release, so the bytes for a given URL are
+/// immutable — cache them hard for a year. A request without `?v`
+/// (a stale link, or a direct hit) falls back to the short cache, so we
+/// never serve stale bytes under a non-versioned URL.
+async fn serve_versioned(
+    Query(q): Query<AssetVer>,
+    body: &'static [u8],
+    content_type: &'static str,
+) -> Response {
+    if q.v.is_some() {
+        serve_with_cache(body, content_type, "public, max-age=31536000, immutable")
+    } else {
+        serve(body, content_type).await
+    }
 }
 
 #[cfg(test)]

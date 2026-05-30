@@ -260,7 +260,7 @@
 {# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
 {% include "admin/_blocks_editor.html" %}
 
-<script src="/assets/js/alpine.min.js" defer></script>
+<script src="/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 // Gradient helpers (gradientCss / gradientDefault / bgMode) are
 // defined in admin/_layout.html so they're shared with the

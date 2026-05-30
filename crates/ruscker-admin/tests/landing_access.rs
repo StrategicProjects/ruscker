@@ -175,6 +175,54 @@ async fn base_path_nests_the_portal_and_keeps_health_at_root() {
 }
 
 #[tokio::test]
+async fn chrome_self_prefixes_under_base_path() {
+    // #294: templates emit `{{ base }}`-prefixed URLs directly, so a page
+    // rendered under `--base-path /box` is already correct WITHOUT the
+    // response-body rewriter (which now only touches the `Location`
+    // header). The landing uses the shared `_layout.html`, so this also
+    // covers the `window.RUSCKER_BASE` injection the page JS relies on for
+    // URLs it builds at runtime.
+    let mut state = app_state(open_db().await).await;
+    state.base_path = Arc::from("/box");
+    let app = router(state);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/box")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+
+    // Asset URLs carry the prefix straight from the template.
+    assert!(
+        body.contains(r#"href="/box/assets/styles.css"#),
+        "stylesheet href self-prefixed"
+    );
+    // The runtime base is exposed for page JS that builds URLs at runtime.
+    assert!(
+        body.contains(r#"window.RUSCKER_BASE = "/box""#),
+        "RUSCKER_BASE set in the layout"
+    );
+    // No bare (un-prefixed) chrome asset URL slipped through — proving the
+    // template self-prefixes rather than relying on a body rewriter.
+    assert!(
+        !body.contains(r#"href="/assets/"#),
+        "no bare /assets href in the rendered body"
+    );
+}
+
+#[tokio::test]
 async fn login_under_base_path_honors_admin_referer() {
     // #186 (#173 follow-up): a non-admin signing in from
     // `/box/admin/specs` should land back on `/box/admin/specs`, not

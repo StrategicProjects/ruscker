@@ -442,11 +442,17 @@ fn rewrite_url_base(value: &str, base: &str) -> Option<String> {
     Some(format!("{base}{t}"))
 }
 
-/// If `resp` is HTML, prefix its absolute chrome URLs with `base` and
-/// inject the runtime shim; always prefix a root-absolute `Location`
-/// header (redirects) so they stay under the base. Cookies set
-/// `Path=/`, which the browser already sends for `{base}/...`, so they
-/// need no rewrite. No-op when `base` is empty.
+/// Prefix a root-absolute `Location` header (redirects) with `base` so a
+/// handler's `Redirect::to("/admin/x")` stays under the mount as
+/// `/box/admin/x`. No-op when `base` is empty.
+///
+/// The chrome's HTML **body** no longer needs rewriting: every template
+/// now emits its URLs already prefixed via `{{ base }}` and sets
+/// `window.RUSCKER_BASE` for the page JS that builds URLs at runtime
+/// (#294). So this dropped the per-request body buffering + `lol_html`
+/// parse that used to run on every admin page; only the redirect
+/// `Location` header — which handlers emit raw — still needs fixing here.
+/// Cookies set `Path=/`, which the browser already sends for `{base}/…`.
 pub async fn prefix_base_path(resp: Response<Body>, base: &str) -> Response<Body> {
     if base.is_empty() {
         return resp;
@@ -462,160 +468,7 @@ pub async fn prefix_base_path(resp: Response<Body>, base: &str) -> Response<Body
         }
     }
 
-    let is_html = parts
-        .headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_ascii_lowercase().starts_with("text/html"))
-        .unwrap_or(false);
-    if !is_html {
-        return Response::from_parts(parts, body);
-    }
-
-    let declared_len = parts
-        .headers
-        .get(header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.parse::<usize>().ok());
-    if declared_len.is_some_and(|n| n > MAX_HTML_BYTES) {
-        return Response::from_parts(parts, body);
-    }
-    let bytes = match to_bytes(body, MAX_HTML_BYTES).await {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!(error = ?e, "chrome HTML exceeded transform cap; can't prefix base path");
-            return Response::builder()
-                .status(502)
-                .body(Body::from("response too large to mount under base path"))
-                .unwrap_or_else(|_| Response::new(Body::empty()));
-        }
-    };
-    if bytes.is_empty() {
-        return Response::from_parts(parts, Body::empty());
-    }
-
-    let rewritten = match transform_base(bytes.as_ref(), base) {
-        Ok(r) => r,
-        Err(e) => {
-            tracing::warn!(error = ?e, "base-path transform failed; serving body as-is");
-            bytes.to_vec()
-        }
-    };
-    parts.headers.remove(header::CONTENT_LENGTH);
-    if let Ok(v) = HeaderValue::from_str(&rewritten.len().to_string()) {
-        parts.headers.insert(header::CONTENT_LENGTH, v);
-    }
-    Response::from_parts(parts, Body::from(rewritten))
-}
-
-/// lol_html pass for the chrome: prefix absolute URL attributes with
-/// `base` and prepend the runtime shim to `<head>`. No `<base href>` —
-/// the chrome uses absolute URLs, which `<base href>` wouldn't affect.
-fn transform_base(html: &[u8], base: &str) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
-    let mut out = Vec::with_capacity(html.len() + 256);
-    let shim = build_base_shim(base);
-    let base = base.to_string();
-
-    let url_attrs: &[(&str, &str)] = &[
-        ("a[href]", "href"),
-        ("link[href]", "href"),
-        ("script[src]", "src"),
-        ("img[src]", "src"),
-        ("iframe[src]", "src"),
-        ("source[src]", "src"),
-        ("form[action]", "action"),
-        ("button[formaction]", "formaction"),
-        ("input[formaction]", "formaction"),
-        ("img[data-src]", "data-src"),
-    ];
-    let mut handlers: Vec<_> = Vec::with_capacity(url_attrs.len() + 1);
-    handlers.push(element!("head", move |el| {
-        el.prepend(&shim, ContentType::Html);
-        Ok(())
-    }));
-    for (selector, attr) in url_attrs {
-        let attr = *attr;
-        let base = base.clone();
-        handlers.push(element!(*selector, move |el| {
-            if let Some(v) = el.get_attribute(attr) {
-                if let Some(nv) = rewrite_url_base(&v, &base) {
-                    el.set_attribute(attr, &nv)?;
-                }
-            }
-            Ok(())
-        }));
-    }
-    let mut rewriter = HtmlRewriter::new(
-        Settings {
-            element_content_handlers: handlers,
-            ..Settings::default()
-        },
-        |c: &[u8]| out.extend_from_slice(c),
-    );
-    rewriter.write(html)?;
-    rewriter.end()?;
-    Ok(out)
-}
-
-/// Runtime shim for the chrome: monkey-patch `fetch`,
-/// `XMLHttpRequest.open`, `WebSocket`, and `EventSource` to prefix
-/// absolute-path URLs built in JS at call time (the dashboard SSE,
-/// `/__set/*`, logs stream, etc.) with `base`. Skips URLs already under
-/// `base` and non-absolute/external ones. IIFE-wrapped, each patch in
-/// its own try/catch.
-fn build_base_shim(base: &str) -> String {
-    format!(
-        r##"<script>(function(){{
-  var BASE = "{base}";
-  // Exposed so server-rendered page JS that builds navigational URLs
-  // (anchor hrefs, form actions the network shim can't intercept) can
-  // prefix them: `(window.RUSCKER_BASE || '') + '/admin/...'`.
-  window.RUSCKER_BASE = BASE;
-  function prefix(u) {{
-    if (typeof u !== "string" || u.charAt(0) !== "/" || u.charAt(1) === "/") return u;
-    if (u === BASE || u.indexOf(BASE + "/") === 0) return u;
-    return BASE + u;
-  }}
-  function prefixWs(u) {{
-    try {{
-      if (typeof u !== "string") return u;
-      var m = u.match(/^(wss?:\/\/[^/]+)(\/.*)?$/i);
-      if (!m) return u;
-      return m[1] + prefix(m[2] || "/");
-    }} catch (_) {{ return u; }}
-  }}
-  try {{
-    var of = window.fetch;
-    if (of) window.fetch = function(input, init) {{
-      if (typeof input === "string") input = prefix(input);
-      else if (input && input.url) {{ try {{ input = new Request(prefix(input.url), input); }} catch (_) {{}} }}
-      return of.call(this, input, init);
-    }};
-  }} catch (_) {{}}
-  try {{
-    var oo = XMLHttpRequest.prototype.open;
-    XMLHttpRequest.prototype.open = function(m, u) {{
-      arguments[1] = prefix(u);
-      return oo.apply(this, arguments);
-    }};
-  }} catch (_) {{}}
-  try {{
-    var OW = window.WebSocket;
-    if (OW) {{
-      window.WebSocket = function(u, p) {{ return p === undefined ? new OW(prefixWs(u)) : new OW(prefixWs(u), p); }};
-      window.WebSocket.prototype = OW.prototype;
-    }}
-  }} catch (_) {{}}
-  try {{
-    var OE = window.EventSource;
-    if (OE) {{
-      window.EventSource = function(u, c) {{ return c === undefined ? new OE(prefix(u)) : new OE(prefix(u), c); }};
-      window.EventSource.prototype = OE.prototype;
-    }}
-  }} catch (_) {{}}
-}})();</script>"##,
-        base = base
-    )
+    Response::from_parts(parts, body)
 }
 
 #[cfg(test)]
@@ -1019,16 +872,21 @@ mod tests {
         assert_eq!(rewrite_url_base("https://x/y", "/box"), None);
     }
 
+    // The chrome HTML body is NOT rewritten anymore (#294): templates emit
+    // `{{ base }}`-prefixed URLs directly. `prefix_base_path` now only
+    // touches the `Location` header — covered by the redirect test below
+    // and the body-untouched assertion in the base-path integration test.
     #[tokio::test]
-    async fn prefix_base_path_rewrites_chrome_html() {
+    async fn prefix_base_path_leaves_html_body_untouched() {
         let resp = html_response(
-            r#"<html><head></head><body><a href="/admin/specs">x</a><form action="/admin/users"></form></body></html>"#,
+            r#"<html><head></head><body><a href="/box/admin/specs">x</a></body></html>"#,
         );
         let out = prefix_base_path(resp, "/box").await;
         let s = body_string(out).await;
-        assert!(s.contains(r#"href="/box/admin/specs""#), "link prefixed");
-        assert!(s.contains(r#"action="/box/admin/users""#), "form action prefixed");
-        assert!(s.contains("BASE = \"/box\""), "runtime shim injected");
+        // Body passes through verbatim — no double-prefix, no shim injected.
+        assert!(s.contains(r#"href="/box/admin/specs""#), "body unchanged");
+        assert!(!s.contains("/box/box/"), "no double-prefix");
+        assert!(!s.contains("RUSCKER_BASE = "), "no injected shim");
     }
 
     #[tokio::test]

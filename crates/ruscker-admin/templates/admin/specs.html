@@ -101,6 +101,13 @@
           </td>
           <td><span class="pill pill-kind-{{ spec.kind }}">{{ spec.kind }}</span></td>
           <td><span class="pill pill-state-{{ spec.state }}">{{ spec.state }}</span></td>
+          {% if spec.config_only %}
+          <td class="text-[color:var(--text-faint)]">—</td>
+          <td class="text-[color:var(--text-faint)]">—</td>
+          <td class="actions-cell">
+            <span class="pill" title="{{ self.t("admin-specs-config-defined") }}">{{ self.t("admin-specs-config-badge") }}</span>
+          </td>
+          {% else %}
           <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
           <td class="actions-cell">
@@ -110,6 +117,7 @@
               <i class="ti ti-edit" aria-hidden="true"></i>
             </a>
           </td>
+          {% endif %}
         </tr>
       {% endfor %}
     </tbody>

@@ -27,7 +27,7 @@
 {% when None %}{% endmatch %}
 
 {# ── Upload form ──────────────────────────────────────────── #}
-<form method="post" action="/admin/media" enctype="multipart/form-data"
+<form method="post" action="{{ base }}/admin/media" enctype="multipart/form-data"
       class="image-upload-zone">
   <input type="file" name="file" id="img-file" required
          accept="image/png,image/jpeg,image/webp,image/svg+xml">

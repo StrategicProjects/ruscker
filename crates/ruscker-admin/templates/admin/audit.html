@@ -15,7 +15,7 @@
   </div>
 
   {# ── Filter bar ───────────────────────────────────────────── #}
-  <form method="get" action="/admin/audit"
+  <form method="get" action="{{ base }}/admin/audit"
         class="audit-filter-bar">
     <div class="select-wrap" :class="'{{ filter.family }}' !== '' ? 'is-active' : ''">
       <select name="family" class="theme-select" onchange="this.form.submit()"
@@ -55,7 +55,7 @@
     </button>
 
     {% if !filter.family.is_empty() || !filter.target.is_empty() || !filter.actor.is_empty() %}
-      <a href="/admin/audit" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
+      <a href="{{ base }}/admin/audit" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
         {{ self.t("filter-clear") }}
       </a>
     {% endif %}
@@ -108,7 +108,7 @@
 
 </div>
 
-<script src="/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
 window.ruscker.audit = () => ({

@@ -19,7 +19,7 @@
       {% else if theme.is_dark() %}<i class="ti ti-moon" aria-hidden="true"></i>
       {% else %}<i class="ti ti-device-desktop" aria-hidden="true"></i>{% endif %}
     </summary>
-    <form method="post" action="/__set/theme" class="chrome-popover">
+    <form method="post" action="{{ base }}/__set/theme" class="chrome-popover">
       <button type="submit" name="theme" value="light"
               class="chrome-popover-item {% if theme.is_light() %}is-current{% endif %}"
               {% if theme.is_light() %}aria-current="true"{% endif %}>
@@ -43,7 +43,7 @@
     <summary class="chrome-icon" aria-label="{{ self.t("chrome-language-label") }}" title="{{ self.t("chrome-language-label") }}">
       <span class="chrome-icon-lang">{{ locale.code()|upper }}</span>
     </summary>
-    <form method="post" action="/__set/locale" class="chrome-popover">
+    <form method="post" action="{{ base }}/__set/locale" class="chrome-popover">
       {% for loc in locales_all %}
         <button type="submit" name="locale" value="{{ loc.code() }}"
                 class="chrome-popover-item {% if *loc == locale %}is-current{% endif %}"
@@ -68,14 +68,14 @@
           </div>
           <div class="chrome-popover-sep"></div>
         {% endif %}
-        <a class="chrome-popover-item" href="/admin/dashboard">
+        <a class="chrome-popover-item" href="{{ base }}/admin/dashboard">
           <i class="ti ti-layout-dashboard" aria-hidden="true"></i> {{ self.t("chrome-panel") }}
         </a>
-        <a class="chrome-popover-item" href="/admin/account/password">
+        <a class="chrome-popover-item" href="{{ base }}/admin/account/password">
           <i class="ti ti-key" aria-hidden="true"></i> {{ self.t("chrome-change-password") }}
         </a>
         <div class="chrome-popover-sep"></div>
-        <form method="post" action="/admin/logout" class="contents">
+        <form method="post" action="{{ base }}/admin/logout" class="contents">
           <button type="submit" class="chrome-popover-item">
             <i class="ti ti-logout" aria-hidden="true"></i> {{ self.t("chrome-signout") }}
           </button>
@@ -83,7 +83,7 @@
       </div>
     </details>
   {% else if show_admin_link %}
-    <a class="chrome-signin" href="/admin/login">
+    <a class="chrome-signin" href="{{ base }}/admin/login">
       <i class="ti ti-login" aria-hidden="true"></i>
       <span>{{ self.t("chrome-signin") }}</span>
     </a>

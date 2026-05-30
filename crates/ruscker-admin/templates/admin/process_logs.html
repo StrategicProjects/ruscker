@@ -32,7 +32,7 @@
     {% if self.truncated() %}
     <span>{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</span>
     {% endif %}
-    <a href="/admin/logs/download" class="admin-nav-link" download>
+    <a href="{{ base }}/admin/logs/download" class="admin-nav-link" download>
       <i class="ti ti-download" aria-hidden="true"></i> {{ self.t("admin-proclog-download") }}
     </a>
   </div>

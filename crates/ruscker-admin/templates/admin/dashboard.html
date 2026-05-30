@@ -200,13 +200,13 @@
                the RequireEditor route guards) — logs can carry sensitive
                data (#261). #}
             {% if role.can_manage() %}
-            <a href="/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
+            <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
                class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
-            <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/restart"
+            <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/restart"
                   style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
               <button type="submit" class="dash-action" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh"></i></button>
             </form>
-            <form method="post" action="/admin/dashboard/replicas/{{ row.replica_id }}/stop"
+            <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/stop"
                   style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
               <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop"></i></button>
             </form>

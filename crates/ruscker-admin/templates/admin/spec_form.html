@@ -23,13 +23,13 @@
   <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
     <div>
       <div class="text-[11px] text-[color:var(--text-faint)] uppercase tracking-wide">
-        <a href="/admin/specs" class="hover:underline">{{ self.t("admin-nav-apps") }}</a>
+        <a href="{{ base }}/admin/specs" class="hover:underline">{{ self.t("admin-nav-apps") }}</a>
         · {% if mode.is_new() %}{{ self.t("spec-form-crumb-new") }}{% else %}{{ self.t("spec-form-crumb-edit") }}{% endif %}
       </div>
       <h1 class="text-xl font-medium tracking-tight" x-text="form.display_name || form.id || '{{ self.t("spec-form-title-new") }}'"></h1>
     </div>
     <div class="flex items-center gap-2">
-      <a href="/admin/specs" class="admin-nav-link">{{ self.t("spec-form-cancel") }}</a>
+      <a href="{{ base }}/admin/specs" class="admin-nav-link">{{ self.t("spec-form-cancel") }}</a>
       <button type="submit" form="spec-form" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
         <i class="ti ti-check" aria-hidden="true"></i>
         {{ self.t("spec-form-save") }}
@@ -811,7 +811,7 @@
       {% if mode.is_edit() %}
         <div class="spec-form-actions-box">
           <div class="spec-form-actions-title">{{ self.t("spec-form-actions") }}</div>
-          <form method="post" action="/admin/specs/{{ form.id }}/delete"
+          <form method="post" action="{{ base }}/admin/specs/{{ form.id }}/delete"
                 onsubmit="return confirm('{{ self.t("spec-form-delete-confirm") }}');">
             <button type="submit" class="spec-form-delete">
               <i class="ti ti-trash" aria-hidden="true"></i>
@@ -825,7 +825,7 @@
   </div>
 </div>
 
-<script src="/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
 window.ruscker.specForm = (initial, logoImages) => ({

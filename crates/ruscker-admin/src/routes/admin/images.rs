@@ -84,6 +84,36 @@ impl<'a> ImagesPage<'a> {
             format!("{:.1} MB", b as f64 / 1024.0 / 1024.0)
         }
     }
+
+    /// The gallery as a JSON array, seeding the Alpine component that
+    /// renders only a page of tiles at a time + filters by filename
+    /// (#317). Same "data in `x-data`, paginate client-side" shape as
+    /// the spec-form logo picker (#293) — the whole list is small
+    /// metadata (no blobs), so paging/filtering is instant in the
+    /// browser and the DOM + thumbnail fetches stay bounded regardless
+    /// of library size. `ImageMeta` isn't `Serialize`, so we build the
+    /// objects here; `size` is pre-formatted so the template needs no
+    /// per-row Rust helper. A `dims` string is `""` when unknown.
+    fn images_json(&self) -> String {
+        let arr: Vec<serde_json::Value> = self
+            .images
+            .iter()
+            .map(|img| {
+                let dims = match (img.width, img.height) {
+                    (Some(w), Some(h)) => format!("{w}×{h}"),
+                    _ => String::new(),
+                };
+                serde_json::json!({
+                    "id": img.id,
+                    "filename": img.filename,
+                    "mime": img.mime_type,
+                    "size": self.fmt_size(&img.size_bytes),
+                    "dims": dims,
+                })
+            })
+            .collect();
+        serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
+    }
 }
 
 async fn index(

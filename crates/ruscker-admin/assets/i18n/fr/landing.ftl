@@ -248,6 +248,8 @@ admin-images-uploaded = Image envoyée :
 admin-images-empty = Aucune image. Envoyez la première ci-dessus.
 admin-images-delete = Supprimer
 admin-images-delete-confirm = Supprimer cette image ? Les specs qui référencent le fichier afficheront le cover teinté.
+admin-images-search = Rechercher des images…
+admin-images-no-match = Aucune image ne correspond à la recherche.
 
 # Admin credentials
 admin-creds-title = Identifiants registry

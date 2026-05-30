@@ -68,6 +68,8 @@ struct BlockFormPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294).
+    base: std::sync::Arc<str>,
     nav_section: &'static str,
     /// Current session role - drives nav gating.
     role: Role,
@@ -103,6 +105,7 @@ async fn new_form(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "blocks",
         role: Role::Admin,
         mode: "new",
@@ -139,6 +142,7 @@ async fn edit_form(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "blocks",
         role: Role::Admin,
         mode: "edit",

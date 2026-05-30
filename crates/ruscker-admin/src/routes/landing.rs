@@ -33,6 +33,9 @@ struct LandingPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294): templates emit
+    /// `{{ base }}/...` so the HTML needs no response-body rewrite.
+    base: std::sync::Arc<str>,
     cards: Vec<CardCtx<'a>>,
     type_chips: Vec<TypeChip>,
     /// Unique themes present in this config, alphabetically. Drives
@@ -209,6 +212,7 @@ async fn index(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         cards,
         type_chips,
         subjects,

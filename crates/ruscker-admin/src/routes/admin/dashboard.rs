@@ -157,6 +157,8 @@ struct DashboardPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294).
+    base: std::sync::Arc<str>,
     nav_section: &'static str,
     /// Current session role — drives nav gating and whether the
     /// per-replica stop/restart action buttons render.
@@ -193,6 +195,8 @@ struct LogsPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294).
+    base: std::sync::Arc<str>,
     nav_section: &'static str,
     /// Current session role — drives nav gating.
     role: Role,
@@ -270,6 +274,7 @@ async fn index(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "dashboard",
         role: session.role,
         backend_connected: snap.backend_connected,
@@ -542,6 +547,7 @@ async fn logs(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "dashboard",
         role: editor.role,
         display_name,
@@ -824,6 +830,7 @@ mod tests {
             theme: Theme::Auto,
             locales: &locales,
             locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
             nav_section: "dashboard",
             role: Role::Admin,
             backend_connected,
@@ -850,6 +857,7 @@ mod tests {
             theme: Theme::Auto,
             locales: &locales,
             locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
             nav_section: "dashboard",
             role: Role::Admin,
             display_name: "Aurora Prime".into(),

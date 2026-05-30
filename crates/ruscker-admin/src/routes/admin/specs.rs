@@ -88,6 +88,8 @@ struct SpecsPage<'a> {
     theme: Theme,
     locales: &'a Locales,
     locales_all: &'static [Locale],
+    /// Mount prefix for base-path-correct URLs (#294).
+    base: std::sync::Arc<str>,
     nav_section: &'static str,
     /// Current session role (Editor or Admin) — drives nav gating.
     role: Role,
@@ -206,6 +208,7 @@ async fn index(
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
         nav_section: "specs",
         role: editor.role,
         specs,

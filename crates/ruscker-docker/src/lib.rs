@@ -169,19 +169,12 @@ impl LocalDockerBackend {
         let replica_id = ReplicaId::new();
         let inner_port = req.inner_port.unwrap_or(DEFAULT_INNER_PORT);
 
-        // A `container-env` value still carrying `${...}` means its env
-        // var wasn't set — interpolation upstream couldn't resolve it
-        // (#300). Fail clearly instead of injecting a literal `${VAR}`
-        // into the container (which would silently misconfigure the app,
-        // and for a secret would leave a placeholder where a real value
-        // should be). Mirrors the registry-password guard below.
-        if let Some(name) = first_unresolved_env(&req.env) {
-            return Err(CoreError::Backend(format!(
-                "container-env {name} for {} references an unset environment \
-                 variable (value still contains ${{...}})",
-                req.spec_id
-            )));
-        }
+        // `${VAR}` resolution (container-env + registry password) happens
+        // upstream in ruscker-admin, which now fails the spawn naming the
+        // missing variable before we get here (#314). We deliberately do
+        // NOT re-scan `req.env` for a residual `${` — that scan also
+        // false-rejected a legitimately-resolved value that happens to
+        // contain the literal `${` (e.g. a templated JSON config).
 
         // 1. Pull image (idempotent — Docker no-ops when local).
         //    Errors bubble up through the stream-of-events.
@@ -314,19 +307,10 @@ impl LocalDockerBackend {
             platform: platform.unwrap_or("").to_string(),
             ..Default::default()
         };
-        // A password still carrying `${...}` means the env var the spec
-        // referenced wasn't set — interpolation upstream couldn't resolve
-        // it (#273). Fail with a clear message instead of pulling with a
-        // literal `${VAR}` password (which would surface as a confusing
-        // registry-auth error).
-        if let Some(c) = creds {
-            if c.password.contains("${") {
-                return Err(CoreError::Backend(format!(
-                    "registry password for image {image} still contains an unresolved \
-                     ${{VAR}} — is the referenced environment variable set?"
-                )));
-            }
-        }
+        // The registry password's `${VAR}` is resolved upstream in
+        // ruscker-admin, which fails the spawn naming the missing var
+        // (#314); no residual-`${` scan here (it would false-reject a
+        // legitimately-resolved value containing the literal `${`).
         // Convert our backend-neutral creds to bollard's native
         // type only at the pull boundary. `None` keeps the pull
         // anonymous (Docker Hub public images).
@@ -850,17 +834,6 @@ fn state_from_docker(s: Option<&str>) -> ReplicaState {
     }
 }
 
-/// The NAME of the first `container-env` entry (`"NAME=value"`) whose
-/// value still contains a `${...}` placeholder — i.e. an env var that
-/// wasn't set. `None` if every value resolved. Used to fail a spawn
-/// loudly instead of injecting a literal `${VAR}` (#300).
-fn first_unresolved_env(env: &[String]) -> Option<&str> {
-    env.iter().find_map(|kv| {
-        let (name, value) = kv.split_once('=')?;
-        value.contains("${").then_some(name)
-    })
-}
-
 fn backend_err(op: &str, e: bollard::errors::Error) -> CoreError {
     CoreError::Backend(format!("{op}: {e}"))
 }
@@ -896,15 +869,6 @@ fn apply_limits(host_config: &mut HostConfig, limits: &ruscker_core::ResourceLim
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn first_unresolved_env_flags_residual_placeholder() {
-        let ok = vec!["A=1".to_string(), "B=plain".to_string()];
-        assert_eq!(first_unresolved_env(&ok), None);
-        let bad = vec!["A=1".to_string(), "DB_PASSWORD=${DB_PASSWORD}".to_string()];
-        assert_eq!(first_unresolved_env(&bad), Some("DB_PASSWORD"));
-        assert_eq!(first_unresolved_env(&[]), None);
-    }
 
     #[test]
     fn state_from_docker_maps_common_values() {

@@ -867,7 +867,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
 
     let inner_port = spec.effective_inner_port();
 
-    let creds = resolve_creds(state, spec).await;
+    let creds = resolve_creds(state, spec).await?;
     let limits = limits_from_spec(spec);
     tracing::info!(
         spec = %spec.id,
@@ -877,10 +877,16 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         with_limits = !limits.is_empty(),
         "spawning first replica"
     );
+    // Resolve `${VAR}` in container-env here, at the point of use, and
+    // fail the spawn naming the missing var (#314) — never inject a
+    // literal `${VAR}` into the container.
+    let env = spec
+        .resolved_env_pairs()
+        .map_err(|e| anyhow::anyhow!("spec {} container-env: {e}", spec.id))?;
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
         .with_limits(limits)
         .with_volumes(spec.volumes.clone().unwrap_or_default())
-        .with_env(spec.resolved_env_pairs())
+        .with_env(env)
         .with_placement(spec.effective_placement())
         .with_anti_affinity(spec.effective_anti_affinity());
     if let Some(port) = inner_port {
@@ -934,24 +940,31 @@ pub(crate) fn limits_from_spec(spec: &Spec) -> ruscker_core::ResourceLimits {
 /// The password is stored as the literal `${VAR}` (never resolved into
 /// the DB / config in memory — #260), so we interpolate it **here**, at
 /// the point of use, right before a pull. Idempotent: a value with no
-/// `${...}` (or a `docker-registry-credential` flow) is unaffected. If a
-/// referenced env var is unset we keep the literal — the backend's
-/// pull then fails with a clear "still contains `${...}`" error rather
-/// than silently pulling anonymously.
-pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCredentials> {
+/// `${...}` (or a `docker-registry-credential` flow) is unaffected.
+///
+/// Returns `Err` with the real cause (`MissingEnvVar { name }`) when the
+/// password references an unset variable, so the spawn fails naming the
+/// missing var (#314). Previously the error was swallowed and the literal
+/// `${VAR}` was left for the backend to detect by scanning for a residual
+/// `${` — a scan that also false-rejected a legitimately-resolved value
+/// containing the literal `${`. `Ok(None)` means "anonymous pull" (no, or
+/// only partial, credentials — partial creds make no sense to Docker).
+pub(crate) fn creds_from_spec(
+    spec: &Spec,
+) -> anyhow::Result<Option<ruscker_core::RegistryCredentials>> {
     let user = spec.docker_registry_username.as_deref().filter(|s| !s.is_empty());
     let pass = spec.docker_registry_password.as_deref().filter(|s| !s.is_empty());
     match (user, pass) {
-        (Some(u), Some(p)) => Some(ruscker_core::RegistryCredentials {
+        (Some(u), Some(p)) => Ok(Some(ruscker_core::RegistryCredentials {
             username: u.to_string(),
-            password: ruscker_config::env::interpolate_value(p).unwrap_or_else(|_| p.to_string()),
+            password: ruscker_config::env::interpolate_value(p)?,
             server_address: spec
                 .docker_registry_domain
                 .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
-        }),
-        _ => None,
+        })),
+        _ => Ok(None),
     }
 }
 
@@ -967,10 +980,14 @@ pub(crate) fn creds_from_spec(spec: &Spec) -> Option<ruscker_core::RegistryCrede
 ///
 /// Async (unlike `creds_from_spec`) because the DB lookup +
 /// decrypt is I/O. Both spawn paths call this.
+///
+/// `Err` carries the real cause when the inline password references an
+/// unset env var (#314); a DB-store credential is already decrypted so
+/// that branch never errors here.
 pub(crate) async fn resolve_creds(
     state: &AppState,
     spec: &Spec,
-) -> Option<ruscker_core::RegistryCredentials> {
+) -> anyhow::Result<Option<ruscker_core::RegistryCredentials>> {
     if let Some(name) = spec
         .docker_registry_credential
         .as_deref()
@@ -979,7 +996,7 @@ pub(crate) async fn resolve_creds(
         match (state.db.as_ref(), state.master_key.is_configured()) {
             (Some(pool), true) => {
                 match crate::db::credentials::resolve(pool, &state.master_key, name).await {
-                    Ok(Some(c)) => return Some(c),
+                    Ok(Some(c)) => return Ok(Some(c)),
                     Ok(None) => {
                         tracing::warn!(
                             credential = name, spec = %spec.id,
@@ -1503,7 +1520,7 @@ container-image: test:latest
     #[test]
     fn creds_from_spec_returns_none_for_anonymous_spec() {
         let s = fake_spec("x");
-        assert!(creds_from_spec(&s).is_none());
+        assert!(creds_from_spec(&s).unwrap().is_none());
     }
 
     #[test]
@@ -1518,7 +1535,7 @@ docker-registry-password: hunter2
 docker-registry-domain: priv.io
 "#,
         );
-        let c = creds_from_spec(&s).expect("creds present");
+        let c = creds_from_spec(&s).unwrap().expect("creds present");
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("priv.io"));
@@ -1539,9 +1556,29 @@ docker-registry-username: bot
 docker-registry-password: ${RUSCKER_TEST_REG_PW}
 "#,
         );
-        let c = creds_from_spec(&s).expect("creds present");
+        let c = creds_from_spec(&s).unwrap().expect("creds present");
         assert_eq!(c.password, "fromenv", "resolved at use");
         std::env::remove_var("RUSCKER_TEST_REG_PW");
+    }
+
+    #[test]
+    fn creds_from_spec_errors_when_password_env_unset() {
+        // #314: an unset password var is a hard error naming the var, not
+        // a silently-kept `${VAR}` literal for the backend to scan for.
+        let s = spec_yaml(
+            r#"
+id: p
+display-name: P
+container-image: priv.io/app:1
+docker-registry-username: bot
+docker-registry-password: ${RUSCKER_DEFINITELY_UNSET_REG_PW}
+"#,
+        );
+        let err = creds_from_spec(&s).expect_err("unset var must error");
+        assert!(
+            err.to_string().contains("RUSCKER_DEFINITELY_UNSET_REG_PW"),
+            "error names the missing var: {err}"
+        );
     }
 
     #[test]
@@ -1555,7 +1592,7 @@ docker-registry-username: bot
 "#,
         );
         assert!(
-            creds_from_spec(&s).is_none(),
+            creds_from_spec(&s).unwrap().is_none(),
             "half-credentials are no credentials"
         );
     }
@@ -1570,7 +1607,7 @@ container-image: x:1
 docker-registry-password: secret
 "#,
         );
-        assert!(creds_from_spec(&s).is_none());
+        assert!(creds_from_spec(&s).unwrap().is_none());
     }
 
     #[test]
@@ -1586,7 +1623,7 @@ docker-registry-domain: ""
 "#,
         );
         assert!(
-            creds_from_spec(&s).is_none(),
+            creds_from_spec(&s).unwrap().is_none(),
             "empty strings shouldn't authenticate"
         );
     }
@@ -1744,7 +1781,7 @@ docker-registry-username: bot
 docker-registry-password: hunter2
 "#,
         );
-        let c = creds_from_spec(&s).expect("creds present");
+        let c = creds_from_spec(&s).unwrap().expect("creds present");
         assert!(c.server_address.is_none(), "Docker Hub default");
     }
 

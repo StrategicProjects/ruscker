@@ -194,9 +194,10 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<ImageMeta>> {
         .collect())
 }
 
-/// Delete by id. Returns true if a row was removed. Audit row is
-/// written on either branch (an attempted delete is an event).
-pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<bool> {
+/// Delete an image by id. Returns the deleted row's filename (so the
+/// caller can invalidate caches keyed by it, #301), or `None` if no
+/// such image existed. Audit row is written when a row was removed.
+pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<Option<String>> {
     let now = Utc::now();
     let target = format!("image:{id}");
     match db {
@@ -229,7 +230,7 @@ pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<
                 .context("audit image.delete")?;
             }
             tx.commit().await.context("commit image delete")?;
-            Ok(removed)
+            Ok(if removed { filename.map(|(f,)| f) } else { None })
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin image delete tx")?;
@@ -259,7 +260,7 @@ pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<
                 .context("audit image.delete")?;
             }
             tx.commit().await.context("commit image delete")?;
-            Ok(removed)
+            Ok(if removed { filename.map(|(f,)| f) } else { None })
         }
     }
 }
@@ -311,7 +312,11 @@ mod pg_tests {
         assert_eq!(metas[0].size_bytes, 4);
         assert_eq!(metas[0].width, Some(48));
 
-        assert!(delete_one(&db, &id, Some("admin")).await.unwrap());
+        // Returns the deleted filename now (#301).
+        assert_eq!(
+            delete_one(&db, &id, Some("admin")).await.unwrap().as_deref(),
+            Some("logo.webp")
+        );
         assert!(fetch_by_filename(&db, "logo.webp").await.unwrap().is_none());
     }
 }

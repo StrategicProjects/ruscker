@@ -30,11 +30,19 @@ use crate::AppState;
 const THUMB_MAX_DIM: u32 = 96;
 
 /// Process-wide cache of generated thumbnails, keyed by filename.
-/// Uploaded images are immutable per filename (a new upload gets a new
-/// name), so an entry never goes stale; the map is bounded by the size
-/// of the media library. First request for an image pays the
-/// decode+resize; the rest hit this cache.
+/// First request for an image pays the decode+resize; the rest hit this
+/// cache. A filename's bytes CAN change (a re-upload `REPLACE`s the same
+/// name), so [`invalidate_thumb`] must be called on upload/delete — the
+/// cache is not self-invalidating (#301). Bounded by the media library.
 static THUMB_CACHE: LazyLock<DashMap<String, Vec<u8>>> = LazyLock::new(DashMap::new);
+
+/// Drop a filename's cached thumbnail. Call this whenever the bytes
+/// behind a filename change — an upload `REPLACE`s a same-named image,
+/// and a delete removes it — otherwise the gallery serves the stale
+/// thumbnail for the rest of the process's life (#301).
+pub(crate) fn invalidate_thumb(filename: &str) {
+    THUMB_CACHE.remove(filename);
+}
 
 /// `?thumb` query flag on `/assets/img/{filename}`.
 #[derive(serde::Deserialize)]
@@ -165,7 +173,7 @@ async fn serve_card_image(
     let want_thumb = q.thumb.is_some();
     if want_thumb {
         if let Some(cached) = THUMB_CACHE.get(&filename) {
-            return serve_thumbnail_bytes(cached.clone());
+            return serve_thumbnail_bytes(&req_headers, cached.clone());
         }
     }
 
@@ -186,7 +194,7 @@ async fn serve_card_image(
         {
             Ok(Ok(thumb)) => {
                 THUMB_CACHE.insert(fname, thumb.clone());
-                return serve_thumbnail_bytes(thumb);
+                return serve_thumbnail_bytes(&req_headers, thumb);
             }
             Ok(Err(err)) => {
                 tracing::warn!(error = ?err, filename, "thumbnail generation failed; serving full image");
@@ -227,13 +235,23 @@ async fn fetch_image_bytes(state: &AppState, filename: &str) -> Option<(String, 
 
 /// Serve a generated WebP thumbnail. Derived deterministically from an
 /// immutable filename, so it can be cached hard (a day).
-fn serve_thumbnail_bytes(body: Vec<u8>) -> Response {
+fn serve_thumbnail_bytes(req_headers: &HeaderMap, body: Vec<u8>) -> Response {
+    // A filename can be re-uploaded (#301), so a thumb isn't truly
+    // immutable — cache modestly and lean on the ETag to make a
+    // revalidation a cheap 304 when the bytes are unchanged.
+    let etag = etag_for(&body);
     let mut headers = HeaderMap::new();
-    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/webp"));
     headers.insert(
         header::CACHE_CONTROL,
-        HeaderValue::from_static("public, max-age=86400"),
+        HeaderValue::from_static("public, max-age=300"),
     );
+    if let Ok(v) = HeaderValue::from_str(&etag) {
+        headers.insert(header::ETAG, v);
+    }
+    if if_none_match(req_headers, &etag) {
+        return (StatusCode::NOT_MODIFIED, headers).into_response();
+    }
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/webp"));
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),

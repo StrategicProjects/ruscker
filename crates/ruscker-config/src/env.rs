@@ -150,20 +150,46 @@ fn interpolate_line(line: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
-    fn with_env<F: FnOnce()>(key: &str, value: &str, f: F) {
-        let original = env::var(key).ok();
-        env::set_var(key, value);
+    /// Serializes every test that mutates the process environment.
+    /// `set_var` / `remove_var` poke global C state that is not
+    /// thread-safe, and two tests sharing a var name (e.g. the
+    /// `RUSCKER_REG_PASS` pair below) would otherwise race under the
+    /// default parallel test runner — a real, observed flake (#295).
+    /// One module-wide lock keeps env-mutating tests effectively serial
+    /// without forcing `--test-threads=1` on the whole suite.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Set each `(key, value)` for the duration of `f`, then restore the
+    /// prior value (or unset it). Holds [`ENV_LOCK`] so no two
+    /// env-mutating tests run at once. Takes a slice so a test needing
+    /// several vars makes a single, non-nested call — a nested call would
+    /// deadlock on the non-reentrant lock.
+    fn with_env<F: FnOnce()>(vars: &[(&str, &str)], f: F) {
+        // Recover from a poisoned lock: a prior test panicking inside the
+        // guard must not wedge every other env test.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let originals: Vec<(String, Option<String>)> = vars
+            .iter()
+            .map(|(k, v)| {
+                let original = env::var(k).ok();
+                env::set_var(k, v);
+                ((*k).to_string(), original)
+            })
+            .collect();
         f();
-        match original {
-            Some(v) => env::set_var(key, v),
-            None => env::remove_var(key),
+        for (k, original) in originals {
+            match original {
+                Some(v) => env::set_var(&k, v),
+                None => env::remove_var(&k),
+            }
         }
     }
 
     #[test]
     fn interpolates_simple_variable() {
-        with_env("RUSCKER_TEST_VAR", "hello", || {
+        with_env(&[("RUSCKER_TEST_VAR", "hello")], || {
             let result = interpolate("value: ${RUSCKER_TEST_VAR}").unwrap();
             assert_eq!(result, "value: hello");
         });
@@ -173,7 +199,7 @@ mod tests {
     fn preserves_secret_keyed_lines() {
         // #260: a secret-keyed line keeps its `${VAR}` verbatim (resolved
         // only at use), while ordinary lines interpolate as usual.
-        with_env("RUSCKER_REG_PASS", "s3cret", || {
+        with_env(&[("RUSCKER_REG_PASS", "s3cret")], || {
             let yaml = "container-image: nginx:${RUSCKER_NEVER_SET:-latest}\n\
                         docker-registry-password: ${RUSCKER_REG_PASS}\n";
             let out = interpolate(yaml).unwrap();
@@ -190,7 +216,7 @@ mod tests {
     fn preserves_container_env_block() {
         // #272: every `${VAR}` *under* container-env is preserved at
         // parse; a sibling key after the block interpolates normally.
-        with_env("RUSCKER_DB_PW", "s3cret", || {
+        with_env(&[("RUSCKER_DB_PW", "s3cret")], || {
             let yaml = "\
 proxy:
   specs:
@@ -214,7 +240,7 @@ proxy:
 
     #[test]
     fn interpolate_value_resolves_and_is_idempotent() {
-        with_env("RUSCKER_REG_PASS", "s3cret", || {
+        with_env(&[("RUSCKER_REG_PASS", "s3cret")], || {
             assert_eq!(interpolate_value("${RUSCKER_REG_PASS}").unwrap(), "s3cret");
             // A value with no placeholder comes back unchanged.
             assert_eq!(interpolate_value("already-plain").unwrap(), "already-plain");
@@ -252,17 +278,15 @@ proxy:
 
     #[test]
     fn multiple_vars_on_same_line() {
-        with_env("RUSCKER_A", "alpha", || {
-            with_env("RUSCKER_B", "beta", || {
-                let result = interpolate("x: ${RUSCKER_A}/${RUSCKER_B}").unwrap();
-                assert_eq!(result, "x: alpha/beta");
-            });
+        with_env(&[("RUSCKER_A", "alpha"), ("RUSCKER_B", "beta")], || {
+            let result = interpolate("x: ${RUSCKER_A}/${RUSCKER_B}").unwrap();
+            assert_eq!(result, "x: alpha/beta");
         });
     }
 
     #[test]
     fn preserves_text_around_var() {
-        with_env("RUSCKER_NAME", "world", || {
+        with_env(&[("RUSCKER_NAME", "world")], || {
             let result = interpolate("greeting: hello ${RUSCKER_NAME}!").unwrap();
             assert_eq!(result, "greeting: hello world!");
         });

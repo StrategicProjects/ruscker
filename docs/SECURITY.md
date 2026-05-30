@@ -124,7 +124,8 @@ Status: living document. Tracks the Phase 5 security audit
   parse and resolved only at spawn (`Spec::resolved_env_pairs`), so an
   app secret passed via `${VAR}` never lands in the DB either. A missing
   env var fails the pull/spawn with a clear message rather than passing
-  a literal `${VAR}` (#273).
+  a literal `${VAR}` — both for the registry password (#273) and for
+  `container-env` values (#300).
 - **[legacy]** A spec imported by an older build may hold a *resolved*
   password in its `config_json`. Re-import the YAML (which now preserves
   the literal) or rotate the secret to the credentials store; the

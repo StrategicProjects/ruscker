@@ -546,6 +546,20 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         }
     };
 
+    // gzip/br compression for the chrome's text responses (HTML + the
+    // bundled CSS/JS) (#287). Outermost layer, so it compresses the
+    // final body — after the base-path rewrite has read it uncompressed,
+    // and only for the chrome routes (the proxy forwards upstream bodies
+    // verbatim and must not be re-compressed). Honors `Accept-Encoding`.
+    // The default predicate already skips images and tiny responses; we
+    // also skip `font/*` — woff2 is already compressed, so re-encoding it
+    // only burns CPU.
+    use tower_http::compression::predicate::{DefaultPredicate, NotForContentType, Predicate};
+    let own = own.layer(
+        tower_http::compression::CompressionLayer::new()
+            .compress_when(DefaultPredicate::new().and(NotForContentType::const_new("font/"))),
+    );
+
     // Health probes (`/healthz`, `/readyz`) sit outside the
     // `security_headers` layer: they return JSON for orchestrators,
     // not HTML for browsers, so CSP / X-Frame-Options are

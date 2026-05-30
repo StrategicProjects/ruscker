@@ -50,7 +50,7 @@
     const box = document.getElementById('proclog');
     const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 48;
     box.scrollTop = box.scrollHeight; // start pinned to the newest line
-    const es = new EventSource('/admin/logs/stream');
+    const es = new EventSource((window.RUSCKER_BASE || '') + '/admin/logs/stream');
     es.onmessage = (e) => {
       const stick = nearBottom();
       // Append as text nodes — never parse log content as HTML.

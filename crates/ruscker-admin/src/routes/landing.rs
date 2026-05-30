@@ -134,7 +134,7 @@ async fn index(
     let mut cards: Vec<CardCtx<'_>> = owned_specs
         .iter()
         .filter(|spec| spec.access_allows(is_admin, username.as_deref(), &groups))
-        .map(CardCtx::from_spec)
+        .map(|spec| CardCtx::from_spec(spec, &state.base_path))
         .collect();
     sort_by_recent(&mut cards);
     let type_chips = build_type_chips(&cards);

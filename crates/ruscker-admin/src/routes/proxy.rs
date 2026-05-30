@@ -309,7 +309,13 @@ async fn forward(
             // is sent to log in; everyone else (and all API clients) get
             // a flat 403 (CORS-wrapped for the `/api/` family).
             if route_prefix == APP_PREFIX && session.is_none() {
-                return Redirect::to("/admin/login").into_response();
+                // Proxy routes are not wrapped by the chrome's
+                // `prefix_base_path` Location-rewriter, so build the
+                // base-prefixed login URL ourselves (#294) — otherwise a
+                // `/box/app/<spec>` visitor is bounced to a `/admin/login`
+                // that 404s outside the mount.
+                return Redirect::to(&format!("{}/admin/login", state.base_path))
+                    .into_response();
             }
             return with_cors(
                 (StatusCode::FORBIDDEN, "access denied\n").into_response(),

@@ -393,7 +393,7 @@
   } catch (_) { /* initial snapshot embedding is best-effort */ }
 
   if (!window.EventSource) return;
-  var es = new EventSource('/admin/dashboard/events');
+  var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/events');
   es.onmessage = function (e) {
     try { apply(JSON.parse(e.data)); } catch (_) { /* ignore */ }
   };

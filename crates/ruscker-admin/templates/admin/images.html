@@ -48,33 +48,83 @@
     {{ self.t("admin-images-empty") }}
   </div>
 {% else %}
-  <section class="image-gallery">
-    {% for img in images %}
-      <div class="image-tile">
-        <a href="/assets/img/{{ img.filename }}" target="_blank" class="image-tile-frame"
-           title="{{ img.filename }}">
-          <img src="/assets/img/{{ img.filename }}?thumb" alt="" loading="lazy">
-        </a>
-        <div class="image-tile-meta">
-          <div class="image-tile-name" title="{{ img.filename }}">{{ img.filename }}</div>
-          <div class="image-tile-sub">
-            <span>{{ self.fmt_size(img.size_bytes) }}</span>
-            <span class="opacity-60">·</span>
-            <span>{{ img.mime_type }}</span>
-            {% match img.width %}{% when Some with (w) %}{% match img.height %}{% when Some with (h) %}
-              <span class="opacity-60">·</span><span>{{ w }}×{{ h }}</span>
-            {% when None %}{% endmatch %}{% when None %}{% endmatch %}
+  {# Client-side filter + "show more" so a large library doesn't render
+     every tile (and fire a thumbnail request each) on load (#317). The
+     metadata is small and already in memory; paging/filtering is instant.
+     Mirrors the spec-form logo picker (#293). #}
+  <div x-data="ruscker.mediaGallery({{ self.images_json()|safe }})" x-cloak>
+    <div class="mb-4">
+      <input type="search" x-model="q"
+             placeholder="{{ self.t("admin-images-search") }}"
+             class="admin-input w-full max-w-xs text-sm"
+             style="padding:6px 10px">
+    </div>
+
+    <section class="image-gallery">
+      <template x-for="img in filtered().slice(0, shown)" :key="img.id">
+        <div class="image-tile">
+          <a :href="assetUrl('/assets/img/' + img.filename)" target="_blank"
+             class="image-tile-frame" :title="img.filename">
+            <img :src="assetUrl('/assets/img/' + img.filename) + '?thumb'" alt="" loading="lazy">
+          </a>
+          <div class="image-tile-meta">
+            <div class="image-tile-name" :title="img.filename" x-text="img.filename"></div>
+            <div class="image-tile-sub">
+              <span x-text="img.size"></span>
+              <span class="opacity-60">·</span>
+              <span x-text="img.mime"></span>
+              <template x-if="img.dims">
+                <span><span class="opacity-60">·</span><span x-text="img.dims"></span></span>
+              </template>
+            </div>
           </div>
+          <form method="post" :action="assetUrl('/admin/media/' + img.id + '/delete')"
+                onsubmit="return confirm('{{ self.t("admin-images-delete-confirm") }}');">
+            <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">
+              <i class="ti ti-trash" aria-hidden="true"></i>
+            </button>
+          </form>
         </div>
-        <form method="post" action="/admin/media/{{ img.id }}/delete"
-              onsubmit="return confirm('{{ self.t("admin-images-delete-confirm") }}');">
-          <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">
-            <i class="ti ti-trash" aria-hidden="true"></i>
-          </button>
-        </form>
-      </div>
-    {% endfor %}
-  </section>
+      </template>
+    </section>
+
+    {# Empty filter result #}
+    <div x-show="filtered().length === 0"
+         class="card-surface rounded-lg p-8 text-center text-sm text-[color:var(--text-muted)] mt-2">
+      {{ self.t("admin-images-no-match") }}
+    </div>
+
+    {# "Show more (N)" — reveals the next page client-side #}
+    <div class="mt-4 text-center" x-show="filtered().length > shown">
+      <button type="button" @click="shown += page" class="admin-nav-link text-xs"
+              x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (filtered().length - shown) + ')'"></button>
+    </div>
+  </div>
+
+  <script>
+  window.ruscker = window.ruscker || {};
+  // Media gallery: filter by filename + paginate render (#317). The full
+  // metadata list (no blobs) is seeded from `x-data`; we only ever render
+  // `shown` of the filtered set, so the DOM + thumbnail fetches stay
+  // bounded regardless of library size.
+  window.ruscker.mediaGallery = (items) => ({
+    all: Array.isArray(items) ? items : [],
+    q: '',
+    shown: 24,
+    page: 24,
+    filtered() {
+      const t = this.q.trim().toLowerCase();
+      return t ? this.all.filter((i) => i.filename.toLowerCase().includes(t)) : this.all;
+    },
+    // Prefix the base path on a root-absolute asset/action URL so the
+    // gallery works under `--base-path /box` (#270) — these URLs are
+    // built at runtime, so the static-HTML response rewriter never sees
+    // them. Stored values stay base-agnostic.
+    assetUrl(p) {
+      return p && p.charAt(0) === '/' ? (window.RUSCKER_BASE || '') + p : (p || '');
+    },
+  });
+  </script>
 {% endif %}
 
 {% endblock %}

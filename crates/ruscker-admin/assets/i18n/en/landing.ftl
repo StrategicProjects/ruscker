@@ -248,6 +248,8 @@ admin-images-uploaded = Image uploaded:
 admin-images-empty = No images yet. Upload the first one above.
 admin-images-delete = Delete
 admin-images-delete-confirm = Delete this image? Specs referencing the filename will fall back to the tinted cover.
+admin-images-search = Search images…
+admin-images-no-match = No images match your search.
 
 # Admin credentials
 admin-creds-title = Registry credentials

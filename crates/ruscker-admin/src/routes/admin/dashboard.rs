@@ -33,7 +33,10 @@ use chrono::Utc;
 use futures_util::stream::Stream;
 use ruscker_core::{Replica, ReplicaId, ReplicaState};
 use std::convert::Infallible;
-use std::time::Duration;
+use std::sync::{Arc, LazyLock};
+use std::time::{Duration, Instant};
+
+use dashmap::DashMap;
 
 use crate::auth::{AdminSession, RequireEditor, Role};
 use crate::i18n::{Locale, Locales};
@@ -69,6 +72,17 @@ const SSE_INTERVAL: Duration = Duration::from_secs(5);
 /// proxy idle timeout. Doesn't trigger the JS `onmessage`
 /// handler.
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Per-locale memoized dashboard snapshot (#291). Building a snapshot
+/// reads the registry, fetches the effective spec catalog (a DB query),
+/// and assembles the rows; with N open dashboard tabs each running its
+/// own [`SSE_INTERVAL`] loop that was N× the work every tick. The whole
+/// snapshot is the same for everyone in a given locale (only the state
+/// labels are localized), so cache it for one interval and let every
+/// tab/connection in that locale reuse it. Keyed by locale (≤4 entries);
+/// a clone of the cached snapshot is cheap next to a fresh DB build.
+static SNAPSHOT_CACHE: LazyLock<DashMap<Locale, (Instant, Arc<DashboardSnapshot>)>> =
+    LazyLock::new(DashMap::new);
 
 /// One row of the replicas table — flattened for the template
 /// and also serialized as JSON over the SSE stream so the
@@ -278,7 +292,21 @@ async fn index(
 /// `locale` is needed to translate the per-state labels server-
 /// side; the JS subscriber then just stamps the strings into
 /// the DOM without owning a locale bundle of its own.
+/// Snapshot for the dashboard + SSE, memoized per locale for one
+/// [`SSE_INTERVAL`] (#291) so N concurrent tabs share one build instead
+/// of each re-querying the DB every tick.
 async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
+    if let Some(entry) = SNAPSHOT_CACHE.get(&locale) {
+        if entry.0.elapsed() < SSE_INTERVAL {
+            return (*entry.1).clone();
+        }
+    }
+    let snap = build_snapshot_uncached(state, locale).await;
+    SNAPSHOT_CACHE.insert(locale, (Instant::now(), Arc::new(snap.clone())));
+    snap
+}
+
+async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardSnapshot {
     let backend_connected = state.backend.is_some();
 
     // Snapshot the registry once. Cloning `Replica` is cheap

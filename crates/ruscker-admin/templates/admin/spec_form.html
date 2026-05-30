@@ -912,10 +912,17 @@ window.ruscker.specForm = (initial, logoImages) => ({
   },
   setCoverMode(mode) {
     this.coverMode = mode;
-    if (mode === 'auto') this.form.cover = '';
-    else if (mode === 'gradient') this.applyCoverGrad();
-    // 'solid' / 'image' keep whatever's in form.cover until the
-    // operator picks a color / image.
+    if (mode === 'auto') { this.form.cover = ''; return; }
+    if (mode === 'gradient') { this.applyCoverGrad(); return; }
+    // 'solid' / 'image' keep the current value only if it already
+    // matches the new mode; otherwise clear it so the saved cover can't
+    // disagree with the chosen mode (#304). The operator then picks a
+    // color / image.
+    const c = (this.form.cover || '').trim();
+    const isGradient = /^(linear|radial)-gradient\(/.test(c);
+    const isImage = c.startsWith('url(');
+    if (mode === 'solid' && (isGradient || isImage)) this.form.cover = '';
+    if (mode === 'image' && !isImage) this.form.cover = '';
   },
   // Set the cover to a library image as a CSS background (#213).
   setCoverImage(name) {

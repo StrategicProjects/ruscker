@@ -180,6 +180,14 @@ pub struct Proxy {
     #[serde(rename = "shutdown-grace-ms")]
     pub shutdown_grace_ms: u64,
 
+    /// How often the dashboard metrics cache polls the backend for
+    /// per-replica CPU/memory, in **seconds**. Each poll fans out
+    /// `stats` round-trips to the Docker daemon, so a busy host may
+    /// prefer a slower cadence (10–15 s). `0` falls back to the
+    /// 5 s default. Ruscker extension — not present in ShinyProxy YAML.
+    #[serde(rename = "metrics-interval", default)]
+    pub metrics_interval_secs: u64,
+
     /// Maximum request body accepted on proxied routes (`/app/*`,
     /// `/api/*`), as a Docker-style size string (`"10m"`, `"1g"`,
     /// or plain bytes). A request whose `Content-Length` exceeds
@@ -285,6 +293,7 @@ impl Default for Proxy {
             heartbeat_timeout: 3_600_000,
             container_wait_time: 60_000,
             shutdown_grace_ms: 30_000,
+            metrics_interval_secs: 0,
             max_body_size: None,
             container_log_path: None,
             port: 8080,
@@ -299,6 +308,16 @@ impl Default for Proxy {
 }
 
 impl Proxy {
+    /// Dashboard metrics poll interval in seconds, honoring
+    /// `proxy.metrics-interval` (0 ⇒ the 5 s default).
+    pub fn effective_metrics_interval_secs(&self) -> u64 {
+        if self.metrics_interval_secs == 0 {
+            5
+        } else {
+            self.metrics_interval_secs
+        }
+    }
+
     /// Global default max request-body size in bytes, parsed from
     /// `proxy.max-body-size`. `None` (unset or malformed) means no
     /// global default; the validator flags a malformed value.
@@ -1052,6 +1071,16 @@ mod parse_memory_tests {
     #[test]
     fn whitespace_tolerated() {
         assert_eq!(parse_memory_string("  512m  "), Some(512 * 1024 * 1024));
+    }
+
+    #[test]
+    fn metrics_interval_defaults_to_5s_else_honors_config() {
+        // Unset / 0 ⇒ 5 s default.
+        assert_eq!(Proxy::default().effective_metrics_interval_secs(), 5);
+        // `proxy.metrics-interval: 12` is honored.
+        let cfg = crate::Config::from_yaml("proxy:\n  metrics-interval: 12\n").unwrap();
+        assert_eq!(cfg.proxy.metrics_interval_secs, 12);
+        assert_eq!(cfg.proxy.effective_metrics_interval_secs(), 12);
     }
 }
 

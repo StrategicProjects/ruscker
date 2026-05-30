@@ -34,6 +34,11 @@ use tracing::{info, warn};
 /// CPU delta windows large enough to read sanely.
 pub const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 
+/// Max concurrent `stats` round-trips to the Docker daemon per refresh
+/// (#288). Bounds the burst on a host with many replicas; the calls
+/// still overlap, just not all at once.
+const MAX_CONCURRENT_STATS: usize = 8;
+
 /// How many recent samples to keep per replica for the dashboard
 /// sparklines. 30 × [`REFRESH_INTERVAL`] (5 s) ≈ 2.5 min of history —
 /// enough to show a trend without unbounded growth.
@@ -157,20 +162,24 @@ async fn refresh_once(
         return;
     }
 
-    // Fan out `backend.metrics_for()` calls in parallel. Each call
-    // is independent so they should overlap their Docker stats
-    // round-trips.
-    use futures_util::future::join_all;
-    let results: Vec<(ReplicaId, Result<ReplicaMetrics, _>)> = join_all(targets.into_iter().map(
-        |(id, container_id)| {
+    // Fan out `backend.metrics_for()` calls, but **bounded** — at most
+    // `MAX_CONCURRENT_STATS` in flight at once (#288). `join_all` would
+    // fire one Docker `stats` round-trip per replica simultaneously,
+    // which on a host with many replicas bursts the daemon and can drag
+    // the whole admin. `buffer_unordered` caps the burst while still
+    // overlapping the independent round-trips.
+    use futures_util::stream::{self, StreamExt};
+    let results: Vec<(ReplicaId, Result<ReplicaMetrics, _>)> =
+        stream::iter(targets.into_iter().map(|(id, container_id)| {
             let id_for_err = id.clone();
             async move {
                 let r = backend.metrics_for(&id, &container_id).await;
                 (id_for_err, r)
             }
-        },
-    ))
-    .await;
+        }))
+        .buffer_unordered(MAX_CONCURRENT_STATS)
+        .collect()
+        .await;
 
     let mut fresh = Vec::with_capacity(results.len());
     for (id, result) in results {

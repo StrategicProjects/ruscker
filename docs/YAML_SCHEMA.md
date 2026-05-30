@@ -79,6 +79,7 @@ ignored by Ruscker.
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
 | `metrics-enabled` | bool | `false` | Expose a Prometheus `/metrics` endpoint (**unauthenticated** when on — firewall it). Ruscker extension |
+| `metrics-interval` | s | `5` | How often the dashboard polls the backend for per-replica CPU/mem. A busy host can slow it (`10`–`15`) to ease the Docker daemon. `0` ⇒ default. Ruscker extension |
 | `hosts` | list | `[]` | Docker hosts for multi-host scheduling (Phase 6). Empty ⇒ the local daemon. Ruscker extension |
 
 ### `proxy.hosts` — multi-host scheduling (Phase 6)

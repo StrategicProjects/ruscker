@@ -546,12 +546,17 @@ async fn spawn_one(
 
     let inner_port = spec.effective_inner_port();
 
-    let creds = crate::routes::proxy::resolve_creds(state, spec).await;
+    let creds = crate::routes::proxy::resolve_creds(state, spec).await?;
     let limits = crate::routes::proxy::limits_from_spec(spec);
+    // Resolve `${VAR}` in container-env at the point of use; an unset var
+    // fails the spawn naming it (#314) rather than injecting a literal.
+    let env = spec
+        .resolved_env_pairs()
+        .map_err(|e| anyhow::anyhow!("spec {} container-env: {e}", spec.id))?;
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
         .with_limits(limits)
         .with_volumes(spec.volumes.clone().unwrap_or_default())
-        .with_env(spec.resolved_env_pairs())
+        .with_env(env)
         .with_placement(spec.effective_placement())
         .with_anti_affinity(spec.effective_anti_affinity());
     if let Some(port) = inner_port {

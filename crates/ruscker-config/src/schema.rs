@@ -796,19 +796,22 @@ impl Spec {
     /// `container-env` values are kept as `${VAR}` literals in the
     /// config/DB (#272) — they're only resolved here, right before the
     /// container is created, so an app secret never lands in the DB.
-    /// Idempotent: a value with no `${...}` is unchanged. An unset var
-    /// with no default keeps the literal (the operator should set it).
-    /// Use this on the spawn path; `env_pairs` (raw) is for display.
-    pub fn resolved_env_pairs(&self) -> Vec<String> {
+    /// Idempotent: a value with no `${...}` is unchanged.
+    ///
+    /// Returns the **real cause** when a referenced env var is unset
+    /// (`Error::MissingEnvVar { name }`) instead of silently keeping the
+    /// `${VAR}` literal (#314). The spawn path propagates this so the
+    /// failure names the missing variable, rather than relying on the
+    /// backend scanning the final string for a residual `${` — a scan
+    /// that would also reject a legitimately-resolved value that happens
+    /// to contain the literal `${`. Use this on the spawn path;
+    /// `env_pairs` (raw) is for display.
+    pub fn resolved_env_pairs(&self) -> crate::error::Result<Vec<String>> {
         self.env_pairs()
             .into_iter()
             .map(|kv| match kv.split_once('=') {
-                Some((k, v)) => {
-                    let resolved =
-                        crate::env::interpolate_value(v).unwrap_or_else(|_| v.to_string());
-                    format!("{k}={resolved}")
-                }
-                None => kv,
+                Some((k, v)) => Ok(format!("{k}={}", crate::env::interpolate_value(v)?)),
+                None => Ok(kv),
             })
             .collect()
     }
@@ -1610,7 +1613,7 @@ proxy:
         // the Spec (and thus never the DB on import).
         assert_eq!(spec.env_pairs(), vec!["DB_PASSWORD=${RUSCKER_TEST_DB_PASS}"]);
         // Resolved only at use.
-        assert_eq!(spec.resolved_env_pairs(), vec!["DB_PASSWORD=s3cret"]);
+        assert_eq!(spec.resolved_env_pairs().unwrap(), vec!["DB_PASSWORD=s3cret"]);
         unsafe { std::env::remove_var("RUSCKER_TEST_DB_PASS") };
     }
 

@@ -29,19 +29,76 @@ use crate::AppState;
 /// The picker tiles render at ~48 px; 96 covers HiDPI.
 const THUMB_MAX_DIM: u32 = 96;
 
-/// Process-wide cache of generated thumbnails, keyed by filename.
-/// First request for an image pays the decode+resize; the rest hit this
-/// cache. A filename's bytes CAN change (a re-upload `REPLACE`s the same
-/// name), so [`invalidate_thumb`] must be called on upload/delete — the
-/// cache is not self-invalidating (#301). Bounded by the media library.
-static THUMB_CACHE: LazyLock<DashMap<String, Vec<u8>>> = LazyLock::new(DashMap::new);
+/// Process-wide cache of generated thumbnails, **content-addressed** by
+/// `(filename, hash-of-source-bytes)`.
+///
+/// Keying on the source-blob hash makes the cache correct under
+/// active-active HA: a re-upload on *another* node (the catalog DB is
+/// shared) changes the bytes, hence the hash, hence the key — so this
+/// node misses and regenerates instead of serving a stale thumbnail
+/// (#313). Keying on filename alone could not see another node's upload,
+/// because [`invalidate_thumb`] is process-local.
+///
+/// First request for a given `(name, bytes)` pays the decode+resize; the
+/// rest hit the cache. We still fetch the (small) source blob on every
+/// request — the genuinely expensive work the cache skips is the
+/// decode+resize, not the DB read. [`invalidate_thumb`] still prunes a
+/// filename's now-stale entries on the local node so memory stays bounded
+/// after a re-upload/delete here (#301).
+static THUMB_CACHE: LazyLock<DashMap<(String, u64), Vec<u8>>> = LazyLock::new(DashMap::new);
 
-/// Drop a filename's cached thumbnail. Call this whenever the bytes
-/// behind a filename change — an upload `REPLACE`s a same-named image,
-/// and a delete removes it — otherwise the gallery serves the stale
-/// thumbnail for the rest of the process's life (#301).
+/// Drop a filename's cached thumbnails. With the content-addressed key
+/// (#313) the cache is already cross-node correct — changed bytes hash to
+/// a different key, so no node serves a stale thumbnail — but the old
+/// entry would otherwise linger on *this* node until the process exits.
+/// Pruning every entry for the filename on a local upload/delete keeps
+/// memory bounded (the intent of #301).
 pub(crate) fn invalidate_thumb(filename: &str) {
-    THUMB_CACHE.remove(filename);
+    THUMB_CACHE.retain(|(name, _), _| name != filename);
+}
+
+/// Fast, non-cryptographic content hash for the thumbnail cache key —
+/// same hasher family as [`etag_for`]. Good enough to detect a changed
+/// blob; not security-sensitive.
+fn content_hash(bytes: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    h.finish()
+}
+
+#[cfg(test)]
+mod thumb_cache_tests {
+    use super::*;
+
+    #[test]
+    fn content_hash_changes_with_bytes() {
+        // The whole point of #313: changed bytes ⇒ a different cache key,
+        // so a re-upload (here or on another HA node) can't be served the
+        // old thumbnail.
+        let a = content_hash(b"original-png-bytes");
+        let b = content_hash(b"re-uploaded-png-bytes");
+        assert_ne!(a, b, "different bytes must hash to different keys");
+        assert_eq!(a, content_hash(b"original-png-bytes"), "stable for same bytes");
+    }
+
+    #[test]
+    fn invalidate_thumb_prunes_only_the_named_file() {
+        // Seed two filenames (one with two content versions) and confirm
+        // invalidating one leaves the other's entries intact.
+        THUMB_CACHE.insert(("keep.png".into(), 1), vec![1]);
+        THUMB_CACHE.insert(("drop.png".into(), 1), vec![2]);
+        THUMB_CACHE.insert(("drop.png".into(), 2), vec![3]);
+
+        invalidate_thumb("drop.png");
+
+        assert!(THUMB_CACHE.contains_key(&("keep.png".into(), 1)), "other file kept");
+        assert!(!THUMB_CACHE.contains_key(&("drop.png".into(), 1)), "stale version pruned");
+        assert!(!THUMB_CACHE.contains_key(&("drop.png".into(), 2)), "all versions pruned");
+
+        // Don't leak test state into other tests sharing the process-wide map.
+        THUMB_CACHE.remove(&("keep.png".into(), 1));
+    }
 }
 
 /// `?thumb` query flag on `/assets/img/{filename}`.
@@ -168,24 +225,27 @@ async fn serve_card_image(
         return StatusCode::BAD_REQUEST.into_response();
     }
 
-    // Thumbnail fast path: serve a cached small WebP if we've already
-    // made one for this (immutable) filename (#283).
     let want_thumb = q.thumb.is_some();
-    if want_thumb {
-        if let Some(cached) = THUMB_CACHE.get(&filename) {
-            return serve_thumbnail_bytes(&req_headers, cached.clone());
-        }
-    }
 
     // Resolve the full image bytes: DB first, then the on-disk fallback.
+    // We fetch on every `?thumb` request too — the source hash is the
+    // cache key (#313), so the bytes are needed to look the thumbnail up.
+    // The blob is small; the expensive step the cache still skips is the
+    // decode+resize below.
     let Some((mime, bytes)) = fetch_image_bytes(&state, &filename).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
 
     // Vector / no resize needed → serve as-is. Raster + `?thumb` →
-    // generate a thumbnail (off the async worker), cache, and serve.
+    // serve the content-addressed cached thumbnail if present, else
+    // generate one (off the async worker), cache, and serve. The key is
+    // `(filename, hash(bytes))`, so a re-upload on any HA node naturally
+    // misses here and regenerates — never a stale thumbnail (#313).
     if want_thumb && mime != "image/svg+xml" {
-        let fname = filename.clone();
+        let key = (filename.clone(), content_hash(&bytes));
+        if let Some(cached) = THUMB_CACHE.get(&key) {
+            return serve_thumbnail_bytes(&req_headers, cached.clone());
+        }
         let src = bytes.clone();
         match tokio::task::spawn_blocking(move || {
             crate::images::thumbnail_webp(&src, THUMB_MAX_DIM)
@@ -193,7 +253,7 @@ async fn serve_card_image(
         .await
         {
             Ok(Ok(thumb)) => {
-                THUMB_CACHE.insert(fname, thumb.clone());
+                THUMB_CACHE.insert(key, thumb.clone());
                 return serve_thumbnail_bytes(&req_headers, thumb);
             }
             Ok(Err(err)) => {

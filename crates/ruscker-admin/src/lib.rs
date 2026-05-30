@@ -396,7 +396,9 @@ impl AdminServer {
                 self.state.metrics.clone(),
                 backend,
                 self.state.replicas.clone(),
-                metrics_cache::REFRESH_INTERVAL,
+                // `proxy.metrics-interval` (seconds; 0 ⇒ 5 s default) —
+                // a busy host can poll Docker stats less often (#288).
+                std::time::Duration::from_secs(self.state.config.proxy.effective_metrics_interval_secs()),
             );
         }
 

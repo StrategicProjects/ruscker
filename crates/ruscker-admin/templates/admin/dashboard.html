@@ -269,43 +269,68 @@
     if (el && el.textContent !== String(value)) el.textContent = value;
   }
 
-  function rowHtml(row) {
-    var cpu = row.cpu_display !== null && row.cpu_display !== undefined
-      ? escapeHtml(row.cpu_display)
+  function metricCell(display) {
+    return display !== null && display !== undefined
+      ? escapeHtml(display)
       : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
-    var mem = row.memory_display !== null && row.memory_display !== undefined
-      ? escapeHtml(row.memory_display)
-      : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
-    var actions = !canManage ? '' : ''
-      + '<a href="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/logs/' + encodeURIComponent(row.replica_id)
-        + '" title="' + escapeHtml(logsTitle)
+  }
+  function actionsHtml(row) {
+    if (!canManage) return '';
+    var base = window.RUSCKER_BASE || '';
+    var rid = encodeURIComponent(row.replica_id);
+    return ''
+      + '<a href="' + base + '/admin/dashboard/logs/' + rid + '" title="' + escapeHtml(logsTitle)
         + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
-      + '<form method="post" action="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+      + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
         + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
         + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
       + '</form>'
-      + '<form method="post" action="' + (window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(row.replica_id)
+      + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
         + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
         + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
       + '</form>';
-    return ''
-      + '<td><span class="dash-dot ' + escapeHtml(row.state_dot) + '"></span></td>'
-      + '<td>'
-        + '<div style="font-weight: 500;">' + escapeHtml(row.display_name) + '</div>'
-        + '<div class="dash-mono">' + escapeHtml(row.spec_id) + '</div>'
-      + '</td>'
-      + '<td>' + escapeHtml(row.state_label) + '</td>'
-      + '<td class="dash-mono">' + escapeHtml(row.uptime) + '</td>'
-      + '<td>' + row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span></td>'
-      + '<td><span class="dash-metric-val">' + cpu + '</span>'
-        + spark(row.cpu_history, 'var(--accent, #1d9e75)') + '</td>'
-      + '<td><span class="dash-metric-val">' + mem + '</span>'
-        + spark(row.mem_history, 'var(--accent-2, #5dcaa5)') + '</td>'
-      + '<td>' + (row.host ? escapeHtml(row.host) : '<span style="color:var(--text-faint)">local</span>') + '</td>'
-      + '<td class="dash-mono">' + escapeHtml(row.container_short) + '</td>'
-      + '<td style="white-space: nowrap;">'
-        + actions
-      + '</td>';
+  }
+
+  // One renderer per <td>, in column order. Each returns that cell's
+  // inner HTML; CELL_TD carries its `<td>` attributes. We diff per cell
+  // so a tick only rewrites the cells whose value actually changed (#292)
+  // — uptime/CPU/mem change every tick, but the name/host/actions cells
+  // stay put, so we stop churning their DOM.
+  var CELL_TD = ['', '', '', ' class="dash-mono"', '', '', '', '', ' class="dash-mono"', ' style="white-space: nowrap;"'];
+  var CELLS = [
+    function (row) { return '<span class="dash-dot ' + escapeHtml(row.state_dot) + '"></span>'; },
+    function (row) { return '<div style="font-weight: 500;">' + escapeHtml(row.display_name) + '</div><div class="dash-mono">' + escapeHtml(row.spec_id) + '</div>'; },
+    function (row) { return escapeHtml(row.state_label); },
+    function (row) { return escapeHtml(row.uptime); },
+    function (row) { return row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span>'; },
+    function (row) { return '<span class="dash-metric-val">' + metricCell(row.cpu_display) + '</span>' + spark(row.cpu_history, 'var(--accent, #1d9e75)'); },
+    function (row) { return '<span class="dash-metric-val">' + metricCell(row.memory_display) + '</span>' + spark(row.mem_history, 'var(--accent-2, #5dcaa5)'); },
+    function (row) { return row.host ? escapeHtml(row.host) : '<span style="color:var(--text-faint)">local</span>'; },
+    function (row) { return escapeHtml(row.container_short); },
+    function (row) { return actionsHtml(row); }
+  ];
+
+  // Render or update a <tr>: a fresh row builds all cells once; an
+  // existing one rewrites only the cells whose HTML changed.
+  function renderRow(tr, row) {
+    var i, html;
+    if (!tr._cells) {
+      html = '';
+      tr._cells = [];
+      for (i = 0; i < CELLS.length; i++) {
+        tr._cells[i] = CELLS[i](row);
+        html += '<td' + CELL_TD[i] + '>' + tr._cells[i] + '</td>';
+      }
+      tr.innerHTML = html;
+      return;
+    }
+    for (i = 0; i < CELLS.length; i++) {
+      var c = CELLS[i](row);
+      if (c !== tr._cells[i]) {
+        tr.children[i].innerHTML = c;
+        tr._cells[i] = c;
+      }
+    }
   }
 
   function apply(snap) {
@@ -339,6 +364,10 @@
       if (id) existing[id] = tr;
     });
 
+    // Reuse existing <tr>s (preserving their per-cell cache so the diff
+    // works) and place them in the snapshot's order; only new replicas
+    // build a fresh row. Moving a node in `replaceChildren` keeps its
+    // children + cache — no innerHTML rewrite for unchanged rows (#292).
     var frag = document.createDocumentFragment();
     snap.rows.forEach(function (row) {
       var tr = existing[row.replica_id];
@@ -346,7 +375,7 @@
         tr = document.createElement('tr');
         tr.dataset.replicaId = row.replica_id;
       }
-      tr.innerHTML = rowHtml(row);
+      renderRow(tr, row);
       frag.appendChild(tr);
     });
     tbody.replaceChildren(frag);

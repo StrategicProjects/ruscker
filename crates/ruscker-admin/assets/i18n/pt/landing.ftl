@@ -185,6 +185,7 @@ admin-specs-filter-search = Buscar por id ou nome…
 admin-specs-filter-kind-all = Todos os tipos
 admin-specs-filter-state-all = Ativos e inativos
 admin-specs-edit = Editar
+admin-specs-duplicate = Duplicar
 admin-specs-config-badge = config
 admin-specs-config-defined = Definido no YAML — somente leitura aqui; edite o arquivo
 admin-specs-delete = Apagar

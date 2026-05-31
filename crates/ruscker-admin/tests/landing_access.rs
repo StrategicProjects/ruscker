@@ -485,3 +485,41 @@ async fn spec_form_preview_matches_landing_svg_fit() {
         "preview must apply the SVG contain-fit rule like the landing card"
     );
 }
+
+#[tokio::test]
+async fn duplicate_opens_new_form_prefilled_with_fresh_id() {
+    // #368: duplicating a spec opens the *New* form pre-filled from the
+    // source, with a unique `-copy` id so the submit creates a brand-new
+    // spec (the source is untouched).
+    let db = open_db().await;
+    let cfg = Config::from_yaml(
+        "proxy:\n  specs:\n    - id: voila\n      display-name: Voila\n      container-image: img/voila:1\n",
+    )
+    .expect("parse spec yaml");
+    ruscker_admin::db::specs::upsert_one(&db, &cfg.proxy.specs[0], None)
+        .await
+        .expect("insert spec");
+    let state = app_state(db).await;
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/specs/voila/duplicate")
+                .header(header::COOKIE, format!("{COOKIE_NAME}={sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    // Fresh id + source fields carried over.
+    assert!(body.contains(r#"value="voila-copy""#), "id suffixed to -copy");
+    assert!(body.contains("img/voila:1"), "source image pre-filled");
+    // New mode → the form posts to the create endpoint (no id in action).
+    assert!(body.contains(r#"action="/admin/specs""#), "New-mode create action");
+}

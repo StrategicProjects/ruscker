@@ -278,18 +278,20 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             rst.kind_override = Some(ruscker_config::SpecKindOverride::App);
             rst
         },
-        // R Markdown isn't a server — it's a document format. Linked to
-        // its docs rather than launching a container (the RStudio Server
-        // card above is what actually renders/previews `.Rmd` files).
+        // R Markdown demo — OpenAnalytics' `shinyproxy-rmarkdown-demo`
+        // renders an `.Rmd` document with a Shiny backend, so it routes
+        // exactly like the Shiny card (sticky + WebSocket, port 3838) and
+        // the existing `/app` rewriter handles its URLs without extra
+        // base-url flags. amd64-only image → pin the platform (#354).
         card(
             "rmarkdown",
             "R Markdown",
-            "Reproducible R documents — author and render in RStudio.",
+            "Reproducible R documents rendered live, with a Shiny backend.",
             "/assets/showcase/rmarkdown.svg",
             "https://rmarkdown.rstudio.com",
-            None,
-            None,
-            None,
+            Some("openanalytics/shinyproxy-rmarkdown-demo:latest"),
+            Some(3838),
+            Some("linux/amd64"),
         )?,
         // ── External-link cards (no public hello image) ─────────────
         card(

@@ -163,7 +163,11 @@ fn rewrite_url(value: &str, base_path: &str) -> Option<String> {
 /// Name kept as `inject_base_href` for source-compat with the
 /// proxy handler that calls this; the function now does both
 /// jobs.
-pub async fn inject_base_href(resp: Response<Body>, base_path: &str) -> Response<Body> {
+pub async fn inject_base_href(
+    resp: Response<Body>,
+    base_path: &str,
+    upstream: &str,
+) -> Response<Body> {
     let (mut parts, body) = resp.into_parts();
 
     // Redirects first — they carry no HTML body, so they'd otherwise
@@ -222,14 +226,25 @@ pub async fn inject_base_href(resp: Response<Body>, base_path: &str) -> Response
         return Response::from_parts(parts, Body::empty());
     }
 
-    let rewritten = match transform(bytes.as_ref(), base_path) {
+    // #373: rewrite the container's OWN internal authority
+    // (`http://127.0.0.1:<published-port>/…`) to the mount before the
+    // lol_html pass. Apps like the FastAPI demo build absolute URLs from
+    // the Host they receive (the internal upstream), so their assets
+    // point the browser at an unreachable `127.0.0.1:<port>`. No-op when
+    // the body doesn't mention the upstream or it isn't valid UTF-8.
+    let authority_rewritten = std::str::from_utf8(bytes.as_ref())
+        .ok()
+        .and_then(|s| rewrite_upstream_authority(s, upstream, base_path));
+    let input: &[u8] = authority_rewritten.as_deref().map_or(bytes.as_ref(), str::as_bytes);
+
+    let rewritten = match transform(input, base_path) {
         Ok(r) => r,
         Err(e) => {
             // lol_html failures are exceptional (allocation
             // errors, etc.). Fall back to the original body
             // rather than nuking the response.
             tracing::warn!(error = ?e, "HTML transform failed; serving upstream body as-is");
-            bytes.to_vec()
+            input.to_vec()
         }
     };
 
@@ -414,6 +429,27 @@ fn rewrite_jupyter_config(html: &str, base_path: &str) -> Option<String> {
     out.push_str(close_tag);
     out.push_str(&html[full.end()..]);
     Some(out)
+}
+
+/// Rewrite the container's own internal authority to the mount path
+/// (#373). An app behind the proxy that builds absolute URLs from the
+/// `Host` it sees (e.g. Starlette/FastAPI `url_for`) emits
+/// `http://127.0.0.1:<port>/static/x` — the published *internal* address,
+/// unreachable from the browser. Replace `http(s)://{upstream}` with the
+/// public mount prefix so `…/static/x` resolves under `/box/app/{spec}/`.
+/// `Some` only when something changed; `None` for an empty `upstream` or
+/// a body that doesn't mention it.
+fn rewrite_upstream_authority(html: &str, upstream: &str, base_path: &str) -> Option<String> {
+    if upstream.is_empty() {
+        return None;
+    }
+    let mount = base_path.trim_end_matches('/'); // e.g. /box/app/fastapi
+    let http = format!("http://{upstream}");
+    let https = format!("https://{upstream}");
+    if !html.contains(&http) && !html.contains(&https) {
+        return None;
+    }
+    Some(html.replace(&http, mount).replace(&https, mount))
 }
 
 /// Run the streaming transform: inject `<base href>`, the
@@ -634,10 +670,41 @@ mod tests {
         // Through the full HTML transform: the config URLs are prefixed
         // AND the `<base href>` + shim are injected in one pass.
         let html = r#"<html><head><script id="jupyter-config-data" type="application/json">{"baseUrl": "/", "fullStaticUrl": "/static/lab"}</script></head><body></body></html>"#;
-        let out = body_string(inject_base_href(html_response(html), "/box/app/jupyter/").await).await;
+        let out = body_string(inject_base_href(html_response(html), "/box/app/jupyter/", "").await).await;
         assert!(out.contains(r#""baseUrl":"/box/app/jupyter/""#), "config: {out}");
         assert!(out.contains(r#""fullStaticUrl":"/box/app/jupyter/static/lab""#));
         assert!(out.contains(r#"<base href="/box/app/jupyter/">"#), "base href: {out}");
+    }
+
+    #[test]
+    fn rewrite_upstream_authority_maps_internal_host_to_mount() {
+        // #373: an app that leaks its internal host:port in absolute URLs
+        // (FastAPI `url_for`) gets them rewritten to the public mount.
+        let html = r#"<link href="http://127.0.0.1:32800/static/logo.png"><script src="https://127.0.0.1:32800/static/index.js"></script>"#;
+        let out = rewrite_upstream_authority(html, "127.0.0.1:32800", "/box/app/fastapi/").unwrap();
+        assert!(out.contains(r#"href="/box/app/fastapi/static/logo.png""#), "{out}");
+        assert!(out.contains(r#"src="/box/app/fastapi/static/index.js""#), "{out}");
+        assert!(!out.contains("127.0.0.1:32800"), "internal authority gone: {out}");
+        // No-op: empty upstream, or a body that doesn't mention it.
+        assert_eq!(rewrite_upstream_authority(html, "", "/box/app/fastapi/"), None);
+        assert_eq!(rewrite_upstream_authority("<p>nope</p>", "127.0.0.1:32800", "/x/"), None);
+    }
+
+    #[tokio::test]
+    async fn inject_base_href_rewrites_leaked_upstream_authority() {
+        // Full pass: the leaked `http://{upstream}/static/x` becomes
+        // `/box/app/fastapi/static/x` (and isn't double-prefixed by the
+        // attribute rewriter, since it now starts with the base).
+        let html = r#"<html><head></head><body><img src="http://127.0.0.1:32800/static/logo.png"></body></html>"#;
+        let out = body_string(
+            inject_base_href(html_response(html), "/box/app/fastapi/", "127.0.0.1:32800").await,
+        )
+        .await;
+        assert!(
+            out.contains(r#"src="/box/app/fastapi/static/logo.png""#),
+            "leaked authority rewritten: {out}"
+        );
+        assert!(!out.contains("127.0.0.1:32800"), "no internal authority remains: {out}");
     }
 
     #[test]
@@ -840,7 +907,7 @@ mod tests {
     async fn inject_base_href_rewrites_html_response() {
         let body = "<html><head><title>x</title></head><body>hi</body></html>";
         let resp = html_response(body);
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         let content_length: usize = out
             .headers()
             .get(header::CONTENT_LENGTH)
@@ -862,7 +929,7 @@ mod tests {
     async fn inject_base_href_rewrites_attributes_in_full_response() {
         let body = r#"<html><head><script src="/lib/jquery.js"></script></head><body><img src="/img/x.png"></body></html>"#;
         let resp = html_response(body);
-        let out = inject_base_href(resp, "/app/a/").await;
+        let out = inject_base_href(resp, "/app/a/", "").await;
         let s = body_string(out).await;
         assert!(s.contains("src=\"/app/a/lib/jquery.js\""));
         assert!(s.contains("src=\"/app/a/img/x.png\""));
@@ -876,7 +943,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "application/json")
             .body(Body::from("{\"a\":1}"))
             .unwrap();
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         let s = body_string(out).await;
         assert_eq!(s, "{\"a\":1}");
     }
@@ -889,7 +956,7 @@ mod tests {
             .header(header::CONTENT_LENGTH, "1234")
             .body(Body::empty())
             .unwrap();
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         let cl = out
             .headers()
             .get(header::CONTENT_LENGTH)
@@ -909,7 +976,7 @@ mod tests {
             .header(header::LOCATION, "/lab")
             .body(Body::empty())
             .unwrap();
-        let out = inject_base_href(resp, "/app/jupyter/").await;
+        let out = inject_base_href(resp, "/app/jupyter/", "").await;
         assert_eq!(
             out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
             "/app/jupyter/lab"
@@ -926,7 +993,7 @@ mod tests {
             .header(header::LOCATION, "/login?next=/lab")
             .body(Body::empty())
             .unwrap();
-        let out = inject_base_href(resp, "/app/jupyter/").await;
+        let out = inject_base_href(resp, "/app/jupyter/", "").await;
         assert_eq!(
             out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
             "/app/jupyter/login?next=/lab"
@@ -940,7 +1007,7 @@ mod tests {
             .header(header::LOCATION, "https://auth.example.com/sso")
             .body(Body::empty())
             .unwrap();
-        let out = inject_base_href(resp, "/app/jupyter/").await;
+        let out = inject_base_href(resp, "/app/jupyter/", "").await;
         assert_eq!(
             out.headers().get(header::LOCATION).unwrap().to_str().unwrap(),
             "https://auth.example.com/sso"
@@ -953,7 +1020,7 @@ mod tests {
             .status(StatusCode::OK)
             .body(Body::from("<html><head></head></html>"))
             .unwrap();
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         let s = body_string(out).await;
         assert!(!s.contains("<base"));
     }
@@ -970,7 +1037,7 @@ mod tests {
             .header(header::CONTENT_LENGTH, (MAX_HTML_BYTES + 1).to_string())
             .body(Body::from(body))
             .unwrap();
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         assert_eq!(out.status(), StatusCode::OK);
         let s = body_string(out).await;
         assert_eq!(s, body, "body must pass through verbatim");
@@ -987,7 +1054,7 @@ mod tests {
             .header(header::CONTENT_TYPE, "text/html")
             .body(Body::from(big))
             .unwrap();
-        let out = inject_base_href(resp, "/app/foo/").await;
+        let out = inject_base_href(resp, "/app/foo/", "").await;
         assert_eq!(out.status(), StatusCode::BAD_GATEWAY);
     }
 

@@ -552,7 +552,10 @@ async fn forward(
         // Include the portal base path (#173) so the app's `<base href>`
         // is `/box/app/{spec}/` when Ruscker is mounted under `/box`.
         let base = format!("{}{route_prefix}{}/", state.base_path, spec.id);
-        rewrite::inject_base_href(resp, &base).await
+        // Pass the container's internal authority so the rewriter can
+        // map any `http://{upstream}/…` self-URLs the app leaks back to
+        // the public mount (#373, FastAPI url_for).
+        rewrite::inject_base_href(resp, &base, &replica.upstream.to_string()).await
     } else {
         resp
     };

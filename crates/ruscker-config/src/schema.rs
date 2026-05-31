@@ -917,6 +917,15 @@ impl Spec {
         self.container_lifetime.map(|m| (m as i64).saturating_mul(60))
     }
 
+    /// Grace window, in **seconds**, granted to in-flight sessions on a
+    /// replica being force-retired (the hard `max-lifetime` recycle)
+    /// before it's killed anyway. Default 60 (#335). A busy replica past
+    /// its hard cap isn't killed until it either goes idle or this window
+    /// elapses; an idle one is reaped at once.
+    pub fn effective_drain_timeout_secs(&self) -> i64 {
+        self.drain_timeout.map(|s| s as i64).unwrap_or(60)
+    }
+
     /// Multi-host placement strategy (default [`Placement::Spread`]).
     pub fn effective_placement(&self) -> Placement {
         self.placement.unwrap_or_default()

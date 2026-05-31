@@ -258,7 +258,7 @@ A spec describes one app, API, or external link. Every spec has an
   max-lifetime: 360                   # minutes — hard recycle (enforced, #334)
   container-lifetime: 360             # minutes — soft recycle when idle (enforced, #334)
   heartbeat-timeout: 3600000          # ms — per-spec override (enforced)
-  stop-on-logout: false               # NOT yet enforced (#326)
+  stop-on-logout: false               # end a user's sessions on logout (enforced, #337)
   docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
   docker-registry-domain: docker.io
@@ -464,13 +464,14 @@ applied) and flagged by `ruscker validate`.
 > `scale-down-grace` (#333 — pool-utilization-driven scale-up + a
 > conservative scale-down gate + per-spec idle grace; unset ⇒ the
 > default rules), `max-lifetime` / `container-lifetime` (#334 — recycle
-> past the age cap), and `drain-timeout` (#335 — grace for a busy
-> `max-lifetime` recycle). Still **not** enforced —
-> `concurrent-requests-per-replica` / `stop-on-logout` — are accepted
-> (and round-trip through import/export + the admin form) for migration
+> past the age cap), `drain-timeout` (#335 — grace for a busy
+> `max-lifetime` recycle), and `stop-on-logout` (#337 — a signed-in
+> user's sticky sessions end immediately on logout). Still **not**
+> enforced — `concurrent-requests-per-replica` — is accepted (and
+> round-trips through import/export + the admin form) for migration
 > friction-free, but a set value does **not** change runtime behaviour
-> yet. `ruscker validate --strict-compat` flags each still-unenforced
-> one. Wiring the rest is tracked per-knob under #326 (#336/#337).
+> yet. `ruscker validate --strict-compat` flags it. Wiring it is tracked
+> under #326 (#336).
 
 ### Routing strategies
 

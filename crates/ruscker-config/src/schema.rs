@@ -943,6 +943,13 @@ impl Spec {
         self.scale_down_threshold.map(|f| f.0)
     }
 
+    /// Whether a signed-in user's sticky sessions on this spec should be
+    /// ended immediately when they log out, instead of waiting for the
+    /// heartbeat sweep (#337). Default `false`.
+    pub fn effective_stop_on_logout(&self) -> bool {
+        self.stop_on_logout.unwrap_or(false)
+    }
+
     /// Multi-host placement strategy (default [`Placement::Spread`]).
     pub fn effective_placement(&self) -> Placement {
         self.placement.unwrap_or_default()
@@ -1164,6 +1171,18 @@ mod max_body_size_tests {
             serde_yaml_ng::from_str("id: y\ncontainer-image: a:1\n").expect("parse");
         assert_eq!(none.effective_max_lifetime_secs(), None);
         assert_eq!(none.effective_container_lifetime_secs(), None);
+    }
+
+    #[test]
+    fn stop_on_logout_defaults_false() {
+        // #337: default false; explicit true honoured.
+        let off: Spec =
+            serde_yaml_ng::from_str("id: a\ncontainer-image: x:1\n").expect("parse");
+        assert!(!off.effective_stop_on_logout());
+        let on: Spec =
+            serde_yaml_ng::from_str("id: b\ncontainer-image: x:1\nstop-on-logout: true\n")
+                .expect("parse");
+        assert!(on.effective_stop_on_logout());
     }
 
     #[test]

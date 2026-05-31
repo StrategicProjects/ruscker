@@ -181,6 +181,11 @@ async fn forward(
     // cookie we may set at the end.
     let is_https = crate::auth::request_is_https(req.headers());
 
+    // Signed-in username (if any), captured before the access-guard below
+    // consumes `session.0`. Used to index the session for `stop-on-logout`
+    // (#337). A borrow + clone — leaves `session` intact for the guard.
+    let acting_user: Option<String> = session.0.as_ref().and_then(|s| s.actor.clone());
+
     // 1. Find the spec. DB-first when attached (covers the showcase
     // seed + operator edits via the admin), falling back to the YAML
     // `proxy.specs` so deployments that load specs exclusively from
@@ -397,10 +402,23 @@ async fn forward(
     //     per-request, not per-session, so inflating
     //     `sessions_active` for them would mislead the scaler.
     if spec_kind_needs_sticky(spec.kind()) {
-        let _outcome = state
+        let outcome = state
             .sessions
             .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id)
             .await;
+        // stop-on-logout (#337): when a *known* user first registers a
+        // session on a spec that opts in, index it so their logout can
+        // end it immediately. Only on first registration and only for
+        // such specs — no cost on the common path.
+        if outcome == crate::sessions::TouchOutcome::Registered && spec.effective_stop_on_logout() {
+            if let Some(user) = &acting_user {
+                state
+                    .logout_index
+                    .entry(user.clone())
+                    .or_default()
+                    .insert(session_id);
+            }
+        }
     }
 
     // 5. WebSocket branch hijacks the upgrade and pumps frames;
@@ -1543,6 +1561,7 @@ mod tests {
             cookie_key: CookieKey::random(),
             spawn_locks: StdArc::new(dashmap::DashMap::new()),
             sessions: StdArc::new(crate::sessions::InMemorySessionStore::new()),
+            logout_index: StdArc::new(dashmap::DashMap::new()),
             leader: StdArc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),

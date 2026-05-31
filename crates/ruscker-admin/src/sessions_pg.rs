@@ -399,6 +399,47 @@ impl SessionStore for PostgresSessionStore {
         removed
     }
 
+    /// End one session by id (#337). Deletes the shared row and, using
+    /// the `RETURNING` replica, reconciles that replica's count to
+    /// committed truth (consistent with the register path's
+    /// `set_session_count`, not a blind decrement) plus this node's
+    /// cached `len()`. An unknown/stale id is a no-op returning `false`.
+    async fn end_session(
+        &self,
+        registry: &RwLock<ReplicaRegistry>,
+        session_id: Uuid,
+    ) -> bool {
+        let row = sqlx::query("DELETE FROM proxy_sessions WHERE session_id = $1 RETURNING replica_id")
+            .bind(session_id)
+            .fetch_optional(&self.pool)
+            .await;
+        let replica_id = match row {
+            Ok(Some(r)) => match r.try_get::<Uuid, _>("replica_id") {
+                Ok(id) => ReplicaId(id),
+                Err(_) => return true, // deleted, but couldn't read the id
+            },
+            Ok(None) => return false, // unknown / already-gone session
+            Err(e) => {
+                error!(error = %e, "postgres end_session failed");
+                return false;
+            }
+        };
+        if let Ok(n) = self.count_for_replica(&replica_id).await {
+            registry.write().await.set_session_count(&replica_id, n);
+        }
+        if let Ok(row) =
+            sqlx::query("SELECT count(*)::bigint AS n FROM proxy_sessions WHERE instance_id = $1")
+                .bind(self.instance_id)
+                .fetch_one(&self.pool)
+                .await
+        {
+            if let Ok(mine) = row.try_get::<i64, _>("n") {
+                self.local_len.store(mine.max(0) as usize, Ordering::Relaxed);
+            }
+        }
+        true
+    }
+
     fn len(&self) -> usize {
         self.local_len.load(Ordering::Relaxed)
     }

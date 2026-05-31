@@ -38,6 +38,7 @@ fn app_state() -> AppState {
         cookie_key: ruscker_proxy::sticky::CookieKey::random(),
         spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
         sessions: std::sync::Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
+        logout_index: std::sync::Arc::new(dashmap::DashMap::new()),
         leader: std::sync::Arc::new(ruscker_admin::leader::AlwaysLeader),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

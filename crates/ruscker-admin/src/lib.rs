@@ -129,6 +129,19 @@ pub struct AppState {
     /// `proxy.heartbeat_timeout` ms.
     pub sessions: std::sync::Arc<dyn sessions::SessionStore>,
 
+    /// `stop-on-logout` index (#337): maps a signed-in username to the
+    /// sticky app-session ids it has open **on specs with
+    /// `stop-on-logout: true`**. The proxy records an entry when such a
+    /// session is first registered for a known user; the logout handler
+    /// drains the user's set and ends those sessions immediately (instead
+    /// of waiting for the heartbeat sweep), so the replica goes idle and
+    /// the scaler reaps it. Process-local — consistent with the
+    /// process-local admin-session store (HA prescribes a sticky upstream
+    /// for session-bearing paths, so a user's logout and app sessions
+    /// land on the same instance). Best-effort: stale ids are harmless
+    /// no-ops at logout.
+    pub logout_index: std::sync::Arc<dashmap::DashMap<String, std::collections::HashSet<uuid::Uuid>>>,
+
     /// Decides whether this instance runs the auto-scaler. Single-node
     /// installs use [`leader::AlwaysLeader`]; HA installs inject a
     /// [`leader::PgLeaderLock`] so exactly one instance scales. The
@@ -198,6 +211,7 @@ impl AdminServer {
                 .context("load sticky cookie key")?,
             spawn_locks: std::sync::Arc::new(dashmap::DashMap::new()),
             sessions: std::sync::Arc::new(sessions::InMemorySessionStore::new()),
+            logout_index: std::sync::Arc::new(dashmap::DashMap::new()),
             leader: std::sync::Arc::new(leader::AlwaysLeader),
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),

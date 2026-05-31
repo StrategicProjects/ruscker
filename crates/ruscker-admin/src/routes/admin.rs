@@ -649,7 +649,25 @@ async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Co
     // Invalidate the session server-side so a copied cookie is dead too,
     // then clear the browser's copy.
     if let Some(c) = cookies.get(COOKIE_NAME) {
-        state.admin_sessions.remove(c.value()).await;
+        let sid = c.value().to_string();
+        // stop-on-logout (#337): resolve the user *before* invalidating,
+        // then end their indexed app sessions (on specs that opted in)
+        // right away — the replicas go idle and the scaler reaps them,
+        // instead of waiting out the heartbeat timeout.
+        if let Some(info) = state.admin_sessions.validate(&sid).await {
+            if let Some(user) = info.actor {
+                if let Some((_, session_ids)) = state.logout_index.remove(&user) {
+                    let n = session_ids.len();
+                    for app_sid in session_ids {
+                        state.sessions.end_session(&state.replicas, app_sid).await;
+                    }
+                    if n > 0 {
+                        tracing::info!(user = %user, ended = n, "stop-on-logout: ended user's app sessions");
+                    }
+                }
+            }
+        }
+        state.admin_sessions.remove(&sid).await;
     }
     let mut c = Cookie::new(COOKIE_NAME, "");
     c.set_path("/");

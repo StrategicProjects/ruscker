@@ -10,7 +10,7 @@
   </h1>
 
   <form method="post"
-        action="{% if mode == "edit" %}/admin/blocks/{{ id }}{% else %}/admin/blocks{% endif %}">
+        action="{{ base }}{% if mode == "edit" %}/admin/blocks/{{ id }}{% else %}/admin/blocks{% endif %}">
 
     <div class="spec-form-field">
       <label class="spec-form-label">{{ self.t("admin-blocks-slot") }}</label>

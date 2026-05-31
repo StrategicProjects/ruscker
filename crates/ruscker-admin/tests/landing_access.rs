@@ -224,6 +224,77 @@ async fn chrome_self_prefixes_under_base_path() {
 }
 
 #[tokio::test]
+async fn spec_form_action_self_prefixes_under_base_path() {
+    // #357: the spec form's `<form action>` is the create/update POST
+    // target. Under `--base-path` it must carry the prefix or the POST
+    // 404s at the reverse proxy — it lacked `{{ base }}` (a #294
+    // survivor), so editing a spec landed on `/admin/specs/{id}` (no
+    // `/box`). Covers both the Edit (update) and New (create) actions.
+    let db = open_db().await;
+    let cfg = Config::from_yaml(
+        "proxy:\n  specs:\n    - id: voila\n      display-name: Voila\n      container-image: x:1\n",
+    )
+    .expect("parse spec yaml");
+    ruscker_admin::db::specs::upsert_one(&db, &cfg.proxy.specs[0], None)
+        .await
+        .expect("insert spec");
+
+    let mut state = app_state(db).await;
+    state.base_path = Arc::from("/box");
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let app = router(state);
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    async fn body_text(resp: axum::response::Response) -> String {
+        String::from_utf8(
+            axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec(),
+        )
+        .unwrap()
+    }
+
+    // Edit form (the reported case): action → /box/admin/specs/voila.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/box/admin/specs/voila/edit")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_text(resp).await;
+    assert!(
+        body.contains(r#"action="/box/admin/specs/voila""#),
+        "edit form action must be base-prefixed"
+    );
+    assert!(
+        !body.contains(r#"action="/admin/specs/voila""#),
+        "no bare (un-prefixed) edit action should slip through"
+    );
+
+    // New form: action → /box/admin/specs.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/box/admin/specs/new")
+                .header(header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_text(resp).await;
+    assert!(
+        body.contains(r#"action="/box/admin/specs""#),
+        "new form action must be base-prefixed"
+    );
+}
+
+#[tokio::test]
 async fn login_under_base_path_honors_admin_referer() {
     // #186 (#173 follow-up): a non-admin signing in from
     // `/box/admin/specs` should land back on `/box/admin/specs`, not

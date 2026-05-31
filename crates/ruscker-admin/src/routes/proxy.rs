@@ -410,13 +410,18 @@ async fn forward(
     //    preceding HTTP request is how WS-only apps stay sticky.
     if let MaybeWs(Some(upgrade)) = ws_upgrade {
         let upstream_ws_url = format!("ws://{}{}", replica.upstream, upstream_path);
-        // Forward the client's session cookie and requested subprotocol
-        // onto the upstream handshake so the app keeps its session.
+        // Forward the client's *app* cookies and requested subprotocol
+        // onto the upstream handshake so the app keeps its session — but
+        // strip Ruscker's own cookies first (#258). The HTTP path strips
+        // these in `do_forward`; the WS upgrade bypasses that, so without
+        // this the admin session id (a bearer) leaks to the app container
+        // over the WS handshake — the most-used transport for Shiny/
+        // Jupyter/RStudio.
         let cookie = req
             .headers()
             .get(header::COOKIE)
             .and_then(|v| v.to_str().ok())
-            .map(String::from);
+            .and_then(filter_ruscker_cookies);
         let subprotocols = req
             .headers()
             .get(header::SEC_WEBSOCKET_PROTOCOL)
@@ -1222,13 +1227,10 @@ const RUSCKER_COOKIE_NAMES: &[&str] = &[
     crate::i18n::COOKIE_NAME,        // ruscker_locale
 ];
 
-/// Drop Ruscker's own cookies from the upstream-bound `Cookie` header,
-/// preserving any cookies the app itself set. If nothing remains, the
-/// header is removed entirely.
-fn strip_ruscker_cookies(headers: &mut HeaderMap) {
-    let Some(raw) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) else {
-        return;
-    };
+/// Drop Ruscker's own cookies from a raw `Cookie` header value,
+/// preserving any cookies the app itself set. Returns `None` when
+/// nothing remains (the caller should then omit the header entirely).
+fn filter_ruscker_cookies(raw: &str) -> Option<String> {
     let kept: Vec<&str> = raw
         .split(';')
         .map(str::trim)
@@ -1239,9 +1241,28 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
         })
         .collect();
     if kept.is_empty() {
-        headers.remove(header::COOKIE);
-    } else if let Ok(v) = HeaderValue::from_str(&kept.join("; ")) {
-        headers.insert(header::COOKIE, v);
+        None
+    } else {
+        Some(kept.join("; "))
+    }
+}
+
+/// Drop Ruscker's own cookies from the upstream-bound `Cookie` header,
+/// preserving any cookies the app itself set. If nothing remains, the
+/// header is removed entirely.
+fn strip_ruscker_cookies(headers: &mut HeaderMap) {
+    let Some(raw) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) else {
+        return;
+    };
+    match filter_ruscker_cookies(raw) {
+        None => {
+            headers.remove(header::COOKIE);
+        }
+        Some(kept) => {
+            if let Ok(v) = HeaderValue::from_str(&kept) {
+                headers.insert(header::COOKIE, v);
+            }
+        }
     }
 }
 
@@ -1299,6 +1320,26 @@ mod tests {
         );
         strip_ruscker_cookies(&mut h);
         assert!(!h.contains_key(header::COOKIE), "empty Cookie header should be removed");
+    }
+
+    #[test]
+    fn filter_ruscker_cookies_strips_for_ws_handshake() {
+        // The WS upgrade branch forwards the cookie via this filter
+        // (not `strip_ruscker_cookies`), so the admin session id must not
+        // survive here either (#258).
+        let raw = format!(
+            "{}=secret-admin-sid; app_token=keepme; {}=pt",
+            crate::auth::COOKIE_NAME,
+            crate::i18n::COOKIE_NAME,
+        );
+        let kept = filter_ruscker_cookies(&raw).expect("app cookie remains");
+        assert!(!kept.contains("secret-admin-sid"), "admin cookie leaked: {kept}");
+        assert!(!kept.contains(crate::auth::COOKIE_NAME));
+        assert!(!kept.contains(crate::i18n::COOKIE_NAME));
+        assert_eq!(kept, "app_token=keepme");
+        // Only-ours ⇒ None, so the WS branch sends no Cookie header.
+        let only_ours = format!("{}=sid", crate::auth::COOKIE_NAME);
+        assert!(filter_ruscker_cookies(&only_ours).is_none());
     }
 
     #[test]

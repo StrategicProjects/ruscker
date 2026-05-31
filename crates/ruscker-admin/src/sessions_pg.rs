@@ -366,6 +366,39 @@ impl SessionStore for PostgresSessionStore {
         }
     }
 
+    /// Delete every shared row for `replica_id`. A stopped replica's
+    /// container is gone, so its sessions are dead cluster-wide — this is
+    /// a definitive removal, not the idle-sweep race that #159 leader-
+    /// gates, so any node may run it. Refreshes this node's cached
+    /// `len()` from the table afterwards (the deleted rows may belong to
+    /// any instance, so we re-derive rather than guess a delta).
+    async fn drop_replica(&self, replica_id: &ReplicaId) -> usize {
+        let res = sqlx::query("DELETE FROM proxy_sessions WHERE replica_id = $1")
+            .bind(replica_id.0)
+            .execute(&self.pool)
+            .await;
+        let removed = match res {
+            Ok(r) => r.rows_affected() as usize,
+            Err(e) => {
+                error!(error = %e, "postgres drop_replica failed");
+                return 0;
+            }
+        };
+        // Best-effort refresh of this node's cached count; a transient
+        // failure just leaves the next sweep to reconcile it.
+        if let Ok(row) =
+            sqlx::query("SELECT count(*)::bigint AS n FROM proxy_sessions WHERE instance_id = $1")
+                .bind(self.instance_id)
+                .fetch_one(&self.pool)
+                .await
+        {
+            if let Ok(mine) = row.try_get::<i64, _>("n") {
+                self.local_len.store(mine.max(0) as usize, Ordering::Relaxed);
+            }
+        }
+        removed
+    }
+
     fn len(&self) -> usize {
         self.local_len.load(Ordering::Relaxed)
     }

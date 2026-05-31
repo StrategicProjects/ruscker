@@ -99,6 +99,20 @@ pub trait SessionStore: Send + Sync {
         is_leader: bool,
     ) -> usize;
 
+    /// Purge every tracked session pointing at `replica_id`. Called when
+    /// a replica leaves the registry (operator stop/restart, scaler
+    /// scale-down). Without it the session entries linger until the idle
+    /// sweep expires them — inflating `len()` for up to one
+    /// `heartbeat-timeout`, and **forever** when a spec sets
+    /// `heartbeat-timeout: -1` (the never-expire Shiny idiom), which
+    /// stalls graceful shutdown until the watchdog `process::exit`.
+    /// Returns how many entries were removed.
+    ///
+    /// The registry counter is intentionally not touched here: the caller
+    /// removes the replica (and its `sessions_active`) from the registry
+    /// around this call, so there is nothing left to decrement.
+    async fn drop_replica(&self, replica_id: &ReplicaId) -> usize;
+
     /// Number of tracked sessions (used by graceful-shutdown drain and
     /// the dashboard/metrics).
     fn len(&self) -> usize;
@@ -238,6 +252,23 @@ impl SessionStore for InMemorySessionStore {
         n
     }
 
+    /// Purge every session entry pointing at `replica_id`. Collects the
+    /// matching keys first (so no DashMap shard guard is held across the
+    /// removals) then drops them. No registry interaction — see the trait
+    /// doc.
+    async fn drop_replica(&self, replica_id: &ReplicaId) -> usize {
+        let victims: Vec<Uuid> = self
+            .sessions
+            .iter()
+            .filter(|kv| &kv.value().replica_id == replica_id)
+            .map(|kv| *kv.key())
+            .collect();
+        for sid in &victims {
+            self.sessions.remove(sid);
+        }
+        victims.len()
+    }
+
     /// Number of tracked sessions. For introspection / tests.
     fn len(&self) -> usize {
         self.sessions.len()
@@ -346,6 +377,37 @@ mod tests {
         assert_eq!(evicted, 1);
         assert!(store.is_empty());
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 0);
+    }
+
+    #[tokio::test]
+    async fn drop_replica_purges_only_that_replicas_sessions() {
+        // #324: stopping/restarting a replica must purge its sessions so
+        // `len()` doesn't stay inflated until the idle sweep — fatal with
+        // `heartbeat-timeout: -1`, where the sweep never runs.
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let ra = fake_replica("alpha");
+        let rb = fake_replica("beta");
+        let (rid_a, rid_b) = (ra.id.clone(), rb.id.clone());
+        reg.write().await.add(ra);
+        reg.write().await.add(rb);
+        let store = InMemorySessionStore::new();
+
+        // Two sessions on A, one on B.
+        for spec_rid in [("alpha", &rid_a), ("alpha", &rid_a), ("beta", &rid_b)] {
+            store
+                .touch_or_register(&reg, Uuid::new_v4(), spec_rid.0, spec_rid.1)
+                .await;
+        }
+        assert_eq!(store.len(), 3);
+
+        // Drop A: its two sessions go, B's one stays.
+        let removed = store.drop_replica(&rid_a).await;
+        assert_eq!(removed, 2);
+        assert_eq!(store.len(), 1);
+
+        // Idempotent: dropping again removes nothing.
+        assert_eq!(store.drop_replica(&rid_a).await, 0);
+        assert_eq!(store.len(), 1);
     }
 
     #[tokio::test]

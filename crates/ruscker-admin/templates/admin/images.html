@@ -28,8 +28,17 @@
 
 {# ── Upload form ──────────────────────────────────────────── #}
 <form method="post" action="{{ base }}/admin/media" enctype="multipart/form-data"
-      class="image-upload-zone">
-  <input type="file" name="file" id="img-file" required
+      class="image-upload-zone"
+      x-data="{ dragging: false }"
+      :class="dragging ? 'is-dragover' : ''"
+      @dragover.prevent="dragging = true"
+      @dragleave.prevent="dragging = false"
+      @drop.prevent="dragging = false;
+        if ($event.dataTransfer.files.length) {
+          $refs.file.files = $event.dataTransfer.files;
+          $el.submit();
+        }">
+  <input type="file" name="file" id="img-file" x-ref="file" required
          accept="image/png,image/jpeg,image/webp,image/svg+xml">
   <label for="img-file" class="image-upload-label">
     <i class="ti ti-cloud-upload" aria-hidden="true"></i>

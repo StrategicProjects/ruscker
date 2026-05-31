@@ -38,17 +38,17 @@
           $refs.file.files = $event.dataTransfer.files;
           $el.submit();
         }">
-  <input type="file" name="file" id="img-file" x-ref="file" required
+  {# Single clear CTA: choosing a file uploads it immediately (the old
+     separate "Upload" submit button was confusing). Drag-drop also
+     auto-submits (above). #}
+  <input type="file" name="file" id="img-file" x-ref="file" required class="hidden"
+         @change="if ($el.files.length) $el.form.submit()"
          accept="image/png,image/jpeg,image/webp,image/svg+xml">
-  <label for="img-file" class="image-upload-label">
-    <i class="ti ti-cloud-upload" aria-hidden="true"></i>
-    <span>{{ self.t("admin-images-drop-here") }}</span>
-    <span class="text-[10px] text-[color:var(--text-faint)] mt-1">{{ self.t("admin-images-formats") }}</span>
+  <label for="img-file" class="admin-login-btn" style="cursor:pointer;padding:8px 16px;font-size:13px">
+    <i class="ti ti-photo-plus" aria-hidden="true"></i>
+    {{ self.t("admin-images-choose") }}
   </label>
-  <button type="submit" class="admin-login-btn" style="padding:8px 14px;font-size:12px">
-    <i class="ti ti-upload" aria-hidden="true"></i>
-    {{ self.t("admin-images-upload") }}
-  </button>
+  <span class="image-upload-hint">{{ self.t("admin-images-drop-here") }} · {{ self.t("admin-images-formats") }}</span>
 </form>
 
 {# ── Gallery grid ─────────────────────────────────────────── #}
@@ -135,6 +135,28 @@
   });
   </script>
 {% endif %}
+
+{# ── Built-in logos (read-only) ───────────────────────────────
+   The framework + brand SVGs bundled in the binary. Shown so the gallery
+   isn't empty on a fresh install and mirrors what the spec-form logo/cover
+   pickers offer (#: media UX). Not deletable — they're binary assets. #}
+<div class="flex items-center gap-2 mt-8 mb-3">
+  <h2 class="text-sm font-medium">{{ self.t("admin-images-builtin") }}</h2>
+  <span class="text-xs text-[color:var(--text-faint)]">{{ self.builtin_logos().len() }}</span>
+</div>
+<section class="image-gallery">
+  {% for (path, name) in self.builtin_logos() %}
+  <div class="image-tile">
+    <a href="{{ base }}{{ path }}" target="_blank" rel="noopener" class="image-tile-frame" title="{{ path }}">
+      <img src="{{ base }}{{ path }}" alt="{{ name }}" loading="lazy" style="object-fit:contain;padding:10px">
+    </a>
+    <div class="image-tile-meta">
+      <div class="image-tile-name" title="{{ path }}">{{ name }}</div>
+      <div class="image-tile-sub"><span class="opacity-60">{{ self.t("admin-images-builtin-tag") }}</span></div>
+    </div>
+  </div>
+  {% endfor %}
+</section>
 
 {# Alpine powers BOTH the upload-zone drag-drop (the form near the top) and
    the gallery filter / "show more" below. The admin layout doesn't ship

@@ -745,7 +745,38 @@ async fn spawn_one(
     replica.sessions_max = spec.effective_seats();
 
     state.replicas.write().await.add(replica);
+
+    // Best-effort: stamp the card's recency date from the image's
+    // publish date when it has none yet (#375). One-time per spec
+    // (guarded by an absent `updated`), never clobbers an operator date,
+    // and a no-op for YAML-only specs (`set_updated_if_absent`).
+    let needs_date = spec
+        .template_properties
+        .get_str("updated")
+        .is_none_or(|s| s.trim().is_empty());
+    if needs_date {
+        if let Some(db) = state.db.as_ref() {
+            if let Some(created) = backend.image_created(image).await {
+                if let Some(date) = format_image_date(&created) {
+                    if let Err(e) =
+                        crate::db::specs::set_updated_if_absent(db, &spec.id, &date, Some("system"))
+                            .await
+                    {
+                        tracing::debug!(spec = %spec.id, error = ?e, "image-date enrich failed");
+                    }
+                }
+            }
+        }
+    }
     Ok(())
+}
+
+/// An image's RFC3339 created timestamp → the showcase `updated` display
+/// format (`DD/MM/YYYY`). `None` if it doesn't parse (#375).
+fn format_image_date(rfc3339: &str) -> Option<String> {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .ok()
+        .map(|dt| dt.format("%d/%m/%Y").to_string())
 }
 
 #[cfg(test)]
@@ -760,6 +791,16 @@ mod tests {
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
+
+    #[test]
+    fn format_image_date_rfc3339_to_dmy() {
+        // #375: image `.created` (RFC3339) → showcase `updated` format.
+        assert_eq!(
+            format_image_date("2025-08-22T13:51:37.357298Z").as_deref(),
+            Some("22/08/2025")
+        );
+        assert_eq!(format_image_date("not-a-date"), None);
+    }
 
     // ── #204: spawn-failure log dedup/backoff state machine ─────────
 

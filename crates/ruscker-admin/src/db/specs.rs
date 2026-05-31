@@ -254,6 +254,35 @@ pub async fn upsert_one(
     }
 }
 
+/// Stamp a spec's `template-properties.updated` date **only if it has
+/// none yet**, returning whether it wrote. Used to fill a card's
+/// recency date from the publish date of the image it runs (#375) — a
+/// one-time enrichment on first spawn. No-op (returns `false`) when the
+/// id isn't a DB spec (YAML-only specs aren't created here) or already
+/// carries a date, so it never clobbers an operator-set value.
+pub async fn set_updated_if_absent(
+    db: &ConfigDb,
+    id: &str,
+    date: &str,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let Some(mut spec) = fetch_one(db, id).await? else {
+        return Ok(false); // not a DB spec — nothing to enrich
+    };
+    let has_date = spec
+        .template_properties
+        .get_str("updated")
+        .is_some_and(|s| !s.trim().is_empty());
+    if has_date {
+        return Ok(false);
+    }
+    spec.template_properties
+        .0
+        .insert("updated".into(), serde_yaml_ng::Value::String(date.to_string()));
+    upsert_one(db, &spec, actor).await?;
+    Ok(true)
+}
+
 /// Delete a spec and all its history. Returns `true` if a row was
 /// actually removed (false if the id didn't exist). Audit log records
 /// the action when something was deleted. `ON DELETE CASCADE` clears
@@ -627,6 +656,29 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audit_count.0, 2);
+    }
+
+    #[tokio::test]
+    async fn set_updated_if_absent_fills_once_then_no_clobber() {
+        std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let cfg =
+            Config::from_yaml("proxy:\n  specs:\n    - id: appx\n      container-image: img:1\n")
+                .unwrap();
+        upsert_one(&db, &cfg.proxy.specs[0], None).await.unwrap();
+
+        // Fills when the date is absent (#375).
+        assert!(set_updated_if_absent(&db, "appx", "22/08/2025", Some("system")).await.unwrap());
+        let s = fetch_one(&db, "appx").await.unwrap().unwrap();
+        assert_eq!(s.template_properties.get_str("updated"), Some("22/08/2025"));
+
+        // No-op when a date already exists — never clobbers it.
+        assert!(!set_updated_if_absent(&db, "appx", "01/01/2099", Some("system")).await.unwrap());
+        let s2 = fetch_one(&db, "appx").await.unwrap().unwrap();
+        assert_eq!(s2.template_properties.get_str("updated"), Some("22/08/2025"));
+
+        // No-op for an id that isn't a DB spec.
+        assert!(!set_updated_if_absent(&db, "nope", "01/01/2025", None).await.unwrap());
     }
 
     // #199: import must not wipe landing_blocks. Migration 0008 seeds a

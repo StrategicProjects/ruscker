@@ -327,6 +327,15 @@ pub trait ContainerBackend: Send + Sync {
     async fn logs_follow(&self, _replica_id: &ReplicaId, _tail: usize) -> CoreResult<LogStream> {
         Ok(Box::pin(futures_util::stream::empty()))
     }
+
+    /// Creation/publish timestamp of an image as an RFC3339 string, if
+    /// the backend can read it (Docker: `inspect_image().created`).
+    /// Used to stamp a card's "updated" date from the image it runs
+    /// (#375). Default `None` so non-Docker backends don't break the
+    /// caller — it just leaves the date unset.
+    async fn image_created(&self, _image: &str) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

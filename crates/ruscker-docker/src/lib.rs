@@ -387,6 +387,17 @@ impl ContainerBackend for LocalDockerBackend {
         Self::spawn_with_port(self, spec_id, image, DEFAULT_INNER_PORT).await
     }
 
+    /// The image's creation/publish timestamp (RFC3339), read from a
+    /// local `docker inspect`. `None` if the image isn't present or has
+    /// no timestamp — the caller leaves the date unset (#375).
+    async fn image_created(&self, image: &str) -> Option<String> {
+        self.docker
+            .inspect_image(image)
+            .await
+            .ok()
+            .and_then(|info| info.created)
+    }
+
     /// Trait override: routes through the inherent method that
     /// already does the bollard work.
     async fn spawn_with_port(

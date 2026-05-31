@@ -379,24 +379,23 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             s
         },
         {
-            // Quarto demo (#372). Use `:latest` — its Dockerfile renders
-            // the `.qmd` at BUILD time and the CMD is
-            // `quarto serve quartoDemo.qmd --port 3838 --host 0.0.0.0
-            // --no-render`, i.e. a REAL Quarto server on **3838** with a
-            // fast startup (no render at boot). (The `:prerendered` tag is
-            // a red herring — it actually runs `rmarkdown::run(...)`, not
-            // Quarto.) The original failure was just the wrong port: the
-            // image serves on 3838, but we'd published 8080. Kind App
-            // (sticky + WebSocket — `quarto serve` can host an interactive
-            // runtime).
+            // Quarto demo on our own image (#394): the upstream
+            // `shinyproxy-quarto-demo` runs `server: shiny` (R + Shiny +
+            // quarto CLI ≈ 430 MB). Our fork
+            // (StrategicProjects/ruscker-quarto-demo →
+            // `milkway/ruscker-quarto-demo`) renders the `.qmd` to a
+            // self-contained HTML at build time and serves it from
+            // `nginx:alpine` — ~67 MB (6.4× smaller). Static page on
+            // port 80 (the trade-off: no live Shiny). amd64-only (the
+            // quarto CLI `.deb` is amd64).
             let mut s = card(
                 "quarto",
                 "Quarto",
                 "Open-source publishing system for technical documents.",
                 "/assets/showcase/quarto.svg",
                 "https://quarto.org",
-                Some("openanalytics/shinyproxy-quarto-demo:latest"),
-                Some(3838),
+                Some("milkway/ruscker-quarto-demo:latest"),
+                Some(80),
                 Some("linux/amd64"),
             )?;
             s.kind_override = Some(ruscker_config::SpecKindOverride::App);
@@ -423,21 +422,22 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             None,
         )?,
         {
-            // FastAPI demo — a stateless API (kind Api: no sticky/WS,
-            // round-robin). ShinyProxy passes a dynamic `SCRIPT_NAME`
-            // (the public path) for the OpenAPI/docs prefix; Ruscker
-            // can't template that, so `/docs` assets may need the
-            // forwarded-prefix headers / a follow-up — the raw API
-            // endpoints work regardless.
+            // FastAPI demo on our own image (#391): a stateless API
+            // (kind Api: no sticky/WS, round-robin), re-branded for
+            // Ruscker (no ShinyProxy logo). Fork:
+            // StrategicProjects/ruscker-fastapi-demo →
+            // `milkway/ruscker-fastapi-demo`. Serves at root
+            // (`SCRIPT_NAME` defaults to ""); the `/app` rewriter + shim
+            // handle the browser-side prefixing. Multi-arch.
             let mut s = card(
                 "fastapi",
                 "FastAPI",
                 "Modern Python framework for building APIs.",
                 "/assets/showcase/fastapi.svg",
                 "https://fastapi.tiangolo.com",
-                Some("openanalytics/shinyproxy-fastapi-demo:latest"),
+                Some("milkway/ruscker-fastapi-demo:latest"),
                 Some(8000),
-                Some("linux/amd64"),
+                None,
             )?;
             s.kind_override = Some(ruscker_config::SpecKindOverride::Api);
             s

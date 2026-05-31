@@ -354,30 +354,28 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             s
         },
         {
-            // Dash demo, re-containerized (#372). Its `app.py` does
-            // `requests_pathname_prefix = os.environ['SHINYPROXY_PUBLIC_PATH']`,
-            // so it KeyErrors / crashes at boot without that var. Ruscker
-            // STRIPS the mount prefix, so the value must be the ROOT `/`
-            // (the app serves at root; the `/app` rewriter prefixes the
-            // browser-side URLs). We set it scoped to this card via
-            // `container-env` — no hidden global injection — exactly what
-            // an operator would put in the spec form's Advanced for any
-            // ShinyProxy-style app. Port 8050, kind Dash.
+            // Dash demo, now on our OWN image (#390): the upstream
+            // `shinyproxy-dash-demo` hard-codes
+            // `requests_pathname_prefix = os.environ['SHINYPROXY_PUBLIC_PATH']`
+            // and KeyErrors without that var. Rather than inject a magic
+            // env, we forked it (StrategicProjects/ruscker-dash-demo →
+            // `milkway/ruscker-dash-demo`) to serve at ROOT
+            // (`requests_pathname_prefix="/"`), which is the natural fit
+            // for Ruscker's stripping proxy: no env, no quirk, and the
+            // app doubles as the reference for "make your app
+            // Ruscker-ready". Multi-arch (amd64+arm64), port 8050, kind
+            // Dash.
             let mut s = card(
                 "dash",
                 "Dash",
                 "Analytical web apps built on Plotly.",
                 "/assets/showcase/dash.svg",
                 "https://dash.plotly.com",
-                Some("openanalytics/shinyproxy-dash-demo:latest"),
+                Some("milkway/ruscker-dash-demo:latest"),
                 Some(8050),
-                Some("linux/amd64"),
+                None,
             )?;
             s.kind_override = Some(ruscker_config::SpecKindOverride::Dash);
-            s.container_env = Some(std::collections::BTreeMap::from([(
-                "SHINYPROXY_PUBLIC_PATH".to_string(),
-                "/".to_string(),
-            )]));
             s
         },
         {
@@ -539,22 +537,19 @@ mod tests {
         );
         // Framework demos (#354/#365): Streamlit/Voilà interactive
         // (sticky + WS); FastAPI a stateless API; rmarkdown + quarto are
-        // Shiny/rmarkdown-backed; Dash interactive (#372, SHINYPROXY_PUBLIC_PATH=/
-        // via container-env); bokeh/plumber stay external links (no demo image).
+        // Shiny/rmarkdown-backed; Dash interactive on our own image (#390,
+        // serves at root — no env); bokeh/plumber stay external links.
         assert_eq!(kind("rmarkdown"), ruscker_config::SpecKind::Shiny);
         assert_eq!(kind("streamlit"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("voila"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("quarto"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("fastapi"), ruscker_config::SpecKind::Api);
-        assert_eq!(kind("dash"), ruscker_config::SpecKind::InteractiveApp, "dash re-containerized (#372)");
-        // Dash's app.py reads SHINYPROXY_PUBLIC_PATH; we scope it to the
-        // card (value `/` — the strip-correct root), not a global inject.
+        assert_eq!(kind("dash"), ruscker_config::SpecKind::InteractiveApp, "dash on ruscker-dash-demo (#390)");
+        // Our forked Dash image serves at root, so no SHINYPROXY_PUBLIC_PATH
+        // shim is needed (#390 supersedes the #372 container-env workaround).
         let dash = specs.iter().find(|s| s.id == "dash").unwrap();
-        assert_eq!(
-            dash.container_env.as_ref().and_then(|e| e.get("SHINYPROXY_PUBLIC_PATH")).map(String::as_str),
-            Some("/"),
-            "dash card carries SHINYPROXY_PUBLIC_PATH=/ via container-env"
-        );
+        assert_eq!(dash.container_image.as_deref(), Some("milkway/ruscker-dash-demo:latest"));
+        assert!(dash.container_env.is_none(), "forked dash needs no env workaround");
         assert_eq!(kind("bokeh"), ruscker_config::SpecKind::External, "no demo image → link");
         assert_eq!(kind("plumber"), ruscker_config::SpecKind::External, "no demo image → link");
     }

@@ -618,12 +618,11 @@ fn collect_stats(config: &Config) -> Stats {
         let state = spec.template_properties.state().to_string();
         *by_state.entry(state).or_insert(0) += 1;
 
-        let access = spec
-            .template_properties
-            .get_str("icon")
-            .unwrap_or("unknown")
-            .to_string();
-        *by_access.entry(access).or_insert(0) += 1;
+        // Access breakdown reflects the real rule (`Spec::is_open()` —
+        // `access-groups`/`access-users`), not the retired decorative
+        // `template-properties.icon` flag (#346).
+        let access = if spec.is_open() { "open" } else { "restricted" };
+        *by_access.entry(access.to_string()).or_insert(0) += 1;
     }
 
     Stats {

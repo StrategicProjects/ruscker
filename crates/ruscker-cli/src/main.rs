@@ -871,7 +871,9 @@ fn print_breakdown(config: &Config) {
             SpecKind::External => "external",
         };
         let state = spec.template_properties.state();
-        let access = spec.template_properties.get_str("icon").unwrap_or("-");
+        // Real access rule (`Spec::is_open()`), not the retired
+        // decorative `template-properties.icon` flag (#346).
+        let access = if spec.is_open() { "open" } else { "restrict" };
         let seats = spec.effective_seats();
         println!(
             "    {:<26} {:<8} {:<8} {:<8} {:<8}",

@@ -251,14 +251,17 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             // posture — the card is open; tighten with a token/auth for
             // anything real.)
             //
-            // `--ServerApp.base_url=#{publicPath}` (#371): the proxy
-            // substitutes the spec's public mount path (e.g.
-            // `/box/app/jupyter/`) at spawn, so Jupyter serves its Lab
-            // page, REST API (`lab/api/settings|workspaces`), and kernel
-            // WebSocket under the SAME prefix the browser uses — fixing
-            // the blank Lab where `base_url=/` 404'd the REST calls. The
-            // #348 jupyter-config rewrite becomes a no-op (the config's
-            // baseUrl already matches), kept as a belt-and-suspenders.
+            // `--ServerApp.base_url=/` (revert of #371): a live probe on
+            // the cast `/box` deploy showed the proxy STRIPS the mount
+            // prefix before forwarding (the container receives `/lab/...`,
+            // not `/box/app/jupyter/lab/...`) — so `base_url=#{publicPath}`
+            // made the container 404 *every* path. With `base_url=/` the
+            // container serves the stripped paths, and the #348
+            // jupyter-config rewrite (which prefixes the page-config
+            // `baseUrl`/`fullStaticUrl` to the mount) makes the browser's
+            // static-chunk + REST requests route back correctly. (The
+            // public-path injection mechanism from #377 stays — it's
+            // useful for env-based apps — Jupyter just doesn't use it.)
             let mut jup = card(
                 "jupyter",
                 "Jupyter",
@@ -275,7 +278,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
                 "--ServerApp.allow_origin=*".into(),
                 "--ServerApp.allow_remote_access=True".into(),
                 "--ServerApp.disable_check_xsrf=True".into(),
-                "--ServerApp.base_url=#{publicPath}".into(),
+                "--ServerApp.base_url=/".into(),
             ]);
             // Generic interactive app, not Shiny (#231).
             jup.kind_override = Some(ruscker_config::SpecKindOverride::App);
@@ -500,6 +503,19 @@ mod tests {
                 .get_str("cover")
                 .is_some_and(|c| c.contains("linear-gradient")),
             "shiny-for-python has a gradient cover"
+        );
+        // #371 revert: Jupyter runs at base_url=/ (the proxy strips the
+        // mount prefix), NOT the #{publicPath} token which 404'd every
+        // path. Lock it so the wrong direction can't sneak back.
+        let jup_cmd = specs.iter().find(|s| s.id == "jupyter").unwrap().container_cmd.clone();
+        let jup_cmd = jup_cmd.unwrap_or_default();
+        assert!(
+            jup_cmd.iter().any(|a| a == "--ServerApp.base_url=/"),
+            "jupyter must run at base_url=/"
+        );
+        assert!(
+            !jup_cmd.iter().any(|a| a.contains("#{publicPath}")),
+            "jupyter must NOT use the public-path token for base_url (#371)"
         );
         // Framework demos converted from external links (#354/#365):
         // Streamlit/Dash/Voilà are interactive (sticky + WS); FastAPI is

@@ -382,3 +382,35 @@ async fn named_user_sees_their_user_spec() {
     assert!(has_card(&body, "vip user app"), "carol is the VIP user");
     assert!(!has_card(&body, "analysts app"), "carol is not in analysts");
 }
+
+#[tokio::test]
+async fn spec_form_preview_matches_landing_svg_fit() {
+    // #359: the preview's logo <img> must mirror the landing card's fit
+    // rule — an SVG logo gets `rcover-img--contain` (object-fit: contain),
+    // not the default `cover` that crops it. The binding is evaluated by
+    // Alpine client-side; this is a regression guard that the rule stays
+    // wired into the rendered preview (the landing applies the same rule
+    // server-side, so the two cards agree).
+    let state = app_state(open_db().await).await;
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/specs/new")
+                .header(header::COOKIE, format!("{COOKIE_NAME}={sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    assert!(
+        body.contains("rcover-img--contain") && body.contains(".svg')"),
+        "preview must apply the SVG contain-fit rule like the landing card"
+    );
+}

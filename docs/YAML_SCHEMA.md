@@ -255,10 +255,10 @@ A spec describes one app, API, or external link. Every spec has an
                                       #   (8050), … . ShinyProxy `port:`
                                       #   is accepted as an alias.
   seats-per-container: 10             # sessions per replica
-  max-lifetime: 360                   # minutes — hard cap
-  container-lifetime: 360             # minutes — soft cap
-  heartbeat-timeout: 3600000          # ms — per-spec override
-  stop-on-logout: false               # auth-related
+  max-lifetime: 360                   # minutes — NOT yet enforced (#326)
+  container-lifetime: 360             # minutes — NOT yet enforced (#326)
+  heartbeat-timeout: 3600000          # ms — per-spec override (enforced)
+  stop-on-logout: false               # NOT yet enforced (#326)
   docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
   docker-registry-domain: docker.io
@@ -450,12 +450,23 @@ applied) and flagged by `ruscker validate`.
 |---|---|---|---|
 | `min-replicas` | u32 | `1` | Always running |
 | `max-replicas` | u32 | = `min-replicas` | Set higher to enable auto-scale |
-| `scale-up-threshold` | float | `0.8` | Spawn when utilization > this |
-| `scale-down-threshold` | float | `0.3` | Retire when < this for grace |
-| `scale-down-grace` | s | `300` | Seconds below threshold before retiring |
-| `drain-timeout` | s | `60` | Seconds to wait for sessions to end |
+| `scale-up-threshold` | float | `0.8` | ⚠️ parsed but **not yet enforced** (#326) |
+| `scale-down-threshold` | float | `0.3` | ⚠️ parsed but **not yet enforced** (#326) |
+| `scale-down-grace` | s | `300` | ⚠️ parsed but **not yet enforced** (#326) |
+| `drain-timeout` | s | `60` | ⚠️ parsed but **not yet enforced** (#326) |
 | `routing-strategy` | enum | varies | See below |
-| `concurrent-requests-per-replica` | u32 | `100` | API-only |
+| `concurrent-requests-per-replica` | u32 | `100` | ⚠️ parsed but **not yet enforced** (#326) |
+
+> **Autoscaling knobs not yet enforced (#326).** The scaler currently
+> scales on **seat saturation** (`sessions_active` vs `sessions_max`)
+> with built-in grace ticks, and reaps replicas by **idle**, not age. So
+> `scale-up-threshold` / `scale-down-threshold` / `scale-down-grace` /
+> `drain-timeout` / `concurrent-requests-per-replica` / `max-lifetime` /
+> `container-lifetime` / `stop-on-logout` are accepted (and round-trip
+> through import/export + the admin form) for migration friction-free,
+> but a set value does **not** change runtime behaviour yet.
+> `ruscker validate --strict-compat` flags each one. Wiring them into
+> the scaler is tracked per-knob under #326.
 
 ### Routing strategies
 

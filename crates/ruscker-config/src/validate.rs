@@ -234,6 +234,44 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
     // NOTE: per-spec env/cmd injection IS now supported — map your
     // ShinyProxy `container-env` / `container-cmd` straight across. They
     // are intentionally absent from this ignored-fields list.
+    //
+    // Scaling/lifecycle knobs (#326): these parse, round-trip, and are
+    // editable in the admin form, but the scaler does NOT yet consume
+    // them — it scales on seat saturation (`sessions_active` vs
+    // `sessions_max`) with built-in grace ticks. Flag them so a migrating
+    // operator isn't misled into thinking a set value takes effect.
+    (
+        "scale-up-threshold",
+        "autoscaling threshold not enforced — scaler scales on seat saturation; tracked in #326",
+    ),
+    (
+        "scale-down-threshold",
+        "autoscaling threshold not enforced — scaler scales on seat saturation; tracked in #326",
+    ),
+    (
+        "scale-down-grace",
+        "scale-down grace not honoured — a fixed cooldown is used instead; tracked in #326",
+    ),
+    (
+        "drain-timeout",
+        "per-spec drain timeout not honoured — `proxy.shutdown-grace-ms` applies globally; tracked in #326",
+    ),
+    (
+        "concurrent-requests-per-replica",
+        "request-based concurrency limit not enforced — capacity is seat-based; tracked in #326",
+    ),
+    (
+        "max-lifetime",
+        "max container lifetime not enforced — replicas are reaped by idle, not age; tracked in #326",
+    ),
+    (
+        "container-lifetime",
+        "max container lifetime not enforced — replicas are reaped by idle, not age; tracked in #326",
+    ),
+    (
+        "stop-on-logout",
+        "stop-on-logout not implemented — sessions end via heartbeat-timeout; tracked in #326",
+    ),
 ];
 
 /// Top-level `proxy.*` keys that are unsupported.
@@ -935,6 +973,43 @@ proxy:
             fields.contains(&"kubernetes-pod-patches"),
             "fields: {fields:?}"
         );
+    }
+
+    #[test]
+    fn compat_scan_flags_unenforced_scaling_knobs() {
+        // #326: these parse + round-trip + are form-editable but the
+        // scaler never consumes them, so strict-compat must surface them
+        // as accepted-but-not-enforced (so a migrating operator isn't
+        // misled). A clean spec (no such knobs) stays quiet.
+        let yaml = "\
+proxy:
+  specs:
+  - id: scaled
+    container-image: rocker/shiny
+    scale-up-threshold: 0.9
+    scale-down-grace: 600
+    drain-timeout: 90
+    concurrent-requests-per-replica: 4
+    max-lifetime: 3600
+    stop-on-logout: true
+";
+        let fields: Vec<String> = compat(yaml)
+            .into_iter()
+            .filter_map(|w| match w {
+                CompatWarning::UnsupportedSpecField { field, .. } => Some(field),
+                _ => None,
+            })
+            .collect();
+        for expected in [
+            "scale-up-threshold",
+            "scale-down-grace",
+            "drain-timeout",
+            "concurrent-requests-per-replica",
+            "max-lifetime",
+            "stop-on-logout",
+        ] {
+            assert!(fields.iter().any(|f| f == expected), "missing {expected}: {fields:?}");
+        }
     }
 
     #[test]

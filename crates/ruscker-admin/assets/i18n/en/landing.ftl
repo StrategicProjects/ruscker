@@ -492,8 +492,8 @@ spec-form-registry-password = Password
 spec-form-registry-password-keep = Blank keeps the current password
 spec-help-registry-password = Use an environment variable — never paste the password as text. Only used together with the username.
 spec-form-registry-credential = Stored credential
-spec-help-registry-credential = Name of a credential from the vault, instead of the inline username/password.
-spec-form-registry-help = For private images. Keep secrets in environment variables; the validator warns about plaintext passwords.
+spec-help-registry-credential = Pick a named credential from the store (Credentials page) to pull private images. When set, it takes precedence over the inline username/password.
+spec-form-registry-help = Two ways to pull a private image: a named credential from the store (above), or the inline domain/username/password. The named credential wins if both are set. Never paste a plaintext password — reference an environment variable instead.
 spec-form-access-section = Access
 spec-form-access-groups = Allowed groups
 spec-help-access-groups = Groups that may see and reach the app (comma-separated). Blank, with users also blank = open to everyone.

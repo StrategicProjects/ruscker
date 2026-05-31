@@ -496,8 +496,8 @@ spec-form-registry-password = Senha
 spec-form-registry-password-keep = Em branco mantém a senha atual
 spec-help-registry-password = Use uma variável de ambiente — nunca cole a senha em texto. Só usada junto com o usuário.
 spec-form-registry-credential = Credencial salva
-spec-help-registry-credential = Nome de uma credencial do cofre, em vez de usuário/senha inline.
-spec-form-registry-help = Para imagens privadas. Mantenha segredos em variáveis de ambiente; o validador alerta sobre senhas em texto.
+spec-help-registry-credential = Escolha uma credencial nomeada do cofre (página Credenciais) para puxar imagens privadas. Quando definida, tem precedência sobre o usuário/senha inline.
+spec-form-registry-help = Duas formas de puxar uma imagem privada: uma credencial nomeada do cofre (acima) ou o domínio/usuário/senha inline. A credencial nomeada vence se ambas estiverem definidas. Nunca cole uma senha em texto puro — use uma variável de ambiente.
 spec-form-access-section = Acesso
 spec-form-access-groups = Grupos permitidos
 spec-help-access-groups = Grupos que podem ver e acessar o app (separados por vírgula). Em branco, com usuários também em branco = aberto a todos.

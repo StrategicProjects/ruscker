@@ -552,8 +552,16 @@
                 <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
                 {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
               </div>
+              {# Free-text, but a datalist surfaces the names the operator
+                 created on the Credentials page so the two screens
+                 connect (#351). A named credential takes precedence over
+                 the inline domain/username/password above. #}
               <input id="f-reg-cred" type="text" name="docker_registry_credential"
-                     value="{{ form.docker_registry_credential }}" class="spec-form-input">
+                     value="{{ form.docker_registry_credential }}"
+                     list="registry-cred-suggestions" class="spec-form-input">
+              <datalist id="registry-cred-suggestions">
+                {% for name in credential_names %}<option value="{{ name }}"></option>{% endfor %}
+              </datalist>
             </div>
           </div>
           <div class="spec-form-help">{{ self.t("spec-form-registry-help") }}</div>

@@ -703,6 +703,10 @@ struct SpecFormPage<'a> {
     /// Filenames in the media library, for the logo picker. Empty
     /// when no DB is wired or the listing fails.
     logo_images: Vec<String>,
+    /// Names of stored registry credentials, for the
+    /// `docker-registry-credential` datalist (#351). Empty when no DB
+    /// is wired or the listing fails — the field stays free-text.
+    credential_names: Vec<String>,
 }
 
 impl<'a> SpecFormPage<'a> {
@@ -750,6 +754,21 @@ async fn logo_filenames(state: &AppState) -> Vec<String> {
     }
 }
 
+/// Names of stored registry credentials, for the spec form's
+/// `docker-registry-credential` datalist (#351) — surfaces the names
+/// the operator created on the Credentials page so the two screens
+/// connect. Empty when no DB is wired or the query fails; the field
+/// then degrades to a plain free-text input.
+async fn credential_names(state: &AppState) -> Vec<String> {
+    match state.db.as_ref() {
+        Some(pool) => db::credentials::list_all(pool)
+            .await
+            .map(|creds| creds.into_iter().map(|c| c.name).collect())
+            .unwrap_or_default(),
+        None => Vec::new(),
+    }
+}
+
 async fn new_form(
     editor: RequireEditor,
     State(state): State<AppState>,
@@ -777,6 +796,7 @@ async fn new_form(
         },
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        credential_names: credential_names(&state).await,
     };
     super::render(&page)
 }
@@ -811,6 +831,7 @@ async fn edit_form(
         form: SpecForm::from_spec(&spec),
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        credential_names: credential_names(&state).await,
     };
     super::render(&page)
 }
@@ -975,6 +996,7 @@ async fn render_form_with_errors(
         form,
         errors,
         logo_images: logo_filenames(state).await,
+        credential_names: credential_names(state).await,
     };
     let body = match page.render() {
         Ok(s) => s,

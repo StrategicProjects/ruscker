@@ -84,6 +84,8 @@ use axum::body::{to_bytes, Body};
 use axum::http::{header, HeaderValue, Response};
 use lol_html::html_content::ContentType;
 use lol_html::{element, HtmlRewriter, Settings};
+use regex::Regex;
+use std::sync::LazyLock;
 
 /// Hard cap on the body size we'll collect to rewrite. 2 MB is
 /// generous for any sensible initial HTML payload; past that
@@ -336,11 +338,98 @@ fn build_runtime_shim(base_path: &str) -> String {
     )
 }
 
+/// Matches the `<script id="jupyter-config-data" …>…</script>` block
+/// JupyterLab emits in its page bootstrap. Attribute order varies
+/// (`type` may precede `id`), so we match any `<script>` whose
+/// attributes include `id="jupyter-config-data"` and capture the inner
+/// JSON. Case-insensitive + dot-matches-newline so the JSON body (which
+/// spans many lines) is captured whole.
+static JUPYTER_CONFIG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"(?is)(<script\b[^>]*\bid=["']jupyter-config-data["'][^>]*>)(.*?)(</script>)"#)
+        .expect("jupyter-config-data regex is valid")
+});
+
+/// Rewrite the URL fields inside JupyterLab's `jupyter-config-data`
+/// JSON so the app works behind the `/app/{spec}/` mount (#348).
+///
+/// ## Why this is needed on top of the `<base href>` + shim
+///
+/// JupyterLab is served with `--ServerApp.base_url=/` (so it doesn't
+/// need to know its proxied path), which means its page config reports
+/// `baseUrl: "/"` and `fullStaticUrl: "/static/lab"`. The Lab bootstrap
+/// sets webpack's `__webpack_public_path__` from those, then loads its
+/// lazy chunks by **injecting `<script src=…>` elements** at runtime —
+/// a path the fetch/XHR/WebSocket shim never sees. So the chunks are
+/// requested at the host root (`/static/lab/<chunk>.js`), miss the
+/// mount, and 404 → blank Lab.
+///
+/// `<base href>` can't fix this either: the public path is an absolute
+/// string, not a relative URL the browser resolves against the base.
+///
+/// The fix: prefix every root-absolute URL field in the config with the
+/// mount (same rule as [`rewrite_url`]), so `baseUrl` →
+/// `/box/app/jupyter/` and `fullStaticUrl` → `/box/app/jupyter/static/lab`.
+/// Webpack then loads chunks from under the mount, the proxy strips the
+/// prefix, and the container (still at `base_url=/`) serves them.
+///
+/// We rewrite **any** key whose name ends in `url` (case-insensitive) —
+/// `baseUrl`, `wsUrl`, `fullStaticUrl`, `fullLabextensionsUrl`,
+/// `fullThemesUrl`, … — so the fix is robust across JupyterLab versions
+/// regardless of which field the bootstrap reads. Non-`/` values (empty
+/// `wsUrl`, CDN `http(s)://…` URLs) are left untouched by `rewrite_url`.
+///
+/// Returns `Some(new_html)` only when something changed; `None` when the
+/// page has no Jupyter config block (every non-Jupyter app) or the JSON
+/// is unparseable — caller then uses the original bytes.
+fn rewrite_jupyter_config(html: &str, base_path: &str) -> Option<String> {
+    let caps = JUPYTER_CONFIG_RE.captures(html)?;
+    let full = caps.get(0)?;
+    let open_tag = caps.get(1)?.as_str();
+    let json_text = caps.get(2)?.as_str();
+    let close_tag = caps.get(3)?.as_str();
+
+    let mut value: serde_json::Value = serde_json::from_str(json_text.trim()).ok()?;
+    let obj = value.as_object_mut()?;
+    let mut changed = false;
+    for (key, val) in obj.iter_mut() {
+        if !key.to_ascii_lowercase().ends_with("url") {
+            continue;
+        }
+        if let Some(s) = val.as_str() {
+            if let Some(new) = rewrite_url(s, base_path) {
+                *val = serde_json::Value::String(new);
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return None;
+    }
+
+    let new_json = serde_json::to_string(&value).ok()?;
+    let mut out = String::with_capacity(html.len() + new_json.len());
+    out.push_str(&html[..full.start()]);
+    out.push_str(open_tag);
+    out.push_str(&new_json);
+    out.push_str(close_tag);
+    out.push_str(&html[full.end()..]);
+    Some(out)
+}
+
 /// Run the streaming transform: inject `<base href>`, the
 /// runtime JS shim, and rewrite known URL-bearing attributes.
 /// Wrapped in a fallible function so the caller can swallow
 /// the (vanishingly rare) lol_html error.
 fn transform(html: &[u8], base_path: &str) -> Result<Vec<u8>, lol_html::errors::RewritingError> {
+    // JupyterLab special case (#348): rewrite the `jupyter-config-data`
+    // URL fields before the lol_html pass so the Lab webpack bootstrap
+    // loads its lazy chunks from under the mount. No-op (and cheap — one
+    // regex scan) for every other app and for non-UTF-8 bodies.
+    let jup = std::str::from_utf8(html)
+        .ok()
+        .and_then(|s| rewrite_jupyter_config(s, base_path));
+    let html: &[u8] = jup.as_deref().map_or(html, str::as_bytes);
+
     let mut out = Vec::with_capacity(html.len() + 256);
     // Track whether we've already injected the `<base>` tag —
     // we only want one, and only if a `<head>` exists.
@@ -503,6 +592,52 @@ mod tests {
             rewrite_url("/sockjs/info", "/app/sales-dashboard/").as_deref(),
             Some("/app/sales-dashboard/sockjs/info")
         );
+    }
+
+    // ── rewrite_jupyter_config: the #348 fix ────────────────
+
+    #[test]
+    fn jupyter_config_urls_prefixed_to_mount() {
+        let html = r#"<html><head><script id="jupyter-config-data" type="application/json">{"baseUrl": "/", "wsUrl": "", "fullStaticUrl": "/static/lab", "appName": "JupyterLab"}</script></head></html>"#;
+        let out = rewrite_jupyter_config(html, "/box/app/jupyter/").expect("should rewrite");
+        // baseUrl "/" → the mount itself (kept with trailing slash).
+        assert!(out.contains(r#""baseUrl":"/box/app/jupyter/""#), "baseUrl in: {out}");
+        // The static path that webpack uses for lazy chunks → under mount.
+        assert!(
+            out.contains(r#""fullStaticUrl":"/box/app/jupyter/static/lab""#),
+            "fullStaticUrl in: {out}"
+        );
+        // Empty wsUrl and the non-URL appName are left as-is.
+        assert!(out.contains(r#""wsUrl":"""#), "wsUrl in: {out}");
+        assert!(out.contains(r#""appName":"JupyterLab""#), "appName in: {out}");
+    }
+
+    #[test]
+    fn jupyter_config_handles_attr_order_and_is_idempotent() {
+        // `type` before `id`, single-quoted id — attribute order varies.
+        let html = r#"<script type="application/json" id='jupyter-config-data'>{"baseUrl":"/"}</script>"#;
+        let out = rewrite_jupyter_config(html, "/app/jupyter/").expect("should rewrite");
+        assert!(out.contains(r#""baseUrl":"/app/jupyter/""#), "out: {out}");
+        // Re-running on the already-prefixed config changes nothing.
+        assert_eq!(rewrite_jupyter_config(&out, "/app/jupyter/"), None);
+    }
+
+    #[test]
+    fn jupyter_config_absent_is_noop() {
+        // A normal (non-Jupyter) app page has no config block.
+        let html = r#"<html><head><script src="/lib/x.js"></script></head></html>"#;
+        assert_eq!(rewrite_jupyter_config(html, "/box/app/shiny/"), None);
+    }
+
+    #[tokio::test]
+    async fn inject_base_href_rewrites_jupyter_config_end_to_end() {
+        // Through the full HTML transform: the config URLs are prefixed
+        // AND the `<base href>` + shim are injected in one pass.
+        let html = r#"<html><head><script id="jupyter-config-data" type="application/json">{"baseUrl": "/", "fullStaticUrl": "/static/lab"}</script></head><body></body></html>"#;
+        let out = body_string(inject_base_href(html_response(html), "/box/app/jupyter/").await).await;
+        assert!(out.contains(r#""baseUrl":"/box/app/jupyter/""#), "config: {out}");
+        assert!(out.contains(r#""fullStaticUrl":"/box/app/jupyter/static/lab""#));
+        assert!(out.contains(r#"<base href="/box/app/jupyter/">"#), "base href: {out}");
     }
 
     #[test]

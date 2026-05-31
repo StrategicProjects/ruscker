@@ -198,17 +198,22 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             None,
         )?,
         // ── Containerized hello-world demos ─────────────────────────
-        // `rocker/shiny` ships an amd64-only manifest; pinning the
-        // platform lets the daemon run it via emulation on arm64
-        // hosts (Apple Silicon / Graviton). The other two images
-        // ship multi-arch manifests so they don't need the override.
+        // The Shiny card runs `openanalytics/shinyproxy-demo` — a real,
+        // single-page Shiny demo that opens straight into a working app
+        // (vs `rocker/shiny`, which lands on a sample-app index). This
+        // is the image the cast lab used for its hand-written
+        // `shiny-demo` card; folding it into the showcase seed retires
+        // that duplicate CONFIG card (#354). amd64-only manifest, so pin
+        // the platform to run it via emulation on arm64 hosts (Apple
+        // Silicon / Graviton); the other two demo images ship multi-arch
+        // manifests so they don't need the override.
         card(
             "shiny",
             "Shiny",
             "Reactive web apps in R and Python.",
             "/assets/showcase/shiny.svg",
             "https://shiny.posit.co",
-            Some("rocker/shiny:latest"),
+            Some("openanalytics/shinyproxy-demo:latest"),
             Some(3838),
             Some("linux/amd64"),
         )?,

@@ -636,6 +636,9 @@ async fn stop_replica(
         // already gone, and we don't want a phantom row.
     }
     state.replicas.write().await.remove(&rid);
+    // Drop the replica's sessions too, or `len()` stays inflated until
+    // the idle sweep (forever under `heartbeat-timeout: -1`) (#324).
+    state.sessions.drop_replica(&rid).await;
     tracing::info!(replica = %replica_id, "replica stopped via dashboard");
     Redirect::to("/admin/dashboard").into_response()
 }
@@ -683,6 +686,9 @@ async fn restart_replica(
         tracing::warn!(replica = %replica_id, error = ?e, "restart: stop phase failed");
     }
     state.replicas.write().await.remove(&rid);
+    // The old replica's sessions are dead; purge them so the fresh
+    // replica's sticky sessions aren't shadowed by ghost counts (#324).
+    state.sessions.drop_replica(&rid).await;
 
     if let Err(e) = crate::scaler::spawn_replica(&state, &spec).await {
         tracing::error!(spec = %spec.id, error = ?e, "restart: spawn phase failed");

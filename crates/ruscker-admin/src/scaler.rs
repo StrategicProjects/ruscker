@@ -500,6 +500,10 @@ async fn stop_one(
         .await
         .map_err(|e| anyhow::anyhow!("backend stop: {e}"))?;
     state.replicas.write().await.remove(replica_id);
+    // Purge the stopped replica's sessions so `len()` doesn't stay
+    // inflated until the idle sweep (and forever under
+    // `heartbeat-timeout: -1`) — see SessionStore::drop_replica (#324).
+    state.sessions.drop_replica(replica_id).await;
     Ok(())
 }
 

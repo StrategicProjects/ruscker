@@ -780,7 +780,12 @@
                :class="form.cover ? '' : 'tint-' + form.display_type"
                :style="coverStyle()"></div>
           <template x-if="form.logo">
-            <img :src="assetUrl(form.logo)" alt="" class="rcover-img">
+            {# Mirror the landing card's fit rule (#359): SVG logos get
+               `rcover-img--contain` (object-fit: contain + padding) so the
+               artwork breathes; raster images stay `cover`. Without this
+               the preview cropped SVGs that the landing showed whole. #}
+            <img :src="assetUrl(form.logo)" alt="" loading="lazy"
+                 :class="(form.logo || '').toLowerCase().endsWith('.svg') ? 'rcover-img rcover-img--contain' : 'rcover-img'">
           </template>
           <template x-if="!form.logo">
             <span class="rcover-fallback" x-text="form.id || '—'"></span>

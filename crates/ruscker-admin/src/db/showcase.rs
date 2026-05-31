@@ -252,13 +252,19 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             // `X-RStudio-Root-Path` header (set in
             // `apply_smart_routing_headers`) — RStudio's official
             // "behind a path-rewriting proxy" mechanism, the same one
-            // ShinyProxy uses (#230). The demo runs auth-less so it opens
-            // without rocker's random password; set a PASSWORD / real
-            // auth for anything sensitive.
+            // ShinyProxy uses (#230). The demo ships a fixed login so it
+            // actually shows RStudio's sign-in screen (#347) instead of
+            // dropping straight into the IDE: `rocker/rstudio` reads
+            // `PASSWORD` and uses the `rstudio` user. The credentials are
+            // surfaced in the card description so the demo is usable. For
+            // anything real, replace the seeded `PASSWORD` (write-only in
+            // the spec form) with a `${VAR}` and a real secret, or wire
+            // SSO in front. (Previously this ran `DISABLE_AUTH=true`,
+            // which skipped the login entirely.)
             let mut rst = card(
                 "rstudio",
                 "RStudio Server",
-                "The RStudio IDE in your browser, served per session.",
+                "The RStudio IDE in your browser, served per session. Demo login — user: rstudio, password: ruscker.",
                 "/assets/showcase/rstudio.svg",
                 "https://posit.co/products/open-source/rstudio-server/",
                 Some("rocker/rstudio:latest"),
@@ -266,8 +272,8 @@ fn showcase_specs() -> Result<Vec<Spec>> {
                 None,
             )?;
             rst.container_env = Some(std::collections::BTreeMap::from([(
-                "DISABLE_AUTH".to_string(),
-                "true".to_string(),
+                "PASSWORD".to_string(),
+                "ruscker".to_string(),
             )]));
             rst.kind_override = Some(ruscker_config::SpecKindOverride::App);
             rst

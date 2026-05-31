@@ -276,6 +276,7 @@ admin-creds-key-missing-help = Le store d'identifiants a besoin d'une clé de 32
 admin-landing-title = Éditeur du portail
 admin-landing-crumb = Paramètres · Page d'accueil
 admin-landing-subtitle = Personnalisez le portail public. Les modifications s'appliquent au prochain rafraîchissement du visiteur.
+admin-landing-scope-help = Ces options (couleurs, textes d'intro, SEO, blocs personnalisés) s'appliquent à la page d'accueil publique en direct — enregistrées ici, affichées à la prochaine visite, sans redémarrage. C'est un ensemble fixe de réglages, pas un éditeur de CSS arbitraire.
 admin-landing-open-portal = Ouvrir le portail
 admin-landing-save = Enregistrer
 admin-landing-saved = Paramètres enregistrés. Rechargez le portail public pour voir.

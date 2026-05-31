@@ -47,6 +47,12 @@
     <form id="landing-form" method="post" action="{{ base }}/admin/landing"
           class="spec-form-fields" autocomplete="off">
 
+      {# Scope note (#350): everything here is applied to the public
+         landing live (saved to the DB, rendered on the next view) — no
+         restart, no rebuild. It's a fixed set of options (colors, intro
+         texts, SEO, custom blocks), NOT an arbitrary-CSS editor. #}
+      <div class="spec-form-help" style="margin-bottom:12px">{{ self.t("admin-landing-scope-help") }}</div>
+
       <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
 
       <div class="grid grid-cols-2 gap-3">

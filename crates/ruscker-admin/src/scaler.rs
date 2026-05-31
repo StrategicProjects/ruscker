@@ -340,8 +340,39 @@ async fn tick(
 
         // Per-spec snapshot — small Vec; not worth threading
         // through the registry-wide snapshot above.
-        let snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
-        let count = snap.len();
+        let mut snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
+        let mut count = snap.len();
+
+        // --- lifetime reap (#334) ---
+        // Recycle replicas past their configured age BEFORE the scale
+        // passes, so a reap that drops us under `min` is refilled by the
+        // scale-to-min branch in this same tick. The hard `max-lifetime`
+        // cap reaps even with active sessions (those sessions are lost —
+        // that's the documented contract); the soft `container-lifetime`
+        // cap reaps only idle replicas. `stop_one` also purges the
+        // replica's sessions (#324), so no orphan counts linger.
+        let aged = lifetime_reap_candidates(
+            &snap,
+            chrono::Utc::now(),
+            spec.effective_max_lifetime_secs(),
+            spec.effective_container_lifetime_secs(),
+        );
+        if !aged.is_empty() {
+            info!(
+                spec = %spec.id,
+                reaping = aged.len(),
+                "recycling replicas past max-/container-lifetime"
+            );
+            for id in &aged {
+                if let Err(e) = stop_one(state, id, backend.as_ref()).await {
+                    warn!(spec = %spec.id, replica = ?id, error = ?e, "lifetime reap stop failed");
+                }
+                idle_ticks.remove(id);
+            }
+            // Re-read so the scale passes below see the post-reap count.
+            snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
+            count = snap.len();
+        }
 
         // --- scale-up pass ---
 
@@ -483,6 +514,33 @@ fn update_idle_ticks(
 /// "not saturated" — there's nothing TO be saturated.
 fn all_saturated(replicas: &[ruscker_core::Replica]) -> bool {
     !replicas.is_empty() && replicas.iter().all(|r| r.available_seats() == 0)
+}
+
+/// Replicas that have outlived their configured lifetime and should be
+/// recycled (#334). The **hard** cap (`max-lifetime`) reaps regardless
+/// of sessions; the **soft** cap (`container-lifetime`) reaps only idle
+/// replicas (`sessions_active == 0`), so an active session isn't killed
+/// before its time. Pure over the snapshot (`now` injected) — no I/O,
+/// easy to test. Returns an empty vec when neither cap is set.
+fn lifetime_reap_candidates(
+    replicas: &[ruscker_core::Replica],
+    now: chrono::DateTime<chrono::Utc>,
+    hard_secs: Option<i64>,
+    soft_secs: Option<i64>,
+) -> Vec<ReplicaId> {
+    if hard_secs.is_none() && soft_secs.is_none() {
+        return Vec::new();
+    }
+    replicas
+        .iter()
+        .filter(|r| {
+            let age = (now - r.started_at).num_seconds();
+            let hard = hard_secs.is_some_and(|cap| age >= cap);
+            let soft = soft_secs.is_some_and(|cap| age >= cap && r.sessions_active == 0);
+            hard || soft
+        })
+        .map(|r| r.id.clone())
+        .collect()
 }
 
 /// Stop a single replica and remove it from the registry. Used
@@ -877,6 +935,52 @@ proxy:
             sessions_max: max,
             host: None,
         }
+    }
+
+    #[test]
+    fn lifetime_reap_picks_aged_replicas_by_cap() {
+        use chrono::{Duration, Utc};
+        let now = Utc::now();
+        let mk = |active: u32, age_secs: i64| Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "s".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: now - Duration::seconds(age_secs),
+            sessions_active: active,
+            sessions_max: 5,
+            host: None,
+        };
+        let young_idle = mk(0, 60);
+        let young_busy = mk(2, 60);
+        let old_idle = mk(0, 4000);
+        let old_busy = mk(3, 4000);
+        let snap = vec![
+            young_idle.clone(),
+            young_busy.clone(),
+            old_idle.clone(),
+            old_busy.clone(),
+        ];
+
+        // No caps → nothing reaped.
+        assert!(lifetime_reap_candidates(&snap, now, None, None).is_empty());
+
+        // Hard cap (3600s) reaps BOTH old replicas — active included.
+        let hard = lifetime_reap_candidates(&snap, now, Some(3600), None);
+        assert_eq!(hard.len(), 2);
+        assert!(hard.contains(&old_idle.id) && hard.contains(&old_busy.id));
+
+        // Soft cap (3600s) reaps only the idle old one.
+        let soft = lifetime_reap_candidates(&snap, now, None, Some(3600));
+        assert_eq!(soft, vec![old_idle.id.clone()]);
+
+        // Both set: the hard cap still reaps the busy old replica.
+        let both = lifetime_reap_candidates(&snap, now, Some(3600), Some(3600));
+        assert_eq!(both.len(), 2);
+
+        // A cap longer than any age reaps nothing.
+        assert!(lifetime_reap_candidates(&snap, now, Some(99_999), Some(99_999)).is_empty());
     }
 
     #[tokio::test]

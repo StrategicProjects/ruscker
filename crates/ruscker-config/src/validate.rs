@@ -260,14 +260,10 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
         "concurrent-requests-per-replica",
         "request-based concurrency limit not enforced — capacity is seat-based; tracked in #326",
     ),
-    (
-        "max-lifetime",
-        "max container lifetime not enforced — replicas are reaped by idle, not age; tracked in #326",
-    ),
-    (
-        "container-lifetime",
-        "max container lifetime not enforced — replicas are reaped by idle, not age; tracked in #326",
-    ),
+    // NOTE: `max-lifetime` / `container-lifetime` ARE enforced now (#334)
+    // — the scaler recycles a replica once it outlives its age cap (hard
+    // reaps regardless of sessions, soft reaps when idle). Intentionally
+    // absent from this ignored-fields list.
     (
         "stop-on-logout",
         "stop-on-logout not implemented — sessions end via heartbeat-timeout; tracked in #326",
@@ -1021,6 +1017,7 @@ proxy:
     drain-timeout: 90
     concurrent-requests-per-replica: 4
     max-lifetime: 3600
+    container-lifetime: 1800
     stop-on-logout: true
 ";
         let fields: Vec<String> = compat(yaml)
@@ -1035,11 +1032,16 @@ proxy:
             "scale-down-grace",
             "drain-timeout",
             "concurrent-requests-per-replica",
-            "max-lifetime",
             "stop-on-logout",
         ] {
             assert!(fields.iter().any(|f| f == expected), "missing {expected}: {fields:?}");
         }
+        // #334: max-lifetime / container-lifetime ARE enforced now — they
+        // must NOT be flagged as unsupported anymore.
+        assert!(
+            !fields.iter().any(|f| f == "max-lifetime" || f == "container-lifetime"),
+            "lifetime caps are enforced now: {fields:?}"
+        );
     }
 
     #[test]

@@ -255,8 +255,8 @@ A spec describes one app, API, or external link. Every spec has an
                                       #   (8050), … . ShinyProxy `port:`
                                       #   is accepted as an alias.
   seats-per-container: 10             # sessions per replica
-  max-lifetime: 360                   # minutes — NOT yet enforced (#326)
-  container-lifetime: 360             # minutes — NOT yet enforced (#326)
+  max-lifetime: 360                   # minutes — hard recycle (enforced, #334)
+  container-lifetime: 360             # minutes — soft recycle when idle (enforced, #334)
   heartbeat-timeout: 3600000          # ms — per-spec override (enforced)
   stop-on-logout: false               # NOT yet enforced (#326)
   docker-registry-username: acme
@@ -457,16 +457,17 @@ applied) and flagged by `ruscker validate`.
 | `routing-strategy` | enum | varies | See below |
 | `concurrent-requests-per-replica` | u32 | `100` | ⚠️ parsed but **not yet enforced** (#326) |
 
-> **Autoscaling knobs not yet enforced (#326).** The scaler currently
-> scales on **seat saturation** (`sessions_active` vs `sessions_max`)
-> with built-in grace ticks, and reaps replicas by **idle**, not age. So
-> `scale-up-threshold` / `scale-down-threshold` / `scale-down-grace` /
-> `drain-timeout` / `concurrent-requests-per-replica` / `max-lifetime` /
-> `container-lifetime` / `stop-on-logout` are accepted (and round-trip
-> through import/export + the admin form) for migration friction-free,
-> but a set value does **not** change runtime behaviour yet.
-> `ruscker validate --strict-compat` flags each one. Wiring them into
-> the scaler is tracked per-knob under #326.
+> **Some autoscaling knobs not yet enforced (#326).** The scaler scales
+> on **seat saturation** (`sessions_active` vs `sessions_max`) with
+> built-in grace ticks. `max-lifetime` / `container-lifetime` **are**
+> enforced (#334 — replicas are recycled past their age cap). The
+> remaining knobs — `scale-up-threshold` / `scale-down-threshold` /
+> `scale-down-grace` / `drain-timeout` / `concurrent-requests-per-replica`
+> / `stop-on-logout` — are accepted (and round-trip through
+> import/export + the admin form) for migration friction-free, but a set
+> value does **not** change runtime behaviour yet.
+> `ruscker validate --strict-compat` flags each still-unenforced one.
+> Wiring the rest is tracked per-knob under #326 (#333/#335/#336/#337).
 
 ### Routing strategies
 

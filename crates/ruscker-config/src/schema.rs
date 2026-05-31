@@ -902,6 +902,21 @@ impl Spec {
         self.max_replicas.unwrap_or_else(|| self.effective_min_replicas())
     }
 
+    /// Hard lifetime cap in **seconds** (`max-lifetime` is authored in
+    /// minutes), or `None` when unset. A replica older than this is
+    /// recycled by the scaler even while sessions are active (#334).
+    pub fn effective_max_lifetime_secs(&self) -> Option<i64> {
+        self.max_lifetime.map(|m| (m as i64).saturating_mul(60))
+    }
+
+    /// Soft lifetime cap in **seconds** (`container-lifetime` is authored
+    /// in minutes), or `None` when unset. A replica older than this is
+    /// recycled by the scaler once it goes idle (no active sessions) —
+    /// "preferred for replacement during natural turnover" (#334).
+    pub fn effective_container_lifetime_secs(&self) -> Option<i64> {
+        self.container_lifetime.map(|m| (m as i64).saturating_mul(60))
+    }
+
     /// Multi-host placement strategy (default [`Placement::Spread`]).
     pub fn effective_placement(&self) -> Placement {
         self.placement.unwrap_or_default()
@@ -1106,6 +1121,23 @@ mod max_body_size_tests {
             s.effective_max_body_bytes(Some(1024)),
             Some(10 * 1024 * 1024)
         );
+    }
+
+    #[test]
+    fn lifetime_caps_convert_minutes_to_seconds() {
+        // #334: both fields are authored in minutes; the scaler wants
+        // seconds. Unset ⇒ None (no cap).
+        let s: Spec = serde_yaml_ng::from_str(
+            "id: x\ncontainer-image: a:1\nmax-lifetime: 60\ncontainer-lifetime: 30\n",
+        )
+        .expect("parse");
+        assert_eq!(s.effective_max_lifetime_secs(), Some(3600));
+        assert_eq!(s.effective_container_lifetime_secs(), Some(1800));
+
+        let none: Spec =
+            serde_yaml_ng::from_str("id: y\ncontainer-image: a:1\n").expect("parse");
+        assert_eq!(none.effective_max_lifetime_secs(), None);
+        assert_eq!(none.effective_container_lifetime_secs(), None);
     }
 
     #[test]

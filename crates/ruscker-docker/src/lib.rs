@@ -447,6 +447,10 @@ impl ContainerBackend for LocalDockerBackend {
             )
             .await
             .map_err(|e| backend_err("remove container", e))?;
+        // Drop the container's CPU-delta baseline so `prev_stats` doesn't
+        // accumulate a dead entry per recycled container over a long-
+        // lived deployment (#325). The hook existed but was never called.
+        self.forget_metrics(&container_id);
         Ok(())
     }
 
@@ -1011,10 +1015,26 @@ mod tests {
         let listed = backend.list().await.expect("list");
         assert!(listed.iter().any(|r| r.id == replica.id));
 
+        // Record a metrics sample so the CPU-delta baseline lands in
+        // `prev_stats`, then assert `stop()` clears it (#325) — otherwise
+        // the map grows by one dead entry per recycled container.
+        let _ = backend
+            .metrics_for_container(&replica.container_id)
+            .await
+            .expect("metrics");
+        assert!(
+            backend.prev_stats.contains_key(&replica.container_id),
+            "metrics_for_container should seed prev_stats"
+        );
+
         // Clean up.
         backend.stop(&replica.id).await.expect("stop");
         let after = backend.list().await.expect("list after stop");
         assert!(!after.iter().any(|r| r.id == replica.id));
+        assert!(
+            !backend.prev_stats.contains_key(&replica.container_id),
+            "stop() must forget the container's metrics baseline (#325)"
+        );
     }
 
     /// `container-env` / `container-cmd` smoke: spawn with both set and

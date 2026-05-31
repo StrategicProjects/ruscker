@@ -135,6 +135,8 @@ const SHOWCASE_QUARTO: &[u8] = include_bytes!("../../assets/showcase/quarto.svg"
 const SHOWCASE_RMARKDOWN: &[u8] = include_bytes!("../../assets/showcase/rmarkdown.svg");
 const SHOWCASE_RSTUDIO: &[u8] = include_bytes!("../../assets/showcase/rstudio.svg");
 const SHOWCASE_SHINY: &[u8] = include_bytes!("../../assets/showcase/shiny.svg");
+const SHOWCASE_SHINY_FOR_PYTHON: &[u8] =
+    include_bytes!("../../assets/showcase/shiny-for-python.svg");
 const SHOWCASE_STREAMLIT: &[u8] = include_bytes!("../../assets/showcase/streamlit.svg");
 const SHOWCASE_VOILA: &[u8] = include_bytes!("../../assets/showcase/voila.svg");
 
@@ -192,6 +194,10 @@ pub fn routes() -> Router<AppState> {
         .route("/assets/showcase/rmarkdown.svg", get(|| serve(SHOWCASE_RMARKDOWN, SVG)))
         .route("/assets/showcase/rstudio.svg", get(|| serve(SHOWCASE_RSTUDIO, SVG)))
         .route("/assets/showcase/shiny.svg", get(|| serve(SHOWCASE_SHINY, SVG)))
+        .route(
+            "/assets/showcase/shiny-for-python.svg",
+            get(|| serve(SHOWCASE_SHINY_FOR_PYTHON, SVG)),
+        )
         .route("/assets/showcase/streamlit.svg", get(|| serve(SHOWCASE_STREAMLIT, SVG)))
         .route("/assets/showcase/voila.svg", get(|| serve(SHOWCASE_VOILA, SVG)))
         // Brand kit. URLs match docs/BRAND.md.

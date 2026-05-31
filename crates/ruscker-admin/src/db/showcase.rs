@@ -181,7 +181,7 @@ fn card(
         .with_context(|| format!("build showcase spec {id}"))
 }
 
-/// The 12 cards seeded on first install. Order matters: Ruscker's
+/// The 13 cards seeded on first install. Order matters: Ruscker's
 /// own docs card is first; the rest follow the order the maintainer
 /// curated for the showcase.
 fn showcase_specs() -> Result<Vec<Spec>> {
@@ -210,13 +210,38 @@ fn showcase_specs() -> Result<Vec<Spec>> {
         card(
             "shiny",
             "Shiny",
-            "Reactive web apps in R and Python.",
+            "Reactive web apps in R.",
             "/assets/showcase/shiny.svg",
             "https://shiny.posit.co",
             Some("openanalytics/shinyproxy-demo:latest"),
             Some(3838),
             Some("linux/amd64"),
         )?,
+        {
+            // Shiny for Python — same reactive model, Python ecosystem.
+            // `shinyproxy-shiny-for-python-demo` listens on :8080; routes
+            // like the R Shiny card (kind Shiny, sticky + WebSocket).
+            // The bundled logo is a white wordmark, so give the card a
+            // deep Shiny-blue → cyan gradient cover that makes the white
+            // artwork pop (the SVG's only ink is `#FFFFFF`).
+            let mut s = card(
+                "shiny-for-python",
+                "Shiny for Python",
+                "Reactive web apps in Python — Shiny's model, Python's ecosystem.",
+                "/assets/showcase/shiny-for-python.svg",
+                "https://shiny.posit.co/py/",
+                Some("openanalytics/shinyproxy-shiny-for-python-demo:latest"),
+                Some(8080),
+                Some("linux/amd64"),
+            )?;
+            s.template_properties.0.insert(
+                "cover".into(),
+                serde_yaml_ng::Value::String(
+                    "linear-gradient(135deg, #16335b 0%, #2aa9c9 100%)".into(),
+                ),
+            );
+            s
+        },
         {
             // Jupyter needs runtime config to work behind the proxy: a
             // notebook server otherwise demands a token nobody has and
@@ -293,37 +318,60 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             Some(3838),
             Some("linux/amd64"),
         )?,
-        // ── External-link cards (no public hello image) ─────────────
-        card(
-            "streamlit",
-            "Streamlit",
-            "Data and machine-learning apps in Python.",
-            "/assets/showcase/streamlit.svg",
-            "https://streamlit.io",
-            None,
-            None,
-            None,
-        )?,
-        card(
-            "dash",
-            "Dash",
-            "Analytical web apps built on Plotly.",
-            "/assets/showcase/dash.svg",
-            "https://dash.plotly.com",
-            None,
-            None,
-            None,
-        )?,
-        card(
-            "quarto",
-            "Quarto",
-            "Open-source publishing system for technical documents.",
-            "/assets/showcase/quarto.svg",
-            "https://quarto.org",
-            None,
-            None,
-            None,
-        )?,
+        // ── Containerized framework demos (OpenAnalytics images) ────
+        // These run the same demo images ShinyProxy uses, behind the
+        // `/app/{spec}/` proxy. Ruscker has no `SHINYPROXY_PUBLIC_PATH`
+        // cmd-templating, so we DON'T pass a base-url path; the apps run
+        // at `base_url=/` and rely on the `/app` HTML rewriter + runtime
+        // shim (+ the #348 jupyter-config rewrite for Voilà), the same
+        // mechanism the Shiny/Jupyter cards use. amd64-only images, so
+        // the platform is pinned. Ports come from each demo's
+        // `application.yml` (#354/#365).
+        {
+            let mut s = card(
+                "streamlit",
+                "Streamlit",
+                "Data and machine-learning apps in Python.",
+                "/assets/showcase/streamlit.svg",
+                "https://streamlit.io",
+                Some("openanalytics/shinyproxy-streamlit-demo:latest"),
+                Some(8501),
+                Some("linux/amd64"),
+            )?;
+            s.kind_override = Some(ruscker_config::SpecKindOverride::Streamlit);
+            s
+        },
+        {
+            let mut s = card(
+                "dash",
+                "Dash",
+                "Analytical web apps built on Plotly.",
+                "/assets/showcase/dash.svg",
+                "https://dash.plotly.com",
+                Some("openanalytics/shinyproxy-dash-demo:latest"),
+                Some(8050),
+                Some("linux/amd64"),
+            )?;
+            s.kind_override = Some(ruscker_config::SpecKindOverride::Dash);
+            s
+        },
+        {
+            // Quarto demo serves rendered docs on :8080. No dedicated
+            // kind — treat as a generic interactive app (sticky+WS is
+            // harmless if the content is static).
+            let mut s = card(
+                "quarto",
+                "Quarto",
+                "Open-source publishing system for technical documents.",
+                "/assets/showcase/quarto.svg",
+                "https://quarto.org",
+                Some("openanalytics/shinyproxy-quarto-demo:latest"),
+                Some(8080),
+                Some("linux/amd64"),
+            )?;
+            s.kind_override = Some(ruscker_config::SpecKindOverride::App);
+            s
+        },
         card(
             "bokeh",
             "Bokeh",
@@ -344,26 +392,53 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             None,
             None,
         )?,
-        card(
-            "fastapi",
-            "FastAPI",
-            "Modern Python framework for building APIs.",
-            "/assets/showcase/fastapi.svg",
-            "https://fastapi.tiangolo.com",
-            None,
-            None,
-            None,
-        )?,
-        card(
-            "voila",
-            "Voilà",
-            "Standalone web apps from Jupyter notebooks.",
-            "/assets/showcase/voila.svg",
-            "https://voila.readthedocs.io",
-            None,
-            None,
-            None,
-        )?,
+        {
+            // FastAPI demo — a stateless API (kind Api: no sticky/WS,
+            // round-robin). ShinyProxy passes a dynamic `SCRIPT_NAME`
+            // (the public path) for the OpenAPI/docs prefix; Ruscker
+            // can't template that, so `/docs` assets may need the
+            // forwarded-prefix headers / a follow-up — the raw API
+            // endpoints work regardless.
+            let mut s = card(
+                "fastapi",
+                "FastAPI",
+                "Modern Python framework for building APIs.",
+                "/assets/showcase/fastapi.svg",
+                "https://fastapi.tiangolo.com",
+                Some("openanalytics/shinyproxy-fastapi-demo:latest"),
+                Some(8000),
+                Some("linux/amd64"),
+            )?;
+            s.kind_override = Some(ruscker_config::SpecKindOverride::Api);
+            s
+        },
+        {
+            // Voilà demo — Jupyter-server based (kind Voila). Like
+            // Jupyter, it builds its webpack public path from the page
+            // config; we run it at `base_url=/` (dropping ShinyProxy's
+            // dynamic `--base_url`) and lean on the #348 jupyter-config
+            // rewrite + the runtime shim. `basics.ipynb` ships in the
+            // image; bind to all interfaces on :8080.
+            let mut s = card(
+                "voila",
+                "Voilà",
+                "Standalone web apps from Jupyter notebooks.",
+                "/assets/showcase/voila.svg",
+                "https://voila.readthedocs.io",
+                Some("openanalytics/shinyproxy-voila-demo:latest"),
+                Some(8080),
+                Some("linux/amd64"),
+            )?;
+            s.kind_override = Some(ruscker_config::SpecKindOverride::Voila);
+            s.container_cmd = Some(vec![
+                "voila".into(),
+                "basics.ipynb".into(),
+                "--no-browser".into(),
+                "--port=8080".into(),
+                "--Voila.ip=0.0.0.0".into(),
+            ]);
+            s
+        },
     ])
 }
 
@@ -375,7 +450,7 @@ mod tests {
     use crate::db::{open_memory, ConfigDb};
 
     #[tokio::test]
-    async fn seed_inserts_all_twelve_cards_on_empty_db() {
+    async fn seed_inserts_all_showcase_cards_on_empty_db() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
         seed_if_unseeded(&db).await.unwrap();
         let pool = match &db {
@@ -386,7 +461,7 @@ mod tests {
             .fetch_one(pool)
             .await
             .unwrap();
-        assert_eq!(n, 12, "12 showcase specs seeded");
+        assert_eq!(n, 13, "13 showcase specs seeded");
         // The Ruscker docs card is the canonical first entry.
         let row: (String,) =
             sqlx::query_as("SELECT display_name FROM specs WHERE id = 'ruscker-docs'")
@@ -407,6 +482,28 @@ mod tests {
         assert_eq!(kind("jupyter"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("rstudio"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("shiny"), ruscker_config::SpecKind::Shiny, "shiny stays Shiny");
+        assert_eq!(kind("shiny-for-python"), ruscker_config::SpecKind::Shiny);
+        // The Shiny-for-Python card carries a gradient cover (white logo
+        // needs a colored background to pop).
+        let sfp = specs.iter().find(|s| s.id == "shiny-for-python").unwrap();
+        assert!(
+            sfp.template_properties
+                .get_str("cover")
+                .is_some_and(|c| c.contains("linear-gradient")),
+            "shiny-for-python has a gradient cover"
+        );
+        // Framework demos converted from external links (#354/#365):
+        // Streamlit/Dash/Voilà are interactive (sticky + WS); FastAPI is
+        // a stateless API; rmarkdown is Shiny-backed; bokeh/plumber have
+        // no demo image so they stay external links.
+        assert_eq!(kind("rmarkdown"), ruscker_config::SpecKind::Shiny);
+        assert_eq!(kind("streamlit"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("dash"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("voila"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("quarto"), ruscker_config::SpecKind::InteractiveApp);
+        assert_eq!(kind("fastapi"), ruscker_config::SpecKind::Api);
+        assert_eq!(kind("bokeh"), ruscker_config::SpecKind::External, "no demo image → link");
+        assert_eq!(kind("plumber"), ruscker_config::SpecKind::External, "no demo image → link");
     }
 
     #[tokio::test]

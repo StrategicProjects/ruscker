@@ -496,7 +496,8 @@ spec-form-registry-password-keep = Blank keeps the current password
 spec-help-registry-password = Use an environment variable — never paste the password as text. Only used together with the username.
 spec-form-registry-credential = Stored credential
 spec-help-registry-credential = Pick a named credential from the store (Credentials page) to pull private images. When set, it takes precedence over the inline username/password.
-spec-form-registry-help = Two ways to pull a private image: a named credential from the store (above), or the inline domain/username/password. The named credential wins if both are set. Never paste a plaintext password — reference an environment variable instead.
+spec-form-registry-help = Pull a private image by selecting a saved credential. Create and manage credentials on the Credentials page — the password can be a literal (encrypted) or an environment-variable reference.
+spec-form-registry-inline-note = This app carries inline registry credentials from imported YAML. They're preserved, but prefer a saved credential above.
 spec-form-access-section = Access
 spec-form-access-groups = Allowed groups
 spec-help-access-groups = Groups that may see and reach the app (comma-separated). Blank, with users also blank = open to everyone.

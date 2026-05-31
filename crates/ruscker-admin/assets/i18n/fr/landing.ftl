@@ -496,7 +496,8 @@ spec-form-registry-password-keep = Vide conserve le mot de passe actuel
 spec-help-registry-password = Utilisez une variable d'environnement — ne collez jamais le mot de passe en clair. Utilisé uniquement avec l'utilisateur.
 spec-form-registry-credential = Identifiant enregistré
 spec-help-registry-credential = Choisissez un identifiant nommé du coffre (page Identifiants) pour tirer des images privées. S'il est défini, il prime sur l'utilisateur/mot de passe en ligne.
-spec-form-registry-help = Deux façons de tirer une image privée : un identifiant nommé du coffre (ci-dessus) ou le domaine/utilisateur/mot de passe en ligne. L'identifiant nommé l'emporte si les deux sont définis. Ne collez jamais de mot de passe en clair — référencez plutôt une variable d'environnement.
+spec-form-registry-help = Tirez une image privée en sélectionnant un identifiant enregistré. Créez et gérez les identifiants sur la page Identifiants — le mot de passe peut être littéral (chiffré) ou une référence de variable d'environnement.
+spec-form-registry-inline-note = Cette app a des identifiants de registre en ligne (YAML importé). Ils sont conservés, mais préférez un identifiant enregistré ci-dessus.
 spec-form-access-section = Accès
 spec-form-access-groups = Groupes autorisés
 spec-help-access-groups = Groupes qui peuvent voir et atteindre l'app (séparés par des virgules). Vide, avec utilisateurs aussi vide = ouvert à tous.

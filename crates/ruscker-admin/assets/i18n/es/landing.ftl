@@ -496,7 +496,8 @@ spec-form-registry-password-keep = En blanco mantiene la contraseña actual
 spec-help-registry-password = Usa una variable de entorno — nunca pegues la contraseña en texto. Solo se usa junto con el usuario.
 spec-form-registry-credential = Credencial guardada
 spec-help-registry-credential = Elige una credencial con nombre del almacén (página Credenciales) para descargar imágenes privadas. Cuando se define, tiene prioridad sobre el usuario/contraseña en línea.
-spec-form-registry-help = Dos formas de descargar una imagen privada: una credencial con nombre del almacén (arriba) o el dominio/usuario/contraseña en línea. La credencial con nombre gana si se definen ambas. Nunca pegues una contraseña en texto plano — usa una variable de entorno.
+spec-form-registry-help = Descarga una imagen privada seleccionando una credencial guardada. Crea y gestiona credenciales en la página Credenciales — la contraseña puede ser literal (cifrada) o una referencia a variable de entorno.
+spec-form-registry-inline-note = Esta app tiene credenciales de registry en línea (YAML importado). Se conservan, pero prefiera una credencial guardada arriba.
 spec-form-access-section = Acceso
 spec-form-access-groups = Grupos permitidos
 spec-help-access-groups = Grupos que pueden ver y acceder a la app (separados por comas). Vacío, con usuarios también vacío = abierto a todos.

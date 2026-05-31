@@ -512,54 +512,44 @@
             <div class="spec-form-help">{{ self.t("spec-form-container-cmd-help") }}</div>
           </div>
 
-          {# Registry — pulling private images #}
+          {# Registry — pulling private images. Unified on the credential
+             store (#351): pick a SAVED credential here; create/manage them
+             on the Credentials page (where the password can be a literal —
+             AES-encrypted — or a `${VAR}` env-ref). The inline
+             domain/username/password from imported ShinyProxy YAML are
+             preserved as hidden fields (back-compat, no data loss on save)
+             but no longer edited here — a named credential takes
+             precedence anyway. #}
           <div class="spec-form-subsection">{{ self.t("spec-form-registry-section") }}</div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-reg-domain" class="spec-form-label">{{ self.t("spec-form-registry-domain") }}</label>
-                {% call help(self.t("spec-help-registry-domain")) %}{% endcall %}
-              </div>
-              <input id="f-reg-domain" type="text" name="docker_registry_domain"
-                     value="{{ form.docker_registry_domain }}" placeholder="docker.io"
-                     class="spec-form-input spec-form-input--mono">
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
+              {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
             </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-reg-user" class="spec-form-label">{{ self.t("spec-form-registry-username") }}</label>
-                {% call help(self.t("spec-help-registry-username")) %}{% endcall %}
-              </div>
-              <input id="f-reg-user" type="text" name="docker_registry_username"
-                     value="{{ form.docker_registry_username }}" class="spec-form-input">
-            </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-reg-pass" class="spec-form-label">{{ self.t("spec-form-registry-password") }}</label>
-                {% call help(self.t("spec-help-registry-password")) %}{% endcall %}
-              </div>
-              <input id="f-reg-pass" type="password" name="docker_registry_password"
-                     value="" autocomplete="new-password"
-                     placeholder="{{ self.t("spec-form-registry-password-keep") }}"
-                     class="spec-form-input spec-form-input--mono">
-            </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
-                {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
-              </div>
-              {# Free-text, but a datalist surfaces the names the operator
-                 created on the Credentials page so the two screens
-                 connect (#351). A named credential takes precedence over
-                 the inline domain/username/password above. #}
-              <input id="f-reg-cred" type="text" name="docker_registry_credential"
-                     value="{{ form.docker_registry_credential }}"
-                     list="registry-cred-suggestions" class="spec-form-input">
-              <datalist id="registry-cred-suggestions">
-                {% for name in credential_names %}<option value="{{ name }}"></option>{% endfor %}
-              </datalist>
+            <input id="f-reg-cred" type="text" name="docker_registry_credential"
+                   value="{{ form.docker_registry_credential }}"
+                   list="registry-cred-suggestions" class="spec-form-input">
+            <datalist id="registry-cred-suggestions">
+              {% for name in credential_names %}<option value="{{ name }}"></option>{% endfor %}
+            </datalist>
+            <div class="spec-form-help">
+              {{ self.t("spec-form-registry-help") }}
+              <a href="{{ base }}/admin/credentials" target="_blank" rel="noopener" class="hover:underline">
+                {{ self.t("admin-nav-credentials") }}
+                <i class="ti ti-external-link" aria-hidden="true" style="font-size:11px"></i>
+              </a>
             </div>
           </div>
-          <div class="spec-form-help">{{ self.t("spec-form-registry-help") }}</div>
+          {# Back-compat: keep inline registry creds from imported YAML so a
+             save doesn't drop them (domain/username preserved verbatim;
+             blank password keeps the stored one, #260). No longer editable
+             here — migrate to a saved credential above. #}
+          <input type="hidden" name="docker_registry_domain" value="{{ form.docker_registry_domain }}">
+          <input type="hidden" name="docker_registry_username" value="{{ form.docker_registry_username }}">
+          <input type="hidden" name="docker_registry_password" value="">
+          {% if !form.docker_registry_domain.is_empty() || !form.docker_registry_username.is_empty() %}
+          <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-registry-inline-note") }}</div>
+          {% endif %}
 
           {# Access — who may see + reach this app (#155) #}
           <div class="spec-form-subsection">{{ self.t("spec-form-access-section") }}</div>

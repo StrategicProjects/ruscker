@@ -442,6 +442,53 @@ fn rewrite_jupyter_config(html: &str, base_path: &str) -> Option<String> {
     Some(out)
 }
 
+/// Rewrite Voilà's inline-script `/voila/…` URLs to the mount (#372).
+///
+/// ## Why this is needed on top of the `<base href>` + shim + #348
+///
+/// Voilà is served with `--base_url=/` (so the container, behind our
+/// *stripping* proxy, serves at root — `base_url=#{publicPath}` would
+/// 404 every request, the same trap as Jupyter in #382). Its page then
+/// boots via **RequireJS**, whose bootstrap lives in an inline
+/// `<script>` (NOT an HTML attribute, so the lol_html attribute pass
+/// never sees it):
+///
+/// ```js
+/// requirejs.config({ baseUrl: '/voila/' });
+/// window.voila_js_url = "/voila/templates/lab/static/voila.js?v=…";
+/// requirejs(["/voila/templates/lab/static/main.js?v=…"]);
+/// ```
+///
+/// Plus `<body data-base-url="/voila/">`. Those root-absolute `/voila/…`
+/// URLs are requested at the host root, miss the `/box/app/voila/` mount,
+/// and 404 → a blank page with a RequireJS `Script error` (the console
+/// the operator reported). `jupyter-config-data` is already handled by
+/// [`rewrite_jupyter_config`] (Voilà ships that block too), so kernels
+/// work; this closes the static-asset gap.
+///
+/// The fix: prefix every **quoted** `/voila/` occurrence with the mount
+/// (`'/voila/` → `'/box/app/voila/voila/`). Anchoring on the quote means
+/// we only touch URL string literals; the `src`/`href` attributes that
+/// the lol_html pass already rewrites are left for it (and even if one
+/// slipped through, [`rewrite_url`] skips paths already under
+/// `base_path`, so there's no double-prefix). The browser then requests
+/// `…/voila/…` under the mount, the proxy strips it, and the container
+/// (still at `base_url=/`) serves from its own `/voila/` root.
+///
+/// `Some` only when something changed; `None` for every non-Voilà page.
+fn rewrite_voila(html: &str, base_path: &str) -> Option<String> {
+    // `/voila/` is Voilà's fixed internal static namespace (independent
+    // of the spec id), so its presence as a quoted URL is a reliable,
+    // cheap marker. Bail before allocating on every other app's page.
+    if !html.contains("\"/voila/") && !html.contains("'/voila/") {
+        return None;
+    }
+    let out = html
+        .replace("\"/voila/", &format!("\"{base_path}voila/"))
+        .replace("'/voila/", &format!("'{base_path}voila/"));
+    (out != html).then_some(out)
+}
+
 /// Rewrite the container's own internal authority to the mount path
 /// (#373). An app behind the proxy that builds absolute URLs from the
 /// `Host` it sees (e.g. Starlette/FastAPI `url_for`) emits
@@ -476,6 +523,14 @@ fn transform(html: &[u8], base_path: &str) -> Result<Vec<u8>, lol_html::errors::
         .ok()
         .and_then(|s| rewrite_jupyter_config(s, base_path));
     let html: &[u8] = jup.as_deref().map_or(html, str::as_bytes);
+
+    // Voilà special case (#372): prefix the RequireJS bootstrap's inline
+    // `/voila/…` static URLs to the mount. Also a cheap no-op regex-free
+    // scan for every non-Voilà app and non-UTF-8 body.
+    let voila = std::str::from_utf8(html)
+        .ok()
+        .and_then(|s| rewrite_voila(s, base_path));
+    let html: &[u8] = voila.as_deref().map_or(html, str::as_bytes);
 
     let mut out = Vec::with_capacity(html.len() + 256);
     // Track whether we've already injected the `<base>` tag —
@@ -688,6 +743,41 @@ mod tests {
         // A normal (non-Jupyter) app page has no config block.
         let html = r#"<html><head><script src="/lib/x.js"></script></head></html>"#;
         assert_eq!(rewrite_jupyter_config(html, "/box/app/shiny/"), None);
+    }
+
+    // ── rewrite_voila: the #372 fix ──────────────────────────
+    #[test]
+    fn voila_inline_requirejs_urls_prefixed_to_mount() {
+        // The RequireJS bootstrap Voilà emits (with --base_url=/), as
+        // captured from the real container.
+        let html = r#"<body data-base-url="/voila/"><script>
+  requirejs.config({ baseUrl: '/voila/', waitSeconds: 30});
+  window.voila_js_url = "/voila/templates/lab/static/voila.js?v=abc";
+  requirejs(["/voila/templates/lab/static/main.js?v=def"]);
+</script></body>"#;
+        let out = rewrite_voila(html, "/box/app/voila/").expect("should rewrite");
+        assert!(out.contains(r#"baseUrl: '/box/app/voila/voila/'"#), "requirejs baseUrl: {out}");
+        assert!(out.contains(r#""/box/app/voila/voila/templates/lab/static/main.js?v=def""#), "main.js: {out}");
+        assert!(out.contains(r#"data-base-url="/box/app/voila/voila/""#), "data-base-url: {out}");
+        // No bare `/voila/` URL string survives.
+        assert!(!out.contains(r#""/voila/"#) && !out.contains(r#"'/voila/"#), "leftover: {out}");
+    }
+
+    #[test]
+    fn voila_absent_is_noop() {
+        // A non-Voilà page (no quoted /voila/ URL) is left untouched.
+        let html = r#"<html><head><script src="/lib/x.js"></script></head></html>"#;
+        assert_eq!(rewrite_voila(html, "/box/app/shiny/"), None);
+    }
+
+    #[test]
+    fn voila_does_not_touch_mounted_attrs_so_lol_html_skips_them() {
+        // A src already under the mount (as the lol_html pass would leave
+        // it) must NOT be re-prefixed by us — and rewrite_url skips it too.
+        let html = r#"<script src="/box/app/voila/voila/static/require.min.js"></script>"#;
+        // Our quote-anchored replace doesn't match `"/box/...`, only `"/voila/`.
+        assert_eq!(rewrite_voila(html, "/box/app/voila/"), None);
+        assert_eq!(rewrite_url("/box/app/voila/voila/static/require.min.js", "/box/app/voila/"), None);
     }
 
     #[tokio::test]

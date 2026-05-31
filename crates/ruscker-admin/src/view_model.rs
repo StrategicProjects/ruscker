@@ -198,7 +198,10 @@ pub struct CardCtx<'a> {
     /// verbatim from `template-properties.subject` and rendered as-is
     /// in the UI — operators choose their own taxonomy.
     pub subject: Option<&'a str>,
-    pub logo: Option<&'a str>,
+    /// Card logo URL. Stored base-agnostic; a root-absolute value
+    /// (e.g. `/assets/img/x.png`) is prefixed with the portal base
+    /// path at construction (#294) so it resolves under `--base-path`.
+    pub logo: Option<String>,
     /// Optional CSS background for the card cover, read verbatim
     /// from `template-properties.cover` (a solid color or a
     /// `linear-/radial-gradient(...)`). When `None`, the card
@@ -206,8 +209,9 @@ pub struct CardCtx<'a> {
     /// into a `style="background: …"` — the browser fail-softs on
     /// invalid CSS, and the value round-trips through YAML/export
     /// untouched. (Not server-validated, same policy as
-    /// `landing_customization.header_bg`.)
-    pub cover: Option<&'a str>,
+    /// `landing_customization.header_bg`.) Any embedded
+    /// `url(/assets/…)` is base-prefixed at construction (#294).
+    pub cover: Option<String>,
     pub updated_raw: Option<&'a str>,
     /// "DD/MM" — short form used in the meta row.
     pub updated_short: Option<String>,
@@ -220,7 +224,12 @@ pub struct CardCtx<'a> {
 }
 
 impl<'a> CardCtx<'a> {
-    pub fn from_spec(spec: &'a Spec) -> Self {
+    /// Build a card view-model. `base` is the portal base path (`""`
+    /// or e.g. `/box`); root-absolute asset URLs in `href`/`logo`/
+    /// `cover` are prefixed with it so the landing renders correct
+    /// links under `--base-path` (the per-request HTML body rewriter
+    /// was removed in #294, so prefixing happens at construction now).
+    pub fn from_spec(spec: &'a Spec, base: &str) -> Self {
         let kind = spec.kind();
         let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
@@ -230,17 +239,23 @@ impl<'a> CardCtx<'a> {
             .unwrap_or(false);
         let active = tp.is_active();
         let subject = tp.get_str("subject");
-        let logo = tp.get_str("logo");
+        let logo = tp.get_str("logo").map(|l| prefix_asset_url(l, base));
         // Empty string ⇒ treat as unset so the kind-tint fallback
         // kicks in rather than rendering `background: ;`.
-        let cover = tp.get_str("cover").filter(|s| !s.trim().is_empty());
+        let cover = tp
+            .get_str("cover")
+            .filter(|s| !s.trim().is_empty())
+            .map(|c| prefix_css_asset_urls(c, base));
         let updated_raw = tp.get_str("updated");
         let updated_date = updated_raw.and_then(parse_dmy);
         let updated_short = updated_date.map(|d| d.format("%d/%m").to_string());
         let status = compute_status(updated_date, Utc::now().date_naive());
         let href = match kind {
+            // External links are operator-authored absolute URLs — never
+            // base-prefixed. Containerized specs route under the portal,
+            // so their `/app/<id>/` path must carry the base path (#294).
             SpecKind::External => tp.get_str("link").unwrap_or("#").to_string(),
-            _ => format!("/app/{}/", spec.id),
+            _ => format!("{base}/app/{}/", spec.id),
         };
         Self {
             id: &spec.id,
@@ -259,6 +274,36 @@ impl<'a> CardCtx<'a> {
             href,
         }
     }
+}
+
+/// Prefix the portal `base` path onto a root-absolute asset URL
+/// (`/assets/img/x` → `/box/assets/img/x`). A full URL (`https://…`),
+/// an anchor, or any non-root-absolute value is returned unchanged.
+/// Mirrors the client-side `assetUrl` helper used by the admin pickers
+/// — the stored value stays base-agnostic; only the rendered URL gets
+/// the prefix (#294/#270).
+fn prefix_asset_url(value: &str, base: &str) -> String {
+    if base.is_empty() || !value.starts_with('/') {
+        value.to_string()
+    } else {
+        format!("{base}{value}")
+    }
+}
+
+/// Prefix the portal `base` path onto root-absolute `url(/assets/…)`
+/// targets embedded in a CSS value (the card `cover` may be
+/// `url('/assets/img/x.png')`). Solid colors / gradients pass through
+/// untouched. Mirrors the client-side `coverStyle` helper exactly —
+/// only `/assets/` URLs are rewritten, so a protocol-relative
+/// `url(//cdn/…)` is left alone (#294/#270).
+fn prefix_css_asset_urls(value: &str, base: &str) -> String {
+    if base.is_empty() {
+        return value.to_string();
+    }
+    value
+        .replace("url(/assets/", &format!("url({base}/assets/"))
+        .replace("url('/assets/", &format!("url('{base}/assets/"))
+        .replace("url(\"/assets/", &format!("url(\"{base}/assets/"))
 }
 
 /// Parse the operator-authored `DD/MM/YYYY` form used in the SEPE
@@ -436,14 +481,17 @@ mod tests {
     #[test]
     fn card_cover_read_from_template_properties() {
         let spec = spec_with_tp("  cover: \"linear-gradient(135deg, #0f6e56, #5dcaa5)\"\n");
-        let card = CardCtx::from_spec(&spec);
-        assert_eq!(card.cover, Some("linear-gradient(135deg, #0f6e56, #5dcaa5)"));
+        let card = CardCtx::from_spec(&spec, "");
+        assert_eq!(
+            card.cover.as_deref(),
+            Some("linear-gradient(135deg, #0f6e56, #5dcaa5)")
+        );
     }
 
     #[test]
     fn card_cover_absent_falls_back_to_tint() {
         let spec = spec_with_tp("  subject: Saúde\n");
-        let card = CardCtx::from_spec(&spec);
+        let card = CardCtx::from_spec(&spec, "");
         assert_eq!(card.cover, None);
     }
 
@@ -452,7 +500,66 @@ mod tests {
         // Empty cover must not render `background: ;` — it should
         // fall through to the kind tint.
         let spec = spec_with_tp("  cover: \"  \"\n");
-        let card = CardCtx::from_spec(&spec);
+        let card = CardCtx::from_spec(&spec, "");
         assert_eq!(card.cover, None);
+    }
+
+    #[test]
+    fn card_urls_prefixed_under_base_path() {
+        // #294: with the per-request HTML body rewriter gone, root-
+        // absolute URLs must be base-prefixed at construction. The href
+        // of a containerized spec, a root-absolute logo, and a
+        // `url(/assets/…)` cover all carry `/box`; external links and
+        // gradients are left untouched.
+        let spec = spec_with_tp(
+            "  logo: \"/assets/img/logo.png\"\n  cover: \"url('/assets/img/c.png')\"\n",
+        );
+        let card = CardCtx::from_spec(&spec, "/box");
+        assert_eq!(card.href, "/box/app/x/");
+        assert_eq!(card.logo.as_deref(), Some("/box/assets/img/logo.png"));
+        assert_eq!(card.cover.as_deref(), Some("url('/box/assets/img/c.png')"));
+
+        // Root deploy (no base) leaves everything bare.
+        let card0 = CardCtx::from_spec(&spec, "");
+        assert_eq!(card0.href, "/app/x/");
+        assert_eq!(card0.logo.as_deref(), Some("/assets/img/logo.png"));
+    }
+
+    #[test]
+    fn prefix_asset_url_only_touches_root_absolute() {
+        assert_eq!(prefix_asset_url("/assets/x.png", "/box"), "/box/assets/x.png");
+        // Full URLs and anchors pass through untouched.
+        assert_eq!(
+            prefix_asset_url("https://cdn/x.png", "/box"),
+            "https://cdn/x.png"
+        );
+        assert_eq!(prefix_asset_url("#", "/box"), "#");
+        // Empty base is a no-op (root deploy).
+        assert_eq!(prefix_asset_url("/assets/x.png", ""), "/assets/x.png");
+    }
+
+    #[test]
+    fn prefix_css_asset_urls_handles_quote_variants_and_leaves_others() {
+        assert_eq!(
+            prefix_css_asset_urls("url(/assets/a.png)", "/box"),
+            "url(/box/assets/a.png)"
+        );
+        assert_eq!(
+            prefix_css_asset_urls("url('/assets/a.png')", "/box"),
+            "url('/box/assets/a.png')"
+        );
+        assert_eq!(
+            prefix_css_asset_urls("url(\"/assets/a.png\")", "/box"),
+            "url(\"/box/assets/a.png\")"
+        );
+        // Gradients and protocol-relative CDNs are left alone.
+        assert_eq!(
+            prefix_css_asset_urls("linear-gradient(#000, #fff)", "/box"),
+            "linear-gradient(#000, #fff)"
+        );
+        assert_eq!(
+            prefix_css_asset_urls("url(//cdn/a.png)", "/box"),
+            "url(//cdn/a.png)"
+        );
     }
 }

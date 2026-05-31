@@ -93,7 +93,7 @@
 
   function startFollow() {
     if (!window.EventSource || es) return;
-    es = new EventSource('/admin/dashboard/logs/' + encodeURIComponent(replicaId) + '/stream');
+    es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/logs/' + encodeURIComponent(replicaId) + '/stream');
     es.onmessage = function (e) { appendLine(e.data); };
     es.onerror = function () {
       // The stream closed (container stopped, or network).

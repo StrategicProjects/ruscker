@@ -348,14 +348,15 @@ fn build_runtime_shim(base_path: &str) -> String {
       return origOpen.apply(this, [method, prefix(url)].concat(rest));
     }};
   }} catch (_) {{}}
-  // Dynamic <script src> / <link href> — RequireJS and webpack chunk
-  // loaders build root-absolute URLs at RUNTIME and assign them to the
-  // element's .src/.href property, a path the fetch/XHR/WS wrappers
-  // above never see (it's the browser's own resource fetch). We patch
-  // the prototype accessor so the same `prefix()` is applied generically
-  // — no per-framework HTML rewrite needed. This is the Class-3 fix that
-  // makes Voilà's RequireJS bootstrap and Jupyter's webpack chunks load
-  // under the mount without bespoke `rewrite_*` passes.
+  // Dynamic resource URLs assigned to an element's property at RUNTIME —
+  // RequireJS/webpack (`script.src`), CSS chunks (`link.href`), and images
+  // (`img.src`, e.g. Jupyter kernel-spec logos served root-absolute from
+  // the API). These are the browser's own resource fetches, a path the
+  // fetch/XHR/WS wrappers above never see. Patch the prototype accessors
+  // so the same `prefix()` applies generically — no per-framework HTML
+  // rewrite needed. This is the Class-3 fix that makes Voilà's RequireJS
+  // bootstrap, Jupyter's webpack chunks, and runtime-set images load under
+  // the mount without bespoke `rewrite_*` passes.
   function patchUrlProp(proto, name) {{
     try {{
       var d = Object.getOwnPropertyDescriptor(proto, name);
@@ -369,15 +370,22 @@ fn build_runtime_shim(base_path: &str) -> String {
       }}
     }} catch (_) {{}}
   }}
-  try {{ patchUrlProp(HTMLScriptElement.prototype, "src"); }} catch (_) {{}}
-  try {{ patchUrlProp(HTMLLinkElement.prototype, "href"); }} catch (_) {{}}
-  // Some loaders set the URL via setAttribute('src'/'href') instead of
-  // the property. Catch that path too, scoped to script/link elements.
   try {{
+    patchUrlProp(HTMLScriptElement.prototype, "src");
+    patchUrlProp(HTMLLinkElement.prototype, "href");
+    patchUrlProp(HTMLImageElement.prototype, "src");
+    patchUrlProp(HTMLIFrameElement.prototype, "src");
+    patchUrlProp(HTMLMediaElement.prototype, "src");
+    patchUrlProp(HTMLSourceElement.prototype, "src");
+  }} catch (_) {{}}
+  // Some loaders set the URL via setAttribute instead of the property.
+  // Catch that path too, scoped to the same resource-loading elements.
+  try {{
+    var SRC_TAGS = {{ SCRIPT: 1, IMG: 1, IFRAME: 1, AUDIO: 1, VIDEO: 1, SOURCE: 1 }};
     var origSetAttr = Element.prototype.setAttribute;
     Element.prototype.setAttribute = function (name, value) {{
       var n = (this.tagName || "").toUpperCase();
-      if ((name === "src" && n === "SCRIPT") || (name === "href" && n === "LINK")) {{
+      if ((name === "src" && SRC_TAGS[n]) || (name === "href" && n === "LINK")) {{
         value = prefix(value);
       }}
       return origSetAttr.call(this, name, value);
@@ -923,22 +931,24 @@ mod tests {
         assert!(shim.contains("XMLHttpRequest.prototype.open"));
         // Dynamic resource loading — the Class-3 fix (#372) that lets the
         // generalized shim subsume per-framework rewrites: RequireJS /
-        // webpack assign root-absolute URLs to script.src / link.href.
+        // webpack assign root-absolute URLs to script.src / link.href, and
+        // runtime-set images (img.src, e.g. Jupyter kernel-spec logos).
         assert!(shim.contains("HTMLScriptElement.prototype"));
         assert!(shim.contains("HTMLLinkElement.prototype"));
+        assert!(shim.contains("HTMLImageElement.prototype"));
         assert!(shim.contains("Element.prototype.setAttribute"));
     }
 
     #[test]
     fn build_runtime_shim_wraps_each_patch_in_try_catch() {
         // A single browser quirk shouldn't break the others — every patch
-        // (WS, fetch, XHR, the patchUrlProp helper, its two call sites, and
-        // setAttribute) is independently guarded.
+        // (WS, fetch, XHR, the patchUrlProp helper, the prop-patch block,
+        // and setAttribute) is independently guarded.
         let shim = build_runtime_shim("/app/x/");
         assert_eq!(
             shim.matches("} catch (_) {}").count(),
-            7,
-            "expected one try/catch per patched global / call site"
+            6,
+            "expected one try/catch per patched global / block"
         );
     }
 

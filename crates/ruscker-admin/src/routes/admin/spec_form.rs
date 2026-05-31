@@ -42,6 +42,7 @@ pub fn routes() -> Router<AppState> {
             "/admin/specs/{id}/edit",
             get(edit_form),
         )
+        .route("/admin/specs/{id}/duplicate", get(duplicate_form))
         .route("/admin/specs/{id}", post(update))
         .route("/admin/specs/{id}/delete", post(delete))
 }
@@ -824,6 +825,72 @@ async fn edit_form(
         role: editor.role,
         mode: FormMode::Edit,
         form: SpecForm::from_spec(&spec),
+        errors: Vec::new(),
+        logo_images: logo_filenames(&state).await,
+        credential_names: credential_names(&state).await,
+    };
+    super::render(&page)
+}
+
+/// Pick a fresh `{base}-copy[-N]` id that no spec uses yet, so the
+/// duplicate doesn't collide with the source (or a previous copy).
+/// Falls back to the bare `-copy` after a sane cap — the create-time
+/// duplicate-id validation is the final backstop.
+async fn unique_copy_id(pool: &crate::db::ConfigDb, base: &str) -> String {
+    let first = format!("{base}-copy");
+    let free = |id: &str| {
+        let id = id.to_string();
+        async move { matches!(db::specs::fetch_one(pool, &id).await, Ok(None)) }
+    };
+    if free(&first).await {
+        return first;
+    }
+    for n in 2..=99 {
+        let candidate = format!("{base}-copy-{n}");
+        if free(&candidate).await {
+            return candidate;
+        }
+    }
+    first
+}
+
+/// Open the **New** spec form pre-filled from an existing spec (#368).
+/// The operator duplicates a near-identical card and edits only what
+/// differs. The form starts in `FormMode::New` with a fresh unique id,
+/// so the submit hits `POST /admin/specs` and creates a brand-new spec
+/// (the source is untouched). Works on `config`-only specs too — that's
+/// a handy way to fork a YAML-defined spec into an editable DB one. The
+/// registry password is write-only (#260), so it isn't carried over.
+async fn duplicate_form(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let spec = match db::specs::fetch_one(pool, &id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, id, "fetch spec for duplicate failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let mut form = SpecForm::from_spec(&spec);
+    form.id = unique_copy_id(pool, &spec.id).await;
+    let page = SpecFormPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "specs",
+        role: editor.role,
+        mode: FormMode::New,
+        form,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
         credential_names: credential_names(&state).await,

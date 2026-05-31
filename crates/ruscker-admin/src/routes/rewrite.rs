@@ -407,7 +407,18 @@ fn rewrite_jupyter_config(html: &str, base_path: &str) -> Option<String> {
     let obj = value.as_object_mut()?;
     let mut changed = false;
     for (key, val) in obj.iter_mut() {
-        if !key.to_ascii_lowercase().ends_with("url") {
+        // Rewrite ONLY `baseUrl` and the absolute `full*Url` fields.
+        // JupyterLab's config carries pairs: a short relative key
+        // (`appUrl`, `workspacesApiUrl`, `settingsUrl`, … = `/lab/…`)
+        // that the Lab JS **joins with baseUrl**, and the pre-joined
+        // absolute `full*Url`. Rewriting the short keys to absolute made
+        // `URLExt.join(baseUrl, workspacesApiUrl)` DOUBLE the prefix
+        // (`/box/app/jupyter/box/app/jupyter/lab/api/workspaces` → 404,
+        // #371). So leave them relative; only `baseUrl` (the join root)
+        // and the `full*Url` (used as-is) need the mount prefix.
+        let k = key.to_ascii_lowercase();
+        let rewrite_this = k == "baseurl" || (k.starts_with("full") && k.ends_with("url"));
+        if !rewrite_this {
             continue;
         }
         if let Some(s) = val.as_str() {
@@ -634,14 +645,28 @@ mod tests {
 
     #[test]
     fn jupyter_config_urls_prefixed_to_mount() {
-        let html = r#"<html><head><script id="jupyter-config-data" type="application/json">{"baseUrl": "/", "wsUrl": "", "fullStaticUrl": "/static/lab", "appName": "JupyterLab"}</script></head></html>"#;
+        // Includes a short relative key (`workspacesApiUrl`) alongside its
+        // absolute pair (`fullWorkspacesApiUrl`): only baseUrl + full*Url
+        // get the mount; the short key STAYS relative or the Lab JS would
+        // double-prefix `URLExt.join(baseUrl, workspacesApiUrl)` (#371).
+        let html = r#"<html><head><script id="jupyter-config-data" type="application/json">{"baseUrl": "/", "wsUrl": "", "fullStaticUrl": "/static/lab", "workspacesApiUrl": "/lab/api/workspaces", "fullWorkspacesApiUrl": "/lab/api/workspaces", "appName": "JupyterLab"}</script></head></html>"#;
         let out = rewrite_jupyter_config(html, "/box/app/jupyter/").expect("should rewrite");
         // baseUrl "/" → the mount itself (kept with trailing slash).
         assert!(out.contains(r#""baseUrl":"/box/app/jupyter/""#), "baseUrl in: {out}");
-        // The static path that webpack uses for lazy chunks → under mount.
+        // Absolute `full*Url` keys → under the mount (used as-is by the Lab).
         assert!(
             out.contains(r#""fullStaticUrl":"/box/app/jupyter/static/lab""#),
             "fullStaticUrl in: {out}"
+        );
+        assert!(
+            out.contains(r#""fullWorkspacesApiUrl":"/box/app/jupyter/lab/api/workspaces""#),
+            "fullWorkspacesApiUrl in: {out}"
+        );
+        // The SHORT relative key is left untouched (joined with baseUrl by
+        // the Lab) — rewriting it would double the prefix (#371).
+        assert!(
+            out.contains(r#""workspacesApiUrl":"/lab/api/workspaces""#),
+            "workspacesApiUrl must stay relative: {out}"
         );
         // Empty wsUrl and the non-URL appName are left as-is.
         assert!(out.contains(r#""wsUrl":"""#), "wsUrl in: {out}");

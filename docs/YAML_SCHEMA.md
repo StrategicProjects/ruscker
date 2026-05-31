@@ -455,23 +455,22 @@ applied) and flagged by `ruscker validate`.
 | `scale-down-grace` | s | `300` | idle-grace before retiring a replica (enforced, #333) |
 | `drain-timeout` | s | `60` | grace for in-flight sessions on a `max-lifetime` recycle (enforced, #335) |
 | `routing-strategy` | enum | varies | See below |
-| `concurrent-requests-per-replica` | u32 | `100` | ⚠️ parsed but **not yet enforced** (#326) |
+| `concurrent-requests-per-replica` | u32 | `100` | API-only — per-replica in-flight cap the scaler scales on (enforced, #336) |
 
-> **Some autoscaling knobs not yet enforced (#326).** By default the
-> scaler scales on **seat saturation** (`sessions_active` vs
-> `sessions_max`) with built-in grace ticks. Now enforced (opt-in where
-> noted): `scale-up-threshold` / `scale-down-threshold` /
+> **Autoscaling knobs (#326).** By default the scaler scales on **seat
+> saturation** (`sessions_active` vs `sessions_max`) with built-in grace
+> ticks. All the per-spec scaling/lifecycle knobs are now enforced
+> (opt-in where noted): `scale-up-threshold` / `scale-down-threshold` /
 > `scale-down-grace` (#333 — pool-utilization-driven scale-up + a
 > conservative scale-down gate + per-spec idle grace; unset ⇒ the
 > default rules), `max-lifetime` / `container-lifetime` (#334 — recycle
 > past the age cap), `drain-timeout` (#335 — grace for a busy
-> `max-lifetime` recycle), and `stop-on-logout` (#337 — a signed-in
-> user's sticky sessions end immediately on logout). Still **not**
-> enforced — `concurrent-requests-per-replica` — is accepted (and
-> round-trips through import/export + the admin form) for migration
-> friction-free, but a set value does **not** change runtime behaviour
-> yet. `ruscker validate --strict-compat` flags it. Wiring it is tracked
-> under #326 (#336).
+> `max-lifetime` recycle), `stop-on-logout` (#337 — a signed-in user's
+> sticky sessions end immediately on logout), and
+> `concurrent-requests-per-replica` (#336 — API specs have no sticky
+> sessions, so the scaler meters their capacity by in-flight requests
+> against this per-replica cap). `ruscker validate --strict-compat` no
+> longer flags any of them.
 
 ### Routing strategies
 

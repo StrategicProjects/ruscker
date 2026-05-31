@@ -112,6 +112,46 @@ fn http_client() -> &'static Client<HttpConnector, Body> {
 const APP_PREFIX: &str = "/app/";
 const API_PREFIX: &str = "/api/";
 
+/// In-flight request count per replica (#336). API specs have no sticky
+/// sessions, so their capacity is request-based, not seat-based: this
+/// gauge lets the scaler treat concurrent in-flight requests the way it
+/// treats sessions for interactive apps. A process-global (like the
+/// scaler's failure log) so the proxy hot path and the scaler share it
+/// without threading a new field through `AppState`; keyed by replica
+/// id, each op takes only that shard's lock.
+static INFLIGHT: std::sync::LazyLock<dashmap::DashMap<ruscker_core::ReplicaId, u32>> =
+    std::sync::LazyLock::new(dashmap::DashMap::new);
+
+/// RAII guard: bumps a replica's in-flight count on creation and drops
+/// it on `Drop`, covering every return/error path of the forward.
+pub(crate) struct InflightGuard(ruscker_core::ReplicaId);
+
+impl InflightGuard {
+    pub(crate) fn new(replica_id: ruscker_core::ReplicaId) -> Self {
+        *INFLIGHT.entry(replica_id.clone()).or_insert(0) += 1;
+        Self(replica_id)
+    }
+}
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        if let Some(mut v) = INFLIGHT.get_mut(&self.0) {
+            *v = v.saturating_sub(1);
+        }
+    }
+}
+
+/// Current in-flight request count for a replica (0 if untracked).
+pub(crate) fn inflight_count(replica_id: &ruscker_core::ReplicaId) -> u32 {
+    INFLIGHT.get(replica_id).map(|v| *v).unwrap_or(0)
+}
+
+/// Forget in-flight entries for replicas that have left the registry —
+/// called by the scaler's per-tick GC so the map can't grow unbounded.
+pub(crate) fn inflight_gc(alive: &std::collections::HashSet<ruscker_core::ReplicaId>) {
+    INFLIGHT.retain(|rid, _| alive.contains(rid));
+}
+
 // Each handler extracts `Option<ConnectInfo<SocketAddr>>`: it's
 // `Some` in production (the listener is served with connect-info)
 // and `None` under `Router::oneshot` tests, where there's no socket
@@ -471,6 +511,12 @@ async fn forward(
         prefix = %forwarded_prefix,
         "forwarding"
     );
+    // API capacity is request-based, not session-based (#336): count this
+    // request as in-flight on the replica for the duration of the forward
+    // (the guard decs on drop, covering every path below). Only API
+    // specs — interactive apps already meter capacity via sticky sessions.
+    let _inflight =
+        (route_prefix == API_PREFIX).then(|| InflightGuard::new(replica.id.clone()));
     let resp = match do_forward(
         &replica,
         upstream_path,
@@ -1358,6 +1404,28 @@ mod tests {
         // Only-ours ⇒ None, so the WS branch sends no Cookie header.
         let only_ours = format!("{}=sid", crate::auth::COOKIE_NAME);
         assert!(filter_ruscker_cookies(&only_ours).is_none());
+    }
+
+    #[test]
+    fn inflight_guard_counts_and_gc_prunes() {
+        // #336: the RAII guard bumps the count and drops it on scope exit;
+        // GC forgets replicas no longer alive. Fresh uuids keep this test
+        // isolated from the process-global map.
+        let rid = ruscker_core::ReplicaId(uuid::Uuid::new_v4());
+        assert_eq!(inflight_count(&rid), 0);
+        {
+            let _g1 = InflightGuard::new(rid.clone());
+            let _g2 = InflightGuard::new(rid.clone());
+            assert_eq!(inflight_count(&rid), 2);
+        }
+        // Both guards dropped → back to zero.
+        assert_eq!(inflight_count(&rid), 0);
+
+        // GC drops the (now-zero) entry when the replica isn't alive.
+        let _g = InflightGuard::new(rid.clone());
+        assert_eq!(inflight_count(&rid), 1);
+        inflight_gc(&std::collections::HashSet::new());
+        assert_eq!(inflight_count(&rid), 0);
     }
 
     #[test]

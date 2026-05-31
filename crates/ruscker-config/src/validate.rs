@@ -235,24 +235,17 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
     // ShinyProxy `container-env` / `container-cmd` straight across. They
     // are intentionally absent from this ignored-fields list.
     //
-    // Scaling/lifecycle knobs (#326): these parse, round-trip, and are
-    // editable in the admin form, but the scaler does NOT yet consume
-    // them. Flag them so a migrating operator isn't misled into thinking
-    // a set value takes effect.
-    (
-        "concurrent-requests-per-replica",
-        "request-based concurrency limit not enforced — capacity is seat-based; tracked in #326",
-    ),
-    // NOTE: enforced now, intentionally absent from this ignored list:
+    // NOTE: the whole #326 family of scaling/lifecycle knobs is enforced
+    // now and is intentionally absent from this list:
     //   `scale-up-threshold` / `scale-down-threshold` / `scale-down-grace`
-    //     — the scaler scales on pool utilization vs the thresholds, with
-    //     a per-spec scale-down grace (#333);
-    //   `drain-timeout` — bounds the grace the hard `max-lifetime` recycle
-    //     grants busy replicas before the force-kill (#335);
-    //   `max-lifetime` / `container-lifetime` — replicas recycled past
-    //     their age cap (#334);
-    //   `stop-on-logout` — a signed-in user's sticky sessions are ended
-    //     immediately on logout (#337).
+    //     — scale on pool utilization vs the thresholds, per-spec grace
+    //       (#333);
+    //   `max-lifetime` / `container-lifetime` — recycle past the age cap
+    //     (#334);
+    //   `drain-timeout` — grace for a busy `max-lifetime` recycle (#335);
+    //   `stop-on-logout` — end a user's sticky sessions on logout (#337);
+    //   `concurrent-requests-per-replica` — API capacity metered by
+    //     in-flight requests (#336).
 ];
 
 /// Top-level `proxy.*` keys that are unsupported.
@@ -987,17 +980,16 @@ proxy:
     }
 
     #[test]
-    fn compat_scan_flags_unenforced_scaling_knobs() {
-        // #326: these parse + round-trip + are form-editable but the
-        // scaler never consumes them, so strict-compat must surface them
-        // as accepted-but-not-enforced (so a migrating operator isn't
-        // misled). A clean spec (no such knobs) stays quiet.
+    fn compat_scan_no_longer_flags_scaling_knobs() {
+        // The whole #326 family is enforced now (#333/#334/#335/#336/#337),
+        // so strict-compat must NOT flag any of them anymore.
         let yaml = "\
 proxy:
   specs:
   - id: scaled
     container-image: rocker/shiny
     scale-up-threshold: 0.9
+    scale-down-threshold: 0.2
     scale-down-grace: 600
     drain-timeout: 90
     concurrent-requests-per-replica: 4
@@ -1012,21 +1004,14 @@ proxy:
                 _ => None,
             })
             .collect();
-        // Only `concurrent-requests-per-replica` (#336) is still unwired.
-        assert!(
-            fields.iter().any(|f| f == "concurrent-requests-per-replica"),
-            "expected concurrent-requests flagged: {fields:?}"
-        );
-        // Enforced now — must NOT be flagged: max-lifetime / container-
-        // lifetime (#334), drain-timeout (#335), the autoscaling
-        // thresholds + scale-down-grace (#333), stop-on-logout (#337).
         for enforced in [
-            "max-lifetime",
-            "container-lifetime",
-            "drain-timeout",
             "scale-up-threshold",
             "scale-down-threshold",
             "scale-down-grace",
+            "drain-timeout",
+            "concurrent-requests-per-replica",
+            "max-lifetime",
+            "container-lifetime",
             "stop-on-logout",
         ] {
             assert!(

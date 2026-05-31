@@ -950,6 +950,14 @@ impl Spec {
         self.stop_on_logout.unwrap_or(false)
     }
 
+    /// Per-replica concurrent-request cap for API specs (#336). API
+    /// replicas have no sticky sessions, so the scaler meters their
+    /// capacity by in-flight requests against this cap instead of seats.
+    /// Default 100 (matches the API `seats-per-container` default).
+    pub fn effective_concurrent_requests_per_replica(&self) -> u32 {
+        self.concurrent_requests_per_replica.unwrap_or(100)
+    }
+
     /// Multi-host placement strategy (default [`Placement::Spread`]).
     pub fn effective_placement(&self) -> Placement {
         self.placement.unwrap_or_default()

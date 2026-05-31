@@ -301,6 +301,12 @@ async fn tick(
     };
     update_idle_ticks(idle_ticks, &registry_snap);
 
+    // GC the in-flight request gauge (#336) for replicas that have left
+    // the registry, so the process-global map can't grow unbounded.
+    let alive_replicas: std::collections::HashSet<ReplicaId> =
+        registry_snap.iter().map(|r| r.id.clone()).collect();
+    crate::routes::proxy::inflight_gc(&alive_replicas);
+
     // Spec ids present in this tick's config — used to GC
     // stale per-spec counters for deleted/renamed specs.
     let known_spec_ids: std::collections::HashSet<&str> =
@@ -341,6 +347,9 @@ async fn tick(
         // Per-spec snapshot — small Vec; not worth threading
         // through the registry-wide snapshot above.
         let mut snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
+        // API capacity is request-based: overlay in-flight requests as
+        // seats so all the seat logic below works for APIs too (#336).
+        overlay_request_capacity(&mut snap, spec);
         let mut count = snap.len();
 
         // --- lifetime reap (#334) + drain window (#335) ---
@@ -373,6 +382,7 @@ async fn tick(
             }
             // Re-read so the scale passes below see the post-reap count.
             snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
+            overlay_request_capacity(&mut snap, spec);
             count = snap.len();
         }
 
@@ -567,6 +577,25 @@ fn scale_up_triggered(replicas: &[ruscker_core::Replica], up_threshold: Option<f
 fn grace_secs_to_ticks(secs: u64, interval: Duration) -> u32 {
     let iv = interval.as_secs().max(1);
     secs.div_ceil(iv).max(1) as u32
+}
+
+/// For API specs, overlay request-based capacity onto the snapshot so the
+/// seat-based scale logic applies unchanged (#336): a replica's in-flight
+/// request count stands in for `sessions_active`, and
+/// `concurrent-requests-per-replica` for `sessions_max`. API replicas
+/// carry no sticky sessions, so their registry `sessions_active` is
+/// always 0 — without this they'd look permanently idle and never scale
+/// on load. No-op for non-API specs. Mutates the scaler's local snapshot
+/// only, never the registry.
+fn overlay_request_capacity(snap: &mut [ruscker_core::Replica], spec: &Spec) {
+    if !matches!(spec.kind(), SpecKind::Api) {
+        return;
+    }
+    let cap = spec.effective_concurrent_requests_per_replica();
+    for r in snap.iter_mut() {
+        r.sessions_active = crate::routes::proxy::inflight_count(&r.id);
+        r.sessions_max = cap;
+    }
 }
 
 /// Replicas that have outlived their configured lifetime and should be
@@ -1126,6 +1155,38 @@ proxy:
         assert_eq!(grace_secs_to_ticks(25, iv), 3); // ceil(2.5)
         assert_eq!(grace_secs_to_ticks(5, iv), 1); // round up
         assert_eq!(grace_secs_to_ticks(0, iv), 1); // floor at 1
+    }
+
+    #[test]
+    fn overlay_request_capacity_maps_inflight_for_api_only() {
+        let api: Spec = serde_yaml_ng::from_str(
+            "id: api1\ncontainer-image: a:1\ntype: api\nconcurrent-requests-per-replica: 50\n",
+        )
+        .expect("parse api spec");
+        let shiny: Spec =
+            serde_yaml_ng::from_str("id: app1\ncontainer-image: a:1\n").expect("parse shiny spec");
+
+        // API, no in-flight yet → (0, cap).
+        let mut snap = vec![replica_with_sessions("api1", 0, 5)];
+        let rid = snap[0].id.clone();
+        overlay_request_capacity(&mut snap, &api);
+        assert_eq!(snap[0].sessions_active, 0);
+        assert_eq!(snap[0].sessions_max, 50, "cap overlaid as seats");
+
+        // Two in-flight requests on that replica → overlay reflects them.
+        let _g1 = crate::routes::proxy::InflightGuard::new(rid.clone());
+        let _g2 = crate::routes::proxy::InflightGuard::new(rid.clone());
+        let mut snap2 = vec![replica_with_sessions("api1", 0, 5)];
+        snap2[0].id = rid.clone();
+        overlay_request_capacity(&mut snap2, &api);
+        assert_eq!(snap2[0].sessions_active, 2, "in-flight overlaid as active");
+        assert_eq!(snap2[0].sessions_max, 50);
+
+        // Non-API spec → untouched (real seats kept).
+        let mut snap3 = vec![replica_with_sessions("app1", 3, 5)];
+        overlay_request_capacity(&mut snap3, &shiny);
+        assert_eq!(snap3[0].sessions_active, 3);
+        assert_eq!(snap3[0].sessions_max, 5);
     }
 
     #[tokio::test]

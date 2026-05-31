@@ -116,6 +116,17 @@ impl<'a> ImagesPage<'a> {
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
+
+    /// Built-in framework + brand logos (read-only) for the gallery's
+    /// "built-in" section — so the gallery isn't empty on a fresh install
+    /// and mirrors what the spec-form pickers offer. Pairs of
+    /// (path, filename). Single source: [`assets::BUILTIN_LOGOS`].
+    fn builtin_logos(&self) -> Vec<(&'static str, &'static str)> {
+        crate::routes::assets::BUILTIN_LOGOS
+            .iter()
+            .map(|&p| (p, p.rsplit('/').next().unwrap_or(p)))
+            .collect()
+    }
 }
 
 async fn index(

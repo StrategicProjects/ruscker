@@ -724,6 +724,13 @@ impl<'a> SpecFormPage<'a> {
         serde_json::to_string(&self.logo_images).unwrap_or_else(|_| "[]".into())
     }
 
+    /// Built-in framework + brand logo paths as a JSON array (Option A),
+    /// seeding the picker's "built-in logos" group so an operator can reuse
+    /// a bundled logo without typing a path. Single source: [`BUILTIN_LOGOS`].
+    fn builtin_logos_json(&self) -> String {
+        serde_json::to_string(crate::routes::assets::BUILTIN_LOGOS).unwrap_or_else(|_| "[]".into())
+    }
+
     /// Options for the kind picker: (key, label-fluent-key, tabler-icon).
     /// Order intentional — mirrors the public landing chip order.
     fn display_type_options(&self) -> &'static [(&'static str, &'static str, &'static str)] {

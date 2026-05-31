@@ -17,7 +17,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
+<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }}, {{ builtin_logos_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
@@ -158,6 +158,21 @@
                   x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - logoShown) + ')'"></button>
         </div>
 
+        {# Built-in logos (Option A): the framework + brand SVGs bundled in
+           the binary, pickable like uploads so a new card can reuse them
+           without typing a path. Stored by their full `/assets/...` path. #}
+        <div class="spec-form-help mt-2" x-show="builtinLogos.length" x-cloak>{{ self.t("spec-form-logo-builtin") }}</div>
+        <div class="flex flex-wrap gap-2" x-show="builtinLogos.length" x-cloak>
+          <template x-for="path in builtinLogos" :key="path">
+            <button type="button" :title="path.split('/').pop()"
+                    @click="form.logo = path"
+                    class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors p-1 bg-[color:var(--surface-soft)]"
+                    :class="form.logo === path ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
+              <img :src="assetUrl(path)" :alt="path" loading="lazy" class="w-full h-full object-contain">
+            </button>
+          </template>
+        </div>
+
         {# Upload error (e.g. unsupported type / too large) #}
         <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
 
@@ -266,6 +281,14 @@
             <button type="button" x-show="logoImages.length > coverShown" x-cloak
                     @click="coverShown += galleryPage" class="admin-nav-link self-center text-xs"
                     x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - coverShown) + ')'"></button>
+            {# Built-in logos as a cover too (Option A). #}
+            <template x-for="path in builtinLogos" :key="'cov-' + path">
+              <button type="button" :title="path.split('/').pop()" @click="setCoverPath(path)"
+                      class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors p-1 bg-[color:var(--surface-soft)]"
+                      :class="form.cover.indexOf(path) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
+                <img :src="assetUrl(path)" :alt="path" loading="lazy" class="w-full h-full object-contain">
+              </button>
+            </template>
           </div>
           <div class="spec-form-help">{{ self.t("spec-form-cover-image-help") }}</div>
           <input type="text" name="cover" x-model="form.cover" readonly
@@ -832,11 +855,14 @@
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
-window.ruscker.specForm = (initial, logoImages) => ({
+window.ruscker.specForm = (initial, logoImages, builtinLogos) => ({
   form: initial,
   // Media-library filenames for the logo/cover pickers (#213). Inline
   // uploads unshift new names here so a fresh thumbnail appears at once.
   logoImages: Array.isArray(logoImages) ? logoImages : [],
+  // Built-in framework + brand logo PATHS bundled in the binary (Option A),
+  // pickable in the logo/cover pickers so a new card can reuse them.
+  builtinLogos: Array.isArray(builtinLogos) ? builtinLogos : [],
   // How many gallery tiles to render initially (#293) — keeps the DOM +
   // thumbnail requests bounded on a large media library. "Show more"
   // reveals another page.
@@ -917,8 +943,13 @@ window.ruscker.specForm = (initial, logoImages) => ({
   },
   // Set the cover to a library image as a CSS background (#213).
   setCoverImage(name) {
+    this.setCoverPath('/assets/img/' + name);
+  },
+  // Set the cover from a full asset path (a Media image or a built-in
+  // logo, Option A) as a CSS background.
+  setCoverPath(path) {
     this.coverMode = 'image';
-    this.form.cover = "url('/assets/img/" + name + "') center / cover no-repeat";
+    this.form.cover = "url('" + path + "') center / cover no-repeat";
   },
   // Inline upload to the media library, then select the result for
   // `target` ('logo' or 'cover'). Reuses the same pipeline as the

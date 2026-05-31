@@ -353,27 +353,31 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             s.kind_override = Some(ruscker_config::SpecKindOverride::Streamlit);
             s
         },
+        // Dash stays an external-link card (#372): the
+        // `shinyproxy-dash-demo` image never serves HTTP behind Ruscker
+        // — its container binds the port but the app crashes/hangs at
+        // startup (it expects ShinyProxy's `SHINYPROXY_PUBLIC_PATH`,
+        // which we don't advertise under our stripping proxy), so
+        // readiness times out and the scaler loops spawning dead
+        // containers. Better a working docs link than a broken,
+        // log-spamming card. Revisit with local Docker testing.
+        card(
+            "dash",
+            "Dash",
+            "Analytical web apps built on Plotly.",
+            "/assets/showcase/dash.svg",
+            "https://dash.plotly.com",
+            None,
+            None,
+            None,
+        )?,
         {
-            let mut s = card(
-                "dash",
-                "Dash",
-                "Analytical web apps built on Plotly.",
-                "/assets/showcase/dash.svg",
-                "https://dash.plotly.com",
-                Some("openanalytics/shinyproxy-dash-demo:latest"),
-                Some(8050),
-                Some("linux/amd64"),
-            )?;
-            s.kind_override = Some(ruscker_config::SpecKindOverride::Dash);
-            s
-        },
-        {
-            // Quarto demo on :8080. Use the `:prerendered` tag (#372):
-            // the `:latest` image renders the docs on startup, which took
-            // >60s — the container accepted TCP but never answered HTTP
-            // inside the readiness window, so it never went Ready and the
-            // splash hung. The prerendered variant serves a pre-built site
-            // immediately. No dedicated kind — generic interactive app.
+            // Quarto demo via `:prerendered` (#372). That image serves the
+            // pre-rendered doc through an R Markdown Shiny runtime on
+            // **3838** (confirmed live: `rmarkdown::run(..., port=3838)`),
+            // NOT 8080 — so the published port must be 3838 or the proxy
+            // hits an empty 8080 and the connection resets. Shiny-backed,
+            // so kind App (sticky + WebSocket).
             let mut s = card(
                 "quarto",
                 "Quarto",
@@ -381,7 +385,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
                 "/assets/showcase/quarto.svg",
                 "https://quarto.org",
                 Some("openanalytics/shinyproxy-quarto-demo:prerendered"),
-                Some(8080),
+                Some(3838),
                 Some("linux/amd64"),
             )?;
             s.kind_override = Some(ruscker_config::SpecKindOverride::App);
@@ -520,16 +524,16 @@ mod tests {
             !jup_cmd.iter().any(|a| a.contains("#{publicPath}")),
             "jupyter must NOT use the public-path token for base_url (#371)"
         );
-        // Framework demos converted from external links (#354/#365):
-        // Streamlit/Dash/Voilà are interactive (sticky + WS); FastAPI is
-        // a stateless API; rmarkdown is Shiny-backed; bokeh/plumber have
-        // no demo image so they stay external links.
+        // Framework demos (#354/#365): Streamlit/Voilà interactive
+        // (sticky + WS); FastAPI a stateless API; rmarkdown + quarto are
+        // Shiny/rmarkdown-backed; bokeh/plumber/dash stay external links
+        // (no working demo image behind the proxy — dash reverted in #372).
         assert_eq!(kind("rmarkdown"), ruscker_config::SpecKind::Shiny);
         assert_eq!(kind("streamlit"), ruscker_config::SpecKind::InteractiveApp);
-        assert_eq!(kind("dash"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("voila"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("quarto"), ruscker_config::SpecKind::InteractiveApp);
         assert_eq!(kind("fastapi"), ruscker_config::SpecKind::Api);
+        assert_eq!(kind("dash"), ruscker_config::SpecKind::External, "dash reverted to link (#372)");
         assert_eq!(kind("bokeh"), ruscker_config::SpecKind::External, "no demo image → link");
         assert_eq!(kind("plumber"), ruscker_config::SpecKind::External, "no demo image → link");
     }

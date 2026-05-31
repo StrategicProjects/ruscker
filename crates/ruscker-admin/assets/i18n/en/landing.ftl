@@ -411,6 +411,7 @@ admin-grad-remove-stop = Remove stop
 
 # Spec form — card cover
 spec-form-cover = Card cover
+spec-form-choose-image = Choose image
 spec-form-cover-auto = Auto (type tint)
 spec-form-cover-auto-help = Uses the card type default tint. Pick Solid or Gradient to customize.
 

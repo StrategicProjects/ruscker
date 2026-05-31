@@ -131,46 +131,19 @@
            clear / advanced path field below. #}
         <input type="hidden" name="logo" x-model="form.logo">
 
-        <div class="flex flex-wrap gap-2" x-cloak>
-          {# Upload tile #}
-          <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
-                 :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
-                 @dragover.prevent="$el.classList.add('border-[#0f6e56]')"
-                 @dragleave.prevent="$el.classList.remove('border-[#0f6e56]')"
-                 @drop.prevent="$el.classList.remove('border-[#0f6e56]'); uploadImage($event, 'logo')"
-                 :title="'{{ self.t("spec-form-logo-upload") }}'">
-            <input type="file" accept="image/*" class="hidden"
-                   @change="uploadImage($event, 'logo')">
-            <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
-          </label>
-          {# Library thumbnails (reactive — inline uploads push here).
-             Only the first `logoShown` render initially (#293). #}
-          <template x-for="name in logoImages.slice(0, logoShown)" :key="name">
-            <button type="button" :title="name"
-                    @click="form.logo = '/assets/img/' + name"
-                    class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
-                    :class="form.logo === '/assets/img/' + name ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-              <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
-            </button>
-          </template>
-          <button type="button" x-show="logoImages.length > logoShown" x-cloak
-                  @click="logoShown += galleryPage" class="admin-nav-link self-center text-xs"
-                  x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - logoShown) + ')'"></button>
-        </div>
-
-        {# Built-in logos (Option A): the framework + brand SVGs bundled in
-           the binary, pickable like uploads so a new card can reuse them
-           without typing a path. Stored by their full `/assets/...` path. #}
-        <div class="spec-form-help mt-2" x-show="builtinLogos.length" x-cloak>{{ self.t("spec-form-logo-builtin") }}</div>
-        <div class="flex flex-wrap gap-2" x-show="builtinLogos.length" x-cloak>
-          <template x-for="path in builtinLogos" :key="path">
-            <button type="button" :title="path.split('/').pop()"
-                    @click="form.logo = path"
-                    class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors p-1 bg-[color:var(--surface-soft)]"
-                    :class="form.logo === path ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-              <img :src="assetUrl(path)" :alt="path" loading="lazy" class="w-full h-full object-contain">
-            </button>
-          </template>
+        {# Picker-first: a preview + a "Choose image" button that opens the
+           shared modal gallery (uploads + built-ins + upload), so the field
+           stays compact no matter how big the library grows. #}
+        <div class="flex items-center gap-3" x-cloak>
+          <div class="w-12 h-12 rounded-md border-2 border-[color:var(--border)] overflow-hidden flex items-center justify-center bg-[color:var(--surface-soft)]"
+               x-show="form.logo">
+            <img :src="assetUrl(form.logo) + (form.logo.startsWith('/assets/img/') ? '?thumb' : '')" alt="" class="w-full h-full object-contain">
+          </div>
+          <button type="button" class="admin-login-btn" style="padding:8px 14px;font-size:13px"
+                  @click="openPicker('logo')">
+            <i class="ti ti-photo" aria-hidden="true"></i>
+            {{ self.t("spec-form-choose-image") }}
+          </button>
         </div>
 
         {# Upload error (e.g. unsupported type / too large) #}
@@ -261,34 +234,12 @@
 
         {# IMAGE — same library + inline upload as the logo picker (#213). #}
         <div x-show="coverMode === 'image'" x-cloak>
-          <div class="flex flex-wrap gap-2 mt-1">
-            <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
-                   :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
-                   @dragover.prevent="$el.classList.add('border-[#0f6e56]')"
-                   @dragleave.prevent="$el.classList.remove('border-[#0f6e56]')"
-                   @drop.prevent="$el.classList.remove('border-[#0f6e56]'); uploadImage($event, 'cover')"
-                   :title="'{{ self.t("spec-form-logo-upload") }}'">
-              <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'cover')">
-              <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
-            </label>
-            <template x-for="name in logoImages.slice(0, coverShown)" :key="'cov-' + name">
-              <button type="button" :title="name" @click="setCoverImage(name)"
-                      class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors"
-                      :class="form.cover.indexOf('/assets/img/' + name) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-                <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy" class="w-full h-full object-cover">
-              </button>
-            </template>
-            <button type="button" x-show="logoImages.length > coverShown" x-cloak
-                    @click="coverShown += galleryPage" class="admin-nav-link self-center text-xs"
-                    x-text="'{{ self.t("spec-form-gallery-more") }}' + ' (' + (logoImages.length - coverShown) + ')'"></button>
-            {# Built-in logos as a cover too (Option A). #}
-            <template x-for="path in builtinLogos" :key="'cov-' + path">
-              <button type="button" :title="path.split('/').pop()" @click="setCoverPath(path)"
-                      class="w-12 h-12 rounded-md overflow-hidden border-2 transition-colors p-1 bg-[color:var(--surface-soft)]"
-                      :class="form.cover.indexOf(path) !== -1 ? 'border-[#0f6e56]' : 'border-transparent hover:border-[color:var(--border)]'">
-                <img :src="assetUrl(path)" :alt="path" loading="lazy" class="w-full h-full object-contain">
-              </button>
-            </template>
+          <div class="flex items-center gap-3 mt-1">
+            <button type="button" class="admin-login-btn" style="padding:8px 14px;font-size:13px"
+                    @click="openPicker('cover')">
+              <i class="ti ti-photo" aria-hidden="true"></i>
+              {{ self.t("spec-form-choose-image") }}
+            </button>
           </div>
           <div class="spec-form-help">{{ self.t("spec-form-cover-image-help") }}</div>
           <input type="text" name="cover" x-model="form.cover" readonly
@@ -850,6 +801,46 @@
     </aside>
 
   </div>
+
+  {# ── Image picker modal (shared by logo + cover) ───────────────
+     Opened by openPicker('logo'|'cover'). Search + the uploaded Media
+     images + the built-in logos + an inline upload — so picking scales to
+     any library size without an ever-growing inline thumbnail strip. #}
+  <div x-show="picker.open" x-cloak class="image-picker-overlay"
+       @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
+    <div class="image-picker-modal">
+      <div class="image-picker-head">
+        <strong x-text="picker.target === 'cover' ? '{{ self.t("spec-form-cover") }}' : '{{ self.t("spec-form-logo") }}'"></strong>
+        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="image-picker-tools">
+        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+               class="spec-form-input text-sm" style="max-width:16rem">
+        <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
+               :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
+          <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
+          {{ self.t("admin-images-choose") }}
+          <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, picker.target)">
+        </label>
+      </div>
+      <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
+      <div class="image-picker-grid">
+        <template x-for="name in pickerUploads()" :key="'pk-' + name">
+          <button type="button" :title="name" @click="pickImage('/assets/img/' + name)"
+                  class="image-picker-tile" :class="pickerSelected('/assets/img/' + name) ? 'is-sel' : ''">
+            <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
+          </button>
+        </template>
+        <template x-for="path in pickerBuiltins()" :key="'pk-' + path">
+          <button type="button" :title="path.split('/').pop()" @click="pickImage(path)"
+                  class="image-picker-tile is-builtin" :class="pickerSelected(path) ? 'is-sel' : ''">
+            <img :src="assetUrl(path)" :alt="path" loading="lazy">
+          </button>
+        </template>
+      </div>
+      <div class="image-picker-empty" x-show="!pickerUploads().length && !pickerBuiltins().length">{{ self.t("admin-images-no-match") }}</div>
+    </div>
+  </div>
 </div>
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
@@ -869,6 +860,9 @@ window.ruscker.specForm = (initial, logoImages, builtinLogos) => ({
   logoShown: 24,
   coverShown: 24,
   galleryPage: 24,
+  // Image-picker modal state (shared by logo + cover). `target` selects
+  // which field a pick writes to; `q` filters uploads + built-ins.
+  picker: { open: false, target: 'logo', q: '' },
   // Prefix the base path on a root-absolute asset URL (#270). These
   // <img :src> values are set by Alpine at runtime, so the base-path
   // response rewriter (which only touches static HTML) never sees them
@@ -950,6 +944,31 @@ window.ruscker.specForm = (initial, logoImages, builtinLogos) => ({
   setCoverPath(path) {
     this.coverMode = 'image';
     this.form.cover = "url('" + path + "') center / cover no-repeat";
+  },
+  // ── Image-picker modal ──────────────────────────────────────
+  openPicker(target) {
+    this.picker.target = target;
+    this.picker.q = '';
+    this.imgError = '';
+    this.picker.open = true;
+  },
+  pickImage(value) {
+    if (this.picker.target === 'cover') this.setCoverPath(value);
+    else this.form.logo = value;
+    this.picker.open = false;
+  },
+  pickerSelected(value) {
+    return this.picker.target === 'cover'
+      ? this.form.cover.indexOf(value) !== -1
+      : this.form.logo === value;
+  },
+  pickerUploads() {
+    const q = this.picker.q.trim().toLowerCase();
+    return q ? this.logoImages.filter((n) => n.toLowerCase().includes(q)) : this.logoImages;
+  },
+  pickerBuiltins() {
+    const q = this.picker.q.trim().toLowerCase();
+    return q ? this.builtinLogos.filter((p) => p.toLowerCase().includes(q)) : this.builtinLogos;
   },
   // Inline upload to the media library, then select the result for
   // `target` ('logo' or 'cover'). Reuses the same pipeline as the

@@ -411,6 +411,7 @@ admin-grad-remove-stop = Quitar color
 
 # Spec form — card cover
 spec-form-cover = Cover de la tarjeta
+spec-form-choose-image = Elegir imagen
 spec-form-cover-auto = Auto (color del tipo)
 spec-form-cover-auto-help = Usa el tono por defecto del tipo. Elija Sólido o Degradado para personalizar.
 

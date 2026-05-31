@@ -253,6 +253,10 @@ async fn login_submit(
     // Username/password login needs the user store. Without a DB the
     // only way in is the break-glass token.
     let Some(pool) = state.db.as_ref() else {
+        // Count this against the limiter too (#328) — symmetric with the
+        // DB-present and token paths, so a no-DB deploy can't be probed
+        // without tripping the same backoff.
+        state.login_limiter.record_failure();
         return login_error(&state, loc, theme, "wrong-login", false);
     };
 

@@ -566,15 +566,27 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
 /// A Docker bind spec: `host:container` plus an optional `:ro`/`:rw`
 /// mode, with a non-empty host and an absolute container path. Public so
 /// the admin form validates with the same rule.
+///
+/// Peels the optional trailing mode first, then splits the rest into
+/// `host:container` on the **last** colon (the container path is the
+/// final segment and must be absolute). This drops the old rigid "at
+/// most 3 colon-separated parts" rule that wrongly rejected a host path
+/// containing a colon (legal on Linux) (#328). This is a *syntax* check
+/// — whether the host path exists is a runtime concern.
 pub fn is_valid_volume_bind(v: &str) -> bool {
-    let parts: Vec<&str> = v.split(':').collect();
-    let host_ok = parts.first().is_some_and(|h| !h.trim().is_empty());
-    let container_ok = parts.get(1).is_some_and(|c| c.starts_with('/'));
-    let mode_ok = match parts.get(2) {
-        None => true,
-        Some(m) => matches!(m.trim(), "ro" | "rw"),
+    // Strip a trailing `:ro` / `:rw` mode if present.
+    let body = match v.rsplit_once(':') {
+        Some((head, mode)) if matches!(mode.trim(), "ro" | "rw") => head,
+        _ => v,
     };
-    parts.len() <= 3 && host_ok && container_ok && mode_ok
+    // The remainder is `host:container`. The container path is the last
+    // colon-segment (it must be absolute), so split on the LAST colon —
+    // that way a host path that itself contains a colon stays with the
+    // host instead of being mistaken for the container.
+    let Some((host, container)) = body.rsplit_once(':') else {
+        return false;
+    };
+    !host.trim().is_empty() && container.starts_with('/')
 }
 
 fn collect_stats(config: &Config) -> Stats {
@@ -816,6 +828,24 @@ proxy:
             })
             .collect();
         assert_eq!(bad, vec!["not-a-bind"], "only the malformed bind warns");
+    }
+
+    #[test]
+    fn volume_bind_parser_handles_modes_and_colon_paths() {
+        // Plain + mode forms.
+        assert!(is_valid_volume_bind("/srv/data:/data"));
+        assert!(is_valid_volume_bind("/srv/www:/www:ro"));
+        assert!(is_valid_volume_bind("/srv/www:/www:rw"));
+        // #328: a host path containing a colon (legal on Linux) is no
+        // longer wrongly rejected by a rigid 3-parts cap. The container
+        // is the last segment; the host keeps the rest.
+        assert!(is_valid_volume_bind("/srv/a:b:/data"));
+        assert!(is_valid_volume_bind("/srv/a:b:/data:ro"));
+        // Still rejected: no container path, non-absolute container,
+        // empty host.
+        assert!(!is_valid_volume_bind("not-a-bind"));
+        assert!(!is_valid_volume_bind("/host:relative"));
+        assert!(!is_valid_volume_bind(":/data"));
     }
 
     #[test]

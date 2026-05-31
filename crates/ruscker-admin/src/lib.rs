@@ -527,7 +527,14 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         // CSRF defense for the chrome's mutations (#259). Layered on the
         // chrome only — NOT the proxy routes (apps legitimately take
         // cross-origin POSTs). Safe methods pass through untouched.
-        .layer(axum::middleware::from_fn(csrf_guard));
+        // `X-Forwarded-Host` is only trusted in the Origin/Host fallback
+        // when the operator opted into forwarded headers (#328).
+        .layer(axum::middleware::from_fn({
+            let trust = routes::proxy::forward_headers_trusted(&state.config.server);
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                csrf_guard(req, next, trust)
+            }
+        }));
 
     // Base-path mounting (#173): when served under a subpath, rewrite the
     // chrome's root-absolute URLs / redirects to carry the prefix. Only
@@ -673,6 +680,10 @@ async fn security_headers(
 async fn csrf_guard(
     req: axum::extract::Request,
     next: axum::middleware::Next,
+    // Whether `X-Forwarded-Host` may be trusted in the Origin/Host
+    // fallback. Only true when the operator opted into forwarded headers
+    // (#328) — otherwise a client could spoof it to pass the check.
+    trust_forwarded: bool,
 ) -> axum::response::Response {
     use axum::http::Method;
     use axum::response::IntoResponse;
@@ -680,7 +691,7 @@ async fn csrf_guard(
         *req.method(),
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    if state_changing && request_is_cross_origin(req.headers()) {
+    if state_changing && request_is_cross_origin(req.headers(), trust_forwarded) {
         tracing::warn!(
             method = %req.method(), uri = %req.uri(),
             "CSRF guard refused a cross-origin state-changing request"
@@ -695,8 +706,10 @@ async fn csrf_guard(
 }
 
 /// `true` when a state-changing request looks cross-origin. See
-/// [`csrf_guard`] for the policy.
-fn request_is_cross_origin(h: &axum::http::HeaderMap) -> bool {
+/// [`csrf_guard`] for the policy. `trust_forwarded` gates whether a
+/// client-supplied `X-Forwarded-Host` may stand in for the real `Host`
+/// in the Origin/Host fallback (#328).
+fn request_is_cross_origin(h: &axum::http::HeaderMap, trust_forwarded: bool) -> bool {
     use axum::http::header;
     // Modern browsers: trust Fetch Metadata.
     if let Some(site) = h.get("sec-fetch-site").and_then(|v| v.to_str().ok()) {
@@ -707,8 +720,12 @@ fn request_is_cross_origin(h: &axum::http::HeaderMap) -> bool {
     let Some(origin) = h.get(header::ORIGIN).and_then(|v| v.to_str().ok()) else {
         return false;
     };
-    let host = h
-        .get("x-forwarded-host")
+    // Prefer the real `Host`; only consult `X-Forwarded-Host` when the
+    // operator trusts forwarded headers — otherwise a non-browser client
+    // could spoof it to match its own Origin and pass the check.
+    let host = trust_forwarded
+        .then(|| h.get("x-forwarded-host"))
+        .flatten()
         .or_else(|| h.get(header::HOST))
         .and_then(|v| v.to_str().ok());
     match host {
@@ -818,36 +835,72 @@ mod csrf_tests {
 
     #[test]
     fn fetch_metadata_decides_when_present() {
-        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "same-origin")])));
-        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "none")])));
-        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "cross-site")])));
-        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "same-site")])));
+        // Sec-Fetch-Site short-circuits before the host check, so the
+        // trust flag is irrelevant here.
+        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "same-origin")]), false));
+        assert!(!request_is_cross_origin(&hm(&[("sec-fetch-site", "none")]), false));
+        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "cross-site")]), false));
+        assert!(request_is_cross_origin(&hm(&[("sec-fetch-site", "same-site")]), false));
     }
 
     #[test]
     fn no_headers_is_allowed() {
         // curl / the break-glass token POST send neither header.
-        assert!(!request_is_cross_origin(&HeaderMap::new()));
+        assert!(!request_is_cross_origin(&HeaderMap::new(), false));
     }
 
     #[test]
     fn origin_fallback_compares_host() {
         // Same host (scheme stripped) → allowed.
-        assert!(!request_is_cross_origin(&hm(&[
-            ("origin", "https://portal.example.org"),
-            ("host", "portal.example.org"),
-        ])));
-        // Behind a proxy, compare against X-Forwarded-Host.
-        assert!(!request_is_cross_origin(&hm(&[
-            ("origin", "https://portal.example.org"),
-            ("x-forwarded-host", "portal.example.org"),
-            ("host", "127.0.0.1:8080"),
-        ])));
+        assert!(!request_is_cross_origin(
+            &hm(&[
+                ("origin", "https://portal.example.org"),
+                ("host", "portal.example.org"),
+            ]),
+            false
+        ));
+        // Behind a trusted proxy, compare against X-Forwarded-Host.
+        assert!(!request_is_cross_origin(
+            &hm(&[
+                ("origin", "https://portal.example.org"),
+                ("x-forwarded-host", "portal.example.org"),
+                ("host", "127.0.0.1:8080"),
+            ]),
+            true
+        ));
         // Different host → cross-origin.
-        assert!(request_is_cross_origin(&hm(&[
-            ("origin", "https://evil.example.com"),
-            ("host", "portal.example.org"),
-        ])));
+        assert!(request_is_cross_origin(
+            &hm(&[
+                ("origin", "https://evil.example.com"),
+                ("host", "portal.example.org"),
+            ]),
+            false
+        ));
+    }
+
+    #[test]
+    fn xforwarded_host_ignored_when_untrusted() {
+        // #328: with forwarded headers NOT trusted, a spoofed
+        // X-Forwarded-Host matching the attacker's Origin must NOT pass
+        // — the check falls back to the real Host and sees a mismatch.
+        assert!(request_is_cross_origin(
+            &hm(&[
+                ("origin", "https://evil.example.com"),
+                ("x-forwarded-host", "evil.example.com"),
+                ("host", "portal.example.org"),
+            ]),
+            false
+        ));
+        // The same request IS treated same-origin when forwarded headers
+        // are trusted (operator put Ruscker behind a real proxy).
+        assert!(!request_is_cross_origin(
+            &hm(&[
+                ("origin", "https://evil.example.com"),
+                ("x-forwarded-host", "evil.example.com"),
+                ("host", "portal.example.org"),
+            ]),
+            true
+        ));
     }
 }
 

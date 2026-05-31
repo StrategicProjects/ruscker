@@ -179,7 +179,14 @@ async fn index(
     let page_title =
         not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
     let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
-    let og_image = not_blank(&lc.og_image).unwrap_or_default();
+    // A root-absolute `og-image` (`/assets/img/og.png`) must carry the
+    // base path so it resolves under `--base-path` (#328). A full URL
+    // (the form OG crawlers usually want) is left untouched. Stored
+    // value stays base-agnostic; only the rendered tag gets the prefix.
+    let og_image = match not_blank(&lc.og_image) {
+        Some(p) if p.starts_with('/') => format!("{}{}", state.base_path, p),
+        other => other.unwrap_or_default(),
+    };
     let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
     let custom_css = not_blank(&lc.custom_css).unwrap_or_default();
 

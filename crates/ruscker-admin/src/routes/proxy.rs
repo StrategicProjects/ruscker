@@ -511,7 +511,7 @@ fn spec_kind_needs_sticky(kind: SpecKind) -> bool {
 /// than `none`). Without that opt-in, a direct client could spoof
 /// the header to dodge a per-IP rate limit — so we ignore it and key
 /// on the real TCP peer instead.
-fn forward_headers_trusted(server: &ruscker_config::Server) -> bool {
+pub(crate) fn forward_headers_trusted(server: &ruscker_config::Server) -> bool {
     server.use_forward_headers
         || server
             .forward_headers_strategy

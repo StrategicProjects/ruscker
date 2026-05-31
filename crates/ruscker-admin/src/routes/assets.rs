@@ -158,7 +158,7 @@ pub const BUILTIN_LOGOS: &[&str] = &[
     "/assets/showcase/fastapi.svg",
     "/assets/showcase/plumber.svg",
     "/assets/showcase/bokeh.svg",
-    "/assets/brand/ruscker-mark.svg",
+    "/assets/brand/mark.svg",
 ];
 
 // Ruscker brand kit — see docs/BRAND.md for usage rules.

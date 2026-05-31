@@ -981,6 +981,11 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   border: 1px dashed var(--border-strong);
   border-radius: 10px;
   background: var(--surface-soft);
+  transition: border-color .12s, background .12s;
+}
+.image-upload-zone.is-dragover {
+  border-color: var(--color-teal-600);
+  background: color-mix(in srgb, var(--color-teal-600) 8%, var(--surface-soft));
 }
 .image-upload-zone input[type="file"] {
   position: absolute;

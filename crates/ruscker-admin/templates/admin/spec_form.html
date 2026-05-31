@@ -29,7 +29,9 @@
       <h1 class="text-xl font-medium tracking-tight" x-text="form.display_name || form.id || '{{ self.t("spec-form-title-new") }}'"></h1>
     </div>
     <div class="flex items-center gap-2">
-      <a href="{{ base }}/admin/specs" class="admin-nav-link">{{ self.t("spec-form-cancel") }}</a>
+      <a href="{{ base }}/admin/specs" class="admin-nav-link">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i>
+        {{ self.t("spec-form-cancel") }}</a>
       <button type="submit" form="spec-form" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
         <i class="ti ti-check" aria-hidden="true"></i>
         {{ self.t("spec-form-save") }}
@@ -875,43 +877,10 @@ window.ruscker.specForm = (initial, logoImages) => ({
   },
   imgUploading: false,
   imgError: '',
-  // Open the Advanced section on load if it already carries any value,
-  // so edits to existing advanced config are visible.
-  advancedOpen: !!(
-    (initial.heartbeat_timeout || '').toString().trim() ||
-    (initial.container_cpu_limit || '').toString().trim() ||
-    (initial.container_memory_limit || '').trim() ||
-    (initial.min_replicas || '').toString().trim() ||
-    (initial.max_replicas || '').toString().trim() ||
-    (initial.concurrent_requests_per_replica || '').toString().trim() ||
-    (initial.api_port || '').toString().trim() ||
-    (initial.api_rate_limit || '').trim() ||
-    (initial.api_docs_path || '').trim() ||
-    (initial.api_health_path || '').trim() ||
-    (initial.api_cors || '').trim() ||
-    (initial.container_port || '').toString().trim() ||
-    (initial.platform || '').trim() ||
-    (initial.container_lifetime || '').toString().trim() ||
-    (initial.stop_on_logout || '').trim() ||
-    (initial.container_env || '').trim() ||
-    (initial.container_cmd || '').trim() ||
-    (initial.docker_registry_domain || '').trim() ||
-    (initial.docker_registry_username || '').trim() ||
-    (initial.docker_registry_password || '').trim() ||
-    (initial.docker_registry_credential || '').trim() ||
-    (initial.access_groups || '').trim() ||
-    (initial.access_users || '').trim() ||
-    (initial.container_cpu_request || '').toString().trim() ||
-    (initial.container_memory_request || '').trim() ||
-    (initial.max_body_size || '').trim() ||
-    (initial.scale_up_threshold || '').toString().trim() ||
-    (initial.scale_down_threshold || '').toString().trim() ||
-    (initial.scale_down_grace || '').toString().trim() ||
-    (initial.drain_timeout || '').toString().trim() ||
-    (initial.routing_strategy || '').trim() ||
-    (initial.placement || '').trim() ||
-    (initial.anti_affinity || '').trim()
-  ),
+  // Advanced starts collapsed by default — even when editing a spec that
+  // has advanced config set — so the form opens clean and uncluttered
+  // (operator request). Click the toggle to reveal it.
+  advancedOpen: false,
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder). Seeded from any
   // existing `cover` value.

@@ -343,19 +343,21 @@ async fn tick(
         let mut snap = state.replicas.read().await.replicas_of(&spec.id).to_vec();
         let mut count = snap.len();
 
-        // --- lifetime reap (#334) ---
+        // --- lifetime reap (#334) + drain window (#335) ---
         // Recycle replicas past their configured age BEFORE the scale
         // passes, so a reap that drops us under `min` is refilled by the
         // scale-to-min branch in this same tick. The hard `max-lifetime`
-        // cap reaps even with active sessions (those sessions are lost —
-        // that's the documented contract); the soft `container-lifetime`
-        // cap reaps only idle replicas. `stop_one` also purges the
-        // replica's sessions (#324), so no orphan counts linger.
+        // cap force-retires busy replicas, but only after the per-spec
+        // `drain-timeout` grace (#335) — an idle one is reaped at once.
+        // The soft `container-lifetime` cap reaps only idle replicas.
+        // `stop_one` also purges the replica's sessions (#324), so no
+        // orphan counts linger.
         let aged = lifetime_reap_candidates(
             &snap,
             chrono::Utc::now(),
             spec.effective_max_lifetime_secs(),
             spec.effective_container_lifetime_secs(),
+            spec.effective_drain_timeout_secs(),
         );
         if !aged.is_empty() {
             info!(
@@ -517,16 +519,25 @@ fn all_saturated(replicas: &[ruscker_core::Replica]) -> bool {
 }
 
 /// Replicas that have outlived their configured lifetime and should be
-/// recycled (#334). The **hard** cap (`max-lifetime`) reaps regardless
-/// of sessions; the **soft** cap (`container-lifetime`) reaps only idle
-/// replicas (`sessions_active == 0`), so an active session isn't killed
-/// before its time. Pure over the snapshot (`now` injected) — no I/O,
-/// easy to test. Returns an empty vec when neither cap is set.
+/// recycled (#334), honouring the per-spec drain window (#335).
+///
+/// - **hard** cap (`max-lifetime`): an *idle* replica is reaped at once;
+///   a *busy* one is granted `drain_secs` of grace past the cap (the
+///   `drain-timeout` window) so its in-flight sessions can finish, and
+///   is force-killed once `age ≥ cap + drain_secs`. New sessions still
+///   route to it during the window (it stays `Ready`), but it can't
+///   outlive `cap + drain_secs`.
+/// - **soft** cap (`container-lifetime`): reaps only idle replicas — it
+///   waits indefinitely for the sessions to leave, never force-killing.
+///
+/// Pure over the snapshot (`now` injected) — no I/O, easy to test.
+/// Returns an empty vec when neither cap is set.
 fn lifetime_reap_candidates(
     replicas: &[ruscker_core::Replica],
     now: chrono::DateTime<chrono::Utc>,
     hard_secs: Option<i64>,
     soft_secs: Option<i64>,
+    drain_secs: i64,
 ) -> Vec<ReplicaId> {
     if hard_secs.is_none() && soft_secs.is_none() {
         return Vec::new();
@@ -535,8 +546,13 @@ fn lifetime_reap_candidates(
         .iter()
         .filter(|r| {
             let age = (now - r.started_at).num_seconds();
-            let hard = hard_secs.is_some_and(|cap| age >= cap);
-            let soft = soft_secs.is_some_and(|cap| age >= cap && r.sessions_active == 0);
+            let idle = r.sessions_active == 0;
+            let hard = hard_secs.is_some_and(|cap| {
+                // Idle ⇒ reap at the cap; busy ⇒ allow the drain window.
+                let deadline = if idle { cap } else { cap.saturating_add(drain_secs) };
+                age >= deadline
+            });
+            let soft = soft_secs.is_some_and(|cap| age >= cap && idle);
             hard || soft
         })
         .map(|r| r.id.clone())
@@ -963,24 +979,72 @@ proxy:
             old_busy.clone(),
         ];
 
+        // drain_secs = 0 here: no grace, so the hard cap behaves like a
+        // plain age check (the drain window is exercised separately).
+
         // No caps → nothing reaped.
-        assert!(lifetime_reap_candidates(&snap, now, None, None).is_empty());
+        assert!(lifetime_reap_candidates(&snap, now, None, None, 0).is_empty());
 
         // Hard cap (3600s) reaps BOTH old replicas — active included.
-        let hard = lifetime_reap_candidates(&snap, now, Some(3600), None);
+        let hard = lifetime_reap_candidates(&snap, now, Some(3600), None, 0);
         assert_eq!(hard.len(), 2);
         assert!(hard.contains(&old_idle.id) && hard.contains(&old_busy.id));
 
         // Soft cap (3600s) reaps only the idle old one.
-        let soft = lifetime_reap_candidates(&snap, now, None, Some(3600));
+        let soft = lifetime_reap_candidates(&snap, now, None, Some(3600), 0);
         assert_eq!(soft, vec![old_idle.id.clone()]);
 
         // Both set: the hard cap still reaps the busy old replica.
-        let both = lifetime_reap_candidates(&snap, now, Some(3600), Some(3600));
+        let both = lifetime_reap_candidates(&snap, now, Some(3600), Some(3600), 0);
         assert_eq!(both.len(), 2);
 
         // A cap longer than any age reaps nothing.
-        assert!(lifetime_reap_candidates(&snap, now, Some(99_999), Some(99_999)).is_empty());
+        assert!(lifetime_reap_candidates(&snap, now, Some(99_999), Some(99_999), 0).is_empty());
+    }
+
+    #[test]
+    fn drain_window_delays_force_kill_of_busy_replica() {
+        // #335: past the hard cap, an idle replica is reaped at once, but
+        // a busy one gets `drain_secs` of grace before the force-kill.
+        use chrono::{Duration, Utc};
+        let now = Utc::now();
+        let mk = |active: u32, age_secs: i64| Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "s".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: now - Duration::seconds(age_secs),
+            sessions_active: active,
+            sessions_max: 5,
+            host: None,
+        };
+        let cap = 3600;
+        let drain = 300;
+        // Just past the cap (age 3700): idle → reaped; busy → still in
+        // its drain window (3700 < 3600+300), so NOT yet reaped.
+        let idle_past = mk(0, 3700);
+        let busy_in_window = mk(2, 3700);
+        let r1 = lifetime_reap_candidates(
+            &[idle_past.clone(), busy_in_window.clone()],
+            now,
+            Some(cap),
+            None,
+            drain,
+        );
+        assert_eq!(r1, vec![idle_past.id.clone()], "idle reaped, busy still draining");
+
+        // Once the busy replica passes cap + drain (age 4000 ≥ 3900) it's
+        // force-killed regardless of its sessions.
+        let busy_expired = mk(2, 4000);
+        let r2 = lifetime_reap_candidates(
+            std::slice::from_ref(&busy_expired),
+            now,
+            Some(cap),
+            None,
+            drain,
+        );
+        assert_eq!(r2, vec![busy_expired.id.clone()], "drain window elapsed → force-kill");
     }
 
     #[tokio::test]

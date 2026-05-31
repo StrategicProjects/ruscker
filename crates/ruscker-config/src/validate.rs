@@ -253,13 +253,12 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
         "scale-down grace not honoured — a fixed cooldown is used instead; tracked in #326",
     ),
     (
-        "drain-timeout",
-        "per-spec drain timeout not honoured — `proxy.shutdown-grace-ms` applies globally; tracked in #326",
-    ),
-    (
         "concurrent-requests-per-replica",
         "request-based concurrency limit not enforced — capacity is seat-based; tracked in #326",
     ),
+    // NOTE: `drain-timeout` IS honoured now (#335) — it bounds the grace
+    // window the hard `max-lifetime` recycle grants busy replicas before
+    // the force-kill. Intentionally absent from this ignored list.
     // NOTE: `max-lifetime` / `container-lifetime` ARE enforced now (#334)
     // — the scaler recycles a replica once it outlives its age cap (hard
     // reaps regardless of sessions, soft reaps when idle). Intentionally
@@ -1030,18 +1029,19 @@ proxy:
         for expected in [
             "scale-up-threshold",
             "scale-down-grace",
-            "drain-timeout",
             "concurrent-requests-per-replica",
             "stop-on-logout",
         ] {
             assert!(fields.iter().any(|f| f == expected), "missing {expected}: {fields:?}");
         }
-        // #334: max-lifetime / container-lifetime ARE enforced now — they
-        // must NOT be flagged as unsupported anymore.
-        assert!(
-            !fields.iter().any(|f| f == "max-lifetime" || f == "container-lifetime"),
-            "lifetime caps are enforced now: {fields:?}"
-        );
+        // Enforced now — must NOT be flagged: max-lifetime / container-
+        // lifetime (#334), drain-timeout (#335).
+        for enforced in ["max-lifetime", "container-lifetime", "drain-timeout"] {
+            assert!(
+                !fields.iter().any(|f| f == enforced),
+                "{enforced} is enforced now: {fields:?}"
+            );
+        }
     }
 
     #[test]

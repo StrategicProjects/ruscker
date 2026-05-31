@@ -534,6 +534,7 @@ spec-form-logo-upload = Upload image
 spec-form-gallery-more = Show more
 spec-form-logo-clear = Remove
 spec-form-logo-none = No image — a kind-based tint is used.
+spec-form-logo-builtin = Built-in logos
 spec-form-logo-path-advanced = Advanced: paste a path or URL
 spec-form-cover-image = Image
 spec-form-cover-image-help = Pick a library image (or upload one) as the card background.

@@ -538,6 +538,7 @@ spec-form-logo-upload = Enviar imagem
 spec-form-gallery-more = Mostrar mais
 spec-form-logo-clear = Remover
 spec-form-logo-none = Sem imagem — usa um tom gerado pelo tipo.
+spec-form-logo-builtin = Logos integrados
 spec-form-logo-path-advanced = Avançado: colar um caminho ou URL
 spec-form-cover-image = Imagem
 spec-form-cover-image-help = Escolha uma imagem da biblioteca (ou envie uma) como fundo do card.

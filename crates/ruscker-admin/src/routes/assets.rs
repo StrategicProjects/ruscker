@@ -140,6 +140,27 @@ const SHOWCASE_SHINY_FOR_PYTHON: &[u8] =
 const SHOWCASE_STREAMLIT: &[u8] = include_bytes!("../../assets/showcase/streamlit.svg");
 const SHOWCASE_VOILA: &[u8] = include_bytes!("../../assets/showcase/voila.svg");
 
+/// Built-in logo paths offered in the spec-form logo/cover pickers
+/// (Option A, #351-follow-up): the bundled framework + brand SVGs, so a
+/// new card can reuse a curated logo without typing a path. Served by the
+/// `/assets/showcase/*` + `/assets/brand/*` handlers above; stored on a
+/// spec by this exact (base-agnostic) path.
+pub const BUILTIN_LOGOS: &[&str] = &[
+    "/assets/showcase/shiny.svg",
+    "/assets/showcase/shiny-for-python.svg",
+    "/assets/showcase/streamlit.svg",
+    "/assets/showcase/dash.svg",
+    "/assets/showcase/voila.svg",
+    "/assets/showcase/jupyter.svg",
+    "/assets/showcase/rstudio.svg",
+    "/assets/showcase/rmarkdown.svg",
+    "/assets/showcase/quarto.svg",
+    "/assets/showcase/fastapi.svg",
+    "/assets/showcase/plumber.svg",
+    "/assets/showcase/bokeh.svg",
+    "/assets/brand/ruscker-mark.svg",
+];
+
 // Ruscker brand kit — see docs/BRAND.md for usage rules.
 const BRAND_MARK: &[u8] = include_bytes!("../../assets/brand/ruscker-mark.svg");
 const BRAND_MARK_FLAT: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-flat.svg");

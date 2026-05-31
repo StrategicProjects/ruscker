@@ -136,4 +136,12 @@
   </script>
 {% endif %}
 
+{# Alpine powers BOTH the upload-zone drag-drop (the form near the top) and
+   the gallery filter / "show more" below. The admin layout doesn't ship
+   Alpine globally — each page includes it — and this page was missing it,
+   so those directives were inert (drag-drop dead, gallery search/paging
+   silently broken). Load it here, outside the gallery `{% if %}`, so the
+   upload form works even when the library is empty. #}
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+
 {% endblock %}

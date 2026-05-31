@@ -135,6 +135,9 @@
           {# Upload tile #}
           <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
                  :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
+                 @dragover.prevent="$el.classList.add('border-[#0f6e56]')"
+                 @dragleave.prevent="$el.classList.remove('border-[#0f6e56]')"
+                 @drop.prevent="$el.classList.remove('border-[#0f6e56]'); uploadImage($event, 'logo')"
                  :title="'{{ self.t("spec-form-logo-upload") }}'">
             <input type="file" accept="image/*" class="hidden"
                    @change="uploadImage($event, 'logo')">
@@ -246,6 +249,9 @@
           <div class="flex flex-wrap gap-2 mt-1">
             <label class="w-12 h-12 rounded-md border-2 border-dashed border-[color:var(--border)] flex items-center justify-center cursor-pointer hover:border-[#0f6e56] transition-colors"
                    :class="imgUploading ? 'opacity-50 pointer-events-none' : ''"
+                   @dragover.prevent="$el.classList.add('border-[#0f6e56]')"
+                   @dragleave.prevent="$el.classList.remove('border-[#0f6e56]')"
+                   @drop.prevent="$el.classList.remove('border-[#0f6e56]'); uploadImage($event, 'cover')"
                    :title="'{{ self.t("spec-form-logo-upload") }}'">
               <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'cover')">
               <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
@@ -918,8 +924,12 @@ window.ruscker.specForm = (initial, logoImages) => ({
   // `target` ('logo' or 'cover'). Reuses the same pipeline as the
   // media page; no navigation. Honors RUSCKER_BASE for subpath mounts.
   async uploadImage(event, target) {
+    // Accept a file from a file-input change OR a drag-drop (consistency
+    // with the media page #410): the dropped file lives on dataTransfer.
     const input = event.target;
-    const file = input.files && input.files[0];
+    const file =
+      (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) ||
+      (input && input.files && input.files[0]);
     if (!file) return;
     this.imgError = '';
     this.imgUploading = true;
@@ -940,7 +950,9 @@ window.ruscker.specForm = (initial, logoImages) => ({
       this.imgError = String(e);
     } finally {
       this.imgUploading = false;
-      input.value = ''; // let the same file be chosen again
+      // Reset only a real file input (a drop target has no `.value`),
+      // so the same file can be chosen again.
+      if (input && 'value' in input) input.value = '';
     }
   },
   needsContainer() {

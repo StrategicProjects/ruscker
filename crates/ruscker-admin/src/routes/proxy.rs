@@ -712,12 +712,20 @@ pub(crate) fn public_path(base_path: &str, spec: &Spec) -> String {
 }
 
 /// Resolve the [`PUBLIC_PATH_TOKEN`] in a spec's env (`NAME=value`) and
-/// cmd argv at spawn, and inject `SHINYPROXY_PUBLIC_PATH=<path>` unless
-/// the spec already set it — so both flag-based apps (Jupyter/Voilà/
-/// Streamlit via the cmd token) and env-based ones (FastAPI `SCRIPT_NAME`,
-/// any framework reading the env) can self-route behind a base path
-/// (#371). Pure; both spawn paths call it before building the request.
-pub(crate) fn apply_public_path(env: &mut Vec<String>, cmd: &mut Option<Vec<String>>, path: &str) {
+/// cmd argv at spawn — an **explicit opt-in** for an operator who needs
+/// to feed the public mount path to an app.
+///
+/// It deliberately does **NOT** auto-inject `SHINYPROXY_PUBLIC_PATH`:
+/// Ruscker **strips** the mount prefix before forwarding (the container
+/// receives `/lab/...`, not `/box/app/jupyter/...` — proven live), the
+/// opposite of ShinyProxy's no-strip model. Advertising the public path
+/// to a ShinyProxy-style demo (which reads `SHINYPROXY_PUBLIC_PATH` to
+/// self-prefix) made it configure the WRONG prefix and 404/500 every
+/// request (Jupyter #371, Dash #372). Apps should serve at root; the
+/// `/app` rewriter + the #348 jupyter-config rewrite handle the
+/// browser-side prefixing. The token stays for the rare case an operator
+/// genuinely wants it.
+pub(crate) fn apply_public_path(env: &mut [String], cmd: &mut Option<Vec<String>>, path: &str) {
     for e in env.iter_mut() {
         if e.contains(PUBLIC_PATH_TOKEN) {
             *e = e.replace(PUBLIC_PATH_TOKEN, path);
@@ -729,9 +737,6 @@ pub(crate) fn apply_public_path(env: &mut Vec<String>, cmd: &mut Option<Vec<Stri
                 *a = a.replace(PUBLIC_PATH_TOKEN, path);
             }
         }
-    }
-    if !env.iter().any(|e| e.starts_with("SHINYPROXY_PUBLIC_PATH=")) {
-        env.push(format!("SHINYPROXY_PUBLIC_PATH={path}"));
     }
 }
 
@@ -1861,7 +1866,7 @@ container-cpu-limit: 1.5
     }
 
     #[test]
-    fn apply_public_path_substitutes_token_and_injects_env() {
+    fn apply_public_path_substitutes_token_only() {
         let path = "/box/app/jupyter/";
         let mut env = vec!["FOO=bar".to_string(), "BASE=#{publicPath}".to_string()];
         let mut cmd = Some(vec![
@@ -1876,23 +1881,16 @@ container-cpu-limit: 1.5
             .contains(&"--ServerApp.base_url=/box/app/jupyter/".to_string()));
         assert!(env.contains(&"BASE=/box/app/jupyter/".to_string()));
         assert!(env.contains(&"FOO=bar".to_string()), "untouched entries survive");
-        // The compat env var is injected.
-        assert!(env
-            .iter()
-            .any(|e| e == "SHINYPROXY_PUBLIC_PATH=/box/app/jupyter/"));
-    }
-
-    #[test]
-    fn apply_public_path_keeps_operator_set_env() {
-        // Don't clobber an explicit SHINYPROXY_PUBLIC_PATH from the spec.
-        let mut env = vec!["SHINYPROXY_PUBLIC_PATH=/custom/".to_string()];
-        let mut cmd = None;
-        apply_public_path(&mut env, &mut cmd, "/box/app/x/");
-        assert_eq!(
-            env.iter().filter(|e| e.starts_with("SHINYPROXY_PUBLIC_PATH=")).count(),
-            1
+        // Does NOT auto-inject SHINYPROXY_PUBLIC_PATH — Ruscker strips the
+        // prefix, so advertising it would mis-prefix ShinyProxy-style apps
+        // (#372). No token → no change.
+        assert!(
+            !env.iter().any(|e| e.starts_with("SHINYPROXY_PUBLIC_PATH=")),
+            "must not inject SHINYPROXY_PUBLIC_PATH"
         );
-        assert!(env.contains(&"SHINYPROXY_PUBLIC_PATH=/custom/".to_string()));
+        let mut env2 = vec!["A=1".to_string()];
+        apply_public_path(&mut env2, &mut None, path);
+        assert_eq!(env2, vec!["A=1".to_string()], "no token ⇒ env untouched");
     }
 
     #[test]

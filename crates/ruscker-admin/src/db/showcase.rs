@@ -368,16 +368,19 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             s
         },
         {
-            // Quarto demo serves rendered docs on :8080. No dedicated
-            // kind — treat as a generic interactive app (sticky+WS is
-            // harmless if the content is static).
+            // Quarto demo on :8080. Use the `:prerendered` tag (#372):
+            // the `:latest` image renders the docs on startup, which took
+            // >60s — the container accepted TCP but never answered HTTP
+            // inside the readiness window, so it never went Ready and the
+            // splash hung. The prerendered variant serves a pre-built site
+            // immediately. No dedicated kind — generic interactive app.
             let mut s = card(
                 "quarto",
                 "Quarto",
                 "Open-source publishing system for technical documents.",
                 "/assets/showcase/quarto.svg",
                 "https://quarto.org",
-                Some("openanalytics/shinyproxy-quarto-demo:latest"),
+                Some("openanalytics/shinyproxy-quarto-demo:prerendered"),
                 Some(8080),
                 Some("linux/amd64"),
             )?;

@@ -150,9 +150,19 @@ const BRAND_LOCKUP_V: &[u8] = include_bytes!("../../assets/brand/ruscker-lockup-
 const BRAND_WORDMARK: &[u8] = include_bytes!("../../assets/brand/ruscker-wordmark.svg");
 const BRAND_APP_ICON: &[u8] = include_bytes!("../../assets/brand/ruscker-app-icon.svg");
 
+// Raster favicons (#374). The SVG favicon below is ignored by some
+// browsers (notably Safari), which then fall back to `/favicon.ico` —
+// previously unserved, so the tab showed a black placeholder. These are
+// rendered from the flat mark (3 bars) and bundled.
+const FAVICON_ICO: &[u8] = include_bytes!("../../assets/brand/favicon.ico");
+const FAVICON_PNG: &[u8] = include_bytes!("../../assets/brand/favicon-32.png");
+const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../assets/brand/apple-touch-icon.png");
+
 // ── Router ────────────────────────────────────────────────────────
 
 const SVG: &str = "image/svg+xml";
+const PNG: &str = "image/png";
+const ICO: &str = "image/x-icon";
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -209,9 +219,13 @@ pub fn routes() -> Router<AppState> {
         .route("/assets/brand/lockup-vertical.svg", get(|| serve(BRAND_LOCKUP_V, SVG)))
         .route("/assets/brand/wordmark.svg", get(|| serve(BRAND_WORDMARK, SVG)))
         .route("/assets/brand/app-icon.svg", get(|| serve(BRAND_APP_ICON, SVG)))
-        // Conventional well-known browser hooks.
+        // Conventional well-known browser hooks. SVG for modern
+        // browsers; raster `.ico`/`.png` so Safari & co. don't fall
+        // back to a black placeholder (#374).
         .route("/favicon.svg", get(|| serve(BRAND_MARK_FLAT, SVG)))
-        .route("/apple-touch-icon.png", get(|| serve(BRAND_APP_ICON, SVG)))
+        .route("/favicon.ico", get(|| serve(FAVICON_ICO, ICO)))
+        .route("/favicon-32.png", get(|| serve(FAVICON_PNG, PNG)))
+        .route("/apple-touch-icon.png", get(|| serve(APPLE_TOUCH_ICON, PNG)))
         // Operator-uploaded card images. DB first (Phase 2 image
         // library); on miss, fall back to the on-disk `images_dir`
         // (Phase 1 deploy that uses a static folder of files).

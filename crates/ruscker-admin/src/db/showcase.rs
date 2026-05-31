@@ -250,6 +250,15 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             // origin so the showcase card opens out of the box. (Demo
             // posture — the card is open; tighten with a token/auth for
             // anything real.)
+            //
+            // `--ServerApp.base_url=#{publicPath}` (#371): the proxy
+            // substitutes the spec's public mount path (e.g.
+            // `/box/app/jupyter/`) at spawn, so Jupyter serves its Lab
+            // page, REST API (`lab/api/settings|workspaces`), and kernel
+            // WebSocket under the SAME prefix the browser uses — fixing
+            // the blank Lab where `base_url=/` 404'd the REST calls. The
+            // #348 jupyter-config rewrite becomes a no-op (the config's
+            // baseUrl already matches), kept as a belt-and-suspenders.
             let mut jup = card(
                 "jupyter",
                 "Jupyter",
@@ -266,7 +275,7 @@ fn showcase_specs() -> Result<Vec<Spec>> {
                 "--ServerApp.allow_origin=*".into(),
                 "--ServerApp.allow_remote_access=True".into(),
                 "--ServerApp.disable_check_xsrf=True".into(),
-                "--ServerApp.base_url=/".into(),
+                "--ServerApp.base_url=#{publicPath}".into(),
             ]);
             // Generic interactive app, not Shiny (#231).
             jup.kind_override = Some(ruscker_config::SpecKindOverride::App);

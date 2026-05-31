@@ -885,17 +885,39 @@ fn print_breakdown(config: &Config) {
     println!();
 }
 
+/// Truncate `s` to at most `n` characters, appending an ellipsis when
+/// it was cut. Counts and slices on `char` boundaries — a byte-index
+/// slice (`&s[..k]`) would panic if the cut landed mid-UTF-8-codepoint
+/// (e.g. a spec id with accented characters) (#327).
 fn truncate(s: &str, n: usize) -> String {
-    if s.len() <= n {
+    if s.chars().count() <= n {
         s.to_string()
     } else {
-        format!("{}…", &s[..n.saturating_sub(1)])
+        let head: String = s.chars().take(n.saturating_sub(1)).collect();
+        format!("{head}…")
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truncate_counts_chars_and_never_panics_on_multibyte() {
+        // Short ASCII passes through.
+        assert_eq!(truncate("shiny", 25), "shiny");
+        // ASCII over the cap gets an ellipsis at n-1 chars.
+        assert_eq!(truncate("abcdef", 4), "abc…");
+        // #327: a multibyte string cut mid-codepoint must not panic. The
+        // old byte-slice `&s[..k]` panicked when k landed inside a
+        // multi-byte char (each `ç`/`ã` is 2 bytes here).
+        let acc = "açãoçãoçãoção"; // 12 chars, > 6
+        let out = truncate(acc, 6);
+        assert_eq!(out.chars().count(), 6); // 5 kept + ellipsis
+        assert!(out.ends_with('…'));
+        // Boundary: exactly at the cap is left intact.
+        assert_eq!(truncate("ção", 3), "ção");
+    }
 
     #[test]
     fn log_format_defaults_to_text() {

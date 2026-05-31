@@ -233,10 +233,13 @@ impl<'a> CardCtx<'a> {
         let kind = spec.kind();
         let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
-        let access_open = tp
-            .get_str("icon")
-            .map(|s| s == "lock_open")
-            .unwrap_or(false);
+        // The card's access lock reflects the *real* access rule
+        // (`Spec::is_open()` — no `access-groups`/`access-users`), not a
+        // decorative `template-properties.icon` flag. This keeps the
+        // landing badge + the `data-access` filter consistent with the
+        // `/app` + `/api` enforcement guard, which also keys off
+        // `is_open()` (#346).
+        let access_open = spec.is_open();
         let active = tp.is_active();
         let subject = tp.get_str("subject");
         let logo = tp.get_str("logo").map(|l| prefix_asset_url(l, base));
@@ -502,6 +505,33 @@ mod tests {
         let spec = spec_with_tp("  cover: \"  \"\n");
         let card = CardCtx::from_spec(&spec, "");
         assert_eq!(card.cover, None);
+    }
+
+    #[test]
+    fn card_lock_reflects_real_access_not_icon() {
+        // #346: the card access lock is derived from `Spec::is_open()`
+        // (`access-groups` / `access-users`), NOT the retired decorative
+        // `template-properties.icon` flag.
+
+        // No access lists ⇒ open, even with a stale `icon: lock` lingering
+        // from an older DB.
+        let open = spec_with_tp("  icon: lock\n");
+        assert!(
+            CardCtx::from_spec(&open, "").access_open,
+            "no access lists ⇒ open (the `icon` flag is ignored)"
+        );
+
+        // An access list ⇒ restricted, even if `icon: lock_open` says
+        // otherwise — the visual can no longer contradict enforcement.
+        let restricted: ruscker_config::Spec = serde_yaml_ng::from_str(
+            "id: x\ndisplay-name: X\ncontainer-image: a:1\n\
+             access-groups: [staff]\ntemplate-properties:\n  icon: lock_open\n",
+        )
+        .expect("parse spec");
+        assert!(
+            !CardCtx::from_spec(&restricted, "").access_open,
+            "access-groups present ⇒ restricted"
+        );
     }
 
     #[test]

@@ -62,8 +62,6 @@ pub struct SpecForm {
     pub container_image: String,
     /// "active" | "inactive"
     pub state: String,
-    /// "lock" (restricted) | "lock_open" (public)
-    pub access: String,
     pub subject: String,
     pub logo: String,
     /// Card-cover CSS background (`template-properties.cover`):
@@ -185,10 +183,6 @@ impl SpecForm {
                 .get_str("state")
                 .map(str::to_string)
                 .unwrap_or_else(|| "active".into()),
-            access: tp
-                .get_str("icon")
-                .map(str::to_string)
-                .unwrap_or_else(|| "lock".into()),
             subject: tp.get_str("subject").map(str::to_string).unwrap_or_default(),
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
             cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
@@ -337,11 +331,14 @@ impl SpecForm {
         let mut tp_map: HashMap<String, YamlValue> = base
             .map(|b| b.template_properties.0.clone())
             .unwrap_or_default();
-        // type, state, icon, updated are always set so chips/filters render
+        // type, state, updated are always set so chips/filters render.
         tp_map.insert("type".into(), YamlValue::String(dt.key().to_string()));
         tp_map.insert("state".into(), YamlValue::String(self.state.clone()));
-        tp_map.insert("icon".into(), YamlValue::String(self.access.clone()));
         tp_map.insert("updated".into(), YamlValue::String(updated));
+        // The access lock is now derived from `Spec::is_open()`
+        // (`access-groups`/`access-users`), not a decorative `icon`
+        // flag — prune any stale value inherited from an older DB (#346).
+        tp_map.remove("icon");
         set_or_remove(&mut tp_map, "subject", &self.subject);
         set_or_remove(&mut tp_map, "logo", &self.logo);
         set_or_remove(&mut tp_map, "cover", &self.cover);
@@ -768,9 +765,7 @@ async fn new_form(
         form: SpecForm {
             // Sensible defaults for a new app
             display_type: "app".into(),
-            state: "active".into(),
-            access: "lock".into(),
-            // The HTML base-href transform is on by default — the
+            state: "active".into(),            // The HTML base-href transform is on by default — the
             // safe behaviour for apps that don't self-route.
             inject_base_href: "on".into(),
             ..Default::default()
@@ -1125,9 +1120,7 @@ proxy:
             id: "fresh".into(),
             display_name: "Fresh".into(),
             display_type: "app".into(),
-            state: "active".into(),
-            access: "lock".into(),
-            ..Default::default()
+            state: "active".into(),            ..Default::default()
         };
         let spec = form.into_spec(None, Role::Admin).expect("into_spec");
         assert_eq!(spec.id, "fresh");
@@ -1141,9 +1134,7 @@ proxy:
             id: "ok".into(),
             display_name: "Ok".into(),
             display_type: "app".into(),
-            state: "active".into(),
-            access: "lock".into(),
-            ..Default::default()
+            state: "active".into(),            ..Default::default()
         }
     }
 
@@ -1231,7 +1222,7 @@ proxy:
         // A brand-new "app" (no base) still defaults to Shiny.
         let fresh = SpecForm {
             id: "s".into(), display_name: "S".into(), display_type: "app".into(),
-            state: "active".into(), access: "lock".into(), container_image: "x".into(),
+            state: "active".into(), container_image: "x".into(),
             ..Default::default()
         };
         assert_eq!(fresh.into_spec(None, Role::Admin).unwrap().kind(), ruscker_config::SpecKind::Shiny);

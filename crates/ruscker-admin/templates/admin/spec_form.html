@@ -266,17 +266,10 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-3 gap-3">
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-access" class="spec-form-label">{{ self.t("spec-form-access") }}</label>
-            {% call help(self.t("spec-help-access")) %}{% endcall %}
-          </div>
-          <select id="f-access" name="access" x-model="form.access" class="spec-form-input">
-            <option value="lock">🔒 {{ self.t("filter-access-restricted") }}</option>
-            <option value="lock_open">🔓 {{ self.t("filter-access-public") }}</option>
-          </select>
-        </div>
+      {# Access lock is derived from the real access lists below
+         (`access-groups`/`access-users`), shown live in the preview
+         card — there's no separate decorative lock control (#346). #}
+      <div class="grid grid-cols-2 gap-3">
         <div class="spec-form-field">
           <div class="spec-form-label-row">
             <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
@@ -786,7 +779,7 @@
           </template>
           <span class="rbadge" :class="'b-' + form.display_type" x-text="badgeText()"></span>
           <span class="rlock">
-            <i class="ti" :class="form.access === 'lock_open'
+            <i class="ti" :class="isOpenAccess()
                 ? 'ti-lock-open text-[color:var(--color-lock-open)]'
                 : 'ti-lock text-[color:var(--color-lock)]'"></i>
           </span>
@@ -859,6 +852,13 @@ window.ruscker.specForm = (initial, logoImages) => ({
       ? this.form.cover.replace(/url\((['"]?)\/assets\//g, 'url($1' + base + '/assets/')
       : this.form.cover;
     return 'background:' + css + ';';
+  },
+  // The preview card's lock mirrors `Spec::is_open()` (#346): open when
+  // both access lists are blank, restricted otherwise. Updates live as
+  // the admin edits the access-groups / access-users fields.
+  isOpenAccess() {
+    return !((this.form.access_groups || '').trim()
+          || (this.form.access_users || '').trim());
   },
   imgUploading: false,
   imgError: '',

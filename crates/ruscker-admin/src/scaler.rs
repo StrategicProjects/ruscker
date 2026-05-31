@@ -708,9 +708,15 @@ async fn spawn_one(
     let limits = crate::routes::proxy::limits_from_spec(spec);
     // Resolve `${VAR}` in container-env at the point of use; an unset var
     // fails the spawn naming it (#314) rather than injecting a literal.
-    let env = spec
+    let mut env = spec
         .resolved_env_pairs()
         .map_err(|e| anyhow::anyhow!("spec {} container-env: {e}", spec.id))?;
+    let mut cmd = spec.container_cmd.clone();
+    // Resolve the public-path token + inject `SHINYPROXY_PUBLIC_PATH` so a
+    // path-sensitive app (Jupyter `--ServerApp.base_url`, Voilà, Streamlit,
+    // FastAPI `SCRIPT_NAME`) can self-route behind `--base-path` (#371).
+    let public_path = crate::routes::proxy::public_path(&state.base_path, spec);
+    crate::routes::proxy::apply_public_path(&mut env, &mut cmd, &public_path);
     let mut req = ruscker_core::SpawnRequest::new(&spec.id, image)
         .with_limits(limits)
         .with_volumes(spec.volumes.clone().unwrap_or_default())
@@ -723,7 +729,7 @@ async fn spawn_one(
     if let Some(platform) = spec.platform.as_deref() {
         req = req.with_platform(platform);
     }
-    if let Some(cmd) = spec.container_cmd.clone() {
+    if let Some(cmd) = cmd {
         req = req.with_cmd(cmd);
     }
     if let Some(c) = creds {

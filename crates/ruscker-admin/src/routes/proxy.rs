@@ -689,6 +689,52 @@ fn mount_prefix(base_path: &str, route_prefix: &str, spec_id: &str) -> String {
     format!("{base_path}{route_prefix}{spec_id}")
 }
 
+/// Token, substituted at spawn with the spec's [`public_path`], that an
+/// operator (or the showcase seed) can drop into `container-cmd` /
+/// `container-env` so a path-sensitive app can self-route behind
+/// `--base-path` (#371). Ruscker's analog of ShinyProxy's
+/// `#{proxy.getRuntimeValue('SHINYPROXY_PUBLIC_PATH')}`. Distinct from the
+/// parse-time `${VAR}` env interpolation, which never sees this runtime
+/// value. Example: Jupyter `--ServerApp.base_url=#{publicPath}`.
+pub(crate) const PUBLIC_PATH_TOKEN: &str = "#{publicPath}";
+
+/// The public mount path a spec is reachable at, **with** a trailing
+/// slash (e.g. `/box/app/jupyter/`) — what an app should use as its
+/// base-url so the URLs it emits and the paths it receives line up with
+/// what the proxy forwards. Derived from [`mount_prefix`] + the spec's
+/// route family (`/api/` for APIs, else `/app/`).
+pub(crate) fn public_path(base_path: &str, spec: &Spec) -> String {
+    let route_prefix = match spec.kind() {
+        ruscker_config::SpecKind::Api => API_PREFIX,
+        _ => APP_PREFIX,
+    };
+    format!("{}/", mount_prefix(base_path, route_prefix, &spec.id))
+}
+
+/// Resolve the [`PUBLIC_PATH_TOKEN`] in a spec's env (`NAME=value`) and
+/// cmd argv at spawn, and inject `SHINYPROXY_PUBLIC_PATH=<path>` unless
+/// the spec already set it — so both flag-based apps (Jupyter/Voilà/
+/// Streamlit via the cmd token) and env-based ones (FastAPI `SCRIPT_NAME`,
+/// any framework reading the env) can self-route behind a base path
+/// (#371). Pure; both spawn paths call it before building the request.
+pub(crate) fn apply_public_path(env: &mut Vec<String>, cmd: &mut Option<Vec<String>>, path: &str) {
+    for e in env.iter_mut() {
+        if e.contains(PUBLIC_PATH_TOKEN) {
+            *e = e.replace(PUBLIC_PATH_TOKEN, path);
+        }
+    }
+    if let Some(args) = cmd {
+        for a in args.iter_mut() {
+            if a.contains(PUBLIC_PATH_TOKEN) {
+                *a = a.replace(PUBLIC_PATH_TOKEN, path);
+            }
+        }
+    }
+    if !env.iter().any(|e| e.starts_with("SHINYPROXY_PUBLIC_PATH=")) {
+        env.push(format!("SHINYPROXY_PUBLIC_PATH={path}"));
+    }
+}
+
 pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
     // DB-first — the operator-editable catalog (admin UI + showcase
     // seed) shadows the YAML for matching ids. Cheap: single indexed
@@ -1801,6 +1847,52 @@ container-cpu-limit: 1.5
         // slash — `route_prefix` already has one.
         assert_eq!(mount_prefix("/box", "/app/", "rstudio"), "/box/app/rstudio");
         assert_eq!(mount_prefix("/box", "/api/", "data-api"), "/box/api/data-api");
+    }
+
+    #[test]
+    fn public_path_carries_base_and_route_family() {
+        // App/Shiny specs route under `/app/`, with a trailing slash and
+        // the base path baked in (#371).
+        assert_eq!(public_path("/box", &fake_spec("jupyter")), "/box/app/jupyter/");
+        assert_eq!(public_path("", &fake_spec("jupyter")), "/app/jupyter/");
+        // API specs route under `/api/`.
+        let api = spec_yaml("id: data\ntype: api\ncontainer-image: x:1\n");
+        assert_eq!(public_path("/box", &api), "/box/api/data/");
+    }
+
+    #[test]
+    fn apply_public_path_substitutes_token_and_injects_env() {
+        let path = "/box/app/jupyter/";
+        let mut env = vec!["FOO=bar".to_string(), "BASE=#{publicPath}".to_string()];
+        let mut cmd = Some(vec![
+            "start.py".to_string(),
+            "--ServerApp.base_url=#{publicPath}".to_string(),
+        ]);
+        apply_public_path(&mut env, &mut cmd, path);
+        // Token resolved in both the cmd argv and an env value.
+        assert!(cmd
+            .as_ref()
+            .unwrap()
+            .contains(&"--ServerApp.base_url=/box/app/jupyter/".to_string()));
+        assert!(env.contains(&"BASE=/box/app/jupyter/".to_string()));
+        assert!(env.contains(&"FOO=bar".to_string()), "untouched entries survive");
+        // The compat env var is injected.
+        assert!(env
+            .iter()
+            .any(|e| e == "SHINYPROXY_PUBLIC_PATH=/box/app/jupyter/"));
+    }
+
+    #[test]
+    fn apply_public_path_keeps_operator_set_env() {
+        // Don't clobber an explicit SHINYPROXY_PUBLIC_PATH from the spec.
+        let mut env = vec!["SHINYPROXY_PUBLIC_PATH=/custom/".to_string()];
+        let mut cmd = None;
+        apply_public_path(&mut env, &mut cmd, "/box/app/x/");
+        assert_eq!(
+            env.iter().filter(|e| e.starts_with("SHINYPROXY_PUBLIC_PATH=")).count(),
+            1
+        );
+        assert!(env.contains(&"SHINYPROXY_PUBLIC_PATH=/custom/".to_string()));
     }
 
     #[test]

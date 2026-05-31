@@ -250,11 +250,9 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
     //   `drain-timeout` — bounds the grace the hard `max-lifetime` recycle
     //     grants busy replicas before the force-kill (#335);
     //   `max-lifetime` / `container-lifetime` — replicas recycled past
-    //     their age cap (#334).
-    (
-        "stop-on-logout",
-        "stop-on-logout not implemented — sessions end via heartbeat-timeout; tracked in #326",
-    ),
+    //     their age cap (#334);
+    //   `stop-on-logout` — a signed-in user's sticky sessions are ended
+    //     immediately on logout (#337).
 ];
 
 /// Top-level `proxy.*` keys that are unsupported.
@@ -1014,12 +1012,14 @@ proxy:
                 _ => None,
             })
             .collect();
-        for expected in ["concurrent-requests-per-replica", "stop-on-logout"] {
-            assert!(fields.iter().any(|f| f == expected), "missing {expected}: {fields:?}");
-        }
+        // Only `concurrent-requests-per-replica` (#336) is still unwired.
+        assert!(
+            fields.iter().any(|f| f == "concurrent-requests-per-replica"),
+            "expected concurrent-requests flagged: {fields:?}"
+        );
         // Enforced now — must NOT be flagged: max-lifetime / container-
         // lifetime (#334), drain-timeout (#335), the autoscaling
-        // thresholds + scale-down-grace (#333).
+        // thresholds + scale-down-grace (#333), stop-on-logout (#337).
         for enforced in [
             "max-lifetime",
             "container-lifetime",
@@ -1027,6 +1027,7 @@ proxy:
             "scale-up-threshold",
             "scale-down-threshold",
             "scale-down-grace",
+            "stop-on-logout",
         ] {
             assert!(
                 !fields.iter().any(|f| f == enforced),

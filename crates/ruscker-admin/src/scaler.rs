@@ -837,6 +837,7 @@ mod tests {
             cookie_key: ruscker_proxy::sticky::CookieKey::random(),
             spawn_locks: Arc::new(dashmap::DashMap::new()),
             sessions: Arc::new(crate::sessions::InMemorySessionStore::new()),
+            logout_index: Arc::new(dashmap::DashMap::new()),
             leader: Arc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),

@@ -39,6 +39,7 @@ async fn state_with_db() -> (AppState, sqlx::SqlitePool) {
         cookie_key: ruscker_proxy::sticky::CookieKey::random(),
         spawn_locks: Arc::new(dashmap::DashMap::new()),
         sessions: Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
+        logout_index: Arc::new(dashmap::DashMap::new()),
         leader: Arc::new(ruscker_admin::leader::AlwaysLeader),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),

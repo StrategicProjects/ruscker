@@ -113,6 +113,17 @@ pub trait SessionStore: Send + Sync {
     /// around this call, so there is nothing left to decrement.
     async fn drop_replica(&self, replica_id: &ReplicaId) -> usize;
 
+    /// End one tracked session by id — remove it and decrement its
+    /// replica's `sessions_active` (the same bookkeeping the idle sweep
+    /// does, but triggered on demand). Used by `stop-on-logout` (#337) to
+    /// free a user's session the moment they sign out. Returns `true` if
+    /// a session was actually removed (a stale/unknown id is a no-op).
+    async fn end_session(
+        &self,
+        registry: &RwLock<ReplicaRegistry>,
+        session_id: Uuid,
+    ) -> bool;
+
     /// Number of tracked sessions (used by graceful-shutdown drain and
     /// the dashboard/metrics).
     fn len(&self) -> usize;
@@ -269,6 +280,24 @@ impl SessionStore for InMemorySessionStore {
         victims.len()
     }
 
+    /// End one session by id: remove it and decrement its replica's
+    /// counter (mirrors a single sweep eviction). Returns whether it
+    /// existed. The DashMap removal yields the entry's `replica_id`, so
+    /// we only take the registry write lock when there's real work.
+    async fn end_session(
+        &self,
+        registry: &RwLock<ReplicaRegistry>,
+        session_id: Uuid,
+    ) -> bool {
+        match self.sessions.remove(&session_id) {
+            Some((_, entry)) => {
+                registry.write().await.dec_sessions(&entry.replica_id);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Number of tracked sessions. For introspection / tests.
     fn len(&self) -> usize {
         self.sessions.len()
@@ -408,6 +437,33 @@ mod tests {
         // Idempotent: dropping again removes nothing.
         assert_eq!(store.drop_replica(&rid_a).await, 0);
         assert_eq!(store.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn end_session_removes_one_and_decrements() {
+        // #337: stop-on-logout ends a single session by id, decrementing
+        // its replica's counter (like one sweep eviction).
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r = fake_replica("alpha");
+        let rid = r.id.clone();
+        reg.write().await.add(r);
+        let store = InMemorySessionStore::new();
+
+        let s1 = Uuid::new_v4();
+        let s2 = Uuid::new_v4();
+        store.touch_or_register(&reg, s1, "alpha", &rid).await;
+        store.touch_or_register(&reg, s2, "alpha", &rid).await;
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 2);
+
+        // End s1: removed, counter drops to 1.
+        assert!(store.end_session(&reg, s1).await);
+        assert_eq!(store.len(), 1);
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
+
+        // Unknown / already-ended id ⇒ no-op false, counter unchanged.
+        assert!(!store.end_session(&reg, s1).await);
+        assert!(!store.end_session(&reg, Uuid::new_v4()).await);
+        assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
     }
 
     #[tokio::test]

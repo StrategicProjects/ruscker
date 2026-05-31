@@ -170,6 +170,18 @@ impl StatusKind {
             StatusKind::Unknown => "status-dot-unknown",
         }
     }
+
+    /// Fluent key for the dot's `title` tooltip — unlike [`label_key`]
+    /// this covers all three states (including `Unknown`) so the
+    /// recency dot + the "—" date placeholder are self-explanatory on
+    /// hover, not a mystery symbol (#349). Self-contained (no `$date`).
+    pub fn title_key(self) -> &'static str {
+        match self {
+            StatusKind::New => "status-title-new",
+            StatusKind::Updated => "status-title-updated",
+            StatusKind::Unknown => "status-title-none",
+        }
+    }
 }
 
 /// Threshold below which an updated card is labelled "new" instead

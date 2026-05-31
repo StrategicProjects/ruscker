@@ -276,6 +276,7 @@ admin-creds-key-missing-help = The credentials store needs a 32-byte key as hex 
 admin-landing-title = Landing editor
 admin-landing-crumb = Settings · Landing page
 admin-landing-subtitle = Customize the public portal. Changes take effect on the visitor's next refresh.
+admin-landing-scope-help = These options (colors, intro texts, SEO, custom blocks) apply to the public landing live — saved here, shown on the next view, no restart. It's a fixed set of settings, not an arbitrary-CSS editor.
 admin-landing-open-portal = Open portal
 admin-landing-save = Save
 admin-landing-saved = Settings saved. Reload the public portal to see them.

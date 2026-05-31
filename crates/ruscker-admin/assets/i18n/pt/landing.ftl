@@ -280,6 +280,7 @@ admin-creds-key-missing-help = O store de credenciais precisa de uma chave de 32
 admin-landing-title = Editor da landing
 admin-landing-crumb = Configurações · Landing page
 admin-landing-subtitle = Personalize o portal público. Mudanças entram em vigor no próximo refresh do visitante.
+admin-landing-scope-help = Estas opções (cores, textos de introdução, SEO, blocos customizados) se aplicam à landing pública ao vivo — salvas aqui, exibidas na próxima visita, sem restart. É um conjunto fixo de configurações, não um editor de CSS arbitrário.
 admin-landing-open-portal = Abrir portal
 admin-landing-save = Salvar
 admin-landing-saved = Configurações salvas. Recarregue o portal público para ver.

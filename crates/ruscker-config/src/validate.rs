@@ -237,32 +237,20 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
     //
     // Scaling/lifecycle knobs (#326): these parse, round-trip, and are
     // editable in the admin form, but the scaler does NOT yet consume
-    // them — it scales on seat saturation (`sessions_active` vs
-    // `sessions_max`) with built-in grace ticks. Flag them so a migrating
-    // operator isn't misled into thinking a set value takes effect.
-    (
-        "scale-up-threshold",
-        "autoscaling threshold not enforced — scaler scales on seat saturation; tracked in #326",
-    ),
-    (
-        "scale-down-threshold",
-        "autoscaling threshold not enforced — scaler scales on seat saturation; tracked in #326",
-    ),
-    (
-        "scale-down-grace",
-        "scale-down grace not honoured — a fixed cooldown is used instead; tracked in #326",
-    ),
+    // them. Flag them so a migrating operator isn't misled into thinking
+    // a set value takes effect.
     (
         "concurrent-requests-per-replica",
         "request-based concurrency limit not enforced — capacity is seat-based; tracked in #326",
     ),
-    // NOTE: `drain-timeout` IS honoured now (#335) — it bounds the grace
-    // window the hard `max-lifetime` recycle grants busy replicas before
-    // the force-kill. Intentionally absent from this ignored list.
-    // NOTE: `max-lifetime` / `container-lifetime` ARE enforced now (#334)
-    // — the scaler recycles a replica once it outlives its age cap (hard
-    // reaps regardless of sessions, soft reaps when idle). Intentionally
-    // absent from this ignored-fields list.
+    // NOTE: enforced now, intentionally absent from this ignored list:
+    //   `scale-up-threshold` / `scale-down-threshold` / `scale-down-grace`
+    //     — the scaler scales on pool utilization vs the thresholds, with
+    //     a per-spec scale-down grace (#333);
+    //   `drain-timeout` — bounds the grace the hard `max-lifetime` recycle
+    //     grants busy replicas before the force-kill (#335);
+    //   `max-lifetime` / `container-lifetime` — replicas recycled past
+    //     their age cap (#334).
     (
         "stop-on-logout",
         "stop-on-logout not implemented — sessions end via heartbeat-timeout; tracked in #326",
@@ -1026,17 +1014,20 @@ proxy:
                 _ => None,
             })
             .collect();
-        for expected in [
-            "scale-up-threshold",
-            "scale-down-grace",
-            "concurrent-requests-per-replica",
-            "stop-on-logout",
-        ] {
+        for expected in ["concurrent-requests-per-replica", "stop-on-logout"] {
             assert!(fields.iter().any(|f| f == expected), "missing {expected}: {fields:?}");
         }
         // Enforced now — must NOT be flagged: max-lifetime / container-
-        // lifetime (#334), drain-timeout (#335).
-        for enforced in ["max-lifetime", "container-lifetime", "drain-timeout"] {
+        // lifetime (#334), drain-timeout (#335), the autoscaling
+        // thresholds + scale-down-grace (#333).
+        for enforced in [
+            "max-lifetime",
+            "container-lifetime",
+            "drain-timeout",
+            "scale-up-threshold",
+            "scale-down-threshold",
+            "scale-down-grace",
+        ] {
             assert!(
                 !fields.iter().any(|f| f == enforced),
                 "{enforced} is enforced now: {fields:?}"

@@ -450,25 +450,27 @@ applied) and flagged by `ruscker validate`.
 |---|---|---|---|
 | `min-replicas` | u32 | `1` | Always running |
 | `max-replicas` | u32 | = `min-replicas` | Set higher to enable auto-scale |
-| `scale-up-threshold` | float | `0.8` | ⚠️ parsed but **not yet enforced** (#326) |
-| `scale-down-threshold` | float | `0.3` | ⚠️ parsed but **not yet enforced** (#326) |
-| `scale-down-grace` | s | `300` | ⚠️ parsed but **not yet enforced** (#326) |
+| `scale-up-threshold` | float | `0.8` | scale up when pool utilization exceeds this (enforced, #333) |
+| `scale-down-threshold` | float | `0.3` | only retire idle replicas while utilization is below this (enforced, #333) |
+| `scale-down-grace` | s | `300` | idle-grace before retiring a replica (enforced, #333) |
 | `drain-timeout` | s | `60` | grace for in-flight sessions on a `max-lifetime` recycle (enforced, #335) |
 | `routing-strategy` | enum | varies | See below |
 | `concurrent-requests-per-replica` | u32 | `100` | ⚠️ parsed but **not yet enforced** (#326) |
 
-> **Some autoscaling knobs not yet enforced (#326).** The scaler scales
-> on **seat saturation** (`sessions_active` vs `sessions_max`) with
-> built-in grace ticks. Enforced: `max-lifetime` / `container-lifetime`
-> (#334 — replicas recycled past their age cap) and `drain-timeout`
-> (#335 — bounds the grace a busy `max-lifetime` recycle gives in-flight
-> sessions). Still not enforced — `scale-up-threshold` /
-> `scale-down-threshold` / `scale-down-grace` /
+> **Some autoscaling knobs not yet enforced (#326).** By default the
+> scaler scales on **seat saturation** (`sessions_active` vs
+> `sessions_max`) with built-in grace ticks. Now enforced (opt-in where
+> noted): `scale-up-threshold` / `scale-down-threshold` /
+> `scale-down-grace` (#333 — pool-utilization-driven scale-up + a
+> conservative scale-down gate + per-spec idle grace; unset ⇒ the
+> default rules), `max-lifetime` / `container-lifetime` (#334 — recycle
+> past the age cap), and `drain-timeout` (#335 — grace for a busy
+> `max-lifetime` recycle). Still **not** enforced —
 > `concurrent-requests-per-replica` / `stop-on-logout` — are accepted
 > (and round-trip through import/export + the admin form) for migration
 > friction-free, but a set value does **not** change runtime behaviour
 > yet. `ruscker validate --strict-compat` flags each still-unenforced
-> one. Wiring the rest is tracked per-knob under #326 (#333/#336/#337).
+> one. Wiring the rest is tracked per-knob under #326 (#336/#337).
 
 ### Routing strategies
 

@@ -399,7 +399,9 @@ async fn tick(
         // (2) Saturation hysteresis: track consecutive saturated
         //     ticks. Only spawn once the counter crosses the
         //     threshold; reset on any non-saturated observation.
-        if count < max && all_saturated(&snap) {
+        //     The trigger is utilization > `scale-up-threshold` when set,
+        //     else the original all-saturated rule (#333).
+        if count < max && scale_up_triggered(&snap, spec.effective_scale_up_threshold()) {
             // Post-drop cooldown: a spec we just scaled down is
             // very likely still saturated (the long-lived
             // session that pinned it never left). Holding off
@@ -446,23 +448,41 @@ async fn tick(
         //     stop them. Cap the drop at `count - min` to never
         //     go below min.
         if count > min {
+            // Per-spec scale-down grace (#333): a `scale-down-grace`
+            // (seconds) overrides the global tick-based grace, converted
+            // against the scaler's fixed cadence. Unset ⇒ the default.
+            let drop_after = spec
+                .scale_down_grace
+                .map(|s| grace_secs_to_ticks(s, DEFAULT_INTERVAL))
+                .unwrap_or(drop_after_ticks);
+            // Optional underutilization gate (#333): with an explicit
+            // `scale-down-threshold`, only scale down while the pool sits
+            // below it — holds idle replicas during moderate load. Unset
+            // ⇒ no gate (the original "retire any idle replica" rule).
+            let underutilized = match spec.effective_scale_down_threshold() {
+                Some(t) => pool_utilization(&snap) < t,
+                None => true,
+            };
             let allowed_to_drop = count - min;
-            let drop_candidates: Vec<_> = snap
-                .iter()
-                .filter(|r| {
-                    r.sessions_active == 0
-                        && idle_ticks.get(&r.id).copied().unwrap_or(0) >= drop_after_ticks
-                })
-                .take(allowed_to_drop)
-                .cloned()
-                .collect();
+            let drop_candidates: Vec<_> = if underutilized {
+                snap.iter()
+                    .filter(|r| {
+                        r.sessions_active == 0
+                            && idle_ticks.get(&r.id).copied().unwrap_or(0) >= drop_after
+                    })
+                    .take(allowed_to_drop)
+                    .cloned()
+                    .collect()
+            } else {
+                Vec::new()
+            };
             if !drop_candidates.is_empty() {
                 info!(
                     spec = %spec.id,
                     count,
                     min,
                     dropping = drop_candidates.len(),
-                    grace_ticks = drop_after_ticks,
+                    grace_ticks = drop_after,
                     "idle replicas past grace — scaling down"
                 );
                 for r in drop_candidates {
@@ -516,6 +536,37 @@ fn update_idle_ticks(
 /// "not saturated" — there's nothing TO be saturated.
 fn all_saturated(replicas: &[ruscker_core::Replica]) -> bool {
     !replicas.is_empty() && replicas.iter().all(|r| r.available_seats() == 0)
+}
+
+/// Pool utilization: total active sessions / total seats across the
+/// snapshot. `0.0` when there are no seats (empty pool, or only
+/// `Starting` replicas with `sessions_max == 0`). (#333)
+fn pool_utilization(replicas: &[ruscker_core::Replica]) -> f64 {
+    let seats: u64 = replicas.iter().map(|r| r.sessions_max as u64).sum();
+    if seats == 0 {
+        return 0.0;
+    }
+    let active: u64 = replicas.iter().map(|r| r.sessions_active as u64).sum();
+    active as f64 / seats as f64
+}
+
+/// Whether the spec's pool is hot enough to add a replica (#333). With
+/// an explicit `scale-up-threshold`, scale up once utilization exceeds
+/// it; otherwise fall back to the original "every replica saturated"
+/// rule (which for `seats: 1` specs is the same as utilization `1.0`).
+fn scale_up_triggered(replicas: &[ruscker_core::Replica], up_threshold: Option<f64>) -> bool {
+    match up_threshold {
+        Some(t) => !replicas.is_empty() && pool_utilization(replicas) > t,
+        None => all_saturated(replicas),
+    }
+}
+
+/// Convert a grace window in seconds to whole scaler ticks at the given
+/// interval, rounded up, floored at 1 (#333). Used to honour a per-spec
+/// `scale-down-grace` against the scaler's fixed tick cadence.
+fn grace_secs_to_ticks(secs: u64, interval: Duration) -> u32 {
+    let iv = interval.as_secs().max(1);
+    secs.div_ceil(iv).max(1) as u32
 }
 
 /// Replicas that have outlived their configured lifetime and should be
@@ -1045,6 +1096,72 @@ proxy:
             drain,
         );
         assert_eq!(r2, vec![busy_expired.id.clone()], "drain window elapsed → force-kill");
+    }
+
+    #[test]
+    fn pool_utilization_and_scale_up_trigger() {
+        let r = |a, m| replica_with_sessions("s", a, m);
+        // 3 active across 10 seats = 0.3.
+        let snap = [r(1, 5), r(2, 5)];
+        assert!((pool_utilization(&snap) - 0.3).abs() < 1e-9);
+        // No seats ⇒ 0.0 (empty pool, or Starting-only).
+        assert_eq!(pool_utilization(&[]), 0.0);
+
+        // With a threshold: 0.3 is not > 0.8, but 0.9 is.
+        assert!(!scale_up_triggered(&snap, Some(0.8)));
+        assert!(scale_up_triggered(&[r(9, 10)], Some(0.8)));
+        // Without a threshold: falls back to all-saturated.
+        assert!(scale_up_triggered(&[r(5, 5), r(5, 5)], None));
+        assert!(!scale_up_triggered(&snap, None));
+        // seats=1 with a threshold behaves like saturation.
+        assert!(scale_up_triggered(&[r(1, 1)], Some(0.8)));
+        assert!(!scale_up_triggered(&[r(0, 1)], Some(0.8)));
+    }
+
+    #[test]
+    fn grace_secs_to_ticks_rounds_up_and_floors_at_one() {
+        let iv = Duration::from_secs(10);
+        assert_eq!(grace_secs_to_ticks(300, iv), 30);
+        assert_eq!(grace_secs_to_ticks(25, iv), 3); // ceil(2.5)
+        assert_eq!(grace_secs_to_ticks(5, iv), 1); // round up
+        assert_eq!(grace_secs_to_ticks(0, iv), 1); // floor at 1
+    }
+
+    #[tokio::test]
+    async fn scale_up_threshold_spawns_before_full_saturation() {
+        // #333: a multi-seat spec over its `scale-up-threshold` scales up
+        // even though it isn't fully saturated (the old all-saturated
+        // rule would not have).
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: multi
+    display-name: Multi
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 3
+    seats-per-container: 10
+    scale-up-threshold: 0.5
+"#,
+            backend.clone(),
+        );
+        // One replica at 6/10 = 0.6 util — NOT saturated, but over 0.5.
+        state
+            .replicas
+            .write()
+            .await
+            .add(replica_with_sessions("multi", 6, 10));
+        // Saturation grace = 1 ⇒ act on the first observation.
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "util 0.6 > threshold 0.5 → scale up before saturation"
+        );
     }
 
     #[tokio::test]

@@ -926,6 +926,23 @@ impl Spec {
         self.drain_timeout.map(|s| s as i64).unwrap_or(60)
     }
 
+    /// Pool-utilization fraction above which the scaler adds a replica,
+    /// or `None` to keep the default "scale up only when every replica is
+    /// fully saturated" rule (#333). Opt-in: setting it makes scale-up
+    /// react before the pool is 100% full (useful for multi-seat specs).
+    pub fn effective_scale_up_threshold(&self) -> Option<f64> {
+        self.scale_up_threshold.map(|f| f.0)
+    }
+
+    /// Pool-utilization fraction below which the scaler is allowed to
+    /// retire an idle replica, or `None` to keep the default "retire any
+    /// idle replica past its grace" rule (#333). Opt-in: setting it makes
+    /// scale-down more conservative — it holds idle replicas while the
+    /// pool is still moderately utilized.
+    pub fn effective_scale_down_threshold(&self) -> Option<f64> {
+        self.scale_down_threshold.map(|f| f.0)
+    }
+
     /// Multi-host placement strategy (default [`Placement::Spread`]).
     pub fn effective_placement(&self) -> Placement {
         self.placement.unwrap_or_default()

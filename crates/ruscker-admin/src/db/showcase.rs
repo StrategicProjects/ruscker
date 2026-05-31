@@ -372,19 +372,23 @@ fn showcase_specs() -> Result<Vec<Spec>> {
             None,
         )?,
         {
-            // Quarto demo via `:prerendered` (#372). That image serves the
-            // pre-rendered doc through an R Markdown Shiny runtime on
-            // **3838** (confirmed live: `rmarkdown::run(..., port=3838)`),
-            // NOT 8080 — so the published port must be 3838 or the proxy
-            // hits an empty 8080 and the connection resets. Shiny-backed,
-            // so kind App (sticky + WebSocket).
+            // Quarto demo (#372). Use `:latest` — its Dockerfile renders
+            // the `.qmd` at BUILD time and the CMD is
+            // `quarto serve quartoDemo.qmd --port 3838 --host 0.0.0.0
+            // --no-render`, i.e. a REAL Quarto server on **3838** with a
+            // fast startup (no render at boot). (The `:prerendered` tag is
+            // a red herring — it actually runs `rmarkdown::run(...)`, not
+            // Quarto.) The original failure was just the wrong port: the
+            // image serves on 3838, but we'd published 8080. Kind App
+            // (sticky + WebSocket — `quarto serve` can host an interactive
+            // runtime).
             let mut s = card(
                 "quarto",
                 "Quarto",
                 "Open-source publishing system for technical documents.",
                 "/assets/showcase/quarto.svg",
                 "https://quarto.org",
-                Some("openanalytics/shinyproxy-quarto-demo:prerendered"),
+                Some("openanalytics/shinyproxy-quarto-demo:latest"),
                 Some(3838),
                 Some("linux/amd64"),
             )?;

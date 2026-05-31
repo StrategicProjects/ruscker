@@ -36,7 +36,19 @@ pub async fn upsert(
     actor: Option<&str>,
 ) -> Result<bool> {
     let now = Utc::now();
-    let (ciphertext, nonce) = key.encrypt(password.as_bytes())?;
+    // Two storage modes, one store (#351 unification):
+    //   • literal password  → AES-256-GCM at rest (the original model).
+    //   • `${VAR}` env-ref   → stored VERBATIM, never encrypted, with an
+    //     EMPTY nonce as the discriminator (a real GCM nonce is 12 bytes,
+    //     never empty). Resolved from the environment at pull time, so the
+    //     plaintext never lands in the DB at all — preserving the "DB never
+    //     sees the cleartext" model now that the spec form points only at
+    //     the store.
+    let (ciphertext, nonce): (Vec<u8>, Vec<u8>) = if password.contains("${") {
+        (password.as_bytes().to_vec(), Vec::new())
+    } else {
+        key.encrypt(password.as_bytes())?
+    };
     // Metadata-only audit diff — never the password (see the
     // `audit_log_never_records_the_password` test).
     let diff = serde_json::to_string(&serde_json::json!({
@@ -198,9 +210,19 @@ pub async fn resolve(
     match row {
         None => Ok(None),
         Some((registry, username, enc, nonce)) => {
-            let pt = key.decrypt(&enc, &nonce)?;
-            let password = String::from_utf8(pt.to_vec())
-                .context("decrypted password is not valid UTF-8")?;
+            // Empty nonce ⇒ a `${VAR}` env-ref stored verbatim (see
+            // `upsert`): resolve it from the environment at pull time
+            // rather than decrypting. Non-empty ⇒ AES-GCM ciphertext.
+            let password = if nonce.is_empty() {
+                let raw = String::from_utf8(enc)
+                    .context("stored credential reference is not valid UTF-8")?;
+                ruscker_config::env::interpolate_value(&raw)
+                    .with_context(|| format!("resolve ${{VAR}} in credential {name}"))?
+            } else {
+                let pt = key.decrypt(&enc, &nonce)?;
+                String::from_utf8(pt.to_vec())
+                    .context("decrypted password is not valid UTF-8")?
+            };
             // An empty `registry` means Docker Hub — keep
             // `server_address` None in that case so bollard
             // doesn't get an empty serveraddress.
@@ -407,6 +429,42 @@ mod tests {
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("registry.example.com"));
+    }
+
+    #[tokio::test]
+    async fn env_ref_password_is_stored_verbatim_and_resolved_at_pull() {
+        // A `${VAR}` password (#351 unification): stored verbatim with an
+        // empty nonce, resolved from the environment at resolve time. Using
+        // `${VAR:-default}` with the var unset exercises the path without
+        // mutating the process environment.
+        let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
+        let key = fixed_key();
+        upsert(
+            &db,
+            &key,
+            "envcred",
+            "registry.example.com",
+            "bot",
+            "${RUSCKER_TEST_UNSET_CRED:-resolved-pw}",
+            None,
+        )
+        .await
+        .unwrap();
+        let c = resolve(&db, &key, "envcred").await.unwrap().expect("resolved");
+        assert_eq!(c.password, "resolved-pw", "env-ref resolved at pull");
+
+        // Stored verbatim (never AES-encrypted), so a DIFFERENT master key
+        // still resolves it — proof the secret never hit the cipher.
+        let other = MasterKey::parse(&"cd".repeat(32)).unwrap();
+        let c2 = resolve(&db, &other, "envcred")
+            .await
+            .unwrap()
+            .expect("resolved with a different key");
+        assert_eq!(
+            c2.password, "resolved-pw",
+            "verbatim env-ref ignores the master key (not encrypted)"
+        );
     }
 
     #[tokio::test]

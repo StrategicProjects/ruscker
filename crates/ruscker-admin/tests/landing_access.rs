@@ -523,3 +523,32 @@ async fn duplicate_opens_new_form_prefilled_with_fresh_id() {
     // New mode → the form posts to the create endpoint (no id in action).
     assert!(body.contains(r#"action="/admin/specs""#), "New-mode create action");
 }
+
+#[tokio::test]
+async fn favicon_routes_serve_raster_with_correct_content_type() {
+    // #374: Safari & co. ignore the SVG favicon and fall back to
+    // `/favicon.ico` — previously unserved (black placeholder). Now the
+    // raster hooks serve with the right content-types.
+    let app = router(app_state(open_db().await).await);
+    async fn ct(app: axum::Router, uri: &str) -> (StatusCode, String) {
+        let resp = app
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let code = resp.status();
+        let ct = resp
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        (code, ct)
+    }
+    assert_eq!(ct(app.clone(), "/favicon.ico").await, (StatusCode::OK, "image/x-icon".into()));
+    assert_eq!(ct(app.clone(), "/favicon-32.png").await, (StatusCode::OK, "image/png".into()));
+    assert_eq!(
+        ct(app.clone(), "/apple-touch-icon.png").await,
+        (StatusCode::OK, "image/png".into())
+    );
+    assert_eq!(ct(app, "/favicon.svg").await, (StatusCode::OK, "image/svg+xml".into()));
+}

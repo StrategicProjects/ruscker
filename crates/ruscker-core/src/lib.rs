@@ -336,6 +336,82 @@ pub trait ContainerBackend: Send + Sync {
     async fn image_created(&self, _image: &str) -> Option<String> {
         None
     }
+
+    // ── Disk management (#453 part B) ───────────────────────────────
+    // The admin "Disk" panel reclaims space left behind by stopped
+    // replicas and unused images. All default to "nothing" so non-Docker
+    // backends (and mocks) keep compiling.
+
+    /// Every container Ruscker manages, **including stopped/exited**
+    /// ones — scoped to the `ruscker.replica_id` label, so it never
+    /// reports a non-Ruscker container. Unlike [`Self::list`] this does
+    /// not require a live port binding, so crashed/exited replicas show
+    /// up (they're exactly what the disk panel reclaims).
+    async fn list_managed_containers(&self) -> CoreResult<Vec<ManagedContainer>> {
+        Ok(Vec::new())
+    }
+
+    /// Force-remove a single container by id (stops it first if running).
+    async fn remove_container(&self, _container_id: &str) -> CoreResult<()> {
+        Ok(())
+    }
+
+    /// Remove every **stopped** Ruscker-managed container (label-scoped,
+    /// never touches running replicas or non-Ruscker containers). Returns
+    /// how many were removed.
+    async fn prune_stopped(&self) -> CoreResult<usize> {
+        Ok(0)
+    }
+
+    /// Local images, for the disk panel's "what's eating space" view.
+    /// Each carries its size and how many containers reference it (so the
+    /// UI can flag "in use" and only offer to remove unused ones).
+    async fn list_images(&self) -> CoreResult<Vec<ImageInfo>> {
+        Ok(Vec::new())
+    }
+
+    /// Remove an image by id or `repo:tag`. Best left to images no
+    /// container uses — the Docker daemon refuses an in-use image unless
+    /// forced, and this never forces.
+    async fn remove_image(&self, _image: &str) -> CoreResult<()> {
+        Ok(())
+    }
+}
+
+/// A container Ruscker manages, in any lifecycle state — the row model
+/// for the admin disk panel (#453). Lighter than [`Replica`]: no
+/// upstream/seat accounting, but it carries the human status string and
+/// whether it's still running, which the panel needs to decide what's
+/// reclaimable.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ManagedContainer {
+    /// Full container id.
+    pub id: String,
+    /// Display name (without Docker's leading `/`).
+    pub name: String,
+    /// Image reference the container runs.
+    pub image: String,
+    /// The `ruscker.spec_id` label, if present.
+    pub spec_id: Option<String>,
+    /// Human status, e.g. `Up 3 minutes` / `Exited (0) 1 hour ago`.
+    pub status: String,
+    /// Whether the container is currently running.
+    pub running: bool,
+}
+
+/// A local image, for the disk panel. `containers` mirrors Docker's
+/// "how many containers reference this image" (`-1` when the daemon
+/// can't tell) — the panel treats `> 0` as in-use.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ImageInfo {
+    /// Image id (`sha256:…`).
+    pub id: String,
+    /// `repo:tag` references; empty for a dangling image.
+    pub tags: Vec<String>,
+    /// On-disk size in bytes (includes shared layers).
+    pub size_bytes: i64,
+    /// Number of containers using the image (`-1` if unknown).
+    pub containers: i64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

@@ -1,0 +1,142 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-disk-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-disk-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-disk-subtitle") }}</p>
+  </div>
+</div>
+
+{% if let Some(f) = flash %}
+  <div class="admin-login-error mb-3" role="status"
+       style="{% if flash_error %}{% else %}background:rgba(29,158,117,0.12);color:var(--text-primary){% endif %}">
+    <i class="ti ti-info-circle" aria-hidden="true"></i>
+    {{ self.t(f) }}
+  </div>
+{% endif %}
+
+{% if !available %}
+  <div class="admin-login-error" role="status">
+    <i class="ti ti-info-circle" aria-hidden="true"></i>
+    {{ self.t("admin-disk-backend-missing") }}
+  </div>
+{% else %}
+
+  {# ── Containers ─────────────────────────────────────────────── #}
+  <div class="flex items-end justify-between mb-2 mt-4">
+    <h2 class="text-sm font-medium">{{ self.t("admin-disk-containers-heading") }}</h2>
+    {% if stopped_count > 0 %}
+    <form method="post" action="{{ base }}/admin/disk/containers/prune"
+          onsubmit="return confirm('{{ self.t("admin-disk-prune-confirm") }}')">
+      <button type="submit" class="dash-action dash-action--danger" style="width:auto;padding:6px 12px">
+        <i class="ti ti-trash" aria-hidden="true"></i>
+        {{ self.t("admin-disk-prune") }} ({{ stopped_count }})
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if containers.is_empty() %}
+  <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-containers") }}</p>
+  {% else %}
+  <table class="w-full text-sm" style="border-collapse:collapse">
+    <thead>
+      <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
+        <th class="py-2">{{ self.t("admin-disk-col-container") }}</th>
+        <th>{{ self.t("admin-disk-col-app") }}</th>
+        <th>{{ self.t("admin-disk-col-image") }}</th>
+        <th>{{ self.t("admin-disk-col-status") }}</th>
+        <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in containers %}
+      <tr style="border-bottom:0.5px solid var(--border)">
+        <td class="py-2"><span class="dash-mono">{{ c.name }}</span></td>
+        <td class="text-[color:var(--text-muted)]">{{ c.spec_id.as_deref().unwrap_or("—") }}</td>
+        <td class="dash-mono text-[color:var(--text-muted)]">{{ c.image }}</td>
+        <td>
+          {% if c.running %}
+            <span style="color:var(--ok,#1d9e75)">● {{ self.t("admin-disk-running") }}</span>
+          {% else %}
+            <span class="text-[color:var(--text-faint)]">○ {{ c.status }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap">
+          <form method="post" action="{{ base }}/admin/disk/containers/remove" style="display:inline"
+                onsubmit="return confirm('{% if c.running %}{{ self.t("admin-disk-remove-running-confirm") }}{% else %}{{ self.t("admin-disk-remove-confirm") }}{% endif %}')">
+            <input type="hidden" name="id" value="{{ c.id }}">
+            <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
+              <i class="ti ti-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# ── Images ─────────────────────────────────────────────────── #}
+  <div class="flex items-end justify-between mb-2 mt-6">
+    <h2 class="text-sm font-medium">{{ self.t("admin-disk-images-heading") }}</h2>
+    <span class="text-xs text-[color:var(--text-muted)]">
+      {{ self.t("admin-disk-images-total") }}: {{ self.human(images_total_bytes) }}
+    </span>
+  </div>
+  <p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-disk-images-note") }}</p>
+
+  {% if images.is_empty() %}
+  <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-images") }}</p>
+  {% else %}
+  <table class="w-full text-sm" style="border-collapse:collapse">
+    <thead>
+      <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
+        <th class="py-2">{{ self.t("admin-disk-col-image") }}</th>
+        <th>{{ self.t("admin-disk-col-id") }}</th>
+        <th style="text-align:right">{{ self.t("admin-disk-col-size") }}</th>
+        <th>{{ self.t("admin-disk-col-usage") }}</th>
+        <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for img in images %}
+      <tr style="border-bottom:0.5px solid var(--border)">
+        <td class="py-2 dash-mono">{{ img.name }}</td>
+        <td class="dash-mono text-[color:var(--text-faint)]">{{ img.short_id }}</td>
+        <td style="text-align:right">{{ self.human(img.size_bytes) }}</td>
+        <td>
+          {% if img.used_by_spec %}
+            <span class="text-[color:var(--text-muted)]">{{ self.t("admin-disk-used-by-spec") }}</span>
+          {% else if img.used_by_container %}
+            <span class="text-[color:var(--text-muted)]">{{ self.t("admin-disk-used-by-container") }}</span>
+          {% else %}
+            <span class="text-[color:var(--text-faint)]">{{ self.t("admin-disk-unused") }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap">
+          {% if img.in_use() %}
+            <span class="text-[color:var(--text-faint)]" title="{{ self.t("admin-disk-in-use-hint") }}">
+              <i class="ti ti-lock"></i>
+            </span>
+          {% else %}
+            <form method="post" action="{{ base }}/admin/disk/images/remove" style="display:inline"
+                  onsubmit="return confirm('{{ self.t("admin-disk-remove-image-confirm") }}')">
+              <input type="hidden" name="id" value="{{ img.id }}">
+              <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
+                <i class="ti ti-trash"></i>
+              </button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+{% endif %}
+{% endblock %}

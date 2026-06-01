@@ -17,10 +17,13 @@
 #![allow(dead_code)]
 
 use async_trait::async_trait;
-use bollard::models::{ContainerCreateBody, HostConfig, PortBinding};
+use bollard::models::{
+    ContainerCreateBody, ContainerSummaryStateEnum, HostConfig, PortBinding,
+};
 use bollard::query_parameters::{
-    CreateContainerOptions, CreateImageOptions, ListContainersOptions, LogsOptionsBuilder,
-    RemoveContainerOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
+    CreateContainerOptions, CreateImageOptions, ListContainersOptions, ListImagesOptions,
+    LogsOptionsBuilder, RemoveContainerOptions, RemoveImageOptions, StartContainerOptions,
+    StatsOptionsBuilder, StopContainerOptions,
 };
 pub mod multihost;
 pub use multihost::MultiHostDockerBackend;
@@ -30,7 +33,8 @@ use chrono::Utc;
 use dashmap::DashMap;
 use futures_util::StreamExt;
 use ruscker_core::{
-    ContainerBackend, CoreError, CoreResult, Replica, ReplicaId, ReplicaMetrics, ReplicaState,
+    ContainerBackend, CoreError, CoreResult, ImageInfo, ManagedContainer, Replica, ReplicaId,
+    ReplicaMetrics, ReplicaState,
 };
 use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
@@ -606,6 +610,122 @@ impl ContainerBackend for LocalDockerBackend {
         };
         Ok(Box::pin(stream))
     }
+
+    // ── Disk management (#453 part B) ───────────────────────────────
+
+    async fn list_managed_containers(&self) -> CoreResult<Vec<ManagedContainer>> {
+        // Same label scope as `list`, but `all: true` keeps stopped/exited
+        // containers — and we don't require a live port binding, so a
+        // crashed replica still shows up for reclamation.
+        let mut filters = HashMap::new();
+        filters.insert("label".to_string(), vec![LABEL_REPLICA_ID.to_string()]);
+        let opts = ListContainersOptions {
+            all: true,
+            filters: Some(filters),
+            ..Default::default()
+        };
+        let list = self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| backend_err("list managed containers", e))?;
+        let managed = list
+            .into_iter()
+            .map(|c| {
+                let labels = c.labels.unwrap_or_default();
+                let name = c
+                    .names
+                    .and_then(|n| n.into_iter().next())
+                    .map(|s| s.trim_start_matches('/').to_string())
+                    .unwrap_or_default();
+                ManagedContainer {
+                    id: c.id.unwrap_or_default(),
+                    name,
+                    image: c.image.unwrap_or_default(),
+                    spec_id: labels.get(LABEL_SPEC_ID).cloned(),
+                    status: c.status.unwrap_or_default(),
+                    running: matches!(c.state, Some(ContainerSummaryStateEnum::RUNNING)),
+                }
+            })
+            .collect();
+        Ok(managed)
+    }
+
+    async fn remove_container(&self, container_id: &str) -> CoreResult<()> {
+        // force=true also stops a running container first, mirroring `stop`.
+        self.docker
+            .remove_container(
+                container_id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .map_err(|e| backend_err("remove container", e))?;
+        self.forget_metrics(container_id);
+        Ok(())
+    }
+
+    async fn prune_stopped(&self) -> CoreResult<usize> {
+        // Only Ruscker-labeled, non-running containers — never a running
+        // replica, never a non-Ruscker container on the host.
+        let managed = self.list_managed_containers().await?;
+        let mut removed = 0;
+        for c in managed.iter().filter(|c| !c.running) {
+            match self
+                .docker
+                .remove_container(
+                    &c.id,
+                    Some(RemoveContainerOptions {
+                        force: true,
+                        ..Default::default()
+                    }),
+                )
+                .await
+            {
+                Ok(()) => {
+                    self.forget_metrics(&c.id);
+                    removed += 1;
+                }
+                Err(e) => tracing::warn!(error = %e, container = %c.id, "prune: remove failed"),
+            }
+        }
+        Ok(removed)
+    }
+
+    async fn list_images(&self) -> CoreResult<Vec<ImageInfo>> {
+        let images = self
+            .docker
+            .list_images(None::<ListImagesOptions>)
+            .await
+            .map_err(|e| backend_err("list images", e))?;
+        Ok(images
+            .into_iter()
+            .map(|i| ImageInfo {
+                id: i.id,
+                // A dangling image reports the `<none>:<none>` placeholder;
+                // drop it so the UI shows "untagged" rather than noise.
+                tags: i
+                    .repo_tags
+                    .into_iter()
+                    .filter(|t| t != "<none>:<none>")
+                    .collect(),
+                size_bytes: i.size,
+                containers: i.containers,
+            })
+            .collect())
+    }
+
+    async fn remove_image(&self, image: &str) -> CoreResult<()> {
+        // No force: the daemon refuses an image still used by a container,
+        // which backstops the panel's "remove unused only" rule.
+        self.docker
+            .remove_image(image, None::<RemoveImageOptions>, None)
+            .await
+            .map_err(|e| backend_err("remove image", e))?;
+        Ok(())
+    }
 }
 
 impl LocalDockerBackend {
@@ -1079,5 +1199,53 @@ mod tests {
         assert_eq!(cfg.cmd, Some(cmd), "cmd override not applied");
 
         backend.stop(&replica.id).await.expect("stop");
+    }
+
+    /// #453 part B: the disk-panel methods see a live replica + its image
+    /// and `remove_container` reaps it. Self-cleaning (the removal is the
+    /// teardown).
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn disk_lists_and_removes_managed_resources() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let replica = backend
+            .spawn_with_port("disk-itest", &image, 80)
+            .await
+            .expect("spawn");
+
+        // list_managed_containers includes our running replica.
+        let managed = backend
+            .list_managed_containers()
+            .await
+            .expect("list managed");
+        let ours = managed
+            .iter()
+            .find(|c| c.id == replica.container_id)
+            .expect("our container listed");
+        assert!(ours.running, "freshly spawned container should be running");
+        assert_eq!(ours.spec_id.as_deref(), Some("disk-itest"));
+
+        // list_images carries real sizes.
+        let images = backend.list_images().await.expect("list images");
+        assert!(
+            images.iter().any(|i| i.size_bytes > 0),
+            "images should carry sizes"
+        );
+
+        // remove_container reaps it (and serves as teardown).
+        backend
+            .remove_container(&replica.container_id)
+            .await
+            .expect("remove container");
+        let after = backend
+            .list_managed_containers()
+            .await
+            .expect("list after");
+        assert!(
+            !after.iter().any(|c| c.id == replica.container_id),
+            "container should be gone after remove"
+        );
     }
 }

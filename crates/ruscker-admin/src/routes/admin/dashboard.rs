@@ -30,7 +30,6 @@ use axum::{
     Router,
 };
 use chrono::Utc;
-use futures_util::stream::Stream;
 use ruscker_core::{Replica, ReplicaId, ReplicaState};
 use std::convert::Infallible;
 use std::sync::{Arc, LazyLock};
@@ -448,11 +447,26 @@ fn format_bytes(bytes: u64) -> String {
 /// blip just resumes the cadence — there's no event-id /
 /// last-event-id handshake to manage, and replaying a snapshot
 /// is idempotent on the client side anyway.
+/// Headers that keep an SSE response *streaming* through a reverse proxy
+/// instead of being buffered. `X-Accel-Buffering: no` tells nginx (and
+/// compatible proxies) not to buffer this response, and `Cache-Control:
+/// no-cache` keeps intermediaries from caching the stream. Without these,
+/// nginx buffers the event stream and the live dashboard appears frozen
+/// behind a reverse proxy (e.g. a `/box` subpath mount) — the WebSocket
+/// pump has `proxy_buffering off`, but a plain SSE response doesn't.
+fn sse_no_buffer_headers() -> [(axum::http::HeaderName, &'static str); 2] {
+    use axum::http::header::{HeaderName, CACHE_CONTROL};
+    [
+        (CACHE_CONTROL, "no-cache"),
+        (HeaderName::from_static("x-accel-buffering"), "no"),
+    ]
+}
+
 async fn events(
     _: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+) -> impl IntoResponse {
     use async_stream::stream;
     let stream = stream! {
         // Emit the first snapshot immediately so the client
@@ -474,7 +488,8 @@ async fn events(
             yield Ok::<_, Infallible>(Event::default().data(body));
         }
     };
-    Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL))
+    let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL));
+    (sse_no_buffer_headers(), sse)
 }
 
 /// Per-replica logs page. Fetches the last [`LOGS_TAIL`] lines
@@ -590,9 +605,8 @@ async fn logs_stream(
 
     use futures_util::StreamExt;
     let event_stream = line_stream.map(|line| Ok::<_, Infallible>(Event::default().data(line)));
-    Sse::new(event_stream)
-        .keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL))
-        .into_response()
+    let sse = Sse::new(event_stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL));
+    (sse_no_buffer_headers(), sse).into_response()
 }
 
 /// Resolve a `{replica_id}` path param to a `ReplicaId`,

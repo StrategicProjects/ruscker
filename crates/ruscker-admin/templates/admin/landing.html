@@ -478,12 +478,12 @@
               </template>
               <div class="landing-preview-count">N</div>
             </div>
-          </div>
-          {# Header center bar — separate row, only when center logos exist. #}
-          <div class="landing-preview-centerbar" x-show="logos.some(l => l.url && l.slot === 'header' && l.align === 'center')">
-            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'center')" :key="i">
-              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
-            </template>
+            {# Header-center logos: absolutely centred within the header bar. #}
+            <div class="landing-logo-center-abs" x-show="logos.some(l => l.url && l.slot === 'header' && l.align === 'center')">
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'center')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+            </div>
           </div>
         </div>
 
@@ -497,15 +497,14 @@
           </div>
         </div>
 
-        {# Footer center bar — separate row above the footer. #}
-        <div class="landing-preview-centerbar" x-show="logos.some(l => l.url && l.slot === 'footer' && l.align === 'center')">
-          <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'center')" :key="i">
-            <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
-          </template>
-        </div>
-
-        {# Footer: left logos · right logos + version + Ruscker mark (#468). #}
+        {# Footer: left · center (absolutely centred) · right + version + mark (#468). #}
         <div class="landing-preview-footer">
+          {# Footer-center logos: absolutely centred within the footer. #}
+          <div class="landing-logo-center-abs" x-show="logos.some(l => l.url && l.slot === 'footer' && l.align === 'center')">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'center')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+          </div>
           <div class="lp-head-side">
             <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'left')" :key="i">
               <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">

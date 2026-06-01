@@ -34,8 +34,10 @@
    landing inject operator logos integrated into the footer chrome (#468):
    left on the far side, right trailing the Ruscker version+mark. They
    default to empty, so other layouts keep the plain right-aligned lockup. #}
-<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-between gap-3">
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-between gap-3 relative">
   <div class="flex items-center gap-3">{% block footer_logos_left %}{% endblock %}</div>
+  {# Footer-center logos: absolutely centred over the footer (#468). #}
+  {% block footer_logos_center %}{% endblock %}
   <div class="flex items-center gap-3">
     <a class="opacity-60 hover:opacity-100 transition-opacity"
        href="https://github.com/StrategicProjects/ruscker/releases/tag/v{{ crate::APP_VERSION }}"

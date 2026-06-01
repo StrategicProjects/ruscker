@@ -6,8 +6,8 @@
 
 <div x-data="ruscker.landingForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
 
-  {# ── Header ───────────────────────────────────────────────── #}
-  <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
+  {# ── Sticky action bar (title + Open portal + Save) ───────── #}
+  <div class="editor-topbar">
     <div>
       <div class="text-[11px] text-[color:var(--text-faint)] uppercase tracking-wide">
         {{ self.t("admin-landing-crumb") }}
@@ -53,9 +53,16 @@
          texts, SEO, custom blocks), NOT an arbitrary-CSS editor. #}
       <div class="spec-form-help" style="margin-bottom:12px">{{ self.t("admin-landing-scope-help") }}</div>
 
-      {# ── Header title + subtitle (#468). Blank ⇒ falls back to the
+      {# ── Card: Header title + subtitle (#468). Blank ⇒ falls back to the
          config proxy.title / default subtitle. #}
-      <div class="spec-form-section-title">{{ self.t("admin-landing-header") }}</div>
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-heading" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-header") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-card-header-desc") }}</div>
+          </div>
+        </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-portal-title") }}</label>
         <input type="text" name="title" x-model="form.title" maxlength="120"
@@ -68,6 +75,18 @@
                placeholder="{{ self.t("landing-subtitle") }}" class="spec-form-input">
         <div class="spec-form-help">{{ self.t("admin-landing-portal-subtitle-help") }}</div>
       </div>
+
+      </section>
+
+      {# ── Card: Appearance — header colours + per-theme palettes. #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-palette" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-card-appearance") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-card-appearance-desc") }}</div>
+          </div>
+        </div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
 
@@ -163,7 +182,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_bg" :value="form.theme_light_bg || '#fafaf7'">
+              <input type="color" :value="form.theme_light_bg || '#fafaf7'" @input="form.theme_light_bg = $event.target.value">
               <input type="text" name="theme_light_bg" x-model="form.theme_light_bg" placeholder="#fafaf7" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -171,7 +190,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_text" :value="form.theme_light_text || '#1a1a1a'">
+              <input type="color" :value="form.theme_light_text || '#1a1a1a'" @input="form.theme_light_text = $event.target.value">
               <input type="text" name="theme_light_text" x-model="form.theme_light_text" placeholder="#1a1a1a" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -179,7 +198,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_accent" :value="form.theme_light_accent || '#0f6e56'">
+              <input type="color" :value="form.theme_light_accent || '#0f6e56'" @input="form.theme_light_accent = $event.target.value">
               <input type="text" name="theme_light_accent" x-model="form.theme_light_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -190,7 +209,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_bg" :value="form.theme_dark_bg || '#161616'">
+              <input type="color" :value="form.theme_dark_bg || '#161616'" @input="form.theme_dark_bg = $event.target.value">
               <input type="text" name="theme_dark_bg" x-model="form.theme_dark_bg" placeholder="#161616" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -198,7 +217,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_text" :value="form.theme_dark_text || '#f0f0f0'">
+              <input type="color" :value="form.theme_dark_text || '#f0f0f0'" @input="form.theme_dark_text = $event.target.value">
               <input type="text" name="theme_dark_text" x-model="form.theme_dark_text" placeholder="#f0f0f0" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -206,7 +225,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_accent" :value="form.theme_dark_accent || '#0f6e56'">
+              <input type="color" :value="form.theme_dark_accent || '#0f6e56'" @input="form.theme_dark_accent = $event.target.value">
               <input type="text" name="theme_dark_accent" x-model="form.theme_dark_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -214,47 +233,94 @@
         </div>
       </div>
 
-      {# ── Header / footer logos (visual identity, grouped with Colors #471) #}
-      <div class="spec-form-section-title">{{ self.t("admin-landing-logos") }}</div>
+      </section>
+
+      {# ── Card: Header / footer logos (#468). #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-photo" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-logos") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-logos-help") }}</div>
+          </div>
+        </div>
       <div class="spec-form-field">
-        <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-logos-help") }}</div>
         {# Submitted as one hidden JSON field; the rows below edit the array. #}
         <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
         <template x-for="(logo, i) in logos" :key="i">
-          <div class="landing-logo-row">
-            <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
-            {# Shared gallery picker (#451): writes only this row's `url`,
-               leaving slot/align/link/height intact. The field stays
-               editable for an external/manual URL. #}
-            <button type="button" class="admin-login-btn" style="padding:6px 10px;font-size:12px;white-space:nowrap"
-                    @click="openImagePicker((v) => { logo.url = v }, logo.url)">
-              <i class="ti ti-photo" aria-hidden="true"></i>
-              {{ self.t("spec-form-choose-image") }}
-            </button>
-            <input type="text" x-model="logo.url"
-                   placeholder="/assets/img/logo.png" class="spec-form-input spec-form-input--mono" style="flex:2;min-width:10rem">
-            <select x-model="logo.slot" class="theme-select">
-              <option value="header">{{ self.t("admin-landing-logo-header") }}</option>
-              <option value="footer">{{ self.t("admin-landing-logo-footer") }}</option>
-            </select>
-            <select x-model="logo.align" class="theme-select">
-              <option value="left">{{ self.t("admin-landing-logo-left") }}</option>
-              <option value="center">{{ self.t("admin-landing-logo-center") }}</option>
-              <option value="right">{{ self.t("admin-landing-logo-right") }}</option>
-            </select>
-            <input type="url" x-model="logo.link" placeholder="https://…"
-                   class="spec-form-input" style="flex:1;min-width:8rem" title="{{ self.t("admin-landing-logo-link") }}">
-            <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32"
-                   class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-height") }}">
-            <button type="button" class="admin-nav-link" @click="logos.splice(i, 1)"
-                    title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+          <div class="landing-logo-card">
+            <div class="landing-logo-card__head">
+              {# Preview thumbnail, or a placeholder icon when no URL yet. #}
+              <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
+              <span class="landing-logo-thumb landing-logo-thumb--empty" x-show="!logo.url"><i class="ti ti-photo" aria-hidden="true"></i></span>
+              {# Image field: shared gallery picker (#451) writes only `url`,
+                 leaving the other fields intact; the input stays editable
+                 for an external/manual URL. #}
+              <div class="landing-logo-field" style="flex:1;min-width:0">
+                <label>{{ self.t("admin-landing-logo-image") }}</label>
+                <div class="landing-logo-image-row">
+                  <button type="button" class="admin-login-btn landing-logo-pick"
+                          @click="openImagePicker((v) => { logo.url = v }, logo.url)">
+                    <i class="ti ti-photo" aria-hidden="true"></i>
+                    {{ self.t("spec-form-choose-image") }}
+                  </button>
+                  <input type="text" x-model="logo.url" placeholder="/assets/img/logo.png"
+                         class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+                </div>
+              </div>
+              <button type="button" class="landing-logo-card__remove admin-nav-link" @click="logos.splice(i, 1)"
+                      title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+            </div>
+            <div class="landing-logo-card__grid">
+              {# Slot — segmented pill (header / footer). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-slot-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'">{{ self.t("admin-landing-logo-header") }}</button>
+                  <button type="button" :class="{ 'is-active': logo.slot === 'footer' }" @click="logo.slot = 'footer'">{{ self.t("admin-landing-logo-footer") }}</button>
+                </div>
+              </div>
+              {# Alignment — segmented icon pill (left / center / right). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-align-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'center' }" @click="logo.align = 'center'" title="{{ self.t("admin-landing-logo-center") }}"><i class="ti ti-align-center" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'right' }" @click="logo.align = 'right'" title="{{ self.t("admin-landing-logo-right") }}"><i class="ti ti-align-right" aria-hidden="true"></i></button>
+                </div>
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-link") }}</label>
+                <input type="url" x-model="logo.link" placeholder="https://…" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-height") }}</label>
+                <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-margin") }}</label>
+                <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0" class="spec-form-input">
+              </div>
+            </div>
           </div>
         </template>
         <button type="button" class="admin-nav-link mt-2"
-                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32 })">
+                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32, margin: null })">
           <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
         </button>
       </div>
+
+      </section>
+
+      {# ── Card: Content — intro text (default + per-locale). #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-align-left" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-card-content") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-card-content-desc") }}</div>
+          </div>
+        </div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-intro") }}</div>
 
@@ -296,6 +362,18 @@
         </div>
       </div>
 
+      </section>
+
+      {# ── Card: SEO & analytics. #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-search" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-card-meta") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-card-meta-desc") }}</div>
+          </div>
+        </div>
+
       <div class="spec-form-section-title">{{ self.t("admin-landing-seo") }}</div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-seo-title") }}</label>
@@ -335,7 +413,17 @@
         <div class="spec-form-help">{{ self.t("admin-landing-analytics-origins-help") }}</div>
       </div>
 
-      <div class="spec-form-section-title">{{ self.t("admin-landing-style") }}</div>
+      </section>
+
+      {# ── Card: Advanced — custom CSS. #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-code" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-style") }}</div>
+            <div class="editor-card__desc">{{ self.t("admin-landing-card-style-desc") }}</div>
+          </div>
+        </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-custom-css") }}</label>
         <textarea name="custom_css" rows="6" x-model="form.custom_css"
@@ -343,28 +431,59 @@
                   class="spec-form-input spec-form-input--mono">{{ form.custom_css }}</textarea>
         <div class="spec-form-help">{{ self.t("admin-landing-custom-css-help") }}</div>
       </div>
+      </section>
 
     </form>
 
     {# ── RIGHT: live preview ──────────────────────────────── #}
-    <aside class="spec-form-preview">
-      <div class="spec-form-section-title">{{ self.t("admin-landing-preview") }}</div>
+    <aside class="spec-form-preview" style="top:96px">
+      <div class="editor-card editor-card--preview">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-eye" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("admin-landing-preview") }}</div>
+          </div>
+        </div>
 
       <div class="landing-preview-frame">
         <div class="landing-preview-header"
              :style="(form.header_bg ? `background:${form.header_bg};` : '') + (form.header_fg ? `color:${form.header_fg};` : '')">
           <div class="landing-preview-header-inner">
-            <div>
-              {# Live preview (#468): title binds to the form, falling back
-                 to the config title; subtitle is optional (hidden when blank). #}
-              <div class="landing-preview-title">
-                <span x-show="(form.title || '').trim()" x-text="form.title"></span>
-                <span x-show="!(form.title || '').trim()">{{ portal_title }}</span>
+            <div class="lp-head-side">
+              {# Header-left logos replace the Ruscker mark (faithful to #468);
+                 a small mark shows when none are set. #}
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'left')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+              <svg class="lp-mark" x-show="!logos.some(l => l.url && l.slot === 'header' && l.align === 'left')" viewBox="0 0 80 80" aria-hidden="true">
+                <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+                <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+                <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+              </svg>
+              <div>
+                {# Live preview (#468): title binds to the form, falling back
+                   to the config title; subtitle is optional (hidden when blank). #}
+                <div class="landing-preview-title">
+                  <span x-show="(form.title || '').trim()" x-text="form.title"></span>
+                  <span x-show="!(form.title || '').trim()">{{ portal_title }}</span>
+                </div>
+                <div class="landing-preview-sub" x-show="(form.subtitle || '').trim()"
+                     x-text="form.subtitle" x-cloak></div>
               </div>
-              <div class="landing-preview-sub" x-show="(form.subtitle || '').trim()"
-                   x-text="form.subtitle" x-cloak></div>
             </div>
-            <div class="landing-preview-count">N</div>
+            <div class="lp-head-side">
+              {# Header-right logos trail the chrome (the count stands in for it). #}
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'right')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+              <div class="landing-preview-count">N</div>
+            </div>
+            {# Header-center logos: absolutely centred within the header bar. #}
+            <div class="landing-logo-center-abs" x-show="logos.some(l => l.url && l.slot === 'header' && l.align === 'center')">
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'center')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+            </div>
           </div>
         </div>
 
@@ -377,10 +496,37 @@
             <div></div><div></div><div></div><div></div>
           </div>
         </div>
+
+        {# Footer: left · center (absolutely centred) · right + version + mark (#468). #}
+        <div class="landing-preview-footer">
+          {# Footer-center logos: absolutely centred within the footer. #}
+          <div class="landing-logo-center-abs" x-show="logos.some(l => l.url && l.slot === 'footer' && l.align === 'center')">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'center')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+          </div>
+          <div class="lp-head-side">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'left')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+          </div>
+          <div class="lp-head-side">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'right')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+            <span class="lp-version">v{{ crate::APP_VERSION }}</span>
+            <svg class="lp-mark" style="width:11px;height:11px" viewBox="0 0 80 80" aria-hidden="true">
+              <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+              <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+              <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+            </svg>
+          </div>
+        </div>
       </div>
 
       <div class="spec-form-help" style="margin-top:8px">
         {{ self.t("admin-landing-preview-help") }}
+      </div>
       </div>
     </aside>
 

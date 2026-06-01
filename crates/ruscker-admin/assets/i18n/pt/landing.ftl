@@ -556,6 +556,14 @@ admin-proclog-download = Baixar log completo
 landing-empty = Nada por aqui.
 
 admin-landing-style = Estilo (CSS)
+admin-landing-card-appearance = Aparência
+admin-landing-card-content = Conteúdo
+admin-landing-card-meta = SEO e Analytics
+admin-landing-card-header-desc = Título e subtítulo exibidos no topo do portal.
+admin-landing-card-appearance-desc = Cores do cabeçalho e a paleta de cada tema (claro/escuro).
+admin-landing-card-content-desc = O texto introdutório do portal, geral e por idioma.
+admin-landing-card-meta-desc = Metadados de busca/compartilhamento e o snippet de analytics.
+admin-landing-card-style-desc = CSS customizado, injetado por último (escape hatch).
 admin-landing-custom-css = CSS personalizado
 admin-landing-custom-css-help = CSS injetado no fim do <head> da landing — sobrescreve o estilo padrão. Mire classes/variáveis estáveis (.rcard, .tint-*, --color-link, vars do header). Admin-confiável; cuidado para não quebrar o layout.
 admin-landing-logos = Logos do cabeçalho/rodapé
@@ -567,6 +575,10 @@ admin-landing-logo-center = Centro
 admin-landing-logo-right = Direita
 admin-landing-logo-link = Link (opcional)
 admin-landing-logo-height = Altura (px)
+admin-landing-logo-margin = Margem (px)
+admin-landing-logo-image = Imagem
+admin-landing-logo-slot-label = Posição
+admin-landing-logo-align-label = Alinhamento
 admin-landing-logo-add = Adicionar logo
 
 # — Gestão de disco (admin) #453

@@ -6,7 +6,7 @@
 {% macro logos(items) %}
   {% for l in items %}
     {% match l.link %}{% when Some with (href) %}<a href="{{ href }}" target="_blank" rel="noopener" class="inline-flex items-center">{% when None %}{% endmatch %}
-    <img src="{{ l.src }}" alt="" loading="lazy" style="height:{{ l.height }}px">
+    <img src="{{ l.src }}" alt="" loading="lazy" style="height:{{ l.height }}px{% match l.margin %}{% when Some with (m) %};margin:{{ m }}px{% when None %}{% endmatch %}">
     {% match l.link %}{% when Some with (href) %}</a>{% when None %}{% endmatch %}
   {% endfor %}
 {% endmacro %}
@@ -34,7 +34,7 @@
 
 <header class="border-b border-[color:var(--border)]"
         {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
-  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
+  <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6 relative">
     <div class="flex items-center gap-3">
       {# Header-left identity. When the operator configured header-left
          logo(s) (#468) they REPLACE the Ruscker mark — the title/subtitle
@@ -65,6 +65,12 @@
         {% if !header_subtitle.is_empty() %}<p class="text-xs opacity-70 mt-1">{{ header_subtitle }}</p>{% endif %}
       </div>
     </div>
+    {# Header-center logo(s) (#468): absolutely centred within the header
+       bar (the empty middle between the title and the chrome), so they read
+       as part of the header — not a separate strip below it. #}
+    {% if self.has_logos_at("header", "center") %}
+    <div class="landing-logo-center-abs">{% call logos(self.logo_view("header", "center", 28)) %}{% endcall %}</div>
+    {% endif %}
     {# Chrome cluster (theme/language/account) with header-right logo(s)
        trailing it (#468) — kept in one flex child so the group stays
        right-aligned within the header's justify-between. #}
@@ -76,17 +82,6 @@
     </div>
   </div>
 </header>
-
-{# Header center logos (admin-managed) — left/right buckets now integrate
-   into the header chrome above (#468); only `center` keeps the separate
-   bar below the header. #}
-{% if self.has_logos_at("header", "center") %}
-<div class="landing-logo-bar px-6 max-w-6xl mx-auto w-full">
-  <div class="landing-logo-group landing-logo-center">
-    {% call logos(self.logo_view("header", "center", 32)) %}{% endcall %}
-  </div>
-</div>
-{% endif %}
 
 {# Custom HTML blocks — `top` slot (after the header). Rendered
    verbatim; admin-trusted (see /admin/blocks). Kept outside the
@@ -280,16 +275,6 @@
 <section class="landing-block landing-block--bottom px-6 max-w-6xl mx-auto w-full">{{ b.html|safe }}</section>
 {% endfor %}
 
-{# Footer center logos (admin-managed) — left/right buckets now integrate
-   into the global footer (#468, see the footer_logos_* block overrides
-   below); only `center` keeps the separate bar above the footer. #}
-{% if self.has_logos_at("footer", "center") %}
-<div class="landing-logo-bar landing-logo-bar--footer px-6 max-w-6xl mx-auto w-full">
-  <div class="landing-logo-group landing-logo-center">
-    {% call logos(self.logo_view("footer", "center", 28)) %}{% endcall %}
-  </div>
-</div>
-{% endif %}
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
@@ -402,9 +387,10 @@ window.ruscker.landing = () => ({
 
 {% endblock %}
 
-{# Footer-left / footer-right logos integrate into the global footer
-   (_layout.html): left on the far side, right trailing the Ruscker
-   version+mark. Defined OUTSIDE `content` so they only fill the layout's
-   footer slots — not render inline here too (#468). #}
+{# Footer-left / center / right logos integrate into the global footer
+   (_layout.html): left on the far side, center absolutely centred, right
+   trailing the Ruscker version+mark. Defined OUTSIDE `content` so they only
+   fill the layout's footer slots — not render inline here too (#468). #}
 {% block footer_logos_left %}{% if self.has_logos_at("footer", "left") %}{% call logos(self.logo_view("footer", "left", 24)) %}{% endcall %}{% endif %}{% endblock %}
+{% block footer_logos_center %}{% if self.has_logos_at("footer", "center") %}<div class="landing-logo-center-abs">{% call logos(self.logo_view("footer", "center", 20)) %}{% endcall %}</div>{% endif %}{% endblock %}
 {% block footer_logos_right %}{% if self.has_logos_at("footer", "right") %}{% call logos(self.logo_view("footer", "right", 20)) %}{% endcall %}{% endif %}{% endblock %}

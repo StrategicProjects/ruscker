@@ -9,6 +9,38 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.32 — 2026-06-01
+
+Admin disk management, a forced first-login password change, and a more
+visible process log.
+
+**Admin**
+- New **Disk** panel (`/admin/disk`, Admin-only): list and remove
+  Ruscker-managed containers, prune every stopped one in a click
+  (label-scoped — it never touches a non-Ruscker container on the host),
+  and remove images no container or spec uses. Reclaims the space left
+  behind by scaled-down or crashed replicas and by apps you've deleted.
+- Deleting an app now **reaps its containers** instead of leaving them
+  running or stopped as orphans.
+- New accounts must **change their password on first login** — the prompt
+  can no longer be skipped, and a guard re-routes to it on every admin
+  page until the change is done. The user-admin password fields are
+  masked, with a reveal toggle.
+- The Portal logos editor uses the same **image gallery picker** as the
+  spec form — search, thumbnails, and inline upload, instead of a bare
+  path field.
+
+**Operations**
+- A one-line **startup banner** (version, bind address, base path, Docker
+  on/off, database, spec count) now appears in the admin Logs tab even at
+  the default log level — so a fresh boot is visible without `-v`. The
+  Logs tab also distinguishes "nothing logged yet" from "no log buffer".
+
+**Docs**
+- The handbook was refreshed to match the current release.
+
+---
+
 ## v0.1.18–v0.1.31 — 2026-05-31
 
 Demo images, credential unification, a redesigned media library, and portal logo support.

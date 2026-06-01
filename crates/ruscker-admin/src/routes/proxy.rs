@@ -512,10 +512,12 @@ async fn forward(
         "forwarding"
     );
     // API capacity is request-based, not session-based (#336): count this
-    // request as in-flight on the replica for the duration of the forward
-    // (the guard decs on drop, covering every path below). Only API
-    // specs — interactive apps already meter capacity via sticky sessions.
-    let _inflight =
+    // request as in-flight on the replica. The guard is moved INTO the
+    // response body on the success path below, so it only drops when the
+    // (possibly streaming) body finishes — not when this handler returns
+    // (#424). Early error returns drop it here, which is correct (no body
+    // to meter). Only API specs — interactive apps meter via sticky sessions.
+    let inflight =
         (route_prefix == API_PREFIX).then(|| InflightGuard::new(replica.id.clone()));
     let resp = match do_forward(
         &replica,
@@ -574,7 +576,28 @@ async fn forward(
         set_sticky_cookie(&cookies, &state.cookie_key, &session, is_https);
     }
 
-    with_cors(resp, cors_on)
+    let resp = with_cors(resp, cors_on);
+    // Keep the in-flight count up until the response body is fully streamed
+    // to the client, not just until this handler returns (#424).
+    match inflight {
+        Some(guard) => attach_inflight_to_body(resp, guard),
+        None => resp,
+    }
+}
+
+/// Wrap a response body so `guard` only drops once the body is fully
+/// consumed/dropped — keeping the replica's in-flight count accurate for
+/// long downloads/streams (#424).
+fn attach_inflight_to_body(resp: Response, guard: InflightGuard) -> Response {
+    use futures_util::StreamExt;
+    let (parts, body) = resp.into_parts();
+    // Tie the guard's lifetime to the stream: it's captured in the closure
+    // state and dropped when the stream (hence the body) is dropped.
+    let guarded = body.into_data_stream().map(move |chunk| {
+        let _ = &guard; // keep `guard` owned by the stream
+        chunk
+    });
+    Response::from_parts(parts, Body::from_stream(guarded))
 }
 
 fn spec_kind_needs_sticky(kind: SpecKind) -> bool {
@@ -844,7 +867,7 @@ const COLD_PROBE_PATH: &str = "/__ruscker_ready";
 async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
     let routing = spec.effective_routing();
     let reg = state.replicas.read().await;
-    pick_replica(reg.replicas_of(&spec.id), routing).is_some()
+    pick_replica(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
 }
 
 /// True for a top-level document navigation (a GET whose `Accept`
@@ -945,6 +968,8 @@ fn cold_start_splash(spec: &Spec, base: &str) -> Response {
 /// matter. Phase 4 GC sweeps them when a spec is deleted.
 async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica> {
     let routing = spec.effective_routing();
+    // APIs balance by in-flight requests, not seats (#424).
+    let api = matches!(spec.kind(), SpecKind::Api);
 
     // Fast path: read lock, no spawn coordination needed. Route to a
     // replica that's actually `Ready` (preferably with a free seat) per
@@ -952,7 +977,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     // usable — never hand traffic to a Starting/Draining/Failed one.
     {
         let reg = state.replicas.read().await;
-        if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing) {
+        if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing, api) {
             return Ok(r);
         }
     }
@@ -974,7 +999,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     {
         let reg = state.replicas.read().await;
         let replicas = reg.replicas_of(&spec.id);
-        if let Some(r) = pick_replica(replicas, routing) {
+        if let Some(r) = pick_replica(replicas, routing, api) {
             return Ok(r);
         }
         // A sibling may have spawned one that's still coming up (not yet
@@ -1168,21 +1193,30 @@ fn pick_index(n: usize) -> usize {
 /// serves, better than a 503 or routing to a non-`Ready` container; the
 /// scaler adds real capacity on sustained saturation). Returns `None`
 /// only when no `Ready` replica exists, so the caller spawns.
-fn pick_replica(replicas: &[Replica], routing: RoutingStrategy) -> Option<Replica> {
-    select(replicas.iter().filter(|r| r.is_accepting()), routing).or_else(|| {
+fn pick_replica(replicas: &[Replica], routing: RoutingStrategy, api: bool) -> Option<Replica> {
+    select(replicas.iter().filter(|r| r.is_accepting()), routing, api).or_else(|| {
         select(
             replicas.iter().filter(|r| r.state == ReplicaState::Ready),
             routing,
+            api,
         )
     })
 }
 
 /// Pick one replica from `candidates` per `routing`. Round-robin spreads
 /// across the candidates; least-connections (and, for now, weighted-
-/// random) favor the replica with the most free seats.
+/// random / resource-aware) favor the least-loaded replica.
+///
+/// "Least loaded" depends on the spec kind (#424): API specs meter
+/// capacity by **in-flight requests** (#336), so fewest in-flight wins;
+/// session-based specs (Shiny / interactive) use the most free seats. The
+/// old code always used `available_seats()`, which for an API is constant
+/// (no sessions are tracked) — so least-connections never actually spread
+/// API load.
 fn select<'a>(
     candidates: impl Iterator<Item = &'a Replica>,
     routing: RoutingStrategy,
+    api: bool,
 ) -> Option<Replica> {
     let cands: Vec<&Replica> = candidates.collect();
     if cands.is_empty() {
@@ -1193,8 +1227,13 @@ fn select<'a>(
         RoutingStrategy::LeastConnections
         | RoutingStrategy::WeightedRandom
         | RoutingStrategy::ResourceAware => {
-            // Most free seats wins; ties break on the first seen.
-            cands.iter().copied().max_by_key(|r| r.available_seats())?
+            if api {
+                // Fewest in-flight requests wins; ties break on first seen.
+                cands.iter().copied().min_by_key(|r| inflight_count(&r.id))?
+            } else {
+                // Most free seats wins; ties break on the first seen.
+                cands.iter().copied().max_by_key(|r| r.available_seats())?
+            }
         }
     };
     Some(chosen.clone())
@@ -1515,7 +1554,7 @@ mod tests {
             rep(ReplicaState::Ready, 5, 5),    // ready but full
             rep(ReplicaState::Ready, 1, 5),    // ready, has seats ✓
         ];
-        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections, false).unwrap();
         assert_eq!(chosen.sessions_active, 1);
     }
 
@@ -1526,8 +1565,27 @@ mod tests {
             rep(ReplicaState::Ready, 1, 10), // 9 free ✓
             rep(ReplicaState::Ready, 8, 10), // 2 free
         ];
-        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections, false).unwrap();
         assert_eq!(chosen.sessions_active, 1);
+    }
+
+    #[test]
+    fn api_least_connections_picks_fewest_inflight() {
+        // reps[0] has MORE free seats (100 vs 50) but MORE in-flight (2 vs 0).
+        // Seat-based routing would pick reps[0]; in-flight routing reps[1].
+        let reps = vec![rep(ReplicaState::Ready, 0, 100), rep(ReplicaState::Ready, 50, 100)];
+        let g1 = InflightGuard::new(reps[0].id.clone());
+        let g2 = InflightGuard::new(reps[0].id.clone());
+        // api=true → fewest in-flight → reps[1].
+        let api_pick = pick_replica(&reps, RoutingStrategy::LeastConnections, true).unwrap();
+        assert_eq!(
+            api_pick.id, reps[1].id,
+            "API least-connections must pick the replica with fewest in-flight"
+        );
+        // api=false → most free seats → reps[0] (in-flight ignored).
+        let seat_pick = pick_replica(&reps, RoutingStrategy::LeastConnections, false).unwrap();
+        assert_eq!(seat_pick.id, reps[0].id);
+        drop((g1, g2));
     }
 
     #[test]
@@ -1540,7 +1598,7 @@ mod tests {
         ] {
             let reps = vec![rep(st, 0, 5)];
             assert!(
-                pick_replica(&reps, RoutingStrategy::LeastConnections).is_none(),
+                pick_replica(&reps, RoutingStrategy::LeastConnections, false).is_none(),
                 "must not route a new session to {st:?}"
             );
         }
@@ -1554,7 +1612,7 @@ mod tests {
             rep(ReplicaState::Ready, 5, 5),
             rep(ReplicaState::Starting, 0, 5),
         ];
-        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections).unwrap();
+        let chosen = pick_replica(&reps, RoutingStrategy::LeastConnections, false).unwrap();
         assert_eq!(chosen.state, ReplicaState::Ready);
     }
 
@@ -1564,7 +1622,7 @@ mod tests {
             rep(ReplicaState::Starting, 0, 5),
             rep(ReplicaState::Draining, 0, 5),
         ];
-        assert!(pick_replica(&reps, RoutingStrategy::RoundRobin).is_none());
+        assert!(pick_replica(&reps, RoutingStrategy::RoundRobin, false).is_none());
     }
 
     // #80: the rate-limit client key must come from the right-most XFF

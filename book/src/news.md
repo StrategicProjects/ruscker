@@ -9,6 +9,24 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.35 — 2026-06-01
+
+Live dashboard fixes behind a reverse proxy, plus smarter share images.
+
+**Admin**
+- The **live dashboard** now streams through reverse proxies: SSE
+  responses send `X-Accel-Buffering: no`, so new containers show up in
+  real time even behind nginx on a subpath mount (no nginx change
+  needed). Previously the table could appear frozen until a reload.
+- **Social share image (`og:image`) auto-defaults**: when left blank it
+  reuses the header (left) logo, else the Ruscker mark — so a shared
+  link carries the portal's identity without setting it twice. The
+  editor field also gets the gallery picker.
+- The Safari pinned-tab `mask-icon` points at the monochrome mark
+  (correct for a recoloured silhouette).
+
+---
+
 ## v0.1.34 — 2026-06-01
 
 Docker connects out of the box, per-theme colours, and a modernised

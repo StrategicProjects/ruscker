@@ -9,6 +9,23 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.33 — 2026-06-01
+
+A bulk image cleanup on the disk panel, plus a documentation fix.
+
+**Admin**
+- The **Disk** panel gains a **"Remove unused" images** button: reclaim
+  every image no container uses and no spec references, in one click.
+  It complements the existing one-click "remove stopped containers" —
+  and, like everything on the panel, it only touches that exact unused
+  subset (never a host-wide `docker image prune`, never `--force`).
+
+**Docs**
+- The documented idle footprint is now ~14 MB (the measured value),
+  down from the rounded ~16 MB.
+
+---
+
 ## v0.1.32 — 2026-06-01
 
 Admin disk management, a forced first-login password change, and a more

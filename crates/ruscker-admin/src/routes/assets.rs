@@ -199,6 +199,10 @@ const BRAND_APP_ICON: &[u8] = include_bytes!("../../assets/brand/ruscker-app-ico
 const FAVICON_ICO: &[u8] = include_bytes!("../../assets/brand/favicon.ico");
 const FAVICON_PNG: &[u8] = include_bytes!("../../assets/brand/favicon-32.png");
 const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../assets/brand/apple-touch-icon.png");
+// Safari pinned-tab mask icon: a single-layer, 100%-black silhouette on a
+// transparent background (Safari recolours it via the `color` attribute on
+// the `mask-icon` link). A colour or multi-opacity SVG is the wrong input.
+const SAFARI_PINNED_TAB: &[u8] = include_bytes!("../../assets/brand/safari-pinned-tab.svg");
 
 // ── Router ────────────────────────────────────────────────────────
 
@@ -268,6 +272,10 @@ pub fn routes() -> Router<AppState> {
         .route("/favicon.ico", get(|| serve(FAVICON_ICO, ICO)))
         .route("/favicon-32.png", get(|| serve(FAVICON_PNG, PNG)))
         .route("/apple-touch-icon.png", get(|| serve(APPLE_TOUCH_ICON, PNG)))
+        .route(
+            "/safari-pinned-tab.svg",
+            get(|| serve(SAFARI_PINNED_TAB, SVG)),
+        )
         // Operator-uploaded card images. DB first (Phase 2 image
         // library); on miss, fall back to the on-disk `images_dir`
         // (Phase 1 deploy that uses a static folder of files).

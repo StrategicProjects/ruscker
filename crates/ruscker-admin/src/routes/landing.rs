@@ -93,6 +93,16 @@ struct LandingPage<'a> {
     show_admin_link: bool,
 }
 
+/// A landing logo resolved for rendering: `src` already carries the mount
+/// prefix and `height` has its per-slot default applied. Produced by
+/// [`LandingPage::logo_view`] and consumed by the template's `logos` macro
+/// so the four chrome inserts (#468) share one rendering path.
+struct LogoView {
+    src: String,
+    link: Option<String>,
+    height: u32,
+}
+
 impl<'a> LandingPage<'a> {
     /// Translation helper used by the template as `self.t("key")`.
     /// Centralizing here keeps templates clean of explicit
@@ -101,9 +111,12 @@ impl<'a> LandingPage<'a> {
         self.locales.t(self.locale, key, None)
     }
 
-    /// Any logos to render in `slot` (`header` / `footer`)?
-    fn has_logos(&self, slot: &str) -> bool {
-        self.logos.iter().any(|l| l.slot == slot)
+    /// Any logo configured for this `slot`/`align` bucket? Used to decide
+    /// whether to render a slot's chrome insert (header-left replaces the
+    /// Ruscker mark; header-right sits after the chrome cluster; the
+    /// `center` bucket still renders as a separate bar). See #468.
+    fn has_logos_at(&self, slot: &str, align: &str) -> bool {
+        self.logos.iter().any(|l| l.slot == slot && l.align == align)
     }
 
     /// Resolve a logo's `<img src>`: an absolute/protocol-relative URL is
@@ -117,21 +130,18 @@ impl<'a> LandingPage<'a> {
         }
     }
 
-    /// Logos in `slot`, grouped into the left/center/right alignment
-    /// buckets (in that order), each preserving insertion order. Empty
-    /// buckets are still returned so the template's grid keeps its three
-    /// columns. Used by the header + footer logo bars.
-    fn logo_groups(&self, slot: &str) -> Vec<(&'static str, Vec<&ruscker_config::LandingLogo>)> {
-        ["left", "center", "right"]
+    /// Render-ready logos for a `slot`/`align` bucket, in insertion order:
+    /// `src` is already mount-prefixed and `height` defaults to `default_h`
+    /// when the operator left it unset. The template's `logos` macro walks
+    /// the returned views (header/footer chrome inserts + the center bar).
+    fn logo_view(&self, slot: &str, align: &str, default_h: u32) -> Vec<LogoView> {
+        self.logos
             .iter()
-            .map(|&align| {
-                (
-                    align,
-                    self.logos
-                        .iter()
-                        .filter(|l| l.slot == slot && l.align == align)
-                        .collect(),
-                )
+            .filter(|l| l.slot == slot && l.align == align)
+            .map(|l| LogoView {
+                src: self.logo_src(l),
+                link: l.link.clone(),
+                height: l.height.unwrap_or(default_h),
             })
             .collect()
     }

@@ -37,6 +37,31 @@ Edit `/etc/ruscker/application.yml`, put secrets in
 [Deploying in production](./deploying.md) to enable the `--docker`
 backend and put it behind nginx.
 
+### Uninstall & reset
+
+Pick the scope you want:
+
+| Goal | Command | What's left |
+|---|---|---|
+| **Remove the software**, keep config + data | `sudo apt remove ruscker` | `/etc/ruscker` (config, admin token, keys) and `/var/lib/ruscker` (catalog DB) — a reinstall resumes where you left off. |
+| **Remove everything** (no trace) | `sudo apt purge ruscker` | Nothing. Drops the catalog DB **and** `/etc/ruscker` — including `application.yml` and the admin token / master key in `ruscker.env`. |
+| **Reset to a brand-new install** | `sudo apt purge ruscker && sudo apt install ./ruscker_<version>-1_amd64.deb` | A pristine box: the default `application.yml` (no custom title/specs) and a freshly generated admin token, exactly like a first install. |
+| **Wipe the data only**, keep config | stop, remove the DB, start (below) | Config + token unchanged; the catalog is empty, so migrations re-run and the showcase cards re-seed on next boot. |
+
+To wipe just the catalog (a "fresh portal" without uninstalling):
+
+```sh
+sudo systemctl stop ruscker
+sudo rm -f /var/lib/ruscker/ruscker.db          # + -wal/-shm if present
+sudo systemctl start ruscker
+```
+
+> The catalog DB lives in `/var/lib/ruscker`; your config and secrets
+> live in `/etc/ruscker`. `purge` clears both; removing the DB clears
+> only the catalog. The portal **title** comes from `proxy.title` in
+> `application.yml`, so it survives a data-only wipe — only a `purge` (or
+> editing the file) changes it.
+
 ## Static musl tarball
 
 For hosts without a package manager, or for quick installs without a

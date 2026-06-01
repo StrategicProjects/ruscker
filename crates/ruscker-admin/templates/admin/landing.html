@@ -221,35 +221,60 @@
         {# Submitted as one hidden JSON field; the rows below edit the array. #}
         <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
         <template x-for="(logo, i) in logos" :key="i">
-          <div class="landing-logo-row">
-            <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
-            {# Shared gallery picker (#451): writes only this row's `url`,
-               leaving slot/align/link/height intact. The field stays
-               editable for an external/manual URL. #}
-            <button type="button" class="admin-login-btn" style="padding:6px 10px;font-size:12px;white-space:nowrap"
-                    @click="openImagePicker((v) => { logo.url = v }, logo.url)">
-              <i class="ti ti-photo" aria-hidden="true"></i>
-              {{ self.t("spec-form-choose-image") }}
-            </button>
-            <input type="text" x-model="logo.url"
-                   placeholder="/assets/img/logo.png" class="spec-form-input spec-form-input--mono" style="flex:2;min-width:10rem">
-            <select x-model="logo.slot" class="theme-select">
-              <option value="header">{{ self.t("admin-landing-logo-header") }}</option>
-              <option value="footer">{{ self.t("admin-landing-logo-footer") }}</option>
-            </select>
-            <select x-model="logo.align" class="theme-select">
-              <option value="left">{{ self.t("admin-landing-logo-left") }}</option>
-              <option value="center">{{ self.t("admin-landing-logo-center") }}</option>
-              <option value="right">{{ self.t("admin-landing-logo-right") }}</option>
-            </select>
-            <input type="url" x-model="logo.link" placeholder="https://…"
-                   class="spec-form-input" style="flex:1;min-width:8rem" title="{{ self.t("admin-landing-logo-link") }}">
-            <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32"
-                   class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-height") }}">
-            <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0"
-                   class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-margin") }}">
-            <button type="button" class="admin-nav-link" @click="logos.splice(i, 1)"
-                    title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+          <div class="landing-logo-card">
+            <div class="landing-logo-card__head">
+              {# Preview thumbnail, or a placeholder icon when no URL yet. #}
+              <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
+              <span class="landing-logo-thumb landing-logo-thumb--empty" x-show="!logo.url"><i class="ti ti-photo" aria-hidden="true"></i></span>
+              {# Image field: shared gallery picker (#451) writes only `url`,
+                 leaving the other fields intact; the input stays editable
+                 for an external/manual URL. #}
+              <div class="landing-logo-field" style="flex:1;min-width:0">
+                <label>{{ self.t("admin-landing-logo-image") }}</label>
+                <div class="landing-logo-image-row">
+                  <button type="button" class="admin-login-btn landing-logo-pick"
+                          @click="openImagePicker((v) => { logo.url = v }, logo.url)">
+                    <i class="ti ti-photo" aria-hidden="true"></i>
+                    {{ self.t("spec-form-choose-image") }}
+                  </button>
+                  <input type="text" x-model="logo.url" placeholder="/assets/img/logo.png"
+                         class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+                </div>
+              </div>
+              <button type="button" class="landing-logo-card__remove admin-nav-link" @click="logos.splice(i, 1)"
+                      title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+            </div>
+            <div class="landing-logo-card__grid">
+              {# Slot — segmented pill (header / footer). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-slot-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'">{{ self.t("admin-landing-logo-header") }}</button>
+                  <button type="button" :class="{ 'is-active': logo.slot === 'footer' }" @click="logo.slot = 'footer'">{{ self.t("admin-landing-logo-footer") }}</button>
+                </div>
+              </div>
+              {# Alignment — segmented icon pill (left / center / right). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-align-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'center' }" @click="logo.align = 'center'" title="{{ self.t("admin-landing-logo-center") }}"><i class="ti ti-align-center" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'right' }" @click="logo.align = 'right'" title="{{ self.t("admin-landing-logo-right") }}"><i class="ti ti-align-right" aria-hidden="true"></i></button>
+                </div>
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-link") }}</label>
+                <input type="url" x-model="logo.link" placeholder="https://…" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-height") }}</label>
+                <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-margin") }}</label>
+                <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0" class="spec-form-input">
+              </div>
+            </div>
           </div>
         </template>
         <button type="button" class="admin-nav-link mt-2"

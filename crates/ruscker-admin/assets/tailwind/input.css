@@ -1067,6 +1067,53 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   padding: 3px; background: var(--surface-soft);
 }
 
+/* Logo editor cards (#482 UX): one labelled card per logo, replacing the
+   flat unlabelled control row. */
+.landing-logo-card {
+  border: 0.5px solid var(--border, rgba(120,120,120,0.25));
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 12px 14px;
+  margin-bottom: 10px;
+}
+.landing-logo-card__head { display: flex; align-items: flex-start; gap: 10px; }
+.landing-logo-card__head .landing-logo-thumb { width: 44px; height: 44px; flex: none; }
+.landing-logo-thumb--empty {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 18px;
+}
+.landing-logo-image-row { display: flex; gap: 8px; align-items: center; }
+.landing-logo-pick { padding: 7px 11px; font-size: 12px; white-space: nowrap; flex: none; }
+.landing-logo-card__remove { flex: none; margin-top: 22px; }
+.landing-logo-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.landing-logo-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.landing-logo-field > label {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+/* Segmented pill control — slot / alignment pickers. */
+.seg-control {
+  display: inline-flex; width: fit-content; max-width: 100%;
+  border: 0.5px solid var(--border, rgba(120,120,120,0.25));
+  border-radius: 8px; overflow: hidden;
+}
+.seg-control button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 7px 12px; background: var(--surface); border: 0; cursor: pointer;
+  color: var(--text-muted); font-family: inherit; font-size: 13px; line-height: 1.2;
+  transition: background 0.12s, color 0.12s;
+}
+.seg-control button:hover { background: var(--surface-soft); color: var(--text); }
+.seg-control button + button { border-left: 0.5px solid var(--border, rgba(120,120,120,0.25)); }
+.seg-control button.is-active { background: var(--color-teal-600); color: #fff; }
+.seg-control .ti { font-size: 16px; }
+
 /* Public landing header/footer logo bars (admin-managed) */
 .landing-logo-bar {
   display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;

@@ -343,6 +343,16 @@ pub struct LandingCustomization {
     #[serde(default, rename = "header-fg")]
     pub header_fg: Option<String>,
 
+    /// Portal title shown in the header. Blank ⇒ falls back to
+    /// `proxy.title`, then the localized `landing-title` default (#468).
+    #[serde(default)]
+    pub title: Option<String>,
+
+    /// Portal subtitle shown under the title in the header. Blank ⇒ the
+    /// localized `landing-subtitle` default (#468).
+    #[serde(default)]
+    pub subtitle: Option<String>,
+
     /// Free-form intro paragraph rendered between the header and
     /// the filter section. Operator-authored, plain text (no HTML).
     ///

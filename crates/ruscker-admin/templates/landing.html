@@ -46,8 +46,8 @@
         </svg>
       {% endif %}
       <div>
-        <h1 class="text-xl font-medium tracking-tight">{{ self.t("landing-title") }}</h1>
-        <p class="text-xs opacity-70 mt-1">{{ self.t("landing-subtitle") }}</p>
+        <h1 class="text-xl font-medium tracking-tight">{{ header_title }}</h1>
+        {% if !header_subtitle.is_empty() %}<p class="text-xs opacity-70 mt-1">{{ header_subtitle }}</p>{% endif %}
       </div>
     </div>
     {% include "_chrome_cluster.html" %}

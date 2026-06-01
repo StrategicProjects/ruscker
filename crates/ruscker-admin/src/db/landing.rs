@@ -31,10 +31,13 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         Option<String>, // analytics_origins
         Option<String>, // custom_css
         Option<String>, // logos_json
+        Option<String>, // title
+        Option<String>, // subtitle
     );
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
-                analytics_html, analytics_origins, custom_css, logos_json
+                analytics_html, analytics_origins, custom_css, logos_json,
+                title, subtitle
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -55,6 +58,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             analytics_origins,
             custom_css,
             logos_json,
+            title,
+            subtitle,
         )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
@@ -83,6 +88,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 // DB-backed editable customization.
                 show_admin_link: None,
                 logos,
+                title,
+                subtitle,
             })
         }
     }
@@ -148,7 +155,8 @@ pub(crate) async fn update_in_tx(
             SET header_bg = ?, header_fg = ?, intro = ?,
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
-                custom_css = ?, logos_json = ?, updated_at = ?
+                custom_css = ?, logos_json = ?, title = ?, subtitle = ?,
+                updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -162,6 +170,8 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.analytics_origins))
     .bind(none_if_empty(&lc.custom_css))
     .bind(&logos_json)
+    .bind(none_if_empty(&lc.title))
+    .bind(none_if_empty(&lc.subtitle))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -185,7 +195,8 @@ pub(crate) async fn update_in_tx_pg(
             SET header_bg = $1, header_fg = $2, intro = $3,
                 intro_locales_json = $4, seo_title = $5, seo_description = $6,
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
-                custom_css = $10, logos_json = $11, updated_at = $12
+                custom_css = $10, logos_json = $11, title = $12,
+                subtitle = $13, updated_at = $14
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -199,6 +210,8 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.analytics_origins))
     .bind(none_if_empty(&lc.custom_css))
     .bind(&logos_json)
+    .bind(none_if_empty(&lc.title))
+    .bind(none_if_empty(&lc.subtitle))
     .bind(now)
     .execute(&mut **tx)
     .await

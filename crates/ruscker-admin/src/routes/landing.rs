@@ -45,6 +45,12 @@ struct LandingPage<'a> {
     /// Resolved per-locale intro text, or empty string when no
     /// `landing-customization.intro` is configured.
     intro: String,
+    /// Header title — `landing-customization.title` override, else
+    /// `proxy.title`, else the localized `landing-title` (#468).
+    header_title: String,
+    /// Header subtitle — `landing-customization.subtitle` override, else
+    /// the localized `landing-subtitle` (#468).
+    header_subtitle: String,
     /// Inline `style="..."` value for the `<header>` element when
     /// the operator set a custom background color. Empty string ⇒
     /// no override.
@@ -252,6 +258,21 @@ async fn index(
     }
     let analytics_origins = origins.trim().to_string();
 
+    // Header title/subtitle (#468): the editor override wins; otherwise
+    // the configured `proxy.title`, then the localized default. This also
+    // fixes the header ignoring `proxy.title` (it used to always show the
+    // i18n `landing-title`).
+    let cfg_title = state.config.proxy.title.trim();
+    let header_title = not_blank(&lc.title).unwrap_or_else(|| {
+        if cfg_title.is_empty() {
+            state.locales.t(loc, "landing-title", None)
+        } else {
+            cfg_title.to_string()
+        }
+    });
+    let header_subtitle =
+        not_blank(&lc.subtitle).unwrap_or_else(|| state.locales.t(loc, "landing-subtitle", None));
+
     let page = LandingPage {
         locale: loc,
         theme,
@@ -263,6 +284,8 @@ async fn index(
         subjects,
         counts,
         intro,
+        header_title,
+        header_subtitle,
         header_style,
         page_title,
         seo_description,

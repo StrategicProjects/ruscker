@@ -598,3 +598,6 @@ admin-disk-flash-removed = Eliminado.
 admin-disk-flash-pruned = Contenedores detenidos eliminados.
 admin-disk-flash-nothing = Nada que eliminar.
 admin-disk-flash-error = La operación falló. Revisa los registros.
+admin-disk-prune-images = Eliminar sin usar
+admin-disk-prune-images-confirm = ¿Eliminar todas las imágenes sin usar?
+admin-disk-flash-images-pruned = Imágenes sin usar eliminadas.

@@ -126,6 +126,23 @@ bind, base path, Docker, database, spec count) shows in the admin Logs
 tab at the default log level. The Portal logos editor reuses the spec
 form's image gallery picker.
 
+**Docker-by-default & Portal branding (v0.1.34–v0.1.35).** `serve`
+**auto-connects to Docker** when the daemon socket is reachable (pass
+`--no-docker` for landing-only); showcase demos seed with
+`min-replicas: 0` so a fresh install no longer pre-spawns every demo
+container. The Portal gains **per-theme colours** (independent
+background/text/accent for light and dark) and **logos that integrate
+into the chrome** — a header-left logo replaces the Ruscker mark,
+header-right trails the buttons, footer-right trails the version, and a
+center logo is centred within the bar; each takes an optional margin.
+The **landing editor** is reorganised into labelled section cards with a
+sticky Save bar, logos are edited as cards with segmented
+position/alignment pickers, and the live preview mirrors the real portal
+chrome. The social-share **`og:image` auto-defaults** to the header logo
+(else the Ruscker mark) and gets a gallery picker. Finally, the **live
+dashboard streams through reverse proxies** (`X-Accel-Buffering: no`), so
+new containers appear in real time even behind nginx on a subpath mount.
+
 ## Planned (optional)
 
 Demand-driven — Ruscker is complete and useful without it.

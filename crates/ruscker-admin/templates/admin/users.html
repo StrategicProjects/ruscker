@@ -35,7 +35,7 @@
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-initial-password") }}</span>
-      <input type="text" name="password" required autocomplete="off" placeholder="••••••••">
+      <input type="password" name="password" required autocomplete="new-password" placeholder="••••••••">
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
@@ -98,8 +98,8 @@
           {# Reset password — reveals a tiny inline form. #}
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/password"
                 style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
-            <input type="text" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
-                   style="width:120px" autocomplete="off">
+            <input type="password" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
+                   style="width:120px" autocomplete="new-password">
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
           </form>
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"

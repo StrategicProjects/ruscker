@@ -39,6 +39,19 @@ pub fn normalize_username(raw: &str) -> String {
     raw.trim().to_lowercase()
 }
 
+/// A username is safe iff it's non-empty and made only of identifier-ish
+/// chars (letters, digits, `_ . @ -` — `@` so e-mail logins work). It
+/// lands un-encoded in the per-user admin action URLs
+/// (`/admin/users/{username}/...`), so anything else (`/`, `?`, `#`,
+/// space, …) would make the user impossible to edit/delete from the UI
+/// (#429, same class as the credential-name fix #423).
+pub fn is_valid_username(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '@' | '-'))
+}
+
 /// Parse the stored comma-separated `groups` column into a clean list:
 /// trimmed, empties dropped, duplicates removed (first wins, order
 /// preserved). Group names are compared case-sensitively against a
@@ -644,6 +657,19 @@ mod tests {
         assert!(verify_password("s3cret-pw", &h));
         assert!(!verify_password("wrong", &h));
         assert!(!verify_password("s3cret-pw", "not-a-phc-string"));
+    }
+
+    #[test]
+    fn username_charset_is_restricted() {
+        assert!(is_valid_username("jane"));
+        assert!(is_valid_username("jane.doe_99"));
+        assert!(is_valid_username("ops@de.ufpe.br")); // e-mail logins
+        // Unsafe in the per-user action URL path segment (#429).
+        assert!(!is_valid_username("foo/bar"));
+        assert!(!is_valid_username("a?b"));
+        assert!(!is_valid_username("a#b"));
+        assert!(!is_valid_username("with space"));
+        assert!(!is_valid_username(""));
     }
 
     #[tokio::test]

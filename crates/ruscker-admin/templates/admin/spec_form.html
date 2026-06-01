@@ -17,7 +17,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }}, {{ builtin_logos_json() }})" x-cloak>
+<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
@@ -831,14 +831,8 @@
             <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
           </button>
         </template>
-        <template x-for="path in pickerBuiltins()" :key="'pk-' + path">
-          <button type="button" :title="path.split('/').pop()" @click="pickImage(path)"
-                  class="image-picker-tile is-builtin" :class="pickerSelected(path) ? 'is-sel' : ''">
-            <img :src="assetUrl(path)" :alt="path" loading="lazy">
-          </button>
-        </template>
       </div>
-      <div class="image-picker-empty" x-show="!pickerUploads().length && !pickerBuiltins().length">{{ self.t("admin-images-no-match") }}</div>
+      <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
     </div>
   </div>
 </div>
@@ -846,14 +840,12 @@
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
-window.ruscker.specForm = (initial, logoImages, builtinLogos) => ({
+window.ruscker.specForm = (initial, logoImages) => ({
   form: initial,
   // Media-library filenames for the logo/cover pickers (#213). Inline
   // uploads unshift new names here so a fresh thumbnail appears at once.
+  // Includes the built-in logos, which are seeded into the library (#433).
   logoImages: Array.isArray(logoImages) ? logoImages : [],
-  // Built-in framework + brand logo PATHS bundled in the binary (Option A),
-  // pickable in the logo/cover pickers so a new card can reuse them.
-  builtinLogos: Array.isArray(builtinLogos) ? builtinLogos : [],
   // How many gallery tiles to render initially (#293) — keeps the DOM +
   // thumbnail requests bounded on a large media library. "Show more"
   // reveals another page.
@@ -965,10 +957,6 @@ window.ruscker.specForm = (initial, logoImages, builtinLogos) => ({
   pickerUploads() {
     const q = this.picker.q.trim().toLowerCase();
     return q ? this.logoImages.filter((n) => n.toLowerCase().includes(q)) : this.logoImages;
-  },
-  pickerBuiltins() {
-    const q = this.picker.q.trim().toLowerCase();
-    return q ? this.builtinLogos.filter((p) => p.toLowerCase().includes(q)) : this.builtinLogos;
   },
   // Inline upload to the media library, then select the result for
   // `target` ('logo' or 'cover'). Reuses the same pipeline as the

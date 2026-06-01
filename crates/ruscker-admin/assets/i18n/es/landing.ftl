@@ -251,6 +251,9 @@ admin-images-uploaded = Imagen subida:
 admin-images-empty = Aún no hay imágenes. Suba la primera arriba.
 admin-images-delete = Eliminar
 admin-images-delete-confirm = ¿Eliminar esta imagen? Las specs que referencian el archivo mostrarán el cover tintado.
+admin-images-inuse = En uso
+admin-images-inuse-help = Usada en una tarjeta o un logo de la landing
+admin-images-delete-confirm-inuse = Esta imagen está EN USO (una tarjeta o la landing). ¿Eliminar igualmente?
 admin-images-search = Buscar imágenes…
 admin-images-no-match = Ninguna imagen coincide con la búsqueda.
 

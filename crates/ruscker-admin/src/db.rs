@@ -98,6 +98,10 @@ pub async fn open(path: impl AsRef<Path>) -> Result<SqlitePool> {
     if let Err(err) = showcase::seed_if_unseeded(&cfg).await {
         tracing::warn!(error = ?err, "showcase seed skipped");
     }
+    // First-install built-in logos in the Media library (#433).
+    if let Err(err) = builtin_logos::seed_if_unseeded(&cfg).await {
+        tracing::warn!(error = ?err, "builtin logos seed skipped");
+    }
 
     Ok(pool)
 }
@@ -154,6 +158,7 @@ pub async fn open_memory() -> Result<SqlitePool> {
 }
 
 pub mod audit;
+pub mod builtin_logos;
 pub mod credentials;
 pub mod export;
 pub mod images;

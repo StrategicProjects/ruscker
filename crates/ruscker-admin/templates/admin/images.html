@@ -91,9 +91,15 @@
                 <span><span class="opacity-60">·</span><span x-text="img.dims"></span></span>
               </template>
             </div>
+            {# In-use warning (#433): referenced by a card or a landing logo. #}
+            <template x-if="img.in_use">
+              <div class="image-tile-used" title="{{ self.t("admin-images-inuse-help") }}">
+                <i class="ti ti-alert-triangle" aria-hidden="true"></i> {{ self.t("admin-images-inuse") }}
+              </div>
+            </template>
           </div>
           <form method="post" :action="assetUrl('/admin/media/' + img.id + '/delete')"
-                onsubmit="return confirm('{{ self.t("admin-images-delete-confirm") }}');">
+                @submit="if (!confirm(img.in_use ? '{{ self.t("admin-images-delete-confirm-inuse") }}' : '{{ self.t("admin-images-delete-confirm") }}')) $event.preventDefault()">
             <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">
               <i class="ti ti-trash" aria-hidden="true"></i>
             </button>
@@ -141,27 +147,9 @@
   </script>
 {% endif %}
 
-{# ── Built-in logos (read-only) ───────────────────────────────
-   The framework + brand SVGs bundled in the binary. Shown so the gallery
-   isn't empty on a fresh install and mirrors what the spec-form logo/cover
-   pickers offer (#: media UX). Not deletable — they're binary assets. #}
-<div class="flex items-center gap-2 mt-8 mb-3">
-  <h2 class="text-sm font-medium">{{ self.t("admin-images-builtin") }}</h2>
-  <span class="text-xs text-[color:var(--text-faint)]">{{ self.builtin_logos().len() }}</span>
-</div>
-<section class="image-gallery">
-  {% for (path, name) in self.builtin_logos() %}
-  <div class="image-tile">
-    <a href="{{ base }}{{ path }}" target="_blank" rel="noopener" class="image-tile-frame" title="{{ path }}">
-      <img src="{{ base }}{{ path }}" alt="{{ name }}" loading="lazy" style="object-fit:contain;padding:10px">
-    </a>
-    <div class="image-tile-meta">
-      <div class="image-tile-name" title="{{ path }}">{{ name }}</div>
-      <div class="image-tile-sub"><span class="opacity-60">{{ self.t("admin-images-builtin-tag") }}</span></div>
-    </div>
-  </div>
-  {% endfor %}
-</section>
+{# Built-in logos used to render here as a separate read-only section; as
+   of #433 they're seeded into the Media library on first install, so they
+   appear in the gallery above (and are deletable) like any other image. #}
 
 {# Alpine powers BOTH the upload-zone drag-drop (the form near the top) and
    the gallery filter / "show more" below. The admin layout doesn't ship

@@ -255,6 +255,9 @@ admin-images-uploaded = Imagem enviada:
 admin-images-empty = Nenhuma imagem ainda. Envie a primeira acima.
 admin-images-delete = Excluir
 admin-images-delete-confirm = Excluir essa imagem? Specs que referenciam o arquivo passarão a mostrar o cover tintado.
+admin-images-inuse = Em uso
+admin-images-inuse-help = Usada num card ou nos logos da landing
+admin-images-delete-confirm-inuse = Esta imagem está EM USO (um card ou a landing). Deletar mesmo assim?
 admin-images-search = Buscar imagens…
 admin-images-no-match = Nenhuma imagem corresponde à busca.
 

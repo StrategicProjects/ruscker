@@ -161,6 +161,27 @@ pub const BUILTIN_LOGOS: &[&str] = &[
     "/assets/brand/mark.svg",
 ];
 
+/// `(filename, bytes)` for the built-in logos, seeded into the Media
+/// library on first install (#433) so they live in the one image group,
+/// are pickable like uploads, and are deletable. The bundled
+/// `/assets/showcase|brand/*` routes still serve the originals for the
+/// showcase cards; these are independent DB copies under `/assets/img/`.
+pub const BUILTIN_LOGO_ASSETS: &[(&str, &[u8])] = &[
+    ("shiny.svg", SHOWCASE_SHINY),
+    ("shiny-for-python.svg", SHOWCASE_SHINY_FOR_PYTHON),
+    ("streamlit.svg", SHOWCASE_STREAMLIT),
+    ("dash.svg", SHOWCASE_DASH),
+    ("voila.svg", SHOWCASE_VOILA),
+    ("jupyter.svg", SHOWCASE_JUPYTER),
+    ("rstudio.svg", SHOWCASE_RSTUDIO),
+    ("rmarkdown.svg", SHOWCASE_RMARKDOWN),
+    ("quarto.svg", SHOWCASE_QUARTO),
+    ("fastapi.svg", SHOWCASE_FASTAPI),
+    ("plumber.svg", SHOWCASE_PLUMBER),
+    ("bokeh.svg", SHOWCASE_BOKEH),
+    ("ruscker-mark.svg", BRAND_MARK),
+];
+
 // Ruscker brand kit — see docs/BRAND.md for usage rules.
 const BRAND_MARK: &[u8] = include_bytes!("../../assets/brand/ruscker-mark.svg");
 const BRAND_MARK_FLAT: &[u8] = include_bytes!("../../assets/brand/ruscker-mark-flat.svg");

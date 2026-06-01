@@ -141,7 +141,7 @@ async fn create(
     };
     let username = db::users::normalize_username(&form.username);
     let role = Role::parse(&form.role).unwrap_or(Role::Viewer);
-    if username.is_empty() || form.password.len() < MIN_PASSWORD_LEN {
+    if !db::users::is_valid_username(&username) || form.password.len() < MIN_PASSWORD_LEN {
         return redirect_flash("bad-input");
     }
     let groups = db::users::parse_groups(&form.groups);

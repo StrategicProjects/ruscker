@@ -54,6 +54,22 @@
   </div>
 </header>
 
+{# Header logos (admin-managed) — left / center / right groups. #}
+{% if self.has_logos("header") %}
+<div class="landing-logo-bar px-6 max-w-6xl mx-auto w-full">
+  {% for (align, items) in self.logo_groups("header") %}
+  <div class="landing-logo-group landing-logo-{{ align }}">
+    {% for logo in items %}
+      {% match logo.link %}{% when Some with (link) %}<a href="{{ link }}" target="_blank" rel="noopener">{% when None %}{% endmatch %}
+      <img src="{{ self.logo_src(logo) }}" alt="" loading="lazy"
+           style="height:{% match logo.height %}{% when Some with (h) %}{{ h }}{% when None %}32{% endmatch %}px">
+      {% match logo.link %}{% when Some with (link) %}</a>{% when None %}{% endmatch %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {# Custom HTML blocks — `top` slot (after the header). Rendered
    verbatim; admin-trusted (see /admin/blocks). Kept outside the
    Alpine `<main>` so operator markup isn't interpreted. #}
@@ -245,6 +261,22 @@
 {% for b in blocks_bottom %}
 <section class="landing-block landing-block--bottom px-6 max-w-6xl mx-auto w-full">{{ b.html|safe }}</section>
 {% endfor %}
+
+{# Footer logos (admin-managed) — left / center / right groups. #}
+{% if self.has_logos("footer") %}
+<div class="landing-logo-bar landing-logo-bar--footer px-6 max-w-6xl mx-auto w-full">
+  {% for (align, items) in self.logo_groups("footer") %}
+  <div class="landing-logo-group landing-logo-{{ align }}">
+    {% for logo in items %}
+      {% match logo.link %}{% when Some with (link) %}<a href="{{ link }}" target="_blank" rel="noopener">{% when None %}{% endmatch %}
+      <img src="{{ self.logo_src(logo) }}" alt="" loading="lazy"
+           style="height:{% match logo.height %}{% when Some with (h) %}{{ h }}{% when None %}28{% endmatch %}px">
+      {% match logo.link %}{% when Some with (link) %}</a>{% when None %}{% endmatch %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>

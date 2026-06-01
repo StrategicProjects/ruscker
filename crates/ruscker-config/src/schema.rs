@@ -420,6 +420,13 @@ pub struct LandingCustomization {
     /// live landing editor.
     #[serde(default, rename = "show-admin-link")]
     pub show_admin_link: Option<bool>,
+
+    /// Logos rendered in the public landing header / footer, each with a
+    /// slot, alignment, optional click-through link and per-logo height.
+    /// Admin-managed via the landing editor; survives import/export.
+    /// Multiple logos sharing a slot+alignment render side by side.
+    #[serde(default)]
+    pub logos: Vec<LandingLogo>,
 }
 
 impl LandingCustomization {
@@ -429,6 +436,25 @@ impl LandingCustomization {
     pub fn effective_show_admin_link(&self) -> bool {
         self.show_admin_link.unwrap_or(true)
     }
+}
+
+/// A logo rendered in the public landing header or footer. See
+/// [`LandingCustomization::logos`].
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LandingLogo {
+    /// Image URL — `/assets/img/...` (uploaded), `/assets/showcase|brand/...`
+    /// (built-in), or an absolute URL.
+    pub url: String,
+    /// Slot: `header` or `footer`. Anything else renders nowhere.
+    pub slot: String,
+    /// Horizontal alignment within the slot: `left` | `center` | `right`.
+    pub align: String,
+    /// Optional click-through URL — when set, the logo is an `<a>`.
+    pub link: Option<String>,
+    /// Render height in pixels (per-logo size). Falls back to a default
+    /// when unset.
+    pub height: Option<u32>,
 }
 
 /// A custom HTML block on the public landing (admin-authored,

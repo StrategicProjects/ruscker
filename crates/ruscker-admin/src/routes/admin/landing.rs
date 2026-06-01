@@ -68,6 +68,12 @@ impl<'a> LandingPage<'a> {
     fn form_initial_json(&self) -> String {
         serde_json::to_string(&self.form).unwrap_or_else(|_| "{}".into())
     }
+
+    /// Built-in logo paths offered (via a datalist) in the logos editor —
+    /// the same bundled framework + brand SVGs the spec-form picker uses.
+    fn builtin_logos(&self) -> &'static [&'static str] {
+        crate::routes::assets::BUILTIN_LOGOS
+    }
 }
 
 /// Flat form structure mirroring the customization fields. The
@@ -90,6 +96,11 @@ pub struct LandingForm {
     pub analytics_html: String,
     pub analytics_origins: String,
     pub custom_css: String,
+    /// Header/footer logos as a JSON array (the editor maintains the list
+    /// client-side and submits it in one hidden field). Empty/blank ⇒ no
+    /// logos.
+    #[serde(default)]
+    pub logos_json: String,
 }
 
 impl LandingForm {
@@ -109,6 +120,7 @@ impl LandingForm {
             analytics_html: lc.analytics_html.clone().unwrap_or_default(),
             analytics_origins: lc.analytics_origins.clone().unwrap_or_default(),
             custom_css: lc.custom_css.clone().unwrap_or_default(),
+            logos_json: serde_json::to_string(&lc.logos).unwrap_or_else(|_| "[]".into()),
         }
     }
 
@@ -143,6 +155,7 @@ impl LandingForm {
             // `show-admin-link` is a YAML deploy policy (#156), not an
             // editor field — never persisted from the form.
             show_admin_link: None,
+            logos: parse_logos(&self.logos_json),
         }
     }
 }
@@ -151,6 +164,33 @@ fn empty_to_none(s: String) -> Option<String> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t.to_string()) }
 }
+
+/// Parse + sanitize the editor's logos JSON: drop entries without a URL,
+/// normalize `slot`/`align` to known values (default `header`/`left`), and
+/// collapse blank links to `None`. Malformed JSON ⇒ no logos.
+fn parse_logos(json: &str) -> Vec<ruscker_config::LandingLogo> {
+    let raw: Vec<ruscker_config::LandingLogo> =
+        serde_json::from_str(json.trim()).unwrap_or_default();
+    raw.into_iter()
+        .filter(|l| !l.url.trim().is_empty())
+        .map(|mut l| {
+            l.url = l.url.trim().to_string();
+            l.slot = if l.slot == "footer" { "footer" } else { "header" }.to_string();
+            l.align = match l.align.as_str() {
+                "center" => "center",
+                "right" => "right",
+                _ => "left",
+            }
+            .to_string();
+            l.link = l.link.and_then(|s| {
+                let t = s.trim().to_string();
+                (!t.is_empty()).then_some(t)
+            });
+            l
+        })
+        .collect()
+}
+
 
 async fn index(
     _: RequireAdmin,
@@ -235,4 +275,33 @@ async fn render(
         groups,
     };
     super::render(&page)
+}
+
+#[cfg(test)]
+mod logo_tests {
+    use super::parse_logos;
+
+    #[test]
+    fn parse_logos_sanitizes() {
+        let json = r#"[
+            {"url":" /assets/brand/mark.svg ","slot":"footer","align":"right","link":" ","height":40},
+            {"url":"","slot":"header","align":"left"},
+            {"url":"/x.png","slot":"bogus","align":"bogus"}
+        ]"#;
+        let out = parse_logos(json);
+        assert_eq!(out.len(), 2, "empty-url entry dropped");
+        assert_eq!(out[0].url, "/assets/brand/mark.svg");
+        assert_eq!(out[0].slot, "footer");
+        assert_eq!(out[0].align, "right");
+        assert_eq!(out[0].link, None, "blank link → None");
+        assert_eq!(out[0].height, Some(40));
+        assert_eq!(out[1].slot, "header", "unknown slot → header");
+        assert_eq!(out[1].align, "left", "unknown align → left");
+    }
+
+    #[test]
+    fn parse_logos_malformed_is_empty() {
+        assert!(parse_logos("not json").is_empty());
+        assert!(parse_logos("").is_empty());
+    }
 }

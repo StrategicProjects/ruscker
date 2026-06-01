@@ -64,6 +64,9 @@ struct LandingPage<'a> {
     /// Operator custom CSS (#232), injected as a `<style>` near the end
     /// of `<head>` (rendered with `|safe`). Empty ⇒ nothing injected.
     custom_css: String,
+    /// Header/footer logos (admin-managed). Rendered in left/center/right
+    /// groups via [`Self::logo_groups`].
+    logos: Vec<ruscker_config::LandingLogo>,
     /// Custom HTML blocks rendered after the header (`top` slot) and
     /// after the card grid (`bottom` slot), in `position` order.
     blocks_top: Vec<crate::db::landing_blocks::LandingBlock>,
@@ -87,6 +90,41 @@ impl<'a> LandingPage<'a> {
     /// bundle/locale handling.
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// Any logos to render in `slot` (`header` / `footer`)?
+    fn has_logos(&self, slot: &str) -> bool {
+        self.logos.iter().any(|l| l.slot == slot)
+    }
+
+    /// Resolve a logo's `<img src>`: an absolute/protocol-relative URL is
+    /// used as-is; a root-absolute path gets the mount prefix (#173).
+    fn logo_src(&self, logo: &ruscker_config::LandingLogo) -> String {
+        let u = &logo.url;
+        if u.starts_with("http://") || u.starts_with("https://") || u.starts_with("//") {
+            u.clone()
+        } else {
+            format!("{}{}", self.base, u)
+        }
+    }
+
+    /// Logos in `slot`, grouped into the left/center/right alignment
+    /// buckets (in that order), each preserving insertion order. Empty
+    /// buckets are still returned so the template's grid keeps its three
+    /// columns. Used by the header + footer logo bars.
+    fn logo_groups(&self, slot: &str) -> Vec<(&'static str, Vec<&ruscker_config::LandingLogo>)> {
+        ["left", "center", "right"]
+            .iter()
+            .map(|&align| {
+                (
+                    align,
+                    self.logos
+                        .iter()
+                        .filter(|l| l.slot == slot && l.align == align)
+                        .collect(),
+                )
+            })
+            .collect()
     }
 
     /// Translation with a single Fluent variable (most common case
@@ -231,6 +269,7 @@ async fn index(
         og_image,
         analytics_html,
         custom_css,
+        logos: lc.logos.clone(),
         blocks_top,
         blocks_bottom,
         signed_in: session.is_some(),

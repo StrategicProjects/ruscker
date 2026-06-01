@@ -226,6 +226,43 @@
         <div class="spec-form-help">{{ self.t("admin-landing-custom-css-help") }}</div>
       </div>
 
+      {# ── Header / footer logos ─────────────────────────────── #}
+      <div class="spec-form-section-title">{{ self.t("admin-landing-logos") }}</div>
+      <div class="spec-form-field">
+        <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-logos-help") }}</div>
+        {# Submitted as one hidden JSON field; the rows below edit the array. #}
+        <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
+        <datalist id="builtin-logo-list">
+          {% for path in self.builtin_logos() %}<option value="{{ path }}"></option>{% endfor %}
+        </datalist>
+        <template x-for="(logo, i) in logos" :key="i">
+          <div class="landing-logo-row">
+            <img :src="logo.url" alt="" class="landing-logo-thumb" x-show="logo.url">
+            <input type="text" x-model="logo.url" list="builtin-logo-list"
+                   placeholder="/assets/img/logo.png" class="spec-form-input spec-form-input--mono" style="flex:2;min-width:12rem">
+            <select x-model="logo.slot" class="theme-select">
+              <option value="header">{{ self.t("admin-landing-logo-header") }}</option>
+              <option value="footer">{{ self.t("admin-landing-logo-footer") }}</option>
+            </select>
+            <select x-model="logo.align" class="theme-select">
+              <option value="left">{{ self.t("admin-landing-logo-left") }}</option>
+              <option value="center">{{ self.t("admin-landing-logo-center") }}</option>
+              <option value="right">{{ self.t("admin-landing-logo-right") }}</option>
+            </select>
+            <input type="url" x-model="logo.link" placeholder="https://…"
+                   class="spec-form-input" style="flex:1;min-width:8rem" title="{{ self.t("admin-landing-logo-link") }}">
+            <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32"
+                   class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-height") }}">
+            <button type="button" class="admin-nav-link" @click="logos.splice(i, 1)"
+                    title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+          </div>
+        </template>
+        <button type="button" class="admin-nav-link mt-2"
+                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32 })">
+          <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
+        </button>
+      </div>
+
     </form>
 
     {# ── RIGHT: live preview ──────────────────────────────── #}
@@ -274,6 +311,12 @@
 window.ruscker = window.ruscker || {};
 window.ruscker.landingForm = (initial) => ({
   form: initial,
+  // Header/footer logos — edited as an array here, submitted as the
+  // hidden `logos_json` field (bound via JSON.stringify). Seeded by
+  // parsing the same field from the server.
+  logos: (() => {
+    try { return JSON.parse(initial.logos_json || '[]'); } catch (_) { return []; }
+  })(),
   // Header-background editing mode + gradient builder sub-state.
   bgMode: window.ruscker.bgMode(initial.header_bg || ''),
   grad: window.ruscker.gradientDefault(),

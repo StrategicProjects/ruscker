@@ -3,6 +3,14 @@
 {% block title %}{{ self.t("admin-disk-title") }} · Ruscker{% endblock %}
 
 {% block content %}
+<style>
+  /* Even column spacing for the disk tables (#disk-ux) — the right-aligned
+     Size column was butting up against Usage. First/last cells stay flush
+     with the section edges. */
+  .disk-table th, .disk-table td { padding: 7px 14px; vertical-align: middle; }
+  .disk-table th:first-child, .disk-table td:first-child { padding-left: 0; }
+  .disk-table th:last-child, .disk-table td:last-child { padding-right: 0; }
+</style>
 <div class="flex items-end justify-between mb-3">
   <div>
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-disk-title") }}</h1>
@@ -29,9 +37,11 @@
   <div class="flex items-end justify-between mb-2 mt-4">
     <h2 class="text-sm font-medium">{{ self.t("admin-disk-containers-heading") }}</h2>
     {% if stopped_count > 0 %}
-    <form method="post" action="{{ base }}/admin/disk/containers/prune"
+    <form method="post" action="{{ base }}/admin/disk/containers/prune" class="disk-prune-form"
           onsubmit="return confirm('{{ self.t("admin-disk-prune-confirm") }}')">
-      <button type="submit" class="dash-action dash-action--danger" style="width:auto;padding:6px 12px">
+      <button type="submit" class="admin-login-btn admin-login-btn--danger"
+              style="padding:7px 12px;font-size:12px"
+              data-busy="{{ self.t("admin-disk-cleaning") }}">
         <i class="ti ti-trash" aria-hidden="true"></i>
         {{ self.t("admin-disk-prune") }} ({{ stopped_count }})
       </button>
@@ -42,7 +52,7 @@
   {% if containers.is_empty() %}
   <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-containers") }}</p>
   {% else %}
-  <table class="w-full text-sm" style="border-collapse:collapse">
+  <table class="w-full text-sm disk-table" style="border-collapse:collapse">
     <thead>
       <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
         <th class="py-2">{{ self.t("admin-disk-col-container") }}</th>
@@ -85,9 +95,11 @@
     <h2 class="text-sm font-medium">{{ self.t("admin-disk-images-heading") }}</h2>
     <div class="flex items-center gap-3">
       {% if unused_images_count > 0 %}
-      <form method="post" action="{{ base }}/admin/disk/images/prune"
+      <form method="post" action="{{ base }}/admin/disk/images/prune" class="disk-prune-form"
             onsubmit="return confirm('{{ self.t("admin-disk-prune-images-confirm") }}')">
-        <button type="submit" class="dash-action dash-action--danger" style="width:auto;padding:6px 12px">
+        <button type="submit" class="admin-login-btn admin-login-btn--danger"
+                style="padding:7px 12px;font-size:12px"
+                data-busy="{{ self.t("admin-disk-cleaning") }}">
           <i class="ti ti-trash" aria-hidden="true"></i>
           {{ self.t("admin-disk-prune-images") }} ({{ unused_images_count }})
         </button>
@@ -103,7 +115,7 @@
   {% if images.is_empty() %}
   <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-images") }}</p>
   {% else %}
-  <table class="w-full text-sm" style="border-collapse:collapse">
+  <table class="w-full text-sm disk-table" style="border-collapse:collapse">
     <thead>
       <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
         <th class="py-2">{{ self.t("admin-disk-col-image") }}</th>
@@ -150,4 +162,20 @@
   {% endif %}
 
 {% endif %}
+
+<script>
+  // Show a "cleaning…" state on the bulk prune buttons while the POST
+  // runs (it can take a few seconds for many containers/images). The
+  // inline confirm() runs first; we only kick in if it wasn't cancelled.
+  document.addEventListener('submit', function (e) {
+    var form = e.target;
+    if (!form.classList || !form.classList.contains('disk-prune-form')) return;
+    if (e.defaultPrevented) return; // confirm() was cancelled
+    var btn = form.querySelector('button[type="submit"]');
+    if (!btn) return;
+    var busy = btn.getAttribute('data-busy') || 'Cleaning…';
+    btn.disabled = true;
+    btn.innerHTML = '<i class="ti ti-loader-2 animate-spin" aria-hidden="true"></i> ' + busy;
+  });
+</script>
 {% endblock %}

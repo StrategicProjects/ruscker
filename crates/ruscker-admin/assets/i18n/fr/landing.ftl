@@ -601,3 +601,4 @@ admin-disk-flash-error = L'opération a échoué. Consultez les journaux.
 admin-disk-prune-images = Supprimer les inutilisées
 admin-disk-prune-images-confirm = Supprimer toutes les images inutilisées ?
 admin-disk-flash-images-pruned = Images inutilisées supprimées.
+admin-disk-cleaning = Nettoyage…

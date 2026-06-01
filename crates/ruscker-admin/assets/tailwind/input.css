@@ -689,6 +689,12 @@ body {
   padding: 11px 12px;
   margin-top: 4px;
 }
+/* Destructive labelled button — same shape as the primary button so it
+   reads as part of the app, but red to signal it removes things (the
+   disk panel's "remove stopped / remove unused" bulk actions). */
+.admin-login-btn--danger { background: var(--color-lock); }
+.admin-login-btn--danger:hover { background: #dc2626; }
+.admin-login-btn:disabled { opacity: 0.6; cursor: default; }
 .admin-login-error {
   display: flex; align-items: center; gap: 8px;
   background: rgba(239, 68, 68, 0.08);

@@ -1,11 +1,11 @@
 # Roadmap
 
-Ruscker is at **v0.1.3** — Phases 0 through 7 are done and the proxy is
+Ruscker is at **v0.1.31** — Phases 0 through 7 are done and the proxy is
 production-ready and horizontally scalable. Phase 8 (external auth) is
 the main optional, demand-driven work left. For what changed in each
 release, see the [release notes](./news.md).
 
-![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. The latest release v0.1.3 adds admin/UX + proxy polish. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
+![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. The latest release v0.1.31 adds demo forks, URL-rewrite modernization, unified credentials, media library, portal logos, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
 
 ## Shipped
 
@@ -70,6 +70,51 @@ instances behind an L4 load balancer can share state and any instance
 can serve any session; one scaler leader via Postgres advisory locks,
 with failover. A runnable 2-instance compose harness lives in
 `examples/ha/`. See [Deployment shapes](./architecture.md#deployment-shapes).
+
+### Post-phase polish → **v0.1.4 – v0.1.31**
+
+Incremental improvements shipped after Phase 7.
+
+**Demo app images.** The Dash, FastAPI, and Quarto showcase cards now
+point to dedicated **`milkway/ruscker-*-demo`** images on Docker Hub.
+The Quarto demo is a static nginx image (~67 MB); Dash and FastAPI serve
+at the root without needing `SHINYPROXY_PUBLIC_PATH`. Demo forks for
+Shiny, Streamlit, and Voilà are **backlog** — those cards still point to
+upstream images.
+
+**URL-rewrite modernization.** The runtime shim that rewrites relative
+asset paths under `/app/{id}/` is now generalized to patch
+`script.src`, `link.href`, `img.src`, and `setAttribute`, which retired
+the Voilà-specific rewriter. The Jupyter-config rewriter (`rewrite_jupyter_config`)
+is kept: JupyterLab builds absolute same-origin API URLs from
+`PageConfig.baseUrl` that a root-relative shim cannot intercept. A
+full absolute-URL Path B rewrite (handling apps that hard-code
+`window.location.origin`) is **deferred** — the current shim covers all
+validated app types.
+
+**Credentials.** The named-credential store now accepts a pure
+`${VAR}` env-ref in addition to an AES-256-GCM literal, resolved only
+at container pull time. The spec form's Registry section is now a
+credential picker; inline domain/user/password fields remain as
+back-compat.
+
+**Media library.** Built-in logos are seeded into the unified media
+library (deletable, with an "in use" badge). The spec-form image picker
+supports inline upload. Gallery pages are paginated with search.
+
+**Portal logos.** The landing editor supports per-slot logos (header /
+footer) with alignment (left / center / right), an optional link, and a
+per-logo height.
+
+**Performance.** gzip/br compression on admin and landing responses;
+`?v=<version>` immutable cache headers on bundled CSS/JS; ETag on media
+assets; WebP thumbnails; bounded Docker stats fan-out with a
+configurable `metrics-interval`.
+
+**Security fixes.** API routing uses in-flight count (not seats);
+charset validation on usernames and credential names; admin password
+fields are write-only in the UI; `${VAR}` resolution returns an error
+when the variable is unset (names the missing variable).
 
 ## Planned (optional)
 

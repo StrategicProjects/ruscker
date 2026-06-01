@@ -5,10 +5,10 @@ Status: living document. Tracks the Phase 5 security audit
 **[accepted limitation]**, or **[deferred]**. File references use
 `crate/path:symbol` so they survive line-number drift.
 
-> **Scope.** This covers the MVP (v0.1.0): single-operator
-> install, Ruscker behind a TLS-terminating reverse proxy, Docker
-> on the same host. Multi-tenant / shared-team auth (OIDC, RBAC)
-> is out of scope until Phase 8.
+> **Scope.** This covers v0.1.31: single-operator install, Ruscker
+> behind a TLS-terminating reverse proxy, Docker on the same host.
+> Multi-tenant / shared-team auth (OIDC, RBAC) is out of scope until
+> Phase 8.
 
 ---
 
@@ -94,6 +94,23 @@ Status: living document. Tracks the Phase 5 security audit
   remaining admin. Audit entries record the acting username (or
   `token` for a break-glass session). Per-app ACLs and external IdPs
   (OIDC/SAML/LDAP) remain Phase 8.
+- **[implemented]** Identifier charset validation (#429 / #423) — a
+  username (`db::users::is_valid_username`) and a stored-credential name
+  (`routes::admin::credentials::is_valid_credential_name`) must be
+  non-empty and made only of identifier-ish chars (letters, digits,
+  `_ . -`, plus `@` for e-mail logins). Both land **un-encoded** in a
+  per-resource admin action URL path segment
+  (`/admin/users/{username}/...`, `/admin/credentials/{name}/delete`), so
+  a `/`, `?`, `#`, or space would make the account/credential impossible
+  to edit or delete from the UI — the validation keeps every row
+  manageable (and therefore deletable). Rejected → the form re-renders
+  with an error, no row written.
+- **[implemented]** Password fields are **write-only** in the admin
+  forms (#430) — the user form and the spec-form Registry section never
+  pre-fill or render a stored password; a blank field keeps the existing
+  value, and the input is masked so a shoulder-surfer can't read a
+  freshly-typed secret. Server-side, a blank password on edit is a no-op,
+  not a wipe.
 - **[implemented]** Bind-mount **`volumes` are Admin-only** (#302). A
   spec's `volumes` map to Docker `HostConfig.binds` — i.e. host
   filesystem / `docker.sock` access — so an Editor (who can otherwise
@@ -111,6 +128,19 @@ Status: living document. Tracks the Phase 5 security audit
   AES-256-GCM — `crypto::MasterKey::{encrypt,decrypt}`. A fresh
   random nonce per encryption, stored alongside the ciphertext;
   never reused (new nonce on every `upsert`).
+- **[implemented]** Unified credential store, two storage modes (#351) —
+  `db::credentials::upsert` accepts **either** a literal password
+  (AES-256-GCM at rest, as above) **or** a pure `${VAR}` env-ref (stored
+  **verbatim**, never encrypted, flagged by an empty nonce — a real GCM
+  nonce is 12 bytes, never empty — and resolved from the environment only
+  at pull time). The env-ref branch is gated on
+  `ruscker_config::env::is_pure_env_ref`: the value must consist
+  **entirely** of valid `${VAR}` / `${VAR:-default}` tokens (whole-token
+  only). A value with any literal text — e.g. `prefix${VAR}` or a
+  malformed `abc${def` — is **not** kept verbatim; it's treated as a
+  literal secret and AES-encrypted. This is the #422 fix: a loose
+  `contains("${")` test would have stored such a literal in cleartext at
+  rest. Either way the DB never holds resolved cleartext.
 - **[implemented]** Master key held in `Zeroizing<[u8; 32]>`
   inside an `Arc` — wiped on last drop. Cookie key likewise
   (`ruscker_proxy::sticky::CookieKey`).
@@ -125,8 +155,10 @@ Status: living document. Tracks the Phase 5 security audit
   the resolved secret never lands in the config DB or an export. The
   admin spec form treats the password as **write-only** — never
   pre-filled or rendered; a blank field keeps the stored value.
-  `docker-registry-credential` (the AES-encrypted store) is preferred
-  for new flows. **`container-env` values** get the same treatment
+  `docker-registry-credential` (the named store — AES literal **or** a
+  verbatim `${VAR}` env-ref, see above) is preferred for new flows; the
+  spec-form Registry section is now just the picker for a stored
+  credential. **`container-env` values** get the same treatment
   (#272): a `${VAR}` in a `container-env` value is preserved literal at
   parse and resolved only at spawn (`Spec::resolved_env_pairs`), so an
   app secret passed via `${VAR}` never lands in the DB either. A missing
@@ -284,7 +316,7 @@ Status: living document. Tracks the Phase 5 security audit
 Minimal Caddy:
 
 ```caddy
-portal.example.gov.br {
+portal.example.org {
     reverse_proxy 127.0.0.1:8080 {
         header_up X-Forwarded-Proto {scheme}
     }
@@ -296,7 +328,7 @@ Minimal nginx:
 ```nginx
 server {
     listen 443 ssl;
-    server_name portal.example.gov.br;
+    server_name portal.example.org;
     # ssl_certificate ... ssl_certificate_key ...;
     location / {
         proxy_pass http://127.0.0.1:8080;

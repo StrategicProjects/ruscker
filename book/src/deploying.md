@@ -115,7 +115,7 @@ Terminate TLS at your edge / load balancer and forward to nginx with
 ```nginx
 server {
     listen 80;
-    server_name portal.example.gov;
+    server_name portal.example.com;
 
     # Media-library / card-image uploads. nginx defaults to 1 MB, which
     # silently 413s any larger image before it reaches Ruscker (the admin
@@ -140,12 +140,19 @@ Set `server.useForwardHeaders: true` in the YAML so Ruscker trusts
 `X-Forwarded-*` (needed for `Secure` cookies and per-client API rate
 limiting).
 
-> The live dashboard streams over Server-Sent Events
-> (`/admin/dashboard/events`). If its updates lag, nginx is buffering
-> the stream — disable it for that path:
+> Two Ruscker endpoints stream over **Server-Sent Events** (SSE):
+> the live dashboard (`/admin/dashboard/events`) and the Ruscker log
+> tail (`/admin/logs/stream`). nginx's default response buffering
+> delays or blocks these streams — disable it for both paths:
 >
 > ```nginx
 > location = /admin/dashboard/events {
+>     proxy_pass http://127.0.0.1:8090;
+>     proxy_buffering off;
+>     proxy_read_timeout 1h;
+>     # + the same proxy_set_header lines as above
+> }
+> location = /admin/logs/stream {
 >     proxy_pass http://127.0.0.1:8090;
 >     proxy_buffering off;
 >     proxy_read_timeout 1h;
@@ -173,29 +180,29 @@ reload.
 ## 4b. Mounting under a base path (subpath)
 
 When you can't create a subdomain (no DNS governance), serve the whole
-portal under a subpath like `example.org/box/`. Start Ruscker with
-`--base-path /box` (or `server.context-path: /box` in the config —
+portal under a subpath like `example.org/apps/`. Start Ruscker with
+`--base-path /apps` (or `server.context-path: /apps` in the config —
 ShinyProxy's `server.servlet.context-path` is also accepted), and point
 nginx at it **preserving the prefix** (no trailing path on `proxy_pass`,
-so the `/box` stays in the forwarded URL):
+so the `/apps` stays in the forwarded URL):
 
 ```nginx
-# Forward both the bare /box and everything under /box/ — without an
+# Forward both the bare /apps and everything under /apps/ — without an
 # nginx-side redirect (Ruscker does its own canonicalization below).
-location = /box  { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
-location /box/   { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
+location = /apps  { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
+location /apps/   { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from §3 */ }
 ```
 
-Ruscker then nests every route under `/box` (`/box`, `/box/admin/…`,
-`/box/app/{spec}/…`), rewrites the URLs/redirects it emits to carry the
+Ruscker then nests every route under `/apps` (`/apps`, `/apps/admin/…`,
+`/apps/app/{spec}/…`), rewrites the URLs/redirects it emits to carry the
 prefix, and injects a small runtime shim so JS-built requests (the live
-dashboard's SSE, `fetch`, etc.) resolve under `/box` too. `/healthz` and
+dashboard's SSE, `fetch`, etc.) resolve under `/apps` too. `/healthz` and
 `/readyz` stay at the **root** for load-balancer probes — don't put them
-behind the `/box` locations. `--base-path` is empty by default, so
+behind the `/apps` locations. `--base-path` is empty by default, so
 root-mounted deploys are unaffected.
 
-> The canonical landing URL is `/box` (no trailing slash); a request to
-> `/box/` 308-redirects to it. Keeping nginx as a plain `proxy_pass`
+> The canonical landing URL is `/apps` (no trailing slash); a request to
+> `/apps/` 308-redirects to it. Keeping nginx as a plain `proxy_pass`
 > (never redirecting) means that single hop can't loop.
 
 ## 5. Health checks

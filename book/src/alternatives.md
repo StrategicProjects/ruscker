@@ -45,8 +45,60 @@ YAML and restart". See [Migrating from ShinyProxy](./migrating.md).
 
 **What ShinyProxy still does that Ruscker doesn't (yet):** a mature
 Kubernetes operator and pluggable enterprise auth (OIDC/SAML/LDAP for
-*app access*). Ruscker's multi-host is Docker-over-ssh/tcp today, and
-its auth gates the *admin panel* (per-app ACLs are [Phase 8](./roadmap.md)).
+*app access*). Ruscker's multi-host is Docker-over-ssh/tcp today. Per-app
+visibility and access control (`access-groups` / `access-users`,
+ShinyProxy-compatible) are already supported; OIDC/SAML/LDAP gating at
+the proxy level is not (apps can handle their own auth internally).
+
+### Strip model vs. `SHINYPROXY_PUBLIC_PATH`
+
+One migration detail worth knowing: ShinyProxy uses a **no-strip** model —
+it passes the full public path to the container as the
+`SHINYPROXY_PUBLIC_PATH` environment variable, and well-behaved
+ShinyProxy demo images read that variable to self-prefix all their URLs.
+Ruscker uses a **strip** model — the proxy strips `/app/{id}` from the
+request path before forwarding, so the container always receives a
+root-relative path (e.g. `/lab/...` instead of `/app/jupyter/lab/...`).
+The container does **not** need to know its mount path; the proxy injects
+a `<base href>`, rewrites static URLs in HTML responses, and patches
+runtime fetches via a small JS shim.
+
+This means **do not set `SHINYPROXY_PUBLIC_PATH` in `container-env`** for
+Ruscker — the container would misconfigure itself and 404 on every request.
+Most apps need no mount-path configuration at all; just serve them at the
+root. Jupyter, for example, runs at `--ServerApp.base_url=/`:
+
+```yaml
+- id: jupyter
+  container-image: quay.io/jupyter/minimal-notebook:latest
+  container-port: 8888
+  container-cmd:
+    - start-notebook.py
+    - --IdentityProvider.token=
+    - --ServerApp.allow_origin=*
+    - --ServerApp.base_url=/
+```
+
+For the rare app that genuinely needs to know its external mount path — to
+build absolute URLs the proxy can't rewrite — Ruscker exposes an explicit
+opt-in token `#{publicPath}`, substituted at spawn with the spec's actual
+mount path (including any `--base-path` prefix), for use in `container-cmd`
+or `container-env`. Do **not** use it for Jupyter: under the strip model a
+non-root `base_url` makes it 404 every path (see
+[Troubleshooting](./troubleshooting.md)). Apps like Shiny, Streamlit, Dash
+and Voilà never need it.
+
+### Secrets via env-var interpolation
+
+Both Ruscker and ShinyProxy support `${VAR}` references in the YAML. The
+difference is where resolution happens. In Ruscker, `${VAR}` references
+in `container-env` values are resolved **at spawn**, not at parse: the
+literal `${DB_PASSWORD}` is stored in the config and the database; only
+when a container is actually started does Ruscker look up the environment
+variable and inject the real value. This means **secrets never land in
+the database** — the DB only ever sees the placeholder. Set secrets in
+the process environment (or in `/etc/ruscker/ruscker.env` for the systemd
+service) and reference them by name in the YAML.
 
 ## Shiny Server (open source / "Free")
 
@@ -100,10 +152,11 @@ scaling and reaping for free. See [What Ruscker can serve](./use-cases.md).
   scheduled reports, content versioning) — that's Posit Connect.
 - You're **all-in on Kubernetes** and want a CRD-native operator today —
   ShinyProxy's operator or a k8s-native platform is a better match
-  (Ruscker schedules onto Docker hosts, not k8s, as of Phase 6).
-- You need **enterprise SSO gating app access per user** right now —
-  that's [Phase 8](./roadmap.md); today Ruscker's auth covers the admin
-  panel (Viewer / Editor / Admin).
+  (Ruscker schedules onto Docker hosts, not k8s).
+- You need **enterprise SSO gating app access per user** (OIDC/SAML/LDAP
+  at the proxy level) — Ruscker's auth covers admin roles (Viewer /
+  Editor / Admin) and per-app visibility (`access-groups` / `access-users`),
+  but proxy-level SSO is not yet supported.
 
 If none of those apply and you want ShinyProxy's model without the JVM,
 start with the [Quickstart](./quickstart.md).

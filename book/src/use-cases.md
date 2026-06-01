@@ -12,11 +12,53 @@ Each app becomes a card on the landing page and a route under
 spawning, sticky sessions, WebSocket upgrades, URL rewriting, load
 balancing, and reaping idle containers.
 
+## Showcase demos
+
+A fresh Ruscker install seeds 13 demo cards automatically. Three of them
+use own-fork images published on Docker Hub; the rest link to official
+docs or use well-known public images:
+
+| Card | Image | Notes |
+|---|---|---|
+| Shiny | `openanalytics/shinyproxy-demo:latest` | R Shiny demo app, port 3838 |
+| Shiny for Python | `openanalytics/shinyproxy-shiny-for-python-demo:latest` | Python, port 8080 |
+| Jupyter | `quay.io/jupyter/minimal-notebook:latest` | token-less, `base_url=/` |
+| RStudio Server | `rocker/rstudio:latest` | per-session IDE, port 8787 |
+| R Markdown | `openanalytics/shinyproxy-rmarkdown-demo:latest` | Shiny backend, port 3838 |
+| Streamlit | `openanalytics/shinyproxy-streamlit-demo:latest` | port 8501 |
+| **Dash** | **`milkway/ruscker-dash-demo:latest`** | our fork — serves at root, no env quirks; multi-arch |
+| **Quarto** | **`milkway/ruscker-quarto-demo:latest`** | our fork — pre-rendered static HTML on nginx (~67 MB vs ~430 MB) |
+| **FastAPI** | **`milkway/ruscker-fastapi-demo:latest`** | our fork — stateless API kind; multi-arch |
+| Voilà | `openanalytics/shinyproxy-voila-demo:latest` | Jupyter notebooks as apps |
+| Bokeh | *(external link)* | docs card, no container |
+| Plumber | *(external link)* | docs card, no container |
+| Ruscker | *(external link)* | docs card, no container |
+
+The three own-fork images (`milkway/ruscker-dash-demo`, `milkway/ruscker-fastapi-demo`,
+`milkway/ruscker-quarto-demo`) are the reference for "how to make a Ruscker-ready
+container": they serve at root, ship no `SHINYPROXY_PUBLIC_PATH` dependency,
+and the Dash/FastAPI forks are multi-arch (amd64 + arm64).
+
+Seeding is idempotent — it only runs once per database. If you delete a
+showcase card, it stays gone on subsequent restarts.
+
 ## Interactive, stateful apps
 
-State lives on the server and the client holds a reactive WebSocket —
-the Shiny model. These need **sticky sessions + WebSocket forwarding**,
-which Ruscker does by default.
+There are two interactive spec kinds in Ruscker:
+
+- **`shiny`** — the Shiny model: state on the server, a reactive WebSocket
+  connection per session. Sticky sessions and WebSocket forwarding are
+  on by default. Covers R Shiny and Shiny for Python.
+- **`app`** (interactive app) — same sticky-session + WebSocket behavior,
+  but for apps that aren't Shiny specifically: Streamlit, Dash, Voilà,
+  JupyterLab, RStudio Server, and similar. Use `type: app` in your spec
+  (or Ruscker infers it from well-known `type:` values like `streamlit`,
+  `dash`, `voila`).
+
+Both kinds give each session its own container slot and forward WebSocket
+upgrades transparently.
+
+Supported frameworks:
 
 - **R** — Shiny (the reference case), Quarto Live, `flexdashboard` with
   `runtime: shiny`.
@@ -53,7 +95,8 @@ benefit from per-spec replica limits.
 Each user gets an isolated container — the JupyterHub pattern, with
 Ruscker's portal and admin on top.
 
-- JupyterLab / Jupyter Notebook, RStudio Server, `code-server` (VS Code
+- JupyterLab / Jupyter Notebook (included in the showcase seed),
+  RStudio Server (included in the showcase seed), `code-server` (VS Code
   in the browser), Theia, Marimo Lab.
 
 ## BI and data exploration
@@ -102,7 +145,7 @@ Surface a DB console as just another card on the portal.
 
 ## Who it's for
 
-- **Governments, universities and research centers** publishing analytics
+- **Public sector, universities and research centers** publishing analytics
   dashboards for the public or for staff.
 - **BI and data-science teams** that want to ship R/Shiny and
   Python/Streamlit apps without standing up a Kubernetes cluster.

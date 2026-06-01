@@ -9,6 +9,104 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.18–v0.1.31 — 2026-05-31
+
+Demo images, credential unification, a redesigned media library, and portal logo support.
+
+**Demo app images**
+- **Dash**, **FastAPI**, and **Quarto** showcase cards now use dedicated
+  fork images on Docker Hub (`milkway/ruscker-dash-demo`,
+  `milkway/ruscker-fastapi-demo`, `milkway/ruscker-quarto-demo`).
+  Dash and FastAPI serve at the container root (no
+  `SHINYPROXY_PUBLIC_PATH` configuration needed). The Quarto demo is a
+  static nginx image (~67 MB).
+
+**Credentials store**
+- The named-credential store now accepts a **pure `${VAR}` env-ref** as
+  a password (stored verbatim, resolved only at pull time), in addition
+  to the existing AES-encrypted literal. "Pure" means a whole-token
+  `${VAR}` — a value with a literal prefix like `prefix${VAR}` is not
+  stored verbatim; it is treated as a literal and AES-encrypted (security
+  fix).
+- The spec-form Registry section is now a **credential picker**; the
+  inline domain/user/password fields are hidden back-compat fallbacks.
+
+**Media library**
+- Built-in logos are **seeded into the Media library** on first start
+  (idempotent) — one unified gallery, no separate "Built-in logos"
+  group. Each logo is **deletable** and shows an **"in use" badge**
+  (cross-references spec logo/cover and landing logos).
+- A **modal picker** in the spec form provides search, uploads, and
+  inline upload without leaving the form; drag-and-drop is supported on
+  both the modal and the media page.
+
+**Portal header/footer logos**
+- The landing editor supports logos in the **header and footer slots**,
+  each with alignment (left/center/right), an optional click-through
+  link, and a per-logo height.
+
+**Security fixes**
+- Username charset and credential-name charset are now validated,
+  making credentials safely deletable.
+- Admin password fields in the spec and user forms are now
+  **masked / write-only**.
+
+**Proxy**
+- API requests (kind `Api`) are now routed by **in-flight request
+  count** instead of seat count, and the in-flight guard spans the
+  full streaming response body.
+
+---
+
+## v0.1.4–v0.1.17 — 2026-05-29
+
+Live UX fixes, security hardening, and a performance pass.
+
+**Live UX fixes**
+- **Cold-start splash**: a loading screen appears on first navigation to
+  an app while its container is starting.
+- **RStudio Server**: the proxy injects the `X-RStudio-Root-Path` header
+  so RStudio rewrites its own internal links correctly behind the mount.
+- **`App` kind** added for notebook-style apps (Jupyter, RStudio) that
+  don't fit the Shiny or plain API model.
+- Relative font URLs fixed so icons resolve correctly when served under
+  a sub-path.
+- Alpine.js CSP flag corrected (`'unsafe-eval'`) so popovers and dynamic
+  filters work.
+- Version number shown in the admin footer.
+- The admin **Blocks editor** is folded into the Portal settings page.
+
+**Security hardening**
+- Ruscker's own session cookies are stripped before forwarding requests
+  to app containers — the admin session no longer leaks upstream.
+- CSRF guard (Fetch-Metadata / Origin check) on all chrome-mutating
+  actions.
+- `${VAR}` secrets in `container-env` and registry passwords are
+  preserved verbatim through import/export and resolved only at spawn
+  or pull time — they never appear in cleartext in the database.
+- Container log access is gated to Editor-and-above accounts.
+
+**Performance**
+- **gzip / Brotli compression** on all HTML, CSS, and JS chrome
+  responses.
+- **`?v={version}`** appended to bundled CSS/JS URLs for
+  cache-busting on upgrade.
+- **ETag** validation on `/assets/img` image responses — revalidation
+  returns a cheap 304.
+- **WebP thumbnails** in media galleries.
+- Configurable **`proxy.metrics-interval`** (seconds) for dashboard
+  stats polling; Docker stats fan-out is now bounded.
+- Dashboard snapshot is memoized per locale across SSE tabs; the SSE
+  patcher updates individual cells instead of replacing whole rows.
+
+**Admin**
+- Spec editing is now fully gated: specs that exist only in YAML (not
+  the database) are shown read-only in `/admin/specs`.
+- The media gallery at `/admin/media` is a client-side Alpine page with
+  filename search and paginated "show more" (24 per page).
+
+---
+
 ## v0.1.3 — 2026-05-29
 
 Admin & UX polish, plus proxy fixes that unlock notebook-style apps.
@@ -51,7 +149,7 @@ Admin & UX polish, plus proxy fixes that unlock notebook-style apps.
 High-availability / multi-host hardening and sub-path mounting.
 
 - **Mount under a sub-path.** `server.context-path` (ShinyProxy-
-  compatible) or the `--base-path /box` flag serves the whole portal
+  compatible) or the `--base-path /portal` flag serves the whole portal
   under a prefix, for reverse proxies that can't give Ruscker its own
   subdomain. Health probes stay at the root for load balancers.
 - **Fully-public portals** can hide the sign-in entrance with

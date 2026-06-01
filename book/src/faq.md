@@ -60,7 +60,10 @@ By default in a local **SQLite** database (`--db`), with YAML as the
 import/export format. For multi-instance HA the same admin catalog and the
 session store live in shared **Postgres** (`--config-db-url` /
 `--session-store-url`). Secrets never go in YAML — use `${ENV_VAR}`
-interpolation; the credentials store is AES-encrypted at rest.
+interpolation. The named credentials store is AES-encrypted at rest; it
+also accepts a pure `${VAR}` env-ref as the password (stored verbatim,
+resolved at pull time, so the decryption key is never needed for env-based
+credentials).
 
 ### Can I run more than one instance for high availability?
 
@@ -73,14 +76,16 @@ One operational caveat: until a shared admin-session store ships, pin
 the **sign-in session** paths to a single upstream — see
 [Sticky upstream for the sign-in session][ha-sticky].
 
-[ha-sticky]: ./deploying.md#sticky-upstream-for-the-sign-in-session-admin-app-api
+[ha-sticky]: ./deploying.md#fallback-sticky-upstream
 
 ### Is it production-ready?
 
-Ruscker runs in production. Releases are multi-arch
-and cosign-signed; see the [release notes](./news.md) for the current
-version and what changed in each. The [Roadmap](./roadmap.md) tracks what's shipped
-(Phases 0–7) and what's planned (Phase 8: external auth).
+Yes. The current release is **v0.1.31** — Phases 0–7 are complete and
+the proxy is production-ready and horizontally scalable.
+Releases are multi-arch and cosign-signed; see the
+[release notes](./news.md) and the [Roadmap](./roadmap.md).
+Phase 8 (external auth: OIDC / SAML / LDAP) is the main remaining
+optional work.
 
 ### What platforms does it run on?
 

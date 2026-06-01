@@ -30,6 +30,8 @@ Each person gets their own account (username + password). Admins manage
 accounts under **Users** (`/admin/users`): create one, assign a role,
 reset a password, or remove it. A new user gets an initial password you
 choose and is asked — once, on first login — whether to change it.
+**Password fields are masked** (type `password`) throughout the panel, so a
+shoulder-surfer can't read a password as you type it.
 
 | Role | Can do |
 |---|---|
@@ -76,10 +78,27 @@ default, so the section stays out of the way until you need it.
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
 
+The gallery is a single unified library — **built-in logos** (brand marks
+shipped with Ruscker) are seeded here automatically alongside your uploads.
+Every image can be **deleted** from the gallery; if it is referenced by any
+spec logo/cover or landing logo, the entry shows an **"in use" badge** so
+you know before deleting.
+
+When editing a spec you can open a **modal picker** (search, browse, drag
+and drop, or upload inline without leaving the form) to select a logo or
+cover. A "Choose image" button auto-uploads on file select for a one-click
+flow.
+
 ### Credentials
 A named, AES-256-GCM-encrypted store for registry credentials (needs
 `RUSCKER_MASTER_KEY`). Passwords never appear in the YAML or in the
-panel after saving.
+panel after saving. Each entry accepts either a literal password
+(encrypted at rest) or a **pure `${VAR}` env-ref** — stored verbatim and
+resolved to the real value only at container pull time.
+
+In the spec form the Registry section is a **credential picker**: type or
+select the name of a stored credential and Ruscker resolves it at spawn.
+There is no need to inline registry passwords in a spec.
 
 ### Landing editor
 Customise the public landing without a custom template:
@@ -91,6 +110,12 @@ Customise the public landing without a custom template:
 - **Analytics** — paste a provider snippet (Plausible, Matomo, GA…)
   and list its origins; Ruscker widens **only the landing's** CSP so
   the script can load.
+- **Logos** — add logos to the landing **header** or **footer** slot.
+  Each logo has its own **alignment** (left / center / right), an optional
+  **click-through link**, and a **height** in pixels. Multiple logos
+  sharing a slot and alignment render side by side. Images come from the
+  Media library — pick one with the same modal picker used in the spec
+  form.
 
 ### Blocks
 Custom HTML blocks rendered in the landing `top` (after the header) and

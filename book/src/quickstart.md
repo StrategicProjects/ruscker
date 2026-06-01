@@ -52,7 +52,15 @@ ruscker serve --config application.yml --bind 127.0.0.1:8080 \
   --docker --db ruscker.db
 ```
 
-Prefer the container image? Mount your config and the Docker socket:
+On first boot with `--db`, Ruscker seeds 13 showcase cards into the
+portal automatically — one live demo per supported framework (Shiny,
+Streamlit, Dash, Voilà, Jupyter, RStudio, …) plus external links for
+the rest. The seed is idempotent; cards you delete stay deleted on
+subsequent boots. Framework logos are also seeded into the Media
+library so they appear in the image picker alongside your own uploads.
+
+Prefer the container image? Mount your config and the Docker socket
+(the image is cosign-signed; `:latest` tracks the current release):
 
 ```sh
 docker run --rm -p 8080:8080 \
@@ -72,19 +80,27 @@ docker run --rm -p 8080:8080 \
 | <http://127.0.0.1:8080/healthz> | liveness (always `200`) |
 
 The first request to `/app/hello/` spawns a container on demand; it's
-reaped automatically once idle. Refresh the [admin dashboard](./admin.md)
-to watch the replica start, serve, and stop.
+reaped automatically once idle.
 
 ## What just happened
 
 Ruscker rendered the landing page from your config, and on the first
 request to the app it asked Docker to start `traefik/whoami`, routed you
-to it, and will reap it when idle. For a real interactive app (Shiny,
-Streamlit, Dash, Voilà) the model is the same — Ruscker adds sticky
-sessions and WebSocket forwarding automatically. See
-[What Ruscker can serve](./use-cases.md) for the framework list and
-[Configuration](./configuration.md) for every spec field (replica pools,
-CPU/memory limits, registry credentials, routing, rate limits…).
+to it, and will reap it when idle. For a real interactive app — Shiny,
+Streamlit, Dash, Voilà, Jupyter, RStudio — the model is the same:
+Ruscker adds sticky sessions and WebSocket forwarding automatically.
+For stateless APIs (Plumber2, FastAPI) it load-balances across replicas
+with no sticky overhead.
+
+If you started with `--db`, the landing page already shows the seeded
+showcase cards. Click any live-demo card to see on-demand container
+spawn in action, then watch the [admin dashboard](./admin.md) to see
+the replica start, serve, and stop.
+
+See [What Ruscker can serve](./use-cases.md) for the full framework
+list and [Configuration](./configuration.md) for every spec field
+(replica pools, CPU/memory limits, registry credentials, routing, rate
+limits…).
 
 ## Next steps
 
@@ -101,4 +117,4 @@ CPU/memory limits, registry credentials, routing, rate limits…).
 - [Troubleshooting](./troubleshooting.md) — when an app won't load.
 
 [base-path]: ./deploying.md#4b-mounting-under-a-base-path-subpath
-[ha-sticky]: ./deploying.md#sticky-upstream-for-the-sign-in-session-admin-app-api
+[ha-sticky]: ./deploying.md#shared-admin-sessions-eliminate-the-sticky-upstream-caveat

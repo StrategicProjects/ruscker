@@ -101,6 +101,7 @@ struct LogoView {
     src: String,
     link: Option<String>,
     height: u32,
+    margin: Option<u32>,
 }
 
 impl<'a> LandingPage<'a> {
@@ -142,6 +143,7 @@ impl<'a> LandingPage<'a> {
                 src: self.logo_src(l),
                 link: l.link.clone(),
                 height: l.height.unwrap_or(default_h),
+                margin: l.margin,
             })
             .collect()
     }

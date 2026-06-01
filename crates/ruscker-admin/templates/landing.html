@@ -6,7 +6,7 @@
 {% macro logos(items) %}
   {% for l in items %}
     {% match l.link %}{% when Some with (href) %}<a href="{{ href }}" target="_blank" rel="noopener" class="inline-flex items-center">{% when None %}{% endmatch %}
-    <img src="{{ l.src }}" alt="" loading="lazy" style="height:{{ l.height }}px">
+    <img src="{{ l.src }}" alt="" loading="lazy" style="height:{{ l.height }}px{% match l.margin %}{% when Some with (m) %};margin:{{ m }}px{% when None %}{% endmatch %}">
     {% match l.link %}{% when Some with (href) %}</a>{% when None %}{% endmatch %}
   {% endfor %}
 {% endmacro %}

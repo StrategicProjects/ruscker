@@ -563,6 +563,7 @@ admin-landing-logo-center = Centro
 admin-landing-logo-right = Derecha
 admin-landing-logo-link = Enlace (opcional)
 admin-landing-logo-height = Altura (px)
+admin-landing-logo-margin = Margen (px)
 admin-landing-logo-add = Añadir logo
 
 # — Gestión de disco (admin) #453

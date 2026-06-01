@@ -163,7 +163,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_bg" :value="form.theme_light_bg || '#fafaf7'">
+              <input type="color" :value="form.theme_light_bg || '#fafaf7'" @input="form.theme_light_bg = $event.target.value">
               <input type="text" name="theme_light_bg" x-model="form.theme_light_bg" placeholder="#fafaf7" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -171,7 +171,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_text" :value="form.theme_light_text || '#1a1a1a'">
+              <input type="color" :value="form.theme_light_text || '#1a1a1a'" @input="form.theme_light_text = $event.target.value">
               <input type="text" name="theme_light_text" x-model="form.theme_light_text" placeholder="#1a1a1a" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -179,7 +179,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_light_accent" :value="form.theme_light_accent || '#0f6e56'">
+              <input type="color" :value="form.theme_light_accent || '#0f6e56'" @input="form.theme_light_accent = $event.target.value">
               <input type="text" name="theme_light_accent" x-model="form.theme_light_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_light_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -190,7 +190,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_bg" :value="form.theme_dark_bg || '#161616'">
+              <input type="color" :value="form.theme_dark_bg || '#161616'" @input="form.theme_dark_bg = $event.target.value">
               <input type="text" name="theme_dark_bg" x-model="form.theme_dark_bg" placeholder="#161616" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -198,7 +198,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_text" :value="form.theme_dark_text || '#f0f0f0'">
+              <input type="color" :value="form.theme_dark_text || '#f0f0f0'" @input="form.theme_dark_text = $event.target.value">
               <input type="text" name="theme_dark_text" x-model="form.theme_dark_text" placeholder="#f0f0f0" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -206,7 +206,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.theme_dark_accent" :value="form.theme_dark_accent || '#0f6e56'">
+              <input type="color" :value="form.theme_dark_accent || '#0f6e56'" @input="form.theme_dark_accent = $event.target.value">
               <input type="text" name="theme_dark_accent" x-model="form.theme_dark_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.theme_dark_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
             </div>
@@ -246,12 +246,14 @@
                    class="spec-form-input" style="flex:1;min-width:8rem" title="{{ self.t("admin-landing-logo-link") }}">
             <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32"
                    class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-height") }}">
+            <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0"
+                   class="spec-form-input" style="width:4.5rem" title="{{ self.t("admin-landing-logo-margin") }}">
             <button type="button" class="admin-nav-link" @click="logos.splice(i, 1)"
                     title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
           </div>
         </template>
         <button type="button" class="admin-nav-link mt-2"
-                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32 })">
+                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32, margin: null })">
           <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
         </button>
       </div>

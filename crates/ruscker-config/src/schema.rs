@@ -506,6 +506,10 @@ pub struct LandingLogo {
     /// Render height in pixels (per-logo size). Falls back to a default
     /// when unset.
     pub height: Option<u32>,
+    /// Outer margin in pixels applied around the logo, for spacing from
+    /// adjacent chrome (the title, the buttons, the version) or from a
+    /// neighbouring logo. Unset ⇒ no extra margin.
+    pub margin: Option<u32>,
 }
 
 /// A custom HTML block on the public landing (admin-authored,

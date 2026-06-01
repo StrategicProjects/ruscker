@@ -183,6 +183,7 @@ proxy:
         align: left                     # `left` | `center` | `right`
         link: https://org.example       # optional click-through
         height: 40                      # render height in px
+        margin: 12                      # optional outer margin in px
 
     # Sign-in visibility (anonymous viewers only)
     show-admin-link: true              # default true; false hides the entrance
@@ -220,9 +221,10 @@ Field reference:
 |---|---|---|---|
 | `url` | string | required | Image URL — `/assets/img/...` (uploaded), a built-in (`/assets/showcase/...`, `/assets/brand/...`), or an absolute URL. |
 | `slot` | enum | required | `header` or `footer` — where the logo renders. |
-| `align` | enum | required | `left`, `center`, or `right` within the slot. Logos sharing a slot+alignment render side by side. |
+| `align` | enum | required | `left`, `center`, or `right` within the slot. `left`/`right` integrate into the chrome: header-`left` replaces the Ruscker mark, header-`right` trails the buttons, footer-`left` sits far-left, footer-`right` trails the version+mark. `center` renders in a separate bar. Logos sharing a slot+alignment render side by side. |
 | `link` | URL | none | Optional click-through — when set, the logo becomes an `<a>`. |
 | `height` | px | default | Per-logo render height in pixels; falls back to a built-in default when unset. |
+| `margin` | px | none | Optional outer margin in pixels around the logo, for spacing from adjacent chrome or a neighbouring logo. |
 
 `blocks[]` subfields:
 

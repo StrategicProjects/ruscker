@@ -42,6 +42,12 @@
 {% if !available %}
   <p class="text-sm text-[color:var(--text-faint)] py-8 text-center">{{ self.t("admin-proclog-unavailable") }}</p>
 {% else %}
+  {# Buffer is wired but empty — say so explicitly so an operator can
+     tell "nothing logged yet" from a broken tab (#452). New lines still
+     stream into the <pre> below as they happen. #}
+  {% if lines.is_empty() %}
+  <p class="text-sm text-[color:var(--text-faint)] py-6 text-center">{{ self.t("admin-proclog-empty") }}</p>
+  {% endif %}
   <pre id="proclog" class="proclog-pre">{% for line in lines %}{{ line }}
 {% endfor %}</pre>
 

@@ -475,6 +475,7 @@ admin-nav-logs = Registros
 admin-proclog-title = Registros
 admin-proclog-subtitle = Registro reciente del proceso Ruscker (en vivo).
 admin-proclog-unavailable = Búfer de registro no disponible (el servidor inició sin la capa de logging).
+admin-proclog-empty = Aún no se ha capturado ningún registro en este nivel. Los nuevos eventos aparecen aquí a medida que ocurren; ejecuta el servidor con -v para incluir registros de nivel info.
 
 # ── spec-form advanced params (#211/#212) ──────────────────────────
 spec-form-runtime-section = Runtime

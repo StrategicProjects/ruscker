@@ -557,8 +557,16 @@ fn init_tracing(verbosity: u8, format: LogFormat) -> ruscker_admin::logbuf::LogB
         _ => "trace",
     };
     // `RUST_LOG` always wins when set (operators expect it); the
-    // verbosity flag only sets the default filter.
-    let env = std::env::var("RUST_LOG").unwrap_or_else(|_| format!("ruscker={level}"));
+    // verbosity flag only sets the default filter. The startup banner
+    // (#452) rides a dedicated target raised to `info` so it shows even
+    // at the default `warn` — `EnvFilter` prefers the longest target
+    // prefix, so this un-mutes only the banner, not the whole app.
+    let env = std::env::var("RUST_LOG").unwrap_or_else(|_| {
+        format!(
+            "ruscker={level},{}=info",
+            ruscker_admin::STARTUP_LOG_TARGET
+        )
+    });
     let filter = tracing_subscriber::EnvFilter::new(env);
 
     let buffer = ruscker_admin::logbuf::LogBuffer::new(2000);

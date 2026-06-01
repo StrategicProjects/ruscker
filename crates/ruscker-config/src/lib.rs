@@ -47,8 +47,8 @@ pub use error::{Error, Result};
 pub use ordered_float::OrderedFloat;
 pub use schema::{
     is_valid_memory_size, normalize_base_path, ApiSpec, Config, Host, HostTls, LandingBlock,
-    LandingCustomization, Logging, Placement, Proxy, RatePolicy, RoutingStrategy, Server, Spec,
-    SpecKind, SpecKindOverride, TemplateProperties,
+    LandingCustomization, LandingLogo, Logging, Placement, Proxy, RatePolicy, RoutingStrategy,
+    Server, Spec, SpecKind, SpecKindOverride, TemplateProperties,
 };
 pub use validate::{is_valid_volume_bind, CompatWarning, ValidationReport, Warning};
 

@@ -30,10 +30,11 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         Option<String>, // analytics_html
         Option<String>, // analytics_origins
         Option<String>, // custom_css
+        Option<String>, // logos_json
     );
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
-                analytics_html, analytics_origins, custom_css
+                analytics_html, analytics_origins, custom_css, logos_json
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -53,9 +54,17 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             analytics_html,
             analytics_origins,
             custom_css,
+            logos_json,
         )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
+            // `logos_json` is NULL on rows created before migration 0010.
+            let logos = match logos_json {
+                Some(j) if !j.trim().is_empty() => {
+                    serde_json::from_str(&j).context("parse logos_json")?
+                }
+                _ => Vec::new(),
+            };
             Ok(LandingCustomization {
                 header_bg: bg,
                 header_fg: fg,
@@ -73,6 +82,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 // Deploy policy (#156) read from YAML config, not the
                 // DB-backed editable customization.
                 show_admin_link: None,
+                logos,
             })
         }
     }
@@ -132,12 +142,13 @@ pub(crate) async fn update_in_tx(
 ) -> Result<()> {
     let intro_locales_json =
         serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
+    let logos_json = serde_json::to_string(&lc.logos).context("serialize logos")?;
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = ?, header_fg = ?, intro = ?,
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
-                custom_css = ?, updated_at = ?
+                custom_css = ?, logos_json = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -150,6 +161,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.analytics_html))
     .bind(none_if_empty(&lc.analytics_origins))
     .bind(none_if_empty(&lc.custom_css))
+    .bind(&logos_json)
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -167,12 +179,13 @@ pub(crate) async fn update_in_tx_pg(
 ) -> Result<()> {
     let intro_locales_json =
         serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
+    let logos_json = serde_json::to_string(&lc.logos).context("serialize logos")?;
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = $1, header_fg = $2, intro = $3,
                 intro_locales_json = $4, seo_title = $5, seo_description = $6,
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
-                custom_css = $10, updated_at = $11
+                custom_css = $10, logos_json = $11, updated_at = $12
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -185,6 +198,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.analytics_html))
     .bind(none_if_empty(&lc.analytics_origins))
     .bind(none_if_empty(&lc.custom_css))
+    .bind(&logos_json)
     .bind(now)
     .execute(&mut **tx)
     .await

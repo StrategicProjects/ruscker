@@ -368,6 +368,43 @@ async fn settled_user_reaches_the_dashboard() {
     assert_eq!(status, StatusCode::OK);
 }
 
+/// #452: with a log buffer wired but still empty, the Logs tab shows an
+/// explicit "nothing captured yet" message — distinct from the "buffer
+/// not wired" message — so an operator can tell an idle log from a broken
+/// tab. Renders in the default locale (pt).
+#[tokio::test]
+async fn logs_tab_distinguishes_empty_buffer_from_unwired() {
+    let (mut state, _pool) = state_with_db().await;
+    // Wired but empty.
+    state.log_buffer = Some(ruscker_admin::logbuf::LogBuffer::new(16));
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/logs")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = std::str::from_utf8(&bytes).unwrap();
+    assert!(
+        body.contains("Nenhum log capturado"),
+        "empty-buffer hint missing"
+    );
+    assert!(
+        !body.contains("Buffer de log não disponível"),
+        "should not show the unwired-buffer message when a buffer exists"
+    );
+}
+
 #[tokio::test]
 async fn last_admin_cannot_be_deleted() {
     let (state, pool) = state_with_db().await;

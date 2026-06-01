@@ -475,6 +475,7 @@ admin-nav-logs = Logs
 admin-proclog-title = Logs
 admin-proclog-subtitle = Recent Ruscker process log (live).
 admin-proclog-unavailable = Log buffer not wired (the server started without the logging layer).
+admin-proclog-empty = No logs captured yet at this level. New events show up here as they happen; run the server with -v to include info-level logs.
 
 # ── spec-form advanced params (#211/#212) ──────────────────────────
 spec-form-runtime-section = Runtime

@@ -49,6 +49,16 @@ use sqlx::SqlitePool;
 /// templates so it never drifts from a hardcoded string.
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// Tracing target for the one-shot startup banner (#452). The CLI's
+/// default `EnvFilter` raises *just this target* to `info` so the boot
+/// summary always lands in the admin "Logs" tab — even at the default
+/// `warn` verbosity, where every other `ruscker*` info log is hidden.
+/// `EnvFilter` prefix-matches and prefers the longest match, so
+/// `ruscker=warn,ruscker_startup=info` shows the banner without
+/// un-muting the rest of the app. Keep this in sync with the directive
+/// in `ruscker-cli`'s `init_tracing`.
+pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
+
 /// Shared state injected into every request.
 #[derive(Clone)]
 pub struct AppState {
@@ -368,7 +378,11 @@ impl AdminServer {
                     let n = existing.len();
                     self.state.replicas.write().await.reset(existing);
                     if n > 0 {
-                        info!(replicas = n, "reconciled existing replicas from backend");
+                        info!(
+                            target: STARTUP_LOG_TARGET,
+                            replicas = n,
+                            "reconciled existing replicas from backend"
+                        );
                     }
                 }
                 Err(err) => {
@@ -414,13 +428,42 @@ impl AdminServer {
                 // a busy host can poll Docker stats less often (#288).
                 std::time::Duration::from_secs(self.state.config.proxy.effective_metrics_interval_secs()),
             );
+            info!(
+                target: STARTUP_LOG_TARGET,
+                "background workers started (scaler, session sweeper, metrics)"
+            );
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());
         let listener = TcpListener::bind(self.addr)
             .await
             .with_context(|| format!("bind {}", self.addr))?;
-        info!(addr = %self.addr, images_dir = ?self.images_dir, "ruscker-admin listening");
+        // One-shot startup banner (#452): the single line operators can
+        // count on seeing in the admin "Logs" tab right after boot,
+        // confirming the build, where it bound, and which subsystems are
+        // wired. Emitted on `STARTUP_LOG_TARGET` so the default filter
+        // surfaces it even at `warn`.
+        let db_kind = match self.state.db.as_ref() {
+            None => "none",
+            Some(db::ConfigDb::Sqlite(_)) => "sqlite",
+            Some(db::ConfigDb::Postgres(_)) => "postgres",
+        };
+        let base = if self.state.base_path.is_empty() {
+            "/"
+        } else {
+            &self.state.base_path
+        };
+        info!(
+            target: STARTUP_LOG_TARGET,
+            version = APP_VERSION,
+            addr = %self.addr,
+            base_path = base,
+            docker = self.state.backend.is_some(),
+            db = db_kind,
+            specs = self.state.config.proxy.specs.len(),
+            images_dir = ?self.images_dir,
+            "ruscker started — listening"
+        );
         // `into_make_service_with_connect_info` exposes the TCP peer
         // address to handlers via `ConnectInfo<SocketAddr>` — the
         // proxy uses it as the per-client key for API rate limiting

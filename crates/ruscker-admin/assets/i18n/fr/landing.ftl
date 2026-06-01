@@ -475,6 +475,7 @@ admin-nav-logs = Journaux
 admin-proclog-title = Journaux
 admin-proclog-subtitle = Journal récent du processus Ruscker (en direct).
 admin-proclog-unavailable = Tampon de journal indisponible (le serveur a démarré sans la couche de journalisation).
+admin-proclog-empty = Aucun journal capturé pour l'instant à ce niveau. Les nouveaux événements apparaissent ici au fur et à mesure ; lancez le serveur avec -v pour inclure les journaux de niveau info.
 
 # ── spec-form advanced params (#211/#212) ──────────────────────────
 spec-form-runtime-section = Runtime

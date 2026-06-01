@@ -1030,7 +1030,13 @@ async fn delete(
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     match db::specs::delete_one(pool, &id, Some(editor.actor())).await {
-        Ok(_) => Redirect::to("/admin/specs").into_response(),
+        Ok(_) => {
+            // Reap the app's containers so a delete doesn't leave orphans
+            // eating disk (#453). Best-effort and logged inside; the DB row
+            // is already gone, so we never block the redirect on Docker.
+            crate::scaler::stop_spec(&state, &id).await;
+            Redirect::to("/admin/specs").into_response()
+        }
         Err(e) => {
             tracing::error!(error = ?e, id, "delete failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response()

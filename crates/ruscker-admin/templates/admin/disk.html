@@ -83,9 +83,20 @@
   {# ── Images ─────────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-2 mt-6">
     <h2 class="text-sm font-medium">{{ self.t("admin-disk-images-heading") }}</h2>
-    <span class="text-xs text-[color:var(--text-muted)]">
-      {{ self.t("admin-disk-images-total") }}: {{ self.human(images_total_bytes) }}
-    </span>
+    <div class="flex items-center gap-3">
+      {% if unused_images_count > 0 %}
+      <form method="post" action="{{ base }}/admin/disk/images/prune"
+            onsubmit="return confirm('{{ self.t("admin-disk-prune-images-confirm") }}')">
+        <button type="submit" class="dash-action dash-action--danger" style="width:auto;padding:6px 12px">
+          <i class="ti ti-trash" aria-hidden="true"></i>
+          {{ self.t("admin-disk-prune-images") }} ({{ unused_images_count }})
+        </button>
+      </form>
+      {% endif %}
+      <span class="text-xs text-[color:var(--text-muted)]">
+        {{ self.t("admin-disk-images-total") }}: {{ self.human(images_total_bytes) }}
+      </span>
+    </div>
   </div>
   <p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-disk-images-note") }}</p>
 

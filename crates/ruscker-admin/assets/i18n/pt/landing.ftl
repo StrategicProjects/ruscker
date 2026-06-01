@@ -602,3 +602,6 @@ admin-disk-flash-removed = Removido.
 admin-disk-flash-pruned = Containers parados removidos.
 admin-disk-flash-nothing = Nada a remover.
 admin-disk-flash-error = A operação falhou. Veja os logs.
+admin-disk-prune-images = Remover não usadas
+admin-disk-prune-images-confirm = Remover todas as imagens não usadas?
+admin-disk-flash-images-pruned = Imagens não usadas removidas.

@@ -598,3 +598,6 @@ admin-disk-flash-removed = Removed.
 admin-disk-flash-pruned = Stopped containers removed.
 admin-disk-flash-nothing = Nothing to remove.
 admin-disk-flash-error = The operation failed. Check the logs.
+admin-disk-prune-images = Remove unused
+admin-disk-prune-images-confirm = Remove all unused images?
+admin-disk-flash-images-pruned = Unused images removed.

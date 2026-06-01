@@ -29,6 +29,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/disk/containers/remove", post(remove_container))
         .route("/admin/disk/containers/prune", post(prune_stopped))
         .route("/admin/disk/images/remove", post(remove_image))
+        .route("/admin/disk/images/prune", post(prune_images))
 }
 
 /// One image row, enriched with whether it's safe to remove.
@@ -69,6 +70,8 @@ struct DiskPage<'a> {
     images: Vec<ImageRow>,
     /// How many of `containers` are stopped (drives the prune button).
     stopped_count: usize,
+    /// How many images are unused (drives the "remove all unused" button).
+    unused_images_count: usize,
     /// Sum of image sizes (may over-count shared layers — labelled as
     /// such in the UI).
     images_total_bytes: i64,
@@ -119,6 +122,7 @@ async fn index(
     let (flash, flash_error) = match q.flash.as_deref() {
         Some("removed") => (Some("admin-disk-flash-removed"), false),
         Some("pruned") => (Some("admin-disk-flash-pruned"), false),
+        Some("images-pruned") => (Some("admin-disk-flash-images-pruned"), false),
         Some("nothing") => (Some("admin-disk-flash-nothing"), false),
         Some("error") => (Some("admin-disk-flash-error"), true),
         _ => (None, false),
@@ -138,6 +142,7 @@ async fn index(
             containers: Vec::new(),
             images: Vec::new(),
             stopped_count: 0,
+            unused_images_count: 0,
             images_total_bytes: 0,
             flash,
             flash_error,
@@ -149,15 +154,12 @@ async fn index(
 
     // Which image refs does the live catalog reference? Used to flag an
     // image as "in use by a spec" so the panel won't offer to remove it.
-    let catalog = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
-    let spec_images: HashSet<String> = catalog
-        .iter()
-        .filter_map(|s| s.container_image.clone())
-        .collect();
+    let spec_images = spec_image_refs(&state).await;
 
     let stopped_count = containers.iter().filter(|c| !c.running).count();
     let images_total_bytes = images.iter().map(|i| i.size_bytes).sum();
-    let images = images.into_iter().map(|i| image_row(i, &spec_images)).collect();
+    let images: Vec<ImageRow> = images.into_iter().map(|i| image_row(i, &spec_images)).collect();
+    let unused_images_count = images.iter().filter(|r| !r.in_use()).count();
 
     super::render(&DiskPage {
         locale: loc,
@@ -171,10 +173,29 @@ async fn index(
         containers,
         images,
         stopped_count,
+        unused_images_count,
         images_total_bytes,
         flash,
         flash_error,
     })
+}
+
+/// The set of image refs the live (DB-first) catalog references — an
+/// image carrying one of these tags is "in use by a spec" and is never
+/// offered for removal.
+async fn spec_image_refs(state: &AppState) -> HashSet<String> {
+    crate::catalog::effective_specs(state.db.as_ref(), &state.config)
+        .await
+        .iter()
+        .filter_map(|s| s.container_image.clone())
+        .collect()
+}
+
+/// An image is safe to reclaim when no container uses it (`containers`
+/// is 0 or unknown-as-non-positive) **and** no current spec references
+/// it by tag. Same rule the per-row remove button uses.
+fn image_unused(i: &ImageInfo, spec_images: &HashSet<String>) -> bool {
+    i.containers <= 0 && !i.tags.iter().any(|t| spec_images.contains(t))
 }
 
 /// Build a display row, resolving the primary tag and the in-use flags.
@@ -258,8 +279,83 @@ async fn remove_image(
     }
 }
 
+/// Remove every **unused** image in one click (#463) — `containers == 0`
+/// and not referenced by any current spec. Never `--force`s, and never
+/// runs a host-wide `docker image prune`: it only removes the exact
+/// subset the panel flags as unused, so a non-Ruscker image the host
+/// happens to have stays put.
+async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Response {
+    let Some(backend) = state.backend.as_ref() else {
+        return redirect("error");
+    };
+    let images = match backend.list_images().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: list images for prune failed");
+            return redirect("error");
+        }
+    };
+    let spec_images = spec_image_refs(&state).await;
+    let unused: Vec<String> = images
+        .into_iter()
+        .filter(|i| image_unused(i, &spec_images))
+        .map(|i| i.id)
+        .collect();
+    if unused.is_empty() {
+        return redirect("nothing");
+    }
+    let mut removed = 0;
+    for id in &unused {
+        match backend.remove_image(id).await {
+            Ok(()) => removed += 1,
+            // Best-effort: an image that turned in-use between listing and
+            // removal (or a multi-tag image) just stays — logged, not fatal.
+            Err(e) => tracing::warn!(error = %e, id = %id, "disk: prune image failed"),
+        }
+    }
+    if removed > 0 {
+        redirect("images-pruned")
+    } else {
+        redirect("error")
+    }
+}
+
 /// Post/redirect/get back to the panel with a one-word flash code. The
 /// base-path response rewriter re-prefixes the `Location` header.
 fn redirect(flash: &str) -> Response {
     Redirect::to(&format!("/admin/disk?flash={flash}")).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn img(tags: &[&str], containers: i64) -> ImageInfo {
+        ImageInfo {
+            id: "sha256:abc".into(),
+            tags: tags.iter().map(|s| s.to_string()).collect(),
+            size_bytes: 1,
+            containers,
+        }
+    }
+
+    /// #463: bulk prune must reclaim only images no container uses and no
+    /// spec references — never an image still in use.
+    #[test]
+    fn image_unused_only_when_no_container_and_no_spec() {
+        let catalog: HashSet<String> = ["nginx:alpine".to_string()].into_iter().collect();
+
+        // Referenced by a spec → in use, never pruned.
+        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog));
+        // A container uses it → in use.
+        assert!(!image_unused(&img(&["other:1"], 3), &catalog));
+        // No container, not in the catalog → reclaimable.
+        assert!(image_unused(&img(&["leftover:1"], 0), &catalog));
+        // Dangling (untagged), no container → reclaimable.
+        assert!(image_unused(&img(&[], 0), &catalog));
+        // Daemon couldn't count containers (-1, non-positive) and it's not
+        // in the catalog → treated as reclaimable; remove_image runs
+        // without --force, so the daemon still refuses a truly in-use one.
+        assert!(image_unused(&img(&["x:1"], -1), &catalog));
+    }
 }

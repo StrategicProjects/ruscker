@@ -543,9 +543,6 @@ pub struct PasswordForm {
     pub current: String,
     pub new_password: String,
     pub confirm: String,
-    /// Present (any value) when the user clicked "keep current" on the
-    /// first-login prompt.
-    pub skip: Option<String>,
 }
 
 async fn password_submit(
@@ -566,12 +563,9 @@ async fn password_submit(
             .into_response();
     };
 
-    // First-login "keep current password" — just clear the prompt.
-    if form.skip.is_some() {
-        let _ = db::users::clear_must_change(pool, &actor).await;
-        return Redirect::to("/admin/dashboard").into_response();
-    }
-
+    // First login is mandatory (#454): there is no "keep current"
+    // escape — the only way past the prompt is a real password change
+    // below, which clears `must_change_password` via `set_password`.
     let first = db::users::fetch(pool, &actor)
         .await
         .ok()

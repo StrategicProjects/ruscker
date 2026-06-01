@@ -89,7 +89,7 @@ admin-setup-submit = Créer l'administrateur
 # — Changement de mot de passe / première connexion
 admin-pw-title = Changer le mot de passe
 admin-pw-help = Définissez un nouveau mot de passe pour votre compte.
-admin-pw-first-prompt = Vous utilisez un mot de passe défini par un administrateur. Voulez-vous le changer maintenant ?
+admin-pw-first-prompt = Vous utilisez un mot de passe défini par un administrateur. Définissez un nouveau mot de passe pour continuer.
 admin-pw-current-label = Mot de passe actuel
 admin-pw-new-label = Nouveau mot de passe
 admin-pw-confirm-label = Confirmer le mot de passe
@@ -97,7 +97,7 @@ admin-pw-error-current = Le mot de passe actuel est incorrect.
 admin-pw-error-mismatch = Les mots de passe ne correspondent pas.
 admin-pw-error-short = Le mot de passe doit comporter au moins 8 caractères.
 admin-pw-submit = Enregistrer le mot de passe
-admin-pw-keep = Conserver le mot de passe actuel
+admin-pw-reveal = Afficher/masquer le mot de passe
 # — Gestion des utilisateurs (admin)
 admin-nav-users = Utilisateurs
 admin-users-title = Utilisateurs
@@ -105,7 +105,7 @@ admin-users-subtitle = Créez et gérez qui peut se connecter, et à quel niveau
 admin-users-new = Nouvel utilisateur
 admin-users-create = Créer
 admin-users-initial-password = Mot de passe initial
-admin-users-initial-password-hint = Il lui sera demandé s'il veut le changer à la première connexion.
+admin-users-initial-password-hint = L'utilisateur devra le changer à la première connexion.
 admin-users-role = Niveau
 admin-users-col-user = Utilisateur
 admin-users-col-role = Niveau

@@ -35,7 +35,19 @@
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-initial-password") }}</span>
-      <input type="password" name="password" required autocomplete="new-password" placeholder="••••••••">
+      {# type=password is the secure default; the reveal toggle (#430) flips
+         it to text via a framework-free delegated listener at the foot of
+         the page — no Alpine dependency, so it works even if Alpine is
+         absent (cf. the #433 images-gallery regression). #}
+      <span style="position:relative;display:block">
+        <input type="password" name="password" required autocomplete="new-password"
+               placeholder="••••••••" style="padding-right:2.2rem">
+        <button type="button" tabindex="-1" class="pw-reveal"
+                title="{{ self.t("admin-pw-reveal") }}"
+                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
+          <i class="ti ti-eye" aria-hidden="true"></i>
+        </button>
+      </span>
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
@@ -98,8 +110,15 @@
           {# Reset password — reveals a tiny inline form. #}
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/password"
                 style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
-            <input type="password" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
-                   style="width:120px" autocomplete="new-password">
+            <span style="position:relative;display:inline-block">
+              <input type="password" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
+                     style="width:140px;padding-right:1.8rem" autocomplete="new-password">
+              <button type="button" tabindex="-1" class="pw-reveal"
+                      title="{{ self.t("admin-pw-reveal") }}"
+                      style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
+                <i class="ti ti-eye" aria-hidden="true"></i>
+              </button>
+            </span>
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
           </form>
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
@@ -111,4 +130,21 @@
     {% endfor %}
   </tbody>
 </table>
+
+<script>
+  // Reveal/hide toggle for the admin user password inputs (#430). One
+  // delegated listener, no framework: clicking a `.pw-reveal` button
+  // flips the adjacent input's type and swaps the eye icon. Kept inline
+  // (the admin CSP already allows inline chrome scripts).
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.pw-reveal');
+    if (!btn) return;
+    var input = btn.parentNode.querySelector('input');
+    if (!input) return;
+    var reveal = input.type === 'password';
+    input.type = reveal ? 'text' : 'password';
+    var icon = btn.querySelector('i');
+    if (icon) icon.className = 'ti ' + (reveal ? 'ti-eye-off' : 'ti-eye');
+  });
+</script>
 {% endblock %}

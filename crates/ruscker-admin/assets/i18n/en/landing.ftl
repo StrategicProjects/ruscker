@@ -552,6 +552,14 @@ admin-proclog-download = Download full log
 landing-empty = Nothing here yet.
 
 admin-landing-style = Style (CSS)
+admin-landing-card-appearance = Appearance
+admin-landing-card-content = Content
+admin-landing-card-meta = SEO & analytics
+admin-landing-card-header-desc = Title and subtitle shown at the top of the portal.
+admin-landing-card-appearance-desc = Header colours and each theme's palette (light/dark).
+admin-landing-card-content-desc = The portal's intro text, general and per language.
+admin-landing-card-meta-desc = Search/share metadata and the analytics snippet.
+admin-landing-card-style-desc = Custom CSS, injected last (escape hatch).
 admin-landing-custom-css = Custom CSS
 admin-landing-custom-css-help = CSS injected at the end of the landing <head> — overrides the built-in styles. Target stable classes/variables (.rcard, .tint-*, --color-link, header vars). Admin-trusted; take care not to break the layout.
 admin-landing-logos = Header / footer logos

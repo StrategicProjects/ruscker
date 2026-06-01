@@ -251,6 +251,9 @@ admin-images-uploaded = Image envoyée :
 admin-images-empty = Aucune image. Envoyez la première ci-dessus.
 admin-images-delete = Supprimer
 admin-images-delete-confirm = Supprimer cette image ? Les specs qui référencent le fichier afficheront le cover teinté.
+admin-images-inuse = Utilisé
+admin-images-inuse-help = Utilisé par une carte ou un logo de la landing
+admin-images-delete-confirm-inuse = Cette image est UTILISÉE (une carte ou la landing). Supprimer quand même ?
 admin-images-search = Rechercher des images…
 admin-images-no-match = Aucune image ne correspond à la recherche.
 

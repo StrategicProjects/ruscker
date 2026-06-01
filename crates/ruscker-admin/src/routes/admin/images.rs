@@ -63,6 +63,11 @@ struct ImagesPage<'a> {
     /// Current session role (Editor or Admin) — drives nav gating.
     role: Role,
     images: Vec<db::images::ImageMeta>,
+    /// Concatenated reference strings (every spec's logo + cover, plus the
+    /// landing header/footer logo URLs). An image is "in use" when its
+    /// `/assets/img/<filename>` appears here — drives the delete warning
+    /// (#433).
+    refs: String,
     /// Set on successful upload — drives a one-shot toast.
     flash_uploaded: Option<String>,
     flash_error: Option<String>,
@@ -111,22 +116,14 @@ impl<'a> ImagesPage<'a> {
                     "mime": img.mime_type,
                     "size": self.fmt_size(&img.size_bytes),
                     "dims": dims,
+                    // #433: referenced by a card (logo/cover) or a landing logo?
+                    "in_use": self.refs.contains(&format!("/assets/img/{}", img.filename)),
                 })
             })
             .collect();
         serde_json::to_string(&arr).unwrap_or_else(|_| "[]".into())
     }
 
-    /// Built-in framework + brand logos (read-only) for the gallery's
-    /// "built-in" section — so the gallery isn't empty on a fresh install
-    /// and mirrors what the spec-form pickers offer. Pairs of
-    /// (path, filename). Single source: [`assets::BUILTIN_LOGOS`].
-    fn builtin_logos(&self) -> Vec<(&'static str, &'static str)> {
-        crate::routes::assets::BUILTIN_LOGOS
-            .iter()
-            .map(|&p| (p, p.rsplit('/').next().unwrap_or(p)))
-            .collect()
-    }
 }
 
 async fn index(
@@ -160,6 +157,26 @@ async fn render_index(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Collect every place an image URL can be referenced, so the gallery
+    // can warn before deleting one that's in use (#433): each spec's logo +
+    // cover, and the landing header/footer logos.
+    let mut refs = String::new();
+    if let Ok(specs) = db::specs::list_all(pool).await {
+        for s in &specs {
+            for key in ["logo", "cover"] {
+                if let Some(v) = s.template_properties.0.get(key).and_then(|v| v.as_str()) {
+                    refs.push_str(v);
+                    refs.push('\n');
+                }
+            }
+        }
+    }
+    if let Ok(lc) = db::landing::fetch(pool).await {
+        for logo in &lc.logos {
+            refs.push_str(&logo.url);
+            refs.push('\n');
+        }
+    }
     let page = ImagesPage {
         locale: loc,
         theme,
@@ -169,6 +186,7 @@ async fn render_index(
         nav_section: "images",
         role,
         images,
+        refs,
         flash_uploaded,
         flash_error,
     };

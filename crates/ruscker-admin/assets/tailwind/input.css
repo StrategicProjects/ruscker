@@ -985,6 +985,10 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   transition: border-color .12s, background .12s;
 }
 .image-upload-hint { font-size: 12px; color: var(--text-muted); }
+.image-tile-used {
+  display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;
+  font-size: 10px; color: var(--color-lock, #b4690e);
+}
 .image-upload-zone.is-dragover {
   border-color: var(--color-teal-600);
   background: color-mix(in srgb, var(--color-teal-600) 8%, var(--surface-soft));

@@ -44,11 +44,17 @@ pub async fn upsert(
     //     plaintext never lands in the DB at all — preserving the "DB never
     //     sees the cleartext" model now that the spec form points only at
     //     the store.
-    let (ciphertext, nonce): (Vec<u8>, Vec<u8>) = if password.contains("${") {
-        (password.as_bytes().to_vec(), Vec::new())
-    } else {
-        key.encrypt(password.as_bytes())?
-    };
+    //
+    // The env-ref branch requires the password to be ENTIRELY valid env-ref
+    // tokens (#422): a loose `contains("${")` would store a literal like
+    // `abc${def` (no valid token) verbatim — i.e. cleartext at rest. Anything
+    // that isn't a pure env-ref is encrypted.
+    let (ciphertext, nonce): (Vec<u8>, Vec<u8>) =
+        if ruscker_config::env::is_pure_env_ref(password) {
+            (password.as_bytes().to_vec(), Vec::new())
+        } else {
+            key.encrypt(password.as_bytes())?
+        };
     // Metadata-only audit diff — never the password (see the
     // `audit_log_never_records_the_password` test).
     let diff = serde_json::to_string(&serde_json::json!({
@@ -464,6 +470,28 @@ mod tests {
         assert_eq!(
             c2.password, "resolved-pw",
             "verbatim env-ref ignores the master key (not encrypted)"
+        );
+    }
+
+    #[tokio::test]
+    async fn literal_password_containing_dollar_brace_is_encrypted_not_verbatim() {
+        // #422: a literal password that merely CONTAINS `${` (not a valid
+        // env-ref) must be AES-encrypted, never stored verbatim.
+        let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
+        let key = fixed_key();
+        upsert(&db, &key, "lit", "registry.example.com", "bot", "abc${def", None)
+            .await
+            .unwrap();
+        // Same key round-trips the literal verbatim.
+        let c = resolve(&db, &key, "lit").await.unwrap().expect("resolved");
+        assert_eq!(c.password, "abc${def");
+        // A DIFFERENT key fails to decrypt — proof it was encrypted, not
+        // stored in cleartext (a verbatim value would resolve regardless).
+        let other = MasterKey::parse(&"cd".repeat(32)).unwrap();
+        assert!(
+            resolve(&db, &other, "lit").await.is_err(),
+            "literal with `${{` must be AES-encrypted, not verbatim"
         );
     }
 

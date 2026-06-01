@@ -9,6 +9,38 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.34 — 2026-06-01
+
+Docker connects out of the box, per-theme colours, and a modernised
+Portal editor.
+
+**Runtime**
+- Ruscker now **auto-connects to Docker** when the daemon socket is
+  reachable — `serve` spawns app containers with no `--docker` flag.
+  Pass `--no-docker` to run landing-only, or keep `--docker` to make a
+  failed connect fatal (useful for a remote daemon).
+- Showcase demos seed with `min-replicas: 0`, so a fresh install no
+  longer pre-spawns every demo container at boot — they cold-start on
+  first click.
+
+**Portal**
+- **Per-theme colours**: set the background, text and accent for the
+  light and dark themes independently in the landing editor. Blank keeps
+  the built-in default.
+- **Logos integrate into the chrome**: a header-left logo replaces the
+  Ruscker mark, header-right sits after the buttons, footer-right trails
+  the version, and a center logo is centred within the header/footer bar
+  itself. Each logo also takes an optional **margin**.
+
+**Admin**
+- The **landing editor** is reorganised into labelled section cards with
+  a sticky Save bar; logos are edited as cards with segmented
+  position/alignment pickers; the live preview now mirrors the real
+  portal chrome (logos + footer). Theme colour swatches show the theme
+  default instead of black when unset.
+
+---
+
 ## v0.1.33 — 2026-06-01
 
 A bulk image cleanup on the disk panel, plus a documentation fix.

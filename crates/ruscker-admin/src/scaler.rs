@@ -661,6 +661,42 @@ async fn stop_one(
     Ok(())
 }
 
+/// Stop and remove every replica of `spec_id`, best-effort, and drop
+/// their sessions. Called when an app is deleted so its containers don't
+/// linger as orphans eating disk (#453) — `LocalDockerBackend::stop`
+/// both stops *and* removes the container, so this reclaims the space.
+/// Returns the number of replicas reaped; a no-op returning 0 when no
+/// backend is wired (landing-only mode) or the spec has no live replica.
+pub async fn stop_spec(state: &AppState, spec_id: &str) -> usize {
+    let Some(backend) = state.backend.clone() else {
+        return 0;
+    };
+    // Snapshot the ids under the read lock, then stop without holding it
+    // (each `stop` is an await on the Docker daemon).
+    let ids: Vec<ruscker_core::ReplicaId> = state
+        .replicas
+        .read()
+        .await
+        .replicas_of(spec_id)
+        .iter()
+        .map(|r| r.id.clone())
+        .collect();
+    for id in &ids {
+        if let Err(e) = backend.stop(id).await {
+            // A container already gone / a flaky daemon must not block the
+            // delete. Drop the registry entry regardless so we don't leave
+            // a phantom behind — mirrors `stop_one`.
+            tracing::warn!(error = ?e, spec_id, replica = ?id, "stop on app delete failed");
+        }
+        state.replicas.write().await.remove(id);
+        state.sessions.drop_replica(id).await;
+    }
+    if !ids.is_empty() {
+        tracing::info!(spec_id, replicas = ids.len(), "reaped containers for deleted app");
+    }
+    ids.len()
+}
+
 /// Spawn one replica for `spec` using the configured backend.
 /// Public entry point for callers outside the scaler loop
 /// (e.g. the dashboard's "restart" action). Resolves the
@@ -918,6 +954,99 @@ mod tests {
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// A bare `Ready` replica for `spec_id`, for seeding the registry.
+    fn fake_replica(spec_id: &str) -> Replica {
+        Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: spec_id.to_string(),
+            container_id: "fake".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+            host: None,
+        }
+    }
+
+    /// #453: deleting an app reaps exactly its containers (via
+    /// `backend.stop`, which removes them) and leaves other apps alone.
+    #[tokio::test]
+    async fn stop_spec_reaps_only_the_targeted_app() {
+        use std::sync::Mutex;
+        struct Recorder {
+            stopped: Mutex<Vec<String>>,
+        }
+        #[async_trait]
+        impl ContainerBackend for Recorder {
+            async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<Replica> {
+                Ok(fake_replica(spec_id))
+            }
+            async fn spawn_with_port(
+                &self,
+                spec_id: &str,
+                image: &str,
+                _port: u16,
+            ) -> CoreResult<Replica> {
+                self.spawn(spec_id, image).await
+            }
+            async fn stop(&self, id: &ReplicaId) -> CoreResult<()> {
+                self.stopped.lock().unwrap().push(id.0.to_string());
+                Ok(())
+            }
+            async fn list(&self) -> CoreResult<Vec<Replica>> {
+                Ok(vec![])
+            }
+            async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+                Ok(ReplicaMetrics {
+                    cpu_percent: 0.0,
+                    memory_bytes: 0,
+                    network_rx_bytes: 0,
+                    network_tx_bytes: 0,
+                })
+            }
+        }
+
+        let backend = Arc::new(Recorder {
+            stopped: Mutex::new(vec![]),
+        });
+        let state = state_with_yaml("proxy:\n  title: T\n  specs: []\n", backend.clone());
+        // Seed two replicas for "doomed" and one for "keep".
+        let doomed_ids: Vec<ReplicaId> = {
+            let mut reg = state.replicas.write().await;
+            let a = fake_replica("doomed");
+            let b = fake_replica("doomed");
+            let ids = vec![a.id.clone(), b.id.clone()];
+            reg.add(a);
+            reg.add(b);
+            reg.add(fake_replica("keep"));
+            ids
+        };
+
+        let n = stop_spec(&state, "doomed").await;
+        assert_eq!(n, 2, "both doomed replicas reaped");
+        let stopped = backend.stopped.lock().unwrap().clone();
+        assert_eq!(stopped.len(), 2, "backend.stop called once per replica");
+        for id in &doomed_ids {
+            assert!(stopped.contains(&id.0.to_string()), "stop missed a replica");
+        }
+        assert_eq!(
+            state.replicas.read().await.replicas_of("doomed").len(),
+            0,
+            "registry purged for the deleted app"
+        );
+        assert_eq!(
+            state.replicas.read().await.replicas_of("keep").len(),
+            1,
+            "other apps untouched"
+        );
+
+        // No backend wired (landing-only) ⇒ no-op.
+        let mut landing = state_with_yaml("proxy:\n  title: T\n  specs: []\n", backend);
+        landing.backend = None;
+        assert_eq!(stop_spec(&landing, "anything").await, 0);
     }
 
     #[tokio::test]

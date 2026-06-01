@@ -606,3 +606,5 @@ admin-disk-prune-images = Remover não usadas
 admin-disk-prune-images-confirm = Remover todas as imagens não usadas?
 admin-disk-flash-images-pruned = Imagens não usadas removidas.
 admin-disk-cleaning = Limpando…
+admin-dashboard-metric-sessions-help = Sessões que as réplicas reportam atendendo agora.
+admin-dashboard-metric-tracker-help = Sessões fixas (sticky) rastreadas pelo proxy no heartbeat.

@@ -122,19 +122,22 @@
 {% endif %}
 
 <div class="dash-metric-grid" id="dash-metrics">
+  {# Capacity → load → resources. The two session metrics sit side by
+     side so they can be compared (#469); tooltips spell out the
+     difference (replica-reported vs. proxy-tracked sticky sessions). #}
   <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-box"></i>{{ self.t("admin-dashboard-metric-containers") }}</div>
     <div class="dash-metric-value" data-metric="containers">{{ total_containers }}</div>
   </div>
   <div class="dash-metric">
-    <div class="dash-metric-label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
-    <div class="dash-metric-value" data-metric="sessions">{{ total_sessions }}</div>
-  </div>
-  <div class="dash-metric">
     <div class="dash-metric-label"><i class="ti ti-apps"></i>{{ self.t("admin-dashboard-metric-specs") }}</div>
     <div class="dash-metric-value" data-metric="specs">{{ spec_count }}</div>
   </div>
-  <div class="dash-metric">
+  <div class="dash-metric" title="{{ self.t("admin-dashboard-metric-sessions-help") }}">
+    <div class="dash-metric-label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
+    <div class="dash-metric-value" data-metric="sessions">{{ total_sessions }}</div>
+  </div>
+  <div class="dash-metric" title="{{ self.t("admin-dashboard-metric-tracker-help") }}">
     <div class="dash-metric-label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
     <div class="dash-metric-value" data-metric="tracker">{{ tracker_sessions }}</div>
   </div>

@@ -687,6 +687,10 @@ pub(crate) fn render<T: Template>(t: &T) -> Response {
 #[cfg(test)]
 mod tests {
     use super::strip_base_prefix;
+    use super::{LoginPage, SetupPage};
+    use crate::i18n::{Locale, Locales};
+    use crate::theme::Theme;
+    use askama::Template;
 
     #[test]
     fn strip_base_prefix_root_is_noop() {
@@ -718,5 +722,50 @@ mod tests {
             "/admin/specs?page=2"
         );
         assert_eq!(strip_base_prefix("/box/?theme=dark", "/box"), "/?theme=dark");
+    }
+
+    // The favicon set lives in the shared `_favicons.html` partial; the
+    // standalone login/setup heads must include it so Safari has the raster
+    // .ico/.png to fall back on (Safari can ignore the SVG favicon and
+    // otherwise keep a stale origin-root icon when moving admin → landing).
+    #[test]
+    fn login_page_includes_raster_favicons() {
+        let locales = Locales::load().expect("load locales");
+        let html = LoginPage {
+            locale: Locale::En,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
+            error: "",
+            bootstrap: false,
+        }
+        .render()
+        .expect("render login");
+        assert!(html.contains("/favicon.ico"), "login must link /favicon.ico");
+        assert!(
+            html.contains("/favicon-32.png"),
+            "login must link /favicon-32.png"
+        );
+    }
+
+    #[test]
+    fn setup_page_includes_raster_favicons() {
+        let locales = Locales::load().expect("load locales");
+        let html = SetupPage {
+            locale: Locale::En,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
+            error: "",
+        }
+        .render()
+        .expect("render setup");
+        assert!(html.contains("/favicon.ico"), "setup must link /favicon.ico");
+        assert!(
+            html.contains("/favicon-32.png"),
+            "setup must link /favicon-32.png"
+        );
     }
 }

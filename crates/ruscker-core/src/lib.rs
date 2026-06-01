@@ -392,6 +392,22 @@ pub trait ContainerBackend: Send + Sync {
             .iter()
             .any(|i| image_tag_matches(&i.tags, image)))
     }
+
+    /// Pull `image` (optionally with registry `creds` + a `platform`),
+    /// streaming human-readable progress lines for the editor's Pull
+    /// button (#498, slice B). Default: unsupported — the editor only
+    /// offers Pull when the backend provides it. The Docker backend
+    /// streams `create_image` events.
+    async fn pull_image(
+        &self,
+        _image: &str,
+        _creds: Option<&RegistryCredentials>,
+        _platform: Option<&str>,
+    ) -> CoreResult<LogStream> {
+        Err(CoreError::Backend(
+            "image pull not supported by this backend".into(),
+        ))
+    }
 }
 
 /// Does any of `tags` (an image's `repo:tag` refs) satisfy a request for

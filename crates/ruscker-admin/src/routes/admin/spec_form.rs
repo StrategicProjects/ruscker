@@ -44,6 +44,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/admin/specs/{id}/duplicate", get(duplicate_form))
         .route("/admin/specs/image-check", get(image_check))
+        .route("/admin/specs/image-pull", get(image_pull))
         .route("/admin/specs/{id}", post(update))
         .route("/admin/specs/{id}/delete", post(delete))
 }
@@ -96,6 +97,88 @@ async fn image_check(
         "no-backend"
     };
     Json(ImageCheckResult { status })
+}
+
+#[derive(Deserialize)]
+struct ImagePullQuery {
+    image: String,
+    /// Name of a stored registry credential (the form's picker) for a
+    /// private image. Empty ⇒ anonymous pull (public images).
+    #[serde(default)]
+    credential: String,
+}
+
+/// `GET /admin/specs/image-pull?image=…&credential=…` — pull an absent
+/// image now, streaming the daemon's progress over SSE so the editor's
+/// Pull button (#498, slice B) can show it. Reuses the same pull path as
+/// a spawn. A terminal `done` event lets the client close the stream and
+/// re-check presence (success ⇒ present, failure ⇒ still absent + the
+/// `error: …` line). Editor-gated.
+async fn image_pull(
+    _: RequireEditor,
+    State(state): State<AppState>,
+    Query(q): Query<ImagePullQuery>,
+) -> Response {
+    use axum::http::header::{HeaderName, CACHE_CONTROL};
+    use axum::response::sse::{Event, KeepAlive, Sse};
+    use futures_util::StreamExt;
+
+    let image = q.image.trim().to_string();
+    if image.is_empty() || image.contains("${") {
+        return (
+            StatusCode::BAD_REQUEST,
+            "image name required (and must be free of ${…})",
+        )
+            .into_response();
+    }
+    let Some(backend) = state.backend.clone() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "Docker backend not connected").into_response();
+    };
+    let creds = resolve_pull_creds(&state, &q.credential).await;
+    let line_stream = match backend.pull_image(&image, creds.as_ref(), None).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(image, error = ?e, "image pull start failed");
+            return (StatusCode::BAD_GATEWAY, format!("pull failed: {e}")).into_response();
+        }
+    };
+    // Progress lines as default events, then one terminal `done` event so
+    // the client closes the EventSource (no auto-reconnect → re-pull).
+    let progress = line_stream.map(|line| Ok::<_, std::convert::Infallible>(Event::default().data(line)));
+    let done = futures_util::stream::once(async {
+        Ok::<_, std::convert::Infallible>(Event::default().event("done").data(""))
+    });
+    let sse = Sse::new(progress.chain(done))
+        .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)));
+    // `X-Accel-Buffering: no` so nginx streams the pull instead of buffering.
+    (
+        [
+            (CACHE_CONTROL, "no-cache"),
+            (HeaderName::from_static("x-accel-buffering"), "no"),
+        ],
+        sse,
+    )
+        .into_response()
+}
+
+/// Resolve a stored registry credential by name for [`image_pull`].
+/// `None` (empty name / no DB / no master key / not found) ⇒ anonymous.
+async fn resolve_pull_creds(
+    state: &AppState,
+    credential: &str,
+) -> Option<ruscker_core::RegistryCredentials> {
+    let name = credential.trim();
+    if name.is_empty() {
+        return None;
+    }
+    let pool = state.db.as_ref()?;
+    if !state.master_key.is_configured() {
+        return None;
+    }
+    crate::db::credentials::resolve(pool, &state.master_key, name)
+        .await
+        .ok()
+        .flatten()
 }
 
 // ── Form payload ────────────────────────────────────────────────

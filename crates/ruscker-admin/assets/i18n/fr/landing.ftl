@@ -222,6 +222,8 @@ spec-form-image-absent = Absente — récupérée au premier lancement
 spec-form-image-unresolved = Contient une variable d'environnement — résolue au pull
 spec-form-image-no-backend = Docker non connecté — vérification impossible
 spec-form-image-error = Échec de la vérification de l'image
+spec-form-image-pull = Récupérer
+spec-form-image-pulling = Récupération…
 spec-form-seats = Sessions/conteneur
 spec-form-lifetime = Durée max. (min)
 spec-form-lifetime-help = 360 = 6 heures

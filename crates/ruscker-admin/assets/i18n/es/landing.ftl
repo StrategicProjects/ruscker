@@ -222,6 +222,8 @@ spec-form-image-absent = Ausente — se descarga en el primer acceso
 spec-form-image-unresolved = Tiene una variable de entorno — se resuelve al hacer pull
 spec-form-image-no-backend = Docker no conectado — no se puede verificar
 spec-form-image-error = Error al verificar la imagen
+spec-form-image-pull = Descargar
+spec-form-image-pulling = Descargando…
 spec-form-seats = Sesiones/contenedor
 spec-form-lifetime = Vida máx. (min)
 spec-form-lifetime-help = 360 = 6 horas

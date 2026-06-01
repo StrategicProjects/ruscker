@@ -735,6 +735,59 @@ impl ContainerBackend for LocalDockerBackend {
         // real daemon failure (#498).
         Ok(self.docker.inspect_image(image).await.is_ok())
     }
+
+    async fn pull_image(
+        &self,
+        image: &str,
+        creds: Option<&ruscker_core::RegistryCredentials>,
+        platform: Option<&str>,
+    ) -> CoreResult<ruscker_core::LogStream> {
+        // Same options/creds path as `ensure_image_pulled`, but the
+        // `create_image` events are surfaced as progress lines instead of
+        // discarded — the editor's Pull button streams them over SSE
+        // (#498, slice B). A registry/auth failure rides through as an
+        // `error: …` line, not a hard error, so the caller can show it.
+        let opts = CreateImageOptions {
+            from_image: Some(image.to_string()),
+            platform: platform.unwrap_or("").to_string(),
+            ..Default::default()
+        };
+        let bollard_creds = creds.map(|c| bollard::auth::DockerCredentials {
+            username: Some(c.username.clone()),
+            password: Some(c.password.clone()),
+            serveraddress: c.server_address.clone(),
+            ..Default::default()
+        });
+        let stream = self
+            .docker
+            .create_image(Some(opts), None, bollard_creds)
+            .map(|ev| match ev {
+                Ok(info) => {
+                    if let Some(err) = info.error_detail {
+                        return format!("error: {}", err.message.unwrap_or_default());
+                    }
+                    let id = info.id.unwrap_or_default();
+                    let status = info.status.unwrap_or_default();
+                    let mut line = String::new();
+                    if !id.is_empty() {
+                        line.push_str(&id);
+                        line.push_str(": ");
+                    }
+                    line.push_str(&status);
+                    // Byte progress, when the daemon reports it (layer pulls).
+                    if let Some(pd) = info.progress_detail {
+                        if let (Some(cur), Some(total)) = (pd.current, pd.total) {
+                            if total > 0 {
+                                line.push_str(&format!(" {cur}/{total}"));
+                            }
+                        }
+                    }
+                    line
+                }
+                Err(e) => format!("error: {e}"),
+            });
+        Ok(Box::pin(stream))
+    }
 }
 
 impl LocalDockerBackend {

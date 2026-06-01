@@ -1276,7 +1276,7 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   border-bottom: 0.5px solid var(--border);
 }
 .landing-preview-header-inner {
-  display: flex; align-items: flex-end; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
   padding: 10px 12px;
 }
 .landing-preview-title {
@@ -1316,6 +1316,20 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   border: 0.5px solid var(--border);
   border-radius: 4px;
 }
+/* Live preview: logos in the header/footer chrome + a faithful footer. */
+.lp-head-side { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.lp-logo { display: block; width: auto; object-fit: contain; }
+.lp-mark { width: 14px; height: 14px; flex: none; }
+.landing-preview-centerbar {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 5px 12px; border-top: 0.5px solid var(--border-soft);
+}
+.landing-preview-footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 6px 12px; border-top: 0.5px solid var(--border);
+  font-size: 9px; color: var(--text-muted);
+}
+.landing-preview-footer .lp-version { opacity: 0.7; }
 
 /* ─── Audit log viewer ───────────────────────────────────────── */
 .audit-filter-bar {

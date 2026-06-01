@@ -449,17 +449,41 @@
         <div class="landing-preview-header"
              :style="(form.header_bg ? `background:${form.header_bg};` : '') + (form.header_fg ? `color:${form.header_fg};` : '')">
           <div class="landing-preview-header-inner">
-            <div>
-              {# Live preview (#468): title binds to the form, falling back
-                 to the config title; subtitle is optional (hidden when blank). #}
-              <div class="landing-preview-title">
-                <span x-show="(form.title || '').trim()" x-text="form.title"></span>
-                <span x-show="!(form.title || '').trim()">{{ portal_title }}</span>
+            <div class="lp-head-side">
+              {# Header-left logos replace the Ruscker mark (faithful to #468);
+                 a small mark shows when none are set. #}
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'left')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+              <svg class="lp-mark" x-show="!logos.some(l => l.url && l.slot === 'header' && l.align === 'left')" viewBox="0 0 80 80" aria-hidden="true">
+                <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+                <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+                <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+              </svg>
+              <div>
+                {# Live preview (#468): title binds to the form, falling back
+                   to the config title; subtitle is optional (hidden when blank). #}
+                <div class="landing-preview-title">
+                  <span x-show="(form.title || '').trim()" x-text="form.title"></span>
+                  <span x-show="!(form.title || '').trim()">{{ portal_title }}</span>
+                </div>
+                <div class="landing-preview-sub" x-show="(form.subtitle || '').trim()"
+                     x-text="form.subtitle" x-cloak></div>
               </div>
-              <div class="landing-preview-sub" x-show="(form.subtitle || '').trim()"
-                   x-text="form.subtitle" x-cloak></div>
             </div>
-            <div class="landing-preview-count">N</div>
+            <div class="lp-head-side">
+              {# Header-right logos trail the chrome (the count stands in for it). #}
+              <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'right')" :key="i">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+              </template>
+              <div class="landing-preview-count">N</div>
+            </div>
+          </div>
+          {# Header center bar — separate row, only when center logos exist. #}
+          <div class="landing-preview-centerbar" x-show="logos.some(l => l.url && l.slot === 'header' && l.align === 'center')">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'center')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+            </template>
           </div>
         </div>
 
@@ -470,6 +494,33 @@
           <div class="landing-preview-mockfilter"></div>
           <div class="landing-preview-mockgrid">
             <div></div><div></div><div></div><div></div>
+          </div>
+        </div>
+
+        {# Footer center bar — separate row above the footer. #}
+        <div class="landing-preview-centerbar" x-show="logos.some(l => l.url && l.slot === 'footer' && l.align === 'center')">
+          <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'center')" :key="i">
+            <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+          </template>
+        </div>
+
+        {# Footer: left logos · right logos + version + Ruscker mark (#468). #}
+        <div class="landing-preview-footer">
+          <div class="lp-head-side">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'left')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+          </div>
+          <div class="lp-head-side">
+            <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'footer' && l.align === 'right')" :key="i">
+              <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 20), 12) + 'px'" alt="">
+            </template>
+            <span class="lp-version">v{{ crate::APP_VERSION }}</span>
+            <svg class="lp-mark" style="width:11px;height:11px" viewBox="0 0 80 80" aria-hidden="true">
+              <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+              <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+              <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+            </svg>
           </div>
         </div>
       </div>

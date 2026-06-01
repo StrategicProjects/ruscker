@@ -391,9 +391,21 @@
       </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-og-image") }}</label>
-        <input type="text" name="og_image" x-model="form.og_image"
-               placeholder="/assets/img/og.png"
-               class="spec-form-input" value="{{ form.og_image }}">
+        {# Gallery picker (#451 mixin) writes the chosen asset path into
+           form.og_image; the field stays editable for an external URL.
+           Blank ⇒ auto-defaults to the header-left logo, else the Ruscker
+           mark (resolved server-side). #}
+        <div class="landing-logo-image-row">
+          <img :src="assetUrl(form.og_image)" alt="" class="landing-logo-thumb" x-show="form.og_image" style="flex:none">
+          <button type="button" class="admin-login-btn landing-logo-pick"
+                  @click="openImagePicker((v) => { form.og_image = v }, form.og_image)">
+            <i class="ti ti-photo" aria-hidden="true"></i>
+            {{ self.t("spec-form-choose-image") }}
+          </button>
+          <input type="text" name="og_image" x-model="form.og_image"
+                 placeholder="/assets/img/og.png"
+                 class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+        </div>
         <div class="spec-form-help">{{ self.t("admin-landing-og-image-help") }}</div>
       </div>
 

@@ -238,13 +238,31 @@ async fn index(
     let page_title =
         not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
     let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
-    // A root-absolute `og-image` (`/assets/img/og.png`) must carry the
-    // base path so it resolves under `--base-path` (#328). A full URL
-    // (the form OG crawlers usually want) is left untouched. Stored
-    // value stays base-agnostic; only the rendered tag gets the prefix.
-    let og_image = match not_blank(&lc.og_image) {
-        Some(p) if p.starts_with('/') => format!("{}{}", state.base_path, p),
-        other => other.unwrap_or_default(),
+    // Social-share image with an auto-default chain: the explicit
+    // `og-image` wins; otherwise the operator's header-left brand logo
+    // (the one that replaces the Ruscker mark) is reused so a shared link
+    // carries the portal's identity without setting it twice; otherwise
+    // the built-in Ruscker mark. A root-absolute path carries the base
+    // path so it resolves under `--base-path` (#328); a full URL is left
+    // untouched. (For best social rendering operators should still upload
+    // a ~1200×630 raster — an SVG logo may not render on every platform.)
+    let og_raw = not_blank(&lc.og_image)
+        .or_else(|| {
+            lc.logos
+                .iter()
+                .find(|l| l.slot == "header" && l.align == "left" && !l.url.trim().is_empty())
+                .map(|l| l.url.trim().to_string())
+        })
+        .unwrap_or_else(|| "/assets/brand/mark.svg".to_string());
+    let og_image = if og_raw.starts_with("http://")
+        || og_raw.starts_with("https://")
+        || og_raw.starts_with("//")
+    {
+        og_raw
+    } else if og_raw.starts_with('/') {
+        format!("{}{}", state.base_path, og_raw)
+    } else {
+        og_raw
     };
     let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
     let custom_css = not_blank(&lc.custom_css).unwrap_or_default();

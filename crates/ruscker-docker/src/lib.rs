@@ -726,6 +726,15 @@ impl ContainerBackend for LocalDockerBackend {
             .map_err(|e| backend_err("remove image", e))?;
         Ok(())
     }
+
+    async fn image_present(&self, image: &str) -> CoreResult<bool> {
+        // Same pull-free check `ensure_image_pulled` uses to skip a
+        // redundant pull. `inspect_image` resolves `repo` → `repo:latest`
+        // natively; a 404 (image absent) is a clean `Ok(false)`, not an
+        // error — the editor's indicator distinguishes "absent" from a
+        // real daemon failure (#498).
+        Ok(self.docker.inspect_image(image).await.is_ok())
+    }
 }
 
 impl LocalDockerBackend {

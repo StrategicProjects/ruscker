@@ -376,6 +376,37 @@ pub trait ContainerBackend: Send + Sync {
     async fn remove_image(&self, _image: &str) -> CoreResult<()> {
         Ok(())
     }
+
+    /// Whether `image` is already present on this backend's host — a fast,
+    /// pull-free presence check for the spec editor's "image on server"
+    /// indicator (#498). `Ok(false)` means "not found" (not an error).
+    ///
+    /// The default matches by tag over [`list_images`](Self::list_images)
+    /// — handling the bare-`repo` → `repo:latest` default — so mocks and
+    /// the multihost router still answer. The Docker backend overrides it
+    /// with a direct `inspect`, which resolves tags natively.
+    async fn image_present(&self, image: &str) -> CoreResult<bool> {
+        Ok(self
+            .list_images()
+            .await?
+            .iter()
+            .any(|i| image_tag_matches(&i.tags, image)))
+    }
+}
+
+/// Does any of `tags` (an image's `repo:tag` refs) satisfy a request for
+/// `image`? A bare `repo` matches `repo:latest`, mirroring Docker's
+/// default-tag rule. Pure helper behind the default
+/// [`ContainerBackend::image_present`]; the Docker backend resolves tags
+/// via the daemon instead.
+fn image_tag_matches(tags: &[String], image: &str) -> bool {
+    let with_tag = if image.contains(':') {
+        image.to_string()
+    } else {
+        format!("{image}:latest")
+    };
+    tags.iter()
+        .any(|t| t.as_str() == image || t.as_str() == with_tag)
 }
 
 /// A container Ruscker manages, in any lifecycle state — the row model
@@ -558,6 +589,24 @@ mod registry_tests {
     use super::*;
     use crate::replica::ReplicaState;
     use std::net::SocketAddr;
+
+    // ── image_tag_matches (default image_present, #498) ──────────────
+
+    #[test]
+    fn image_tag_matches_exact_and_latest() {
+        let tags = vec!["nginx:1.27".to_string(), "org/app:latest".to_string()];
+        // Exact ref hits.
+        assert!(image_tag_matches(&tags, "nginx:1.27"));
+        assert!(image_tag_matches(&tags, "org/app:latest"));
+        // A bare repo matches its `:latest` (Docker's default tag).
+        assert!(image_tag_matches(&tags, "org/app"));
+        // A bare repo does NOT match a non-latest tag.
+        assert!(!image_tag_matches(&tags, "nginx"));
+        // Unknown image.
+        assert!(!image_tag_matches(&tags, "redis:7"));
+        // No tags (dangling image) never matches.
+        assert!(!image_tag_matches(&[], "nginx:1.27"));
+    }
 
     fn fake_replica(spec: &str) -> Replica {
         Replica {

@@ -12,11 +12,11 @@
 use anyhow::Result;
 use askama::Template;
 use axum::{
-    extract::{Form, Path, State},
+    extract::{Form, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use chrono::Utc;
 use ruscker_config::{
@@ -43,8 +43,59 @@ pub fn routes() -> Router<AppState> {
             get(edit_form),
         )
         .route("/admin/specs/{id}/duplicate", get(duplicate_form))
+        .route("/admin/specs/image-check", get(image_check))
         .route("/admin/specs/{id}", post(update))
         .route("/admin/specs/{id}/delete", post(delete))
+}
+
+// ── Image presence check (#498, slice A) ────────────────────────
+
+#[derive(Deserialize)]
+struct ImageCheckQuery {
+    image: String,
+}
+
+/// Result of [`image_check`]. `status` is one of:
+/// - `present`   — the image is on the server (ready to launch)
+/// - `absent`    — not on the server (it'll be pulled on first launch)
+/// - `empty`     — no image name typed
+/// - `unresolved`— the name still carries a `${VAR}` (resolved at pull)
+/// - `no-backend`— Docker isn't connected, so we can't check
+/// - `error`     — the daemon check failed
+#[derive(Serialize)]
+struct ImageCheckResult {
+    status: &'static str,
+}
+
+/// `GET /admin/specs/image-check?image=<name>` — does the backend already
+/// have this image locally? Powers the spec editor's "on server" indicator
+/// (#498). Pull-free and Editor-gated; a quick yes/no, no registry round
+/// trip (that's slice B's explicit Pull button).
+async fn image_check(
+    _: RequireEditor,
+    State(state): State<AppState>,
+    Query(q): Query<ImageCheckQuery>,
+) -> Json<ImageCheckResult> {
+    let image = q.image.trim();
+    let status = if image.is_empty() {
+        "empty"
+    } else if image.contains("${") {
+        // A `${VAR}` image is only resolved at pull time; checking the
+        // literal would always miss. Tell the editor it's deferred.
+        "unresolved"
+    } else if let Some(backend) = state.backend.as_ref() {
+        match backend.image_present(image).await {
+            Ok(true) => "present",
+            Ok(false) => "absent",
+            Err(err) => {
+                tracing::warn!(image, error = ?err, "image presence check failed");
+                "error"
+            }
+        }
+    } else {
+        "no-backend"
+    };
+    Json(ImageCheckResult { status })
 }
 
 // ── Form payload ────────────────────────────────────────────────

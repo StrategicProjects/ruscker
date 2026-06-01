@@ -219,6 +219,13 @@ spec-form-state-inactive = Inativo
 spec-form-subject = Assunto
 spec-form-container = Container
 spec-form-image = Imagem Docker
+spec-form-image-check = Verificar
+spec-form-image-checking = Verificando…
+spec-form-image-present = No servidor
+spec-form-image-absent = Ausente — será puxada no primeiro acesso
+spec-form-image-unresolved = Contém variável de ambiente — resolvida no pull
+spec-form-image-no-backend = Docker não conectado — não dá para verificar
+spec-form-image-error = Falha ao verificar a imagem
 spec-form-seats = Sessões/container
 spec-form-lifetime = Vida máx. (min)
 spec-form-lifetime-help = 360 = 6 horas

@@ -89,7 +89,7 @@ admin-setup-submit = Create admin
 # — Password change / first login
 admin-pw-title = Change password
 admin-pw-help = Set a new password for your account.
-admin-pw-first-prompt = You're using a password set by an administrator. Would you like to change it now?
+admin-pw-first-prompt = You're using a password set by an administrator. Set a new password to continue.
 admin-pw-current-label = Current password
 admin-pw-new-label = New password
 admin-pw-confirm-label = Confirm password
@@ -97,7 +97,7 @@ admin-pw-error-current = Current password is incorrect.
 admin-pw-error-mismatch = Passwords don't match.
 admin-pw-error-short = Password must be at least 8 characters.
 admin-pw-submit = Save password
-admin-pw-keep = Keep current password
+admin-pw-reveal = Show/hide password
 # — User management (admin)
 admin-nav-users = Users
 admin-users-title = Users
@@ -105,7 +105,7 @@ admin-users-subtitle = Create and manage who can sign in, and at which level.
 admin-users-new = New user
 admin-users-create = Create
 admin-users-initial-password = Initial password
-admin-users-initial-password-hint = The user is asked whether to change it on first login.
+admin-users-initial-password-hint = The user must change it on first login.
 admin-users-role = Role
 admin-users-col-user = User
 admin-users-col-role = Role

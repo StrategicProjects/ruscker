@@ -608,4 +608,4 @@ admin-landing-header = Header
 admin-landing-portal-title = Portal title
 admin-landing-portal-title-help = Shown at the top of the landing. Blank uses the config title (proxy.title).
 admin-landing-portal-subtitle = Subtitle
-admin-landing-portal-subtitle-help = The line under the title. Blank uses the default subtitle.
+admin-landing-portal-subtitle-help = The line under the title. Leave blank to hide it.

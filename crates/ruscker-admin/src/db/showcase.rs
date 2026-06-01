@@ -168,6 +168,11 @@ fn card(
         if let Some(p) = platform {
             spec_json.insert("platform".into(), json!(p));
         }
+        // Demos spawn on demand, not at boot (#478): the default
+        // `min-replicas` is 1 for interactive apps, which would pre-spawn
+        // every showcase container on a fresh install (heavy + pointless
+        // until someone opens a card). 0 ⇒ cold-start on first click.
+        spec_json.insert("min-replicas".into(), json!(0));
     } else {
         // External link card — explicit kind so Spec::kind() doesn't
         // need to infer.

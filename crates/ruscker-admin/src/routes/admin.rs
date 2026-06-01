@@ -26,6 +26,7 @@ pub mod audit;
 pub mod blocks;
 pub mod credentials;
 pub mod dashboard;
+pub mod disk;
 pub mod images;
 pub mod landing;
 pub mod logs;
@@ -50,6 +51,7 @@ pub fn routes() -> Router<AppState> {
             get(password_form).post(password_submit),
         )
         .merge(dashboard::routes())
+        .merge(disk::routes())
         .merge(specs::routes())
         .merge(spec_form::routes())
         .merge(images::routes())
@@ -618,6 +620,8 @@ async fn password_submit(
 fn section_for_admin_path(path: &str) -> &'static str {
     if path.starts_with("/admin/dashboard") {
         "dashboard"
+    } else if path.starts_with("/admin/disk") {
+        "disk"
     } else if path.starts_with("/admin/specs") {
         "specs"
     } else if path.starts_with("/admin/media") {

@@ -34,9 +34,25 @@ reinstall**, not just editing files on the server:
 `sudo dpkg -i --force-confold ruscker_<version>_amd64.deb && sudo
 systemctl restart ruscker`.
 
-## `413 Payload Too Large` on an upload
-A `max-body-size` cap is in effect (global `proxy.max-body-size` or a
-per-spec override). Raise it for that spec or globally.
+## `413 Payload Too Large` on a Media upload
+There are two independent size limits in the upload path; the **nginx
+limit fires first** and is the more common culprit.
+
+**nginx (most common).** nginx's default `client_max_body_size` is 1 MB.
+Any upload larger than that is rejected by nginx before Ruscker even sees
+the request — the admin shows a generic "upload doesn't work" failure with
+no obvious error. Ruscker itself accepts up to 12 MB for media uploads.
+Set a higher limit in your nginx server block:
+
+```nginx
+client_max_body_size 16m;
+```
+
+See the full nginx snippet in [Deploying](./deploying.md).
+
+**Ruscker `proxy.max-body-size`.** A separate cap applies to requests
+forwarded to app containers. If a specific API spec rejects large POSTs
+with 413, raise `proxy.max-body-size` globally or as a per-spec override.
 
 ## `429 Too Many Requests` from an API
 The spec's `api.rate-limit` is throttling the caller. The `Retry-After`
@@ -83,11 +99,72 @@ buffers the response will hold the stream back. Disable buffering for
 `/admin/dashboard/events` — see the nginx note in
 [Deploying](./deploying.md).
 
+## The favicon doesn't appear in Safari (or shows a stale icon)
+Safari caches favicons aggressively and sometimes keeps serving a stale
+or broken icon long after you upgrade Ruscker. To force a refresh:
+
+1. In Safari, go to **Settings → Advanced** and enable the **Develop**
+   menu.
+2. Open **Develop → Empty Caches**, then reload the page.
+3. If that isn't enough, close all tabs pointing at the site and reopen
+   them.
+
+For iOS Safari, a full Safari data clear (**Settings → Safari → Clear
+History and Website Data**) removes the icon cache.
+
+This is a browser-side caching behaviour, not a Ruscker bug. The favicon
+markup was hardened in v0.1.18 (the `sizes="any"` attribute that confused
+Safari's icon selection was removed).
+
 ## `docker pull ghcr.io/strategicprojects/ruscker` is denied
 A freshly-published image package starts **private**. Either make the
 package public (Packages → the package → *Package settings* →
 visibility), or authenticate: `docker login ghcr.io` with a token that
 has `read:packages`.
+
+## Jupyter or Voilà loads a blank page / 404s on assets
+Ruscker uses a **strip model**: `/app/{id}` is stripped from the request
+path before forwarding, so the container always sees a root-relative path.
+The proxy injects a `<base href>`, rewrites static URLs in HTML responses,
+and patches runtime JavaScript via a shim — most apps (Shiny, Streamlit,
+Dash, Voilà) need no special configuration.
+
+**Voilà** — no special setup is required; the generalized runtime shim
+handles Voilà's RequireJS bootstrap.
+
+**JupyterLab / Jupyter Notebook** — the proxy also rewrites the
+`jupyter-config-data` JSON block (where Lab stores `baseUrl`,
+`fullStaticUrl`, and related paths) so the browser loads its chunks from
+under the mount. Because Ruscker strips the mount prefix before
+forwarding, the container should serve at **root** (`base_url=/`) and let
+the proxy do the prefixing. Configure the spec like this:
+
+```yaml
+- id: jupyter
+  container-image: quay.io/jupyter/minimal-notebook:latest
+  container-port: 8888
+  container-cmd:
+    - start-notebook.py
+    - --IdentityProvider.token=
+    - --ServerApp.allow_origin=*
+    - --ServerApp.base_url=/
+```
+
+`--IdentityProvider.token=` disables the login token so the proxy can
+forward requests without authentication, and `--ServerApp.allow_origin=*`
+lets the kernel WebSocket connect. Do **not** set
+`--ServerApp.base_url=#{publicPath}`: under Ruscker's strip model the
+container never sees the mount prefix, so a non-root `base_url` makes
+Jupyter 404 every path.
+
+**Do not set `SHINYPROXY_PUBLIC_PATH`** in `container-env` either. That
+variable is a ShinyProxy convention; Ruscker does not use it, and if a
+container reads it to self-prefix URLs it will 404 on every request.
+
+If assets still 404 after configuring the above, check
+`docker logs <ruscker-container-id>` for startup errors and verify the
+image's server is listening on the port you set in `container-port`
+(Jupyter uses 8888; the Ruscker default is 3838, the Shiny Server port).
 
 ## Inspecting what's running
 ```sh

@@ -5,13 +5,16 @@
 
 # Ruscker
 
-**Ruscker** is a lightweight Rust alternative to **ShinyProxy** and
-**Shiny Server Free**. It hosts and load-balances containerized
-interactive web apps — R/Shiny, Streamlit, Dash, Voilà — and stateless
-HTTP APIs (Plumber2, FastAPI) behind a single proxy, with a custom
-landing page and a real admin panel.
+**Ruscker** is a **portal and orchestrator** for containerized web
+workloads behind one proxy. It handles two shapes:
 
-It ships as a **single static binary, no JVM** — so the idle footprint
+- **Container-per-session** interactive apps — R/Shiny, Streamlit,
+  Dash, Voilà, Jupyter, RStudio.
+- **Container-per-API** stateless HTTP services — Plumber2, FastAPI.
+
+It keeps a ShinyProxy-compatible YAML schema for low-friction migration,
+ships as a **single static binary, no JVM**, and adds a real admin
+panel, a live monitoring dashboard, and load balancing. Idle footprint
 is megabytes, not hundreds of megabytes, and startup is instant.
 
 ## How it works
@@ -37,12 +40,11 @@ proper admin panel, a monitoring dashboard, and load balancing.
 
 ## In production
 
-Ruscker is on **v0.1.3** and runs in production today. Where the
+Ruscker is on **v0.1.31** and runs in production today. Where the
 JVM-based stack it replaced idled at hundreds of megabytes, Ruscker
 idles in the low tens:
 
-> **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
-> serving the same apps.
+> **~540 MB → ~16 MB idle** — roughly a 30× cut.
 
 A real 31-spec config migrated with **no unsupported features**, and
 apps spawn on demand. Releases are multi-arch and **cosign-signed**;
@@ -51,21 +53,32 @@ the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
 ## What's in the box
 
 - **Reverse proxy + load balancer** with sticky sessions, WebSocket
-  forwarding, per-spec replica pools, an auto-scaler, and absolute-URL
-  rewriting so unmodified Shiny/Streamlit apps work behind a sub-path.
+  forwarding, per-spec replica pools, an auto-scaler, and URL rewriting
+  (a generalized runtime shim patches `fetch`, `XMLHttpRequest`,
+  `WebSocket`, `script.src`, `link.href`, and more) so unmodified apps
+  work behind a sub-path.
 - **Container backend** (Docker) that spawns app containers on demand,
-  applies per-container CPU/memory limits, and reaps idle ones.
-- **Admin panel** — apps CRUD, image/media library, encrypted
-  credentials store, landing-page editor (colors, intros, SEO, social
-  meta, analytics, custom HTML blocks), audit log, **user accounts with
+  applies per-container CPU/memory limits, and reaps idle ones. Per-spec
+  `container-env` and `container-cmd` let you configure notebook servers
+  (Jupyter, RStudio) without custom images.
+- **Admin panel** — apps CRUD with a full advanced form, a unified
+  media library (built-in logos, uploads, drag-and-drop, "in use"
+  badges), an encrypted credentials store (AES literal or `${VAR}`
+  env-ref, resolved only at pull time), a landing-page editor (colors,
+  intros, SEO, social meta, analytics, custom HTML blocks, header/footer
+  logos with alignment and links), audit log, **user accounts with
   Viewer / Editor / Admin roles**, and a live monitoring dashboard
-  (CPU/memory sparklines, live-follow logs, stop/restart).
-- **Operations**: `/healthz` + `/readyz` probes, graceful shutdown,
-  structured (JSON) logging, per-API rate limiting + CORS, request
-  body-size limits, and an opt-in Prometheus `/metrics` endpoint.
-- **Distribution**: a multi-arch Docker image, a Debian package with a
-  hardened `systemd` unit, static musl tarballs, a Homebrew tap, and
-  cosign-signed artifacts.
+  (CPU/memory, live-follow logs, stop/restart).
+- **Sub-path mounting**: serve the whole portal under a prefix via
+  `server.context-path` (ShinyProxy-compatible) or `--base-path`. Health
+  probes (`/healthz`, `/readyz`) stay at the root for load balancers.
+- **Operations**: graceful shutdown, structured (JSON) logging, per-API
+  rate limiting + CORS, request body-size limits, gzip/br compression,
+  immutable-versioned static assets, and an opt-in Prometheus `/metrics`
+  endpoint.
+- **Distribution**: a cosign-signed multi-arch container image
+  (`ghcr.io/strategicprojects/ruscker`), a Debian package with a
+  hardened `systemd` unit, static musl tarballs, and a Homebrew tap.
 
 ## Where to next
 

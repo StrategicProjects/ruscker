@@ -14,7 +14,7 @@ A few cross-cutting concerns have dedicated chapters and field sets:
 
 - **Subpath mounting** (`server.context-path` / `--base-path`) — when
   you can't dedicate a subdomain and need the portal under
-  `example.org/box/`. See [Mounting under a base path][base-path] in
+  `example.org/apps/`. See [Mounting under a base path][base-path] in
   the deploy guide and [`server.context-path`](#servercontext-path--subpath-mounting)
   in the schema below.
 - **Per-user access** (`access-groups` / `access-users`) — restrict
@@ -24,15 +24,22 @@ A few cross-cutting concerns have dedicated chapters and field sets:
   in the schema. Group membership is set per user in the admin users
   page.
 - **Active-active HA** — when running more than one Ruscker instance
-  behind a load balancer, the **sign-in session** must be
-  pinned to one upstream until the shared session store ships. See
-  [Sticky upstream for the sign-in session][ha-sticky] in the deploy
-  guide.
-- **Branding, SEO, analytics, custom HTML** — see
-  [`proxy.landing-customization`](#proxylanding-customization) below.
+  behind a load balancer, point them at a shared Postgres for the
+  **sign-in session** so any node can serve any authenticated request;
+  if you can't, pin the session-bearing paths to one upstream. See
+  [Shared admin sessions][ha-sticky] in the deploy guide.
+- **Branding, logos, SEO, analytics, custom HTML** — header/footer
+  logos, colors, SEO/social meta, analytics snippets, and custom HTML
+  blocks. See [`proxy.landing-customization`](#proxylanding-customization)
+  below.
+- **Named registry credentials** (`docker-registry-credential`) — store
+  registry passwords encrypted in the admin panel and reference them by
+  name instead of writing credentials inline. See
+  [Registry credentials](#containerized-specs-shiny-streamlit-dash-voilà-api)
+  in the schema below.
 
 [base-path]: ./deploying.md#4b-mounting-under-a-base-path-subpath
-[ha-sticky]: ./deploying.md#sticky-upstream-for-the-sign-in-session-admin-app-api
+[ha-sticky]: ./deploying.md#shared-admin-sessions-eliminate-the-sticky-upstream-caveat
 
 ## Per-user access
 

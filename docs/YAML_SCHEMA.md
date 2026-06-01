@@ -28,9 +28,9 @@ server:
   servlet:
     session:
       timeout: 3600
-  context-path: /box                  # Mount portal under a subpath (see below)
+  context-path: /apps                  # Mount portal under a subpath (see below)
   # ShinyProxy's nested form is also accepted:
-  servlet.context-path: /box
+  servlet.context-path: /apps
 ```
 
 Resolved via `Server::session_timeout_secs()` — either form works.
@@ -38,10 +38,10 @@ Resolved via `Server::session_timeout_secs()` — either form works.
 ### `server.context-path` — subpath mounting
 
 Serves the whole portal under a URL prefix when you can't dedicate a
-subdomain (e.g. `example.org/box/` instead of `box.example.org/`).
+subdomain (e.g. `example.org/apps/` instead of `box.example.org/`).
 Normalized form: leading slash, no trailing slash (`"box"`,
-`"/box/"`, and `"/box"` all become `/box`). The CLI flag
-`--base-path /box` overrides the YAML.
+`"/apps/"`, and `"/apps"` all become `/apps`). The CLI flag
+`--base-path /apps` overrides the YAML.
 
 ShinyProxy emits this as `server.servlet.context-path`; the flat
 `server.context-path` form is also accepted. Empty / absent ⇒ served
@@ -172,6 +172,18 @@ proxy:
               data-domain="example.org"></script>
     analytics-origins: "https://plausible.io"   # space-separated; widens landing CSP
 
+    # Operator CSS — injected as a <style> late in the landing <head>,
+    # so it can override the built-in styles
+    custom-css: ".rk-card { border-radius: 0; }"
+
+    # Header / footer logos (admin-managed in the live editor; see below)
+    logos:
+      - url: /assets/img/org-mark.png   # uploaded, built-in, or absolute URL
+        slot: header                    # `header` | `footer`
+        align: left                     # `left` | `center` | `right`
+        link: https://org.example       # optional click-through
+        height: 40                      # render height in px
+
     # Sign-in visibility (anonymous viewers only)
     show-admin-link: true              # default true; false hides the entrance
 
@@ -197,8 +209,20 @@ Field reference:
 | `og-image` | path / URL | none | `og:image` for social-share. |
 | `analytics-html` | string | none | **Trusted** raw HTML, injected verbatim into landing `<head>`. |
 | `analytics-origins` | string | none | Space-separated origins added to the landing CSP (`script-src`/`connect-src`/`img-src`). |
+| `custom-css` | string | none | **Trusted** raw CSS, injected as a `<style>` late in the landing `<head>` so it overrides the built-in styles. |
 | `show-admin-link` | bool | `true` | When `false`, anonymous visitors don't see the "Sign in" entrance. Logged-in users still see their panel link. |
+| `logos[]` | list | `[]` | Header/footer logos (see below). |
 | `blocks[]` | list | `[]` | Custom HTML blocks (see below). |
+
+`logos[]` subfields:
+
+| Field | Type | Default | Notes |
+|---|---|---|---|
+| `url` | string | required | Image URL — `/assets/img/...` (uploaded), a built-in (`/assets/showcase/...`, `/assets/brand/...`), or an absolute URL. |
+| `slot` | enum | required | `header` or `footer` — where the logo renders. |
+| `align` | enum | required | `left`, `center`, or `right` within the slot. Logos sharing a slot+alignment render side by side. |
+| `link` | URL | none | Optional click-through — when set, the logo becomes an `<a>`. |
+| `height` | px | default | Per-logo render height in pixels; falls back to a built-in default when unset. |
 
 `blocks[]` subfields:
 
@@ -210,17 +234,19 @@ Field reference:
 | `csp-origins` | string | `""` | Space-separated origins this block's content needs, folded into the landing CSP. |
 | `enabled` | bool | `true` | Toggle without deleting. |
 
-> **Trust model:** `analytics-html` and `blocks[].html` are rendered
-> unescaped. Only set them from a trusted source. Anything the
-> snippet loads from outside Ruscker's origin must also be listed in
+> **Trust model:** `analytics-html`, `custom-css`, and `blocks[].html`
+> are rendered unescaped. Only set them from a trusted source. Anything
+> the snippet loads from outside Ruscker's origin must also be listed in
 > the matching `*-origins` field, otherwise the landing's CSP blocks
 > it.
 
-Blocks are **admin-managed in the live landing editor** and stored in
-their own DB table; the `blocks[]` slot in this YAML schema exists so
-a future `ruscker export` round-trip can serialize them, but at the
-moment the import/export path does **not** populate it — operators
-edit blocks from the admin UI. SEO, analytics, and `show-admin-link`
+`custom-css`, `logos[]`, and `blocks[]` are **admin-managed in the live
+landing editor** (the logos picker and blocks editor live on the Portal
+page). Blocks are stored in their own DB table; the `blocks[]` slot in
+this YAML schema exists so a future `ruscker export` round-trip can
+serialize them, but at the moment the import/export path does **not**
+populate it — operators edit blocks from the admin UI. `logos[]` does
+round-trip through import/export. SEO, analytics, and `show-admin-link`
 are deploy-level policy and live only in this block.
 
 ## Specs
@@ -262,6 +288,9 @@ A spec describes one app, API, or external link. Every spec has an
   docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
   docker-registry-domain: docker.io
+  docker-registry-credential: dockerhub-acme   # OR reference a stored
+                                      #   credential by name (Ruscker
+                                      #   extension; see below)
   volumes:                            # bind mounts (ShinyProxy-compatible)
     - /srv/myapp/data:/data           #   persistent data
     - /srv/myapp/www:/www:ro          #   static assets, read-only
@@ -303,6 +332,25 @@ always sees everything; an anonymous visitor sees only open apps. Group
 membership is set per user in the admin panel. Enforcement is real (not
 just hiding the card). See the [Roadmap](ROADMAP.md) Phase 8.
 
+#### Registry credentials — inline vs. named (`docker-registry-credential`)
+
+A spec can authenticate to a private registry two ways:
+
+1. **Inline** `docker-registry-username` / `docker-registry-password` /
+   `docker-registry-domain` — ShinyProxy-compatible. Always use
+   `${ENV_VAR}` for the password (never a literal in YAML).
+2. **Named** `docker-registry-credential: <name>` — a **Ruscker
+   extension** that references an entry in the admin's encrypted
+   credential store (managed under **Credentials** in the admin panel).
+   The username, password, and registry are resolved from the store at
+   **pull time** (decrypted with `RUSCKER_MASTER_KEY`), so no secret —
+   not even a `${VAR}` reference — needs to live in the spec at all.
+
+When `docker-registry-credential` is set, it **takes precedence** over
+the inline `docker-registry-*` fields for that spec. Leave it unset to
+use the inline fields. The spec form's **Registry** section is a picker
+over stored credential names.
+
 ### Smart routing — sub-path context for the upstream
 
 Ruscker mounts each app under a sub-path (`/app/{id}`, `/api/{id}`) but
@@ -342,6 +390,33 @@ mechanisms bridge that gap:
    `inject-base-href` only affects `/app/{id}` responses; `/api/{id}`
    responses are never rewritten. Editable in the admin **Advanced**
    form under **Routing**.
+
+3. **The `#{publicPath}` token (opt-in).** For an app that needs its
+   *own* base-url told to it as a config value — Jupyter's
+   `--ServerApp.base_url`, for instance — drop the literal token
+   `#{publicPath}` into any `container-cmd` argument or `container-env`
+   value. At spawn it's substituted with the spec's public mount path
+   **with a trailing slash** (e.g. `/app/{id}/`, or `/apps/app/{id}/`
+   under a base path; `/api/{id}/` for APIs). This is Ruscker's analog
+   of ShinyProxy's `SHINYPROXY_PUBLIC_PATH`, but it is **never injected
+   automatically** — Ruscker strips the mount prefix before forwarding,
+   so most apps should serve at root and rely on the rewriting above.
+   Reach for the token only when an app genuinely needs the public path
+   in its own configuration:
+
+   ```yaml
+   - id: jupyter
+     container-image: org/jupyter:tag
+     type: app
+     container-cmd:
+       - jupyter
+       - lab
+       - --ServerApp.base_url=#{publicPath}
+   ```
+
+   Note `#{publicPath}` is resolved at **spawn**, distinct from the
+   parse-time `${VAR}` env interpolation, which never sees this runtime
+   value.
 
 ### External link specs (no container)
 

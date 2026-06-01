@@ -13,9 +13,9 @@ ruscker validate --strict-compat application.yml # migration pre-flight
 ```
 
 `--strict-compat` lists every ShinyProxy feature your config uses that
-Ruscker does **not** honour (e.g. Kubernetes backend, per-spec
-`volumes`/`environment`, non-`none` authentication) and exits non-zero
-if it finds any. A clean run means a drop-in migration.
+Ruscker does **not** honour (e.g. Kubernetes backend, `minimum-seats-available`,
+non-`none` authentication) and exits non-zero if it finds any. A clean
+run means a drop-in migration.
 
 > In production, a real 31-spec ShinyProxy 3.2.0 config reported
 > **"no unsupported features"**.
@@ -24,7 +24,68 @@ The validator also flags **plaintext credentials** in the YAML — move
 any `docker-registry-password` to `${DOCKER_REGISTRY_PASSWORD}` and set
 the variable in the environment (or `/etc/ruscker/ruscker.env`).
 
-## 2. Card logos
+## 2. Credentials and env-var interpolation
+
+Any string value in `application.yml` can reference an environment
+variable with `${VAR}` or `${VAR:-default}`:
+
+```yaml
+docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}
+```
+
+The literal `${VAR}` token is what gets stored (in the config file, the
+database, and exports) — it is resolved to the real value only when a
+container is actually spawned. This means registry passwords and
+per-spec `container-env` secrets **never land in the database**.
+
+For teams managing several apps that share a registry credential,
+Ruscker also has a **named credential store** in the admin panel.
+Store the credential there once, then reference it by name in the spec:
+
+```yaml
+- id: my_app
+  container-image: registry.example.com/team/app:latest
+  docker-registry-credential: my-registry-cred   # name from the store
+```
+
+When `docker-registry-credential` is set, it takes precedence over the
+inline `docker-registry-username` / `docker-registry-password` fields.
+The credential store accepts either an encrypted password or a pure
+`${VAR}` env-ref (resolved at pull time, not stored in cleartext).
+
+> The inline fields are still valid and kept for back-compat — use
+> whichever fits your workflow.
+
+## 3. Sub-path mounting (`context-path`)
+
+If you run Ruscker on a path prefix rather than a dedicated subdomain
+(e.g. `example.org/apps/` instead of `apps.example.org`), use
+`server.context-path`:
+
+```yaml
+server:
+  context-path: /apps    # normalized: leading slash, no trailing slash
+```
+
+ShinyProxy's nested form is also accepted without changes:
+
+```yaml
+server:
+  servlet.context-path: /apps
+```
+
+Or override it at startup with the CLI flag (wins over YAML):
+
+```sh
+ruscker serve --base-path /apps --config application.yml ...
+```
+
+The portal and admin routes are all mounted under the prefix; the
+health probes (`/healthz`, `/readyz`) stay at the root so your load
+balancer does not need to know the prefix. Your reverse proxy just
+needs to forward requests under the same path through to Ruscker.
+
+## 4. Card logos
 
 ShinyProxy serves card logos from its `template-path`'s `assets/img/`
 folder. When you run `serve` without `--images-dir`, Ruscker
@@ -35,7 +96,10 @@ auto-discovers them next to the config:
 
 So a config left in place finds its logos with no extra flags.
 
-## 3. Side-by-side cutover (recommended)
+You can also upload images through the admin **Media** panel and
+reference them by filename in the spec's `logo` field.
+
+## 5. Side-by-side cutover (recommended)
 
 You don't have to flip everything at once. A safe pattern (proven in
 production) keeps ShinyProxy reachable while Ruscker takes the root:
@@ -52,14 +116,31 @@ bookmarks keep working after the cutover.
 ## What Ruscker adds
 
 Beyond parity, you also get: a real admin panel (no more hand-editing
-YAML), a monitoring dashboard, per-API rate-limiting/CORS, health
-probes, graceful shutdown, and a tiny footprint. See
+YAML), a live monitoring dashboard, per-spec `container-env` /
+`container-cmd` injection, per-API rate-limiting and CORS, per-user
+and per-group app visibility, health probes, graceful shutdown, and a
+tiny footprint — idle memory drops from ~540 MB to ~16 MB. See
 [The admin panel](./admin.md).
 
 ## Not supported (yet)
 
-Authentication schemes other than `none`, the Kubernetes backend, and
-a few per-spec fields (`volumes`, `environment`, `labels`, …) are
-parsed but ignored — `validate --strict-compat` is the source of
-truth. For apps that handle their own auth (a common case), `none` is
-correct: Ruscker just routes traffic.
+Authentication schemes other than `none` and the Kubernetes backend
+are the main gaps — `validate --strict-compat` is the authoritative
+source of truth for your specific config. For apps that handle their
+own auth (a common case), `none` is correct: Ruscker just routes
+traffic.
+
+The following ShinyProxy per-spec fields are accepted by the parser
+but currently ignored:
+
+- `minimum-seats-available` — use `min-replicas` instead
+- `labels` — custom container labels (phase 3.5)
+- `network-connections` — container network wiring (phase 3.5)
+- `kubernetes-*` — Kubernetes backend
+
+Fields that **are** now fully supported (and no longer flagged by
+`--strict-compat`): `volumes`, `container-env`, `container-cmd`,
+`port` (maps to `container-port`), and the scaling and lifecycle knobs
+`scale-up-threshold`, `scale-down-threshold`, `scale-down-grace`,
+`max-lifetime`, `container-lifetime`, `drain-timeout`,
+`stop-on-logout`, and `concurrent-requests-per-replica`.

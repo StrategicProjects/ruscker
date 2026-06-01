@@ -161,11 +161,18 @@ enum Command {
         #[arg(long, env = "RUSCKER_MASTER_KEY")]
         master_key: Option<String>,
 
-        /// Enable the local Docker backend. Required for the
-        /// proxy routes (`/app/*`, `/api/*`) to actually spawn
-        /// containers. Without it those routes return 503.
+        /// Force the Docker backend on. By default Ruscker auto-connects
+        /// when the daemon socket is reachable; `--docker` makes a failed
+        /// connect a fatal boot error instead of a landing-only fallback
+        /// (useful for a remote/explicit Docker host).
         #[arg(long)]
         docker: bool,
+
+        /// Run landing-only: never connect to Docker even if the socket
+        /// is reachable. The proxy routes (`/app/*`, `/api/*`) return 503.
+        /// Opts out of the default auto-connect.
+        #[arg(long, conflicts_with = "docker")]
+        no_docker: bool,
 
         /// Postgres DSN for the shared HA session store
         /// (`postgres://user:pass@host/db`). When set, several Ruscker
@@ -221,6 +228,7 @@ fn main() -> Result<()> {
             admin_token,
             master_key,
             docker,
+            no_docker,
             session_store_url,
             admin_session_store_url,
             base_path,
@@ -233,6 +241,7 @@ fn main() -> Result<()> {
             admin_token,
             master_key,
             docker,
+            no_docker,
             session_store_url,
             admin_session_store_url,
             base_path_override: base_path,
@@ -402,6 +411,7 @@ struct ServeArgs {
     admin_token: Option<String>,
     master_key: Option<String>,
     docker: bool,
+    no_docker: bool,
     session_store_url: Option<String>,
     admin_session_store_url: Option<String>,
     base_path_override: Option<String>,
@@ -418,6 +428,7 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
         admin_token,
         master_key,
         docker,
+        no_docker,
         session_store_url,
         admin_session_store_url,
         base_path_override,
@@ -475,32 +486,50 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
         if let Some(k) = master_key {
             server = server.with_master_key(k).context("invalid --master-key")?;
         }
-        if docker {
-            let backend: std::sync::Arc<dyn ruscker_core::ContainerBackend> = if hosts.is_empty() {
-                std::sync::Arc::new(
-                    ruscker_docker::LocalDockerBackend::local()
-                        .context("connect to Docker daemon")?,
-                )
-            } else {
-                tracing::info!(count = hosts.len(), "multi-host backend");
-                std::sync::Arc::new(
-                    ruscker_docker::MultiHostDockerBackend::connect(&hosts)
-                        .context("connect to Docker hosts")?,
-                )
-            };
-            server = server.with_backend(backend);
-        } else if is_local_docker_reachable() {
-            // #184: the operator started without `--docker` on a host
-            // where the daemon socket is reachable. Spawning containers
-            // is the whole point of the proxy, so nudge them once at
-            // startup — this is a hint, not a hard requirement (the
-            // landing + admin still work in proxy-less mode).
-            tracing::warn!(
-                "Docker socket is reachable at /var/run/docker.sock but --docker is OFF — \
-                 app containers will not spawn. If you installed from the Ruscker .deb \
-                 package run `sudo ruscker-enable-docker`; otherwise add --docker to the \
-                 command line."
-            );
+        // Docker backend (#477): the default is **auto** — connect when
+        // the daemon is reachable, so a fresh install just works. `--docker`
+        // forces it on (a failed connect is then a fatal boot error, e.g.
+        // for a remote host); `--no-docker` forces landing-only.
+        if no_docker {
+            // Explicit landing-only — nothing to wire, no nudge.
+        } else if !hosts.is_empty() {
+            // Multi-host is itself an explicit opt-in (the operator listed
+            // hosts); `connect` validates them and fails only on zero.
+            tracing::info!(count = hosts.len(), "multi-host backend");
+            let backend = ruscker_docker::MultiHostDockerBackend::connect(&hosts)
+                .context("connect to Docker hosts")?;
+            server = server.with_backend(std::sync::Arc::new(backend));
+        } else if docker || is_local_docker_reachable() {
+            // `docker` ⇒ forced on; otherwise auto (the socket file exists).
+            match ruscker_docker::LocalDockerBackend::local() {
+                Ok(b) => {
+                    let backend: std::sync::Arc<dyn ruscker_core::ContainerBackend> =
+                        std::sync::Arc::new(b);
+                    // The socket file can be present while the service user
+                    // lacks access (not in the `docker` group) — that only
+                    // surfaces on a real API call, so probe before committing.
+                    match backend.list().await {
+                        Ok(_) => server = server.with_backend(backend),
+                        Err(e) if docker => {
+                            return Err(anyhow::anyhow!("{e}"))
+                                .context("--docker is set but the Docker daemon is unreachable");
+                        }
+                        Err(e) => tracing::warn!(
+                            error = %e,
+                            "Docker socket is present but the daemon is unreachable (the \
+                             service user may not be in the `docker` group) — running \
+                             landing-only; app containers won't spawn. Run \
+                             `sudo ruscker-enable-docker` or add the user to the `docker` \
+                             group; pass --no-docker to silence this."
+                        ),
+                    }
+                }
+                Err(e) if docker => return Err(e).context("connect to Docker daemon"),
+                Err(e) => tracing::warn!(
+                    error = ?e,
+                    "could not initialise the Docker client — running landing-only"
+                ),
+            }
         }
         // Config database: Postgres (shared HA catalog) takes precedence
         // over the SQLite path when both are given.

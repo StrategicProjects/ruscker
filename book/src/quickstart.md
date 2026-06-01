@@ -39,12 +39,14 @@ ruscker validate application.yml
 ## 3. Run it
 
 ```sh
-ruscker serve --config application.yml --bind 127.0.0.1:8080 --docker
+ruscker serve --config application.yml --bind 127.0.0.1:8080
 ```
 
-`--docker` enables the backend that spawns app containers; without it the
-landing page and admin still work but `/app/*` returns 503. To unlock the
-admin panel, also pass an admin token and a DB:
+Ruscker **auto-connects to Docker** when the daemon socket is reachable, so
+app containers spawn out of the box. Pass `--no-docker` to run landing-only
+(then `/app/*` returns 503); pass `--docker` to make a failed connect a fatal
+error instead of falling back to landing-only (useful for a remote daemon). To
+unlock the admin panel, also pass an admin token and a DB:
 
 ```sh
 RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32) \

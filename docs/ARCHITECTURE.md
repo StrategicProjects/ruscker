@@ -8,7 +8,7 @@ how the pieces fit together.
 
 ![How Ruscker works: browsers and API clients hit a single Ruscker binary, which serves the landing page + admin and reverse-proxies to app containers it spawns on demand via the Docker daemon.](images/architecture.svg)
 
-All of this is a single Rust process — one static binary, ~16 MB idle,
+All of this is a single Rust process — one static binary, ~14 MB idle,
 no JVM. Visitors and API clients reach it on one port; it serves the
 landing page and admin UI, reverse-proxies `/app/{spec}` and
 `/api/{spec}` to the right replica (keeping Shiny sessions sticky and

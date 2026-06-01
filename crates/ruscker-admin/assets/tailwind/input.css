@@ -1146,14 +1146,16 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .editor-card--preview { padding-bottom: 14px; }
 
 /* Public landing header/footer logo bars (admin-managed) */
+/* Center logo bar (#468): left/right buckets now live in the chrome, so this
+   bar only ever holds the `center` group — centre it with flex. (The old
+   3-column grid `1fr auto 1fr` left a lone center child stuck in the first
+   1fr column, i.e. off to the left.) */
 .landing-logo-bar {
-  display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  display: flex; align-items: center; justify-content: center;
   gap: 16px; padding-top: 12px; padding-bottom: 12px;
 }
 .landing-logo-group { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
-.landing-logo-left { justify-self: start; }
-.landing-logo-center { justify-self: center; }
-.landing-logo-right { justify-self: end; }
+.landing-logo-center { justify-content: center; }
 .landing-logo-bar img { display: block; width: auto; object-fit: contain; }
 .landing-logo-bar--footer {
   border-top: 0.5px solid var(--border, rgba(120,120,120,0.25));

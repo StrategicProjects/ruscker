@@ -103,6 +103,17 @@ pub struct CredentialForm {
     pub password: String,
 }
 
+/// A credential name is safe iff it's non-empty (after trim) and made only
+/// of identifier-ish chars. It lands un-encoded in the delete URL's single
+/// path segment, so anything else (`/`, `?`, `#`, space, …) would make the
+/// credential undeletable from the UI (#423).
+fn is_valid_credential_name(name: &str) -> bool {
+    let t = name.trim();
+    !t.is_empty()
+        && t.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+}
+
 async fn create_or_update(
     admin: RequireAdmin,
     State(state): State<AppState>,
@@ -134,6 +145,21 @@ async fn create_or_update(
             theme,
             None,
             Some("name, username and password are required".into()),
+        )
+        .await;
+    }
+
+    // Restrict the name to a safe charset (#423). The delete action puts the
+    // name in a single URL path segment (`/admin/credentials/{name}/delete`)
+    // un-encoded, so a `/`, `?`, `#`, space, … would make the credential
+    // impossible to delete from the UI. Keep it to identifier-ish chars.
+    if !is_valid_credential_name(&form.name) {
+        return render_index(
+            &state,
+            loc,
+            theme,
+            None,
+            Some("name may only contain letters, digits, '_', '.' and '-'".into()),
         )
         .await;
     }
@@ -177,5 +203,24 @@ async fn delete(
             tracing::error!(error = ?err, name, "credential delete failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_credential_name;
+
+    #[test]
+    fn credential_name_charset_is_restricted() {
+        assert!(is_valid_credential_name("dockerhub-milkway"));
+        assert!(is_valid_credential_name("reg_1.prod"));
+        assert!(is_valid_credential_name("  trimmed-ok  "));
+        // Undeletable-name cases (#423): break the delete URL path segment.
+        assert!(!is_valid_credential_name("foo/bar"));
+        assert!(!is_valid_credential_name("a?b"));
+        assert!(!is_valid_credential_name("a#b"));
+        assert!(!is_valid_credential_name("with space"));
+        assert!(!is_valid_credential_name(""));
+        assert!(!is_valid_credential_name("   "));
     }
 }

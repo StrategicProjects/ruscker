@@ -295,8 +295,14 @@
              :style="(form.header_bg ? `background:${form.header_bg};` : '') + (form.header_fg ? `color:${form.header_fg};` : '')">
           <div class="landing-preview-header-inner">
             <div>
-              <div class="landing-preview-title">{{ portal_title }}</div>
-              <div class="landing-preview-sub">{{ self.t("landing-subtitle") }}</div>
+              {# Live preview (#468): title binds to the form, falling back
+                 to the config title; subtitle is optional (hidden when blank). #}
+              <div class="landing-preview-title">
+                <span x-show="(form.title || '').trim()" x-text="form.title"></span>
+                <span x-show="!(form.title || '').trim()">{{ portal_title }}</span>
+              </div>
+              <div class="landing-preview-sub" x-show="(form.subtitle || '').trim()"
+                   x-text="form.subtitle" x-cloak></div>
             </div>
             <div class="landing-preview-count">N</div>
           </div>

@@ -608,4 +608,4 @@ admin-landing-header = En-tête
 admin-landing-portal-title = Titre du portail
 admin-landing-portal-title-help = Affiché en haut de la landing. Vide : utilise le titre de la config (proxy.title).
 admin-landing-portal-subtitle = Sous-titre
-admin-landing-portal-subtitle-help = La ligne sous le titre. Vide : utilise le sous-titre par défaut.
+admin-landing-portal-subtitle-help = La ligne sous le titre. Laissez vide pour le masquer.

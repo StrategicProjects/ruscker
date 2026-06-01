@@ -612,4 +612,4 @@ admin-landing-header = Cabeçalho
 admin-landing-portal-title = Título do portal
 admin-landing-portal-title-help = Aparece no topo da landing. Em branco, usa o título do config (proxy.title).
 admin-landing-portal-subtitle = Subtítulo
-admin-landing-portal-subtitle-help = A linha abaixo do título. Em branco, usa o subtítulo padrão.
+admin-landing-portal-subtitle-help = A linha abaixo do título. Em branco, o subtítulo fica oculto.

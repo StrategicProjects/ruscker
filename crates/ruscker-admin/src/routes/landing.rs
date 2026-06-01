@@ -270,8 +270,10 @@ async fn index(
             cfg_title.to_string()
         }
     });
-    let header_subtitle =
-        not_blank(&lc.subtitle).unwrap_or_else(|| state.locales.t(loc, "landing-subtitle", None));
+    // The subtitle is optional (#468): a blank override hides it entirely
+    // (the template skips the `<p>` when empty). The localized default is
+    // only a placeholder hint in the editor, not a forced fallback.
+    let header_subtitle = not_blank(&lc.subtitle).unwrap_or_default();
 
     let page = LandingPage {
         locale: loc,

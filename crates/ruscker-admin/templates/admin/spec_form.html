@@ -291,11 +291,29 @@
               <label for="f-img" class="spec-form-label">{{ self.t("spec-form-image") }}</label>
               {% call help(self.t("spec-help-image")) %}{% endcall %}
             </div>
-            <input id="f-img" type="text" name="container_image"
-                   value="{{ form.container_image }}"
-                   x-model="form.container_image"
-                   placeholder="org/repo:tag"
-                   class="spec-form-input spec-form-input--mono">
+            <div style="display:flex; gap:8px; align-items:center">
+              <input id="f-img" type="text" name="container_image"
+                     value="{{ form.container_image }}"
+                     x-model="form.container_image"
+                     @input="imageCheck.status = ''"
+                     placeholder="org/repo:tag"
+                     class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+              {# On-demand presence check (#498). Pull-free; the badge below
+                 reports present / absent / deferred. #}
+              <button type="button" class="admin-login-btn" style="padding:7px 11px;font-size:12px;white-space:nowrap"
+                      @click="checkImage()" :disabled="imageCheck.loading || !(form.container_image || '').trim()">
+                <i class="ti ti-search" aria-hidden="true"></i>
+                {{ self.t("spec-form-image-check") }}
+              </button>
+            </div>
+            <div class="spec-form-help" x-show="imageCheck.loading || imageCheck.status" x-cloak style="margin-top:5px">
+              <span x-show="imageCheck.loading"><i class="ti ti-loader-2" aria-hidden="true"></i> {{ self.t("spec-form-image-checking") }}</span>
+              <span x-show="!imageCheck.loading && imageCheck.status === 'present'" style="color:var(--color-teal-600)"><i class="ti ti-circle-check" aria-hidden="true"></i> {{ self.t("spec-form-image-present") }}</span>
+              <span x-show="!imageCheck.loading && imageCheck.status === 'absent'"><i class="ti ti-cloud-download" aria-hidden="true"></i> {{ self.t("spec-form-image-absent") }}</span>
+              <span x-show="!imageCheck.loading && imageCheck.status === 'unresolved'"><i class="ti ti-variable" aria-hidden="true"></i> {{ self.t("spec-form-image-unresolved") }}</span>
+              <span x-show="!imageCheck.loading && imageCheck.status === 'no-backend'"><i class="ti ti-plug-off" aria-hidden="true"></i> {{ self.t("spec-form-image-no-backend") }}</span>
+              <span x-show="!imageCheck.loading && imageCheck.status === 'error'"><i class="ti ti-alert-triangle" aria-hidden="true"></i> {{ self.t("spec-form-image-error") }}</span>
+            </div>
           </div>
 
           <div class="grid grid-cols-2 gap-3">
@@ -855,6 +873,23 @@ window.ruscker.specForm = (initial, logoImages) => ({
   // Image-picker modal state (shared by logo + cover). `target` selects
   // which field a pick writes to; `q` filters uploads + built-ins.
   picker: { open: false, target: 'logo', q: '' },
+  // Container-image presence check (#498): on demand, ask the backend
+  // whether `container_image` is already on the server. `status` drives
+  // the badge; cleared when the field changes so a stale ✓ never lingers.
+  imageCheck: { status: '', loading: false },
+  async checkImage() {
+    const image = (this.form.container_image || '').trim();
+    if (!image) { this.imageCheck = { status: 'empty', loading: false }; return; }
+    this.imageCheck = { status: '', loading: true };
+    try {
+      const base = window.RUSCKER_BASE || '';
+      const resp = await fetch(base + '/admin/specs/image-check?image=' + encodeURIComponent(image));
+      const data = await resp.json().catch(() => ({ status: 'error' }));
+      this.imageCheck = { status: data.status || 'error', loading: false };
+    } catch (_) {
+      this.imageCheck = { status: 'error', loading: false };
+    }
+  },
   // Prefix the base path on a root-absolute asset URL (#270). These
   // <img :src> values are set by Alpine at runtime, so the base-path
   // response rewriter (which only touches static HTML) never sees them

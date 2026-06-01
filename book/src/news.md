@@ -9,6 +9,25 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.36 — 2026-06-01
+
+A favicon fix for Safari and a cleaner uninstall.
+
+**Admin**
+- Every page now ships the **same favicon set** — the standalone login
+  and setup screens previously linked only the SVG icon, which Safari can
+  ignore (leaving a dark placeholder when moving between admin and the
+  landing). The icon links live in one shared partial, and a dedicated
+  monochrome `safari-pinned-tab.svg` backs the Safari pinned-tab icon.
+
+**Packaging**
+- `apt purge ruscker` now removes `/etc/ruscker` too (config + the admin
+  token / keys in `ruscker.env`), so a purge leaves no trace. The
+  installation chapter documents the full **uninstall & reset** matrix
+  (remove vs purge vs purge+install vs a data-only DB wipe).
+
+---
+
 ## v0.1.35 — 2026-06-01
 
 Live dashboard fixes behind a reverse proxy, plus smarter share images.

@@ -11,7 +11,7 @@ to silently ignore them). See [Migrating from ShinyProxy](./migrating.md).
 
 No. Ruscker is a single static binary written in Rust. There's no JVM, no
 Java toolchain, and no application server to manage — the idle footprint
-is **~16 MB** instead of the hundreds of MB a JVM-based proxy idles at.
+is **~14 MB** instead of the hundreds of MB a JVM-based proxy idles at.
 
 ### Which app frameworks can it host?
 

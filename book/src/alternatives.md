@@ -16,7 +16,7 @@ ShinyProxy's `application.yml`.
 | | **Ruscker** | **ShinyProxy** | **Shiny Server** (open source) | **Posit Connect** | **JupyterHub** |
 |---|---|---|---|---|---|
 | Runtime | Rust — single static binary | JVM (Java / Spring) | C++ / Node | proprietary | Python |
-| Idle footprint | **~16 MB** | ~300–540 MB | moderate | heavy | moderate–heavy |
+| Idle footprint | **~14 MB** | ~300–540 MB | moderate | heavy | moderate–heavy |
 | Per-session isolation | ✅ container/session | ✅ container/session | ❌ shared R processes | ✅ | ✅ per-user |
 | Frameworks | Shiny, Streamlit, Dash, Voilà, Plumber, FastAPI — any HTTP/WS container | any container | **R/Shiny only** | R, Python, Quarto, APIs | Jupyter/Python (+ images) |
 | Admin UI | ✅ live dashboard + full CRUD | minimal | edit config + restart | ✅ rich | partial |

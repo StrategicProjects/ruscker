@@ -53,7 +53,7 @@ installer, a **Homebrew tap**, and **cosign-signed** release artifacts.
 
 > **Production milestone.** Ruscker replaced a JVM-based stack on the
 > same machine serving the same apps, cutting idle memory from
-> **~540 MB to ~16 MB** (~30×). A real 31-spec config migrated with no
+> **~540 MB to ~14 MB** (~38×). A real 31-spec config migrated with no
 > unsupported features.
 
 ### Phase 6 — Multi-host scheduling → **v0.1.1 / v0.1.2**

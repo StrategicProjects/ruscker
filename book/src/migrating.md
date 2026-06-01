@@ -119,7 +119,7 @@ Beyond parity, you also get: a real admin panel (no more hand-editing
 YAML), a live monitoring dashboard, per-spec `container-env` /
 `container-cmd` injection, per-API rate-limiting and CORS, per-user
 and per-group app visibility, health probes, graceful shutdown, and a
-tiny footprint — idle memory drops from ~540 MB to ~16 MB. See
+tiny footprint — idle memory drops from ~540 MB to ~14 MB. See
 [The admin panel](./admin.md).
 
 ## Not supported (yet)

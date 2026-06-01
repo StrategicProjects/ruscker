@@ -44,7 +44,7 @@ Ruscker is on **v0.1.31** and runs in production today. Where the
 JVM-based stack it replaced idled at hundreds of megabytes, Ruscker
 idles in the low tens:
 
-> **~540 MB → ~16 MB idle** — roughly a 30× cut.
+> **~540 MB → ~14 MB idle** — roughly a 38× cut.
 
 A real 31-spec config migrated with **no unsupported features**, and
 apps spawn on demand. Releases are multi-arch and **cosign-signed**;

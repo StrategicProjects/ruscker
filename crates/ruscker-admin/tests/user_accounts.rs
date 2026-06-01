@@ -255,6 +255,119 @@ async fn setup_page_chrome_cluster_is_outside_the_setup_form() {
     );
 }
 
+async fn get(state: AppState, uri: &str, cookie: Option<&str>) -> (StatusCode, String) {
+    let app = router(state);
+    let mut b = Request::builder().method("GET").uri(uri);
+    if let Some(c) = cookie {
+        b = b.header("cookie", c);
+    }
+    let resp = app.oneshot(b.body(Body::empty()).unwrap()).await.unwrap();
+    let status = resp.status();
+    let loc = resp
+        .headers()
+        .get("location")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    (status, loc)
+}
+
+/// #454: a logged-in account that still carries `must_change_password`
+/// is bounced off every other admin route back to the password page —
+/// so the post-login prompt can't be skipped by navigating away.
+#[tokio::test]
+async fn must_change_user_is_pinned_to_password_page() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+        "bob",
+        "bobpass12",
+        Role::Viewer,
+        true,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("bob".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    // Any other admin route redirects to the change-password page.
+    let (status, loc) = get(state.clone(), "/admin/dashboard", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/account/password");
+
+    // …but the password page itself stays reachable (no redirect loop).
+    let (pw_status, _) = get(state, "/admin/account/password", Some(&cookie)).await;
+    assert_eq!(pw_status, StatusCode::OK);
+}
+
+/// #454: completing the change clears the flag, and the guard then lets
+/// the user through. There is no "keep current" escape hatch any more —
+/// a real password change is the only way past.
+#[tokio::test]
+async fn changing_password_lifts_the_guard() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+        "bob",
+        "bobpass12",
+        Role::Viewer,
+        true,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("bob".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    let (status, loc) = post(
+        state.clone(),
+        "/admin/account/password",
+        "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/dashboard");
+
+    // The guard no longer fires — the dashboard renders.
+    let (dash_status, _) = get(state, "/admin/dashboard", Some(&cookie)).await;
+    assert_eq!(dash_status, StatusCode::OK);
+}
+
+/// A normal account (no pending change) reaches the panel untouched —
+/// the guard must not redirect everyone.
+#[tokio::test]
+async fn settled_user_reaches_the_dashboard() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+        "alice",
+        "alicepass1",
+        Role::Editor,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    let sid = state
+        .admin_sessions
+        .create(Role::Editor, Some("alice".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let (status, _) = get(state, "/admin/dashboard", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
 /// #452: with a log buffer wired but still empty, the Logs tab shows an
 /// explicit "nothing captured yet" message — distinct from the "buffer
 /// not wired" message — so an operator can tell an idle log from a broken

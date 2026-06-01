@@ -93,7 +93,7 @@ admin-setup-submit = Criar administrador
 # — Troca de senha / primeiro acesso
 admin-pw-title = Alterar senha
 admin-pw-help = Defina uma nova senha para a sua conta.
-admin-pw-first-prompt = Você está usando uma senha definida pelo administrador. Deseja trocá-la agora?
+admin-pw-first-prompt = Você está usando uma senha definida pelo administrador. Defina uma nova senha para continuar.
 admin-pw-current-label = Senha atual
 admin-pw-new-label = Nova senha
 admin-pw-confirm-label = Confirme a senha
@@ -101,7 +101,7 @@ admin-pw-error-current = Senha atual incorreta.
 admin-pw-error-mismatch = As senhas não coincidem.
 admin-pw-error-short = A senha deve ter ao menos 8 caracteres.
 admin-pw-submit = Salvar senha
-admin-pw-keep = Manter a senha atual
+admin-pw-reveal = Mostrar/ocultar senha
 # — Gestão de usuários (admin)
 admin-nav-users = Usuários
 admin-users-title = Usuários
@@ -109,7 +109,7 @@ admin-users-subtitle = Crie e gerencie quem acessa o painel e com qual nível.
 admin-users-new = Novo usuário
 admin-users-create = Criar
 admin-users-initial-password = Senha inicial
-admin-users-initial-password-hint = O usuário será consultado se quer trocá-la no primeiro acesso.
+admin-users-initial-password-hint = O usuário será obrigado a trocá-la no primeiro acesso.
 admin-users-role = Nível
 admin-users-col-user = Usuário
 admin-users-col-role = Nível

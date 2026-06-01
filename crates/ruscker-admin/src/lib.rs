@@ -591,7 +591,15 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
             move |req: axum::extract::Request, next: axum::middleware::Next| {
                 csrf_guard(req, next, trust)
             }
-        }));
+        }))
+        // Force a first-login password change (#454): a logged-in account
+        // still carrying `must_change_password` is pinned to the password
+        // page on every other `/admin/*` route. Layered on the chrome so a
+        // redirect's `Location` rides the base-path rewriter below.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            must_change_password_guard,
+        ));
 
     // Base-path mounting (#173): when served under a subpath, rewrite the
     // chrome's root-absolute URLs / redirects to carry the prefix. Only
@@ -669,6 +677,67 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::health::routes())
         .layer(CookieManagerLayer::new())
         .with_state(state)
+}
+
+/// Force a first-login password change (#454).
+///
+/// A user account created in the admin gets `must_change_password = true`
+/// (see `db::users::create`). Login already redirects such a user to the
+/// self-service password page, but nothing stopped them from navigating
+/// straight to `/admin/dashboard` and keeping the admin-assigned initial
+/// password. This guard closes that gap: on any `/admin/*` route other
+/// than the password page / login / logout / first-admin setup, a session
+/// whose account still needs a change is bounced back to
+/// `/admin/account/password`.
+///
+/// Break-glass token sessions (no `actor`) and anonymous requests pass
+/// through untouched — they have no account to rotate, and the routes'
+/// own guards handle authentication. The cost is one indexed user lookup
+/// per gated admin request; the admin panel is low-traffic and the proxy
+/// hot path (`/app`, `/api`) never reaches this layer.
+async fn must_change_password_guard(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let path = req.uri().path();
+    let gated = path.starts_with("/admin/")
+        && !path.starts_with("/admin/account")
+        && !path.starts_with("/admin/login")
+        && !path.starts_with("/admin/logout")
+        && !path.starts_with("/admin/setup");
+    if gated {
+        if let Some(pool) = state.db.as_ref() {
+            // Cookies are populated by the outer CookieManagerLayer, so the
+            // extension is always present here; read the opaque session id
+            // straight from it to avoid re-running the full extractor.
+            let session_id = req
+                .extensions()
+                .get::<tower_cookies::Cookies>()
+                .and_then(|c| c.get(auth::COOKIE_NAME).map(|c| c.value().to_string()));
+            if let Some(id) = session_id {
+                if let Some(actor) = state
+                    .admin_sessions
+                    .validate(&id)
+                    .await
+                    .and_then(|info| info.actor)
+                {
+                    let must = db::users::fetch(pool, &actor)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(|u| u.must_change_password)
+                        .unwrap_or(false);
+                    if must {
+                        return axum::response::Redirect::to("/admin/account/password")
+                            .into_response();
+                    }
+                }
+            }
+        }
+    }
+    next.run(req).await
 }
 
 /// Baseline security response headers for Ruscker's own pages.

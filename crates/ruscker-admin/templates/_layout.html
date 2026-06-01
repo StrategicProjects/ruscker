@@ -30,21 +30,28 @@
 
 {# Footer slimmed down to just the "powered by" lockup (#182). Theme
    and language pickers moved into the top-right chrome cluster on every
-   page. #}
-<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end gap-3">
-  <a class="opacity-60 hover:opacity-100 transition-opacity"
-     href="https://github.com/StrategicProjects/ruscker/releases/tag/v{{ crate::APP_VERSION }}"
-     title="Release notes">v{{ crate::APP_VERSION }}</a>
-  <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
-     href="https://github.com/StrategicProjects/ruscker"
-     aria-label="Ruscker">
-    <svg class="brand-mark-inline" viewBox="0 0 80 80" width="20" height="20" aria-hidden="true">
-      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
-      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
-      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
-    </svg>
-    <span class="brand-wordmark">ruscker</span>
-  </a>
+   page. The `footer_logos_left`/`footer_logos_right` blocks let the
+   landing inject operator logos integrated into the footer chrome (#468):
+   left on the far side, right trailing the Ruscker version+mark. They
+   default to empty, so other layouts keep the plain right-aligned lockup. #}
+<footer class="mt-auto border-t border-[color:var(--border)] py-4 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-between gap-3">
+  <div class="flex items-center gap-3">{% block footer_logos_left %}{% endblock %}</div>
+  <div class="flex items-center gap-3">
+    <a class="opacity-60 hover:opacity-100 transition-opacity"
+       href="https://github.com/StrategicProjects/ruscker/releases/tag/v{{ crate::APP_VERSION }}"
+       title="Release notes">v{{ crate::APP_VERSION }}</a>
+    <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
+       href="https://github.com/StrategicProjects/ruscker"
+       aria-label="Ruscker">
+      <svg class="brand-mark-inline" viewBox="0 0 80 80" width="20" height="20" aria-hidden="true">
+        <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+        <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+        <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+      </svg>
+      <span class="brand-wordmark">ruscker</span>
+    </a>
+    {% block footer_logos_right %}{% endblock %}
+  </div>
 </footer>
 
 </body>

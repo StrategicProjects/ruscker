@@ -1,5 +1,16 @@
 {% extends "_layout.html" %}
 
+{# Render a bucket of resolved logos (LogoView: src/link/height). Shared by
+   the header-left/right inserts, the footer-left/right footer slots and the
+   center bars — one markup path for all four positions (#468). #}
+{% macro logos(items) %}
+  {% for l in items %}
+    {% match l.link %}{% when Some with (href) %}<a href="{{ href }}" target="_blank" rel="noopener" class="inline-flex items-center">{% when None %}{% endmatch %}
+    <img src="{{ l.src }}" alt="" loading="lazy" style="height:{{ l.height }}px">
+    {% match l.link %}{% when Some with (href) %}</a>{% when None %}{% endmatch %}
+  {% endfor %}
+{% endmacro %}
+
 {% block title %}{{ page_title }}{% endblock %}
 
 {% block head_extra %}
@@ -25,51 +36,55 @@
         {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
   <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
     <div class="flex items-center gap-3">
-      {# Small Ruscker mark left of the operator-provided title (#182).
-         When the operator hasn't set a custom `header-bg`, we render
-         in the brand teal palette — that works against the default
-         surface in both light and dark themes. When a custom header
-         is in play (`header_style` non-empty), one of the brand
-         polygons can collide with the chosen background (e.g. teal
-         on teal disappears) — so we drop to a monochrome `currentColor`
-         mark that inherits the header's text color and stays
-         high-contrast at zero cost. Future: operators can override
-         with `landing-customization.logo`. #}
-      {% if header_style.is_empty() %}
+      {# Header-left identity. When the operator configured header-left
+         logo(s) (#468) they REPLACE the Ruscker mark — the title/subtitle
+         text stays (operators customise those via #468 slice A). Otherwise
+         the built-in Ruscker mark renders (#182): brand teal on the default
+         surface, or a monochrome `currentColor` mark when a custom header
+         background is in play (a brand polygon can collide with the chosen
+         background — e.g. teal on teal disappears). #}
+      {% if self.has_logos_at("header", "left") %}
+        {% call logos(self.logo_view("header", "left", 28)) %}{% endcall %}
+      {% else %}
+        {% if header_style.is_empty() %}
         <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
           <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
           <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
           <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
         </svg>
-      {% else %}
+        {% else %}
         <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
           <polygon points="14,52 40,40 66,52 40,64" fill="currentColor" opacity="0.45"/>
           <polygon points="14,40 40,28 66,40 40,52" fill="currentColor" opacity="0.7"/>
           <polygon points="14,28 40,16 66,28 40,40" fill="currentColor" opacity="1"/>
         </svg>
+        {% endif %}
       {% endif %}
       <div>
         <h1 class="text-xl font-medium tracking-tight">{{ header_title }}</h1>
         {% if !header_subtitle.is_empty() %}<p class="text-xs opacity-70 mt-1">{{ header_subtitle }}</p>{% endif %}
       </div>
     </div>
-    {% include "_chrome_cluster.html" %}
+    {# Chrome cluster (theme/language/account) with header-right logo(s)
+       trailing it (#468) — kept in one flex child so the group stays
+       right-aligned within the header's justify-between. #}
+    <div class="flex items-center gap-4">
+      {% include "_chrome_cluster.html" %}
+      {% if self.has_logos_at("header", "right") %}
+      <div class="flex items-center gap-3">{% call logos(self.logo_view("header", "right", 28)) %}{% endcall %}</div>
+      {% endif %}
+    </div>
   </div>
 </header>
 
-{# Header logos (admin-managed) — left / center / right groups. #}
-{% if self.has_logos("header") %}
+{# Header center logos (admin-managed) — left/right buckets now integrate
+   into the header chrome above (#468); only `center` keeps the separate
+   bar below the header. #}
+{% if self.has_logos_at("header", "center") %}
 <div class="landing-logo-bar px-6 max-w-6xl mx-auto w-full">
-  {% for (align, items) in self.logo_groups("header") %}
-  <div class="landing-logo-group landing-logo-{{ align }}">
-    {% for logo in items %}
-      {% match logo.link %}{% when Some with (link) %}<a href="{{ link }}" target="_blank" rel="noopener">{% when None %}{% endmatch %}
-      <img src="{{ self.logo_src(logo) }}" alt="" loading="lazy"
-           style="height:{% match logo.height %}{% when Some with (h) %}{{ h }}{% when None %}32{% endmatch %}px">
-      {% match logo.link %}{% when Some with (link) %}</a>{% when None %}{% endmatch %}
-    {% endfor %}
+  <div class="landing-logo-group landing-logo-center">
+    {% call logos(self.logo_view("header", "center", 32)) %}{% endcall %}
   </div>
-  {% endfor %}
 </div>
 {% endif %}
 
@@ -265,19 +280,14 @@
 <section class="landing-block landing-block--bottom px-6 max-w-6xl mx-auto w-full">{{ b.html|safe }}</section>
 {% endfor %}
 
-{# Footer logos (admin-managed) — left / center / right groups. #}
-{% if self.has_logos("footer") %}
+{# Footer center logos (admin-managed) — left/right buckets now integrate
+   into the global footer (#468, see the footer_logos_* block overrides
+   below); only `center` keeps the separate bar above the footer. #}
+{% if self.has_logos_at("footer", "center") %}
 <div class="landing-logo-bar landing-logo-bar--footer px-6 max-w-6xl mx-auto w-full">
-  {% for (align, items) in self.logo_groups("footer") %}
-  <div class="landing-logo-group landing-logo-{{ align }}">
-    {% for logo in items %}
-      {% match logo.link %}{% when Some with (link) %}<a href="{{ link }}" target="_blank" rel="noopener">{% when None %}{% endmatch %}
-      <img src="{{ self.logo_src(logo) }}" alt="" loading="lazy"
-           style="height:{% match logo.height %}{% when Some with (h) %}{{ h }}{% when None %}28{% endmatch %}px">
-      {% match logo.link %}{% when Some with (link) %}</a>{% when None %}{% endmatch %}
-    {% endfor %}
+  <div class="landing-logo-group landing-logo-center">
+    {% call logos(self.logo_view("footer", "center", 28)) %}{% endcall %}
   </div>
-  {% endfor %}
 </div>
 {% endif %}
 
@@ -391,3 +401,10 @@ window.ruscker.landing = () => ({
 </script>
 
 {% endblock %}
+
+{# Footer-left / footer-right logos integrate into the global footer
+   (_layout.html): left on the far side, right trailing the Ruscker
+   version+mark. Defined OUTSIDE `content` so they only fill the layout's
+   footer slots — not render inline here too (#468). #}
+{% block footer_logos_left %}{% if self.has_logos_at("footer", "left") %}{% call logos(self.logo_view("footer", "left", 24)) %}{% endcall %}{% endif %}{% endblock %}
+{% block footer_logos_right %}{% if self.has_logos_at("footer", "right") %}{% call logos(self.logo_view("footer", "right", 20)) %}{% endcall %}{% endif %}{% endblock %}

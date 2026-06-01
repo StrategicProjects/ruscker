@@ -53,6 +53,22 @@
          texts, SEO, custom blocks), NOT an arbitrary-CSS editor. #}
       <div class="spec-form-help" style="margin-bottom:12px">{{ self.t("admin-landing-scope-help") }}</div>
 
+      {# ── Header title + subtitle (#468). Blank ⇒ falls back to the
+         config proxy.title / default subtitle. #}
+      <div class="spec-form-section-title">{{ self.t("admin-landing-header") }}</div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-portal-title") }}</label>
+        <input type="text" name="title" x-model="form.title" maxlength="120"
+               placeholder="{{ portal_title }}" class="spec-form-input">
+        <div class="spec-form-help">{{ self.t("admin-landing-portal-title-help") }}</div>
+      </div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-portal-subtitle") }}</label>
+        <input type="text" name="subtitle" x-model="form.subtitle" maxlength="160"
+               placeholder="{{ self.t("landing-subtitle") }}" class="spec-form-input">
+        <div class="spec-form-help">{{ self.t("admin-landing-portal-subtitle-help") }}</div>
+      </div>
+
       <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
 
       <div class="grid grid-cols-2 gap-3">

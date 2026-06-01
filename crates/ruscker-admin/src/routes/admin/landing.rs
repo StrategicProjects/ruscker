@@ -88,6 +88,8 @@ impl<'a> LandingPage<'a> {
 #[derive(Debug, Default, serde::Serialize, Deserialize)]
 #[serde(default)]
 pub struct LandingForm {
+    pub title: String,
+    pub subtitle: String,
     pub header_bg: String,
     pub header_fg: String,
     pub intro: String,
@@ -112,6 +114,8 @@ impl LandingForm {
     pub fn from_customization(lc: &LandingCustomization) -> Self {
         let g = |code: &str| lc.intro_locales.get(code).cloned().unwrap_or_default();
         Self {
+            title: lc.title.clone().unwrap_or_default(),
+            subtitle: lc.subtitle.clone().unwrap_or_default(),
             header_bg: lc.header_bg.clone().unwrap_or_default(),
             header_fg: lc.header_fg.clone().unwrap_or_default(),
             intro: lc.intro.clone().unwrap_or_default(),
@@ -143,6 +147,8 @@ impl LandingForm {
             }
         }
         LandingCustomization {
+            title: empty_to_none(self.title),
+            subtitle: empty_to_none(self.subtitle),
             header_bg: empty_to_none(self.header_bg),
             header_fg: empty_to_none(self.header_fg),
             intro: empty_to_none(self.intro),

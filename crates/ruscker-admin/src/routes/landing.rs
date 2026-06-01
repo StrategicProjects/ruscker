@@ -51,6 +51,9 @@ struct LandingPage<'a> {
     /// Header subtitle — `landing-customization.subtitle` override, else
     /// the localized `landing-subtitle` (#468).
     header_subtitle: String,
+    /// `<style>` body setting the theme CSS variables from the operator's
+    /// per-theme color overrides (#475). Empty ⇒ no `<style>` emitted.
+    theme_style: String,
     /// Inline `style="..."` value for the `<header>` element when
     /// the operator set a custom background color. Empty string ⇒
     /// no override.
@@ -275,6 +278,10 @@ async fn index(
     // only a placeholder hint in the editor, not a forced fallback.
     let header_subtitle = not_blank(&lc.subtitle).unwrap_or_default();
 
+    // Per-theme color overrides (#475) → a small `<style>` setting the
+    // theme CSS variables for light / dark / OS-auto.
+    let theme_style = build_theme_style(&lc.theme_colors);
+
     let page = LandingPage {
         locale: loc,
         theme,
@@ -288,6 +295,7 @@ async fn index(
         intro,
         header_title,
         header_subtitle,
+        theme_style,
         header_style,
         page_title,
         seo_description,
@@ -330,4 +338,49 @@ fn render<T: Template>(t: &T) -> Response {
             (StatusCode::INTERNAL_SERVER_ERROR, "template error").into_response()
         }
     }
+}
+
+/// Accept a CSS color value only if it's plausibly a color and can't
+/// break out of a `{ }` declaration block — even though the editor is
+/// Admin-only, a stray `}`/`;`/`<` would corrupt the whole `<style>`.
+fn sanitize_css_color(s: &Option<String>) -> Option<String> {
+    let t = s.as_deref().map(str::trim).filter(|t| !t.is_empty())?;
+    let ok = t
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '#' | '(' | ')' | ',' | '%' | '.' | ' ' | '-'));
+    ok.then(|| t.to_string())
+}
+
+/// Build the `<style>` body that recolors the theme CSS variables from
+/// the operator's overrides (#475). Light values land on `:root` (the
+/// base, which also covers OS-auto-light); dark values land on both the
+/// explicit `[data-theme="dark"]` and the OS-auto-dark media query —
+/// mirroring the cascade in `input.css`. Empty when nothing is set.
+fn build_theme_style(tc: &ruscker_config::ThemeColors) -> String {
+    fn vars(p: &ruscker_config::ThemePalette) -> String {
+        let mut s = String::new();
+        if let Some(c) = sanitize_css_color(&p.bg) {
+            s.push_str(&format!("--bg:{c};"));
+        }
+        if let Some(c) = sanitize_css_color(&p.text) {
+            s.push_str(&format!("--text:{c};"));
+        }
+        if let Some(c) = sanitize_css_color(&p.accent) {
+            s.push_str(&format!("--color-teal-600:{c};"));
+        }
+        s
+    }
+    let light = vars(&tc.light);
+    let dark = vars(&tc.dark);
+    let mut css = String::new();
+    if !light.is_empty() {
+        css.push_str(&format!(":root{{{light}}}"));
+    }
+    if !dark.is_empty() {
+        css.push_str(&format!(
+            "@media (prefers-color-scheme:dark){{:root:not([data-theme=\"light\"]){{{dark}}}}}"
+        ));
+        css.push_str(&format!(":root[data-theme=\"dark\"]{{{dark}}}"));
+    }
+    css
 }

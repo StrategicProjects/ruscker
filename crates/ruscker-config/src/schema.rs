@@ -437,6 +437,47 @@ pub struct LandingCustomization {
     /// Multiple logos sharing a slot+alignment render side by side.
     #[serde(default)]
     pub logos: Vec<LandingLogo>,
+
+    /// Per-theme color overrides for the public landing (#475). Blank
+    /// values keep the built-in theme default. Admin-managed; stored as
+    /// a JSON blob in the DB and round-trips through import/export.
+    #[serde(default, rename = "theme-colors")]
+    pub theme_colors: ThemeColors,
+}
+
+/// Operator color overrides for the light and dark themes (#475).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThemeColors {
+    pub light: ThemePalette,
+    pub dark: ThemePalette,
+}
+
+impl ThemeColors {
+    /// True when no override is set in either theme — lets callers skip
+    /// emitting an empty `<style>` block.
+    pub fn is_empty(&self) -> bool {
+        self.light.is_empty() && self.dark.is_empty()
+    }
+}
+
+/// The handful of theme CSS variables an operator can recolor (#475).
+/// Each is an optional CSS color string; blank ⇒ keep the default.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ThemePalette {
+    /// Page background (`--bg`).
+    pub bg: Option<String>,
+    /// Main text color (`--text`).
+    pub text: Option<String>,
+    /// Brand accent (`--color-teal-600`) — buttons, focus, highlights.
+    pub accent: Option<String>,
+}
+
+impl ThemePalette {
+    pub fn is_empty(&self) -> bool {
+        self.bg.is_none() && self.text.is_none() && self.accent.is_none()
+    }
 }
 
 impl LandingCustomization {

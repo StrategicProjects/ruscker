@@ -33,11 +33,12 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         Option<String>, // logos_json
         Option<String>, // title
         Option<String>, // subtitle
+        Option<String>, // theme_colors_json
     );
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins, custom_css, logos_json,
-                title, subtitle
+                title, subtitle, theme_colors_json
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -60,6 +61,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             logos_json,
             title,
             subtitle,
+            theme_colors_json,
         )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
@@ -69,6 +71,13 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                     serde_json::from_str(&j).context("parse logos_json")?
                 }
                 _ => Vec::new(),
+            };
+            // `theme_colors_json` is NULL before migration 0012.
+            let theme_colors = match theme_colors_json {
+                Some(j) if !j.trim().is_empty() => {
+                    serde_json::from_str(&j).context("parse theme_colors_json")?
+                }
+                _ => Default::default(),
             };
             Ok(LandingCustomization {
                 header_bg: bg,
@@ -90,6 +99,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 logos,
                 title,
                 subtitle,
+                theme_colors,
             })
         }
     }
@@ -150,13 +160,14 @@ pub(crate) async fn update_in_tx(
     let intro_locales_json =
         serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
     let logos_json = serde_json::to_string(&lc.logos).context("serialize logos")?;
+    let theme_colors_json = theme_colors_json(lc)?;
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = ?, header_fg = ?, intro = ?,
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
                 custom_css = ?, logos_json = ?, title = ?, subtitle = ?,
-                updated_at = ?
+                theme_colors_json = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -172,11 +183,24 @@ pub(crate) async fn update_in_tx(
     .bind(&logos_json)
     .bind(none_if_empty(&lc.title))
     .bind(none_if_empty(&lc.subtitle))
+    .bind(&theme_colors_json)
     .bind(now)
     .execute(&mut **tx)
     .await
     .context("update landing_customization")?;
     Ok(())
+}
+
+/// JSON for the `theme_colors_json` column — `None` (→ SQL NULL) when no
+/// override is set, so an all-default palette doesn't litter the row.
+fn theme_colors_json(lc: &LandingCustomization) -> Result<Option<String>> {
+    if lc.theme_colors.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(
+            serde_json::to_string(&lc.theme_colors).context("serialize theme_colors")?,
+        ))
+    }
 }
 
 /// Postgres twin of [`update_in_tx`] — `$n` placeholders. Used by the
@@ -190,13 +214,14 @@ pub(crate) async fn update_in_tx_pg(
     let intro_locales_json =
         serde_json::to_string(&lc.intro_locales).context("serialize intro_locales")?;
     let logos_json = serde_json::to_string(&lc.logos).context("serialize logos")?;
+    let theme_colors_json = theme_colors_json(lc)?;
     sqlx::query(
         "UPDATE landing_customization
             SET header_bg = $1, header_fg = $2, intro = $3,
                 intro_locales_json = $4, seo_title = $5, seo_description = $6,
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
                 custom_css = $10, logos_json = $11, title = $12,
-                subtitle = $13, updated_at = $14
+                subtitle = $13, theme_colors_json = $14, updated_at = $15
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -212,6 +237,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(&logos_json)
     .bind(none_if_empty(&lc.title))
     .bind(none_if_empty(&lc.subtitle))
+    .bind(&theme_colors_json)
     .bind(now)
     .execute(&mut **tx)
     .await

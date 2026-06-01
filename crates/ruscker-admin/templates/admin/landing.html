@@ -154,6 +154,66 @@
         </div>
       </div>
 
+      {# ── Per-theme colors (#475). Blank ⇒ keep the theme default. #}
+      <div class="spec-form-section-title">{{ self.t("admin-landing-theme-colors") }}</div>
+      <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-theme-colors-help") }}</div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("admin-landing-theme-light") }}</div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_light_bg" :value="form.theme_light_bg || '#fafaf7'">
+              <input type="text" name="theme_light_bg" x-model="form.theme_light_bg" placeholder="#fafaf7" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_light_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_light_text" :value="form.theme_light_text || '#1a1a1a'">
+              <input type="text" name="theme_light_text" x-model="form.theme_light_text" placeholder="#1a1a1a" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_light_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_light_accent" :value="form.theme_light_accent || '#0f6e56'">
+              <input type="text" name="theme_light_accent" x-model="form.theme_light_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_light_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="spec-form-label" style="margin-bottom:6px">🌙 {{ self.t("admin-landing-theme-dark") }}</div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_dark_bg" :value="form.theme_dark_bg || '#161616'">
+              <input type="text" name="theme_dark_bg" x-model="form.theme_dark_bg" placeholder="#161616" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_dark_bg = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-text") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_dark_text" :value="form.theme_dark_text || '#f0f0f0'">
+              <input type="text" name="theme_dark_text" x-model="form.theme_dark_text" placeholder="#f0f0f0" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_dark_text = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-theme-accent") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.theme_dark_accent" :value="form.theme_dark_accent || '#0f6e56'">
+              <input type="text" name="theme_dark_accent" x-model="form.theme_dark_accent" placeholder="#0f6e56" class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.theme_dark_accent = ''" class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {# ── Header / footer logos (visual identity, grouped with Colors #471) #}
       <div class="spec-form-section-title">{{ self.t("admin-landing-logos") }}</div>
       <div class="spec-form-field">

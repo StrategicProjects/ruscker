@@ -107,6 +107,22 @@ pub fn interpolate_value(value: &str) -> Result<String> {
     interpolate_line(value)
 }
 
+/// `true` when `value` (trimmed) consists ONLY of valid `${VAR}` /
+/// `${VAR:-default}` tokens (plus inter-token whitespace) — i.e. nothing
+/// literal remains that would be stored or leak.
+///
+/// Used to decide whether a value is safe to keep VERBATIM (resolved from
+/// the environment at use time) vs. must be treated as a literal secret.
+/// A loose `contains("${")` is unsafe: a literal password like `abc${def`
+/// or `p@ss${word` has no valid token, so keeping it verbatim would store
+/// the cleartext (see the credential-store regression #422).
+pub fn is_pure_env_ref(value: &str) -> bool {
+    let t = value.trim();
+    // Strip every valid token; if only whitespace is left, the whole value
+    // was env-refs. Empty (no token at all) ⇒ not an env-ref.
+    !t.is_empty() && ENV_VAR_PATTERN.replace_all(t, "").trim().is_empty()
+}
+
 fn interpolate_line(line: &str) -> Result<String> {
     let mut result = String::with_capacity(line.len());
     let mut last_end = 0;
@@ -290,5 +306,22 @@ proxy:
             let result = interpolate("greeting: hello ${RUSCKER_NAME}!").unwrap();
             assert_eq!(result, "greeting: hello world!");
         });
+    }
+
+    #[test]
+    fn is_pure_env_ref_only_for_whole_token_values() {
+        // Pure env-refs (kept verbatim by the credential store, #422).
+        assert!(is_pure_env_ref("${VAR}"));
+        assert!(is_pure_env_ref("  ${VAR}  "));
+        assert!(is_pure_env_ref("${VAR:-default}"));
+        assert!(is_pure_env_ref("${A} ${B}"));
+        // NOT pure — literal text that would be stored / leak.
+        assert!(!is_pure_env_ref("abc${def")); // malformed, no token
+        assert!(!is_pure_env_ref("p@ss${word")); // no closing brace
+        assert!(!is_pure_env_ref("prefix${VAR}")); // literal prefix
+        assert!(!is_pure_env_ref("${VAR}suffix"));
+        assert!(!is_pure_env_ref("plainsecret"));
+        assert!(!is_pure_env_ref(""));
+        assert!(!is_pure_env_ref("${}")); // empty braces, no valid name
     }
 }

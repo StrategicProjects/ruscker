@@ -55,6 +55,10 @@ struct LandingPage<'a> {
     /// Custom HTML blocks, grouped per slot. The blocks editor is
     /// folded into this page (#242) and rendered below the form.
     groups: Vec<SlotGroup>,
+    /// Media-library filenames for the logos picker (#451) — the same
+    /// shared gallery the spec form uses (includes the built-in logos
+    /// seeded into the library, #433). Empty when no DB is wired.
+    logo_images: Vec<String>,
 }
 
 impl<'a> LandingPage<'a> {
@@ -69,10 +73,11 @@ impl<'a> LandingPage<'a> {
         serde_json::to_string(&self.form).unwrap_or_else(|_| "{}".into())
     }
 
-    /// Built-in logo paths offered (via a datalist) in the logos editor —
-    /// the same bundled framework + brand SVGs the spec-form picker uses.
-    fn builtin_logos(&self) -> &'static [&'static str] {
-        crate::routes::assets::BUILTIN_LOGOS
+    /// JSON array of media-library filenames for the logos picker (#451),
+    /// passed as the 2nd argument to the Alpine `landingForm` factory —
+    /// mirrors the spec form's `logo_images_json`.
+    fn logo_images_json(&self) -> String {
+        serde_json::to_string(&self.logo_images).unwrap_or_else(|_| "[]".into())
     }
 }
 
@@ -260,6 +265,16 @@ async fn render(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Media-library filenames for the shared logos picker (#451).
+    // Non-fatal: a listing failure just leaves the gallery empty, the
+    // manual URL field still works.
+    let logo_images = match db::images::list_all(database).await {
+        Ok(imgs) => imgs.into_iter().map(|i| i.filename).collect(),
+        Err(err) => {
+            tracing::warn!(error = ?err, "landing: list images for logo picker failed");
+            Vec::new()
+        }
+    };
     let page = LandingPage {
         locale: loc,
         theme,
@@ -273,6 +288,7 @@ async fn render(
         flash_error,
         portal_title: state.config.proxy.title.trim().to_string(),
         groups,
+        logo_images,
     };
     super::render(&page)
 }

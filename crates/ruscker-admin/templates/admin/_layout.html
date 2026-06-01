@@ -156,6 +156,83 @@ window.ruscker.gradientDefault = () => ({
 window.ruscker.bgMode = (value) =>
   (typeof value === 'string' && /^(linear|radial)-gradient\(/.test(value.trim()))
     ? 'gradient' : 'solid';
+
+// Shared image-picker mixin (#451) — the gallery modal reused by the
+// spec form's logo/cover and the landing logos editor. Spread it into an
+// Alpine x-data factory: `...window.ruscker.imagePicker(filenames)`. It
+// owns the modal state, search, inline upload and selection; the caller
+// decides what a pick does by passing a callback to `openImagePicker`.
+// `filenames` is the media-library list (includes the seeded built-in
+// logos, #433). Pair it with the `image-picker-*` modal markup.
+window.ruscker.imagePicker = (filenames) => ({
+  logoImages: Array.isArray(filenames) ? filenames : [],
+  picker: { open: false, q: '' },
+  imgUploading: false,
+  imgError: '',
+  // Set by openImagePicker: where a pick goes, and the current value (to
+  // highlight its tile). Underscored so they don't collide with caller
+  // state when spread.
+  _pickCb: null,
+  _pickSel: '',
+  // Prefix the base path on a root-absolute asset URL (#270) — these
+  // <img :src> values are set by Alpine at runtime, after the base-path
+  // HTML rewriter has run, so a bare `/assets/img/x` would 404 under
+  // `--base-path`. A full URL is returned untouched.
+  assetUrl(p) {
+    return p && p.charAt(0) === '/' ? (window.RUSCKER_BASE || '') + p : (p || '');
+  },
+  // Library filenames filtered by the search box.
+  pickerUploads() {
+    const q = this.picker.q.trim().toLowerCase();
+    return q ? this.logoImages.filter((n) => n.toLowerCase().includes(q)) : this.logoImages;
+  },
+  // Open the gallery. `onPick(value)` receives the chosen asset path;
+  // `selected` is the current value, highlighted in the grid.
+  openImagePicker(onPick, selected) {
+    this._pickCb = onPick;
+    this._pickSel = selected || '';
+    this.picker.q = '';
+    this.imgError = '';
+    this.picker.open = true;
+  },
+  pickImage(value) {
+    if (this._pickCb) this._pickCb(value);
+    this.picker.open = false;
+  },
+  pickerSelected(value) {
+    return this._pickSel === value;
+  },
+  // Inline upload to the media library, then auto-select the result for
+  // the active target. Same endpoint + flow as the media page; no
+  // navigation. Honors RUSCKER_BASE for subpath mounts.
+  async uploadImage(event) {
+    const input = event.target;
+    const file =
+      (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) ||
+      (input && input.files && input.files[0]);
+    if (!file) return;
+    this.imgError = '';
+    this.imgUploading = true;
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const base = (window.RUSCKER_BASE || '');
+      const resp = await fetch(base + '/admin/media/upload-inline', { method: 'POST', body: fd });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.filename) {
+        this.imgError = data.error || ('upload failed (' + resp.status + ')');
+        return;
+      }
+      if (this.logoImages.indexOf(data.filename) === -1) this.logoImages.unshift(data.filename);
+      this.pickImage(data.url || ('/assets/img/' + data.filename));
+    } catch (e) {
+      this.imgError = String(e);
+    } finally {
+      this.imgUploading = false;
+      if (input && 'value' in input) input.value = '';
+    }
+  },
+});
 </script>
 
 <main class="flex-1 px-6 py-6 max-w-7xl mx-auto w-full">

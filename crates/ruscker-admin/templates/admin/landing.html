@@ -4,7 +4,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.landingForm({{ form_initial_json() }})" x-cloak>
+<div x-data="ruscker.landingForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
@@ -232,14 +232,19 @@
         <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-logos-help") }}</div>
         {# Submitted as one hidden JSON field; the rows below edit the array. #}
         <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
-        <datalist id="builtin-logo-list">
-          {% for path in self.builtin_logos() %}<option value="{{ path }}"></option>{% endfor %}
-        </datalist>
         <template x-for="(logo, i) in logos" :key="i">
           <div class="landing-logo-row">
-            <img :src="logo.url" alt="" class="landing-logo-thumb" x-show="logo.url">
-            <input type="text" x-model="logo.url" list="builtin-logo-list"
-                   placeholder="/assets/img/logo.png" class="spec-form-input spec-form-input--mono" style="flex:2;min-width:12rem">
+            <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
+            {# Shared gallery picker (#451): writes only this row's `url`,
+               leaving slot/align/link/height intact. The field stays
+               editable for an external/manual URL. #}
+            <button type="button" class="admin-login-btn" style="padding:6px 10px;font-size:12px;white-space:nowrap"
+                    @click="openImagePicker((v) => { logo.url = v }, logo.url)">
+              <i class="ti ti-photo" aria-hidden="true"></i>
+              {{ self.t("spec-form-choose-image") }}
+            </button>
+            <input type="text" x-model="logo.url"
+                   placeholder="/assets/img/logo.png" class="spec-form-input spec-form-input--mono" style="flex:2;min-width:10rem">
             <select x-model="logo.slot" class="theme-select">
               <option value="header">{{ self.t("admin-landing-logo-header") }}</option>
               <option value="footer">{{ self.t("admin-landing-logo-footer") }}</option>
@@ -298,6 +303,40 @@
     </aside>
 
   </div>
+
+  {# ── Image picker modal (shared mixin, #451) ───────────────────
+     Opened by a logo row's "Choose image" button via openImagePicker.
+     Same markup + `image-picker-*` styles as the spec form; the mixin
+     in _layout.html supplies the state/behaviour. #}
+  <div x-show="picker.open" x-cloak class="image-picker-overlay"
+       @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
+    <div class="image-picker-modal">
+      <div class="image-picker-head">
+        <strong>{{ self.t("spec-form-choose-image") }}</strong>
+        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="image-picker-tools">
+        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+               class="spec-form-input text-sm" style="max-width:16rem">
+        <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
+               :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
+          <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
+          {{ self.t("admin-images-choose") }}
+          <input type="file" accept="image/*" class="hidden" @change="uploadImage($event)">
+        </label>
+      </div>
+      <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
+      <div class="image-picker-grid">
+        <template x-for="name in pickerUploads()" :key="'pk-' + name">
+          <button type="button" :title="name" @click="pickImage('/assets/img/' + name)"
+                  class="image-picker-tile" :class="pickerSelected('/assets/img/' + name) ? 'is-sel' : ''">
+            <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
+          </button>
+        </template>
+      </div>
+      <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
+    </div>
+  </div>
 </div>
 
 {# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
@@ -309,7 +348,11 @@
 // defined in admin/_layout.html so they're shared with the
 // spec-form cover editor.
 window.ruscker = window.ruscker || {};
-window.ruscker.landingForm = (initial) => ({
+window.ruscker.landingForm = (initial, logoImages) => ({
+  // Shared image-picker mixin (#451): the logos gallery modal, search,
+  // inline upload and selection. The per-row "Choose image" button calls
+  // `openImagePicker` with a callback that writes that row's `url`.
+  ...window.ruscker.imagePicker(logoImages),
   form: initial,
   // Header/footer logos — edited as an array here, submitted as the
   // hidden `logos_json` field (bound via JSON.stringify). Seeded by

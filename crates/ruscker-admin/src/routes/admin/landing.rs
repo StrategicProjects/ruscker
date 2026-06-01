@@ -90,6 +90,13 @@ impl<'a> LandingPage<'a> {
 pub struct LandingForm {
     pub title: String,
     pub subtitle: String,
+    // Per-theme color overrides (#475); blank ⇒ keep the theme default.
+    pub theme_light_bg: String,
+    pub theme_light_text: String,
+    pub theme_light_accent: String,
+    pub theme_dark_bg: String,
+    pub theme_dark_text: String,
+    pub theme_dark_accent: String,
     pub header_bg: String,
     pub header_fg: String,
     pub intro: String,
@@ -113,9 +120,17 @@ pub struct LandingForm {
 impl LandingForm {
     pub fn from_customization(lc: &LandingCustomization) -> Self {
         let g = |code: &str| lc.intro_locales.get(code).cloned().unwrap_or_default();
+        let tc = &lc.theme_colors;
+        let s = |o: &Option<String>| o.clone().unwrap_or_default();
         Self {
             title: lc.title.clone().unwrap_or_default(),
             subtitle: lc.subtitle.clone().unwrap_or_default(),
+            theme_light_bg: s(&tc.light.bg),
+            theme_light_text: s(&tc.light.text),
+            theme_light_accent: s(&tc.light.accent),
+            theme_dark_bg: s(&tc.dark.bg),
+            theme_dark_text: s(&tc.dark.text),
+            theme_dark_accent: s(&tc.dark.accent),
             header_bg: lc.header_bg.clone().unwrap_or_default(),
             header_fg: lc.header_fg.clone().unwrap_or_default(),
             intro: lc.intro.clone().unwrap_or_default(),
@@ -146,9 +161,22 @@ impl LandingForm {
                 intro_locales.insert(code.into(), trimmed.to_string());
             }
         }
+        let theme_colors = ruscker_config::ThemeColors {
+            light: ruscker_config::ThemePalette {
+                bg: empty_to_none(self.theme_light_bg),
+                text: empty_to_none(self.theme_light_text),
+                accent: empty_to_none(self.theme_light_accent),
+            },
+            dark: ruscker_config::ThemePalette {
+                bg: empty_to_none(self.theme_dark_bg),
+                text: empty_to_none(self.theme_dark_text),
+                accent: empty_to_none(self.theme_dark_accent),
+            },
+        };
         LandingCustomization {
             title: empty_to_none(self.title),
             subtitle: empty_to_none(self.subtitle),
+            theme_colors,
             header_bg: empty_to_none(self.header_bg),
             header_fg: empty_to_none(self.header_fg),
             intro: empty_to_none(self.intro),

@@ -1,14 +1,21 @@
 #!/bin/sh
 # postrm — cargo-deb injects the systemd cleanup at the marker below. On
-# purge we also drop the state directory. The `ruscker` system user is
+# purge we drop the state directory AND the config directory, so a purge
+# leaves no Ruscker trace behind. The `ruscker` system user is
 # intentionally left behind (Debian policy discourages removing system
-# users), and config files are conf-files that dpkg removes on purge.
+# users).
 set -e
 
 #DEBHELPER#
 
 if [ "$1" = "purge" ]; then
+    # The catalog DB, images, audit log, showcase-seed marker, etc.
     rm -rf /var/lib/ruscker
+    # dpkg removes the conffiles themselves (application.yml, ruscker.env)
+    # on purge, but can leave behind `.dpkg-{bak,old,dist}` variants and
+    # the now-empty directory. Drop the whole dir so nothing — including
+    # the admin token / master key in ruscker.env — survives a purge.
+    rm -rf /etc/ruscker
 fi
 
 exit 0

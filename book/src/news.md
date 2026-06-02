@@ -9,9 +9,28 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
-## v0.1.45 — 2026-06-02
+## v0.1.46 — 2026-06-02
 
-Featured carousel layout polish.
+Admin catalog on by default, plus a session-revocation fix.
+
+**Packaging**
+- The Debian/systemd unit now runs with **`--db` enabled by default**, so
+  a fresh `.deb` install has the **admin panel live out of the box** and
+  seeds the showcase apps on first boot — no YAML editing. The Docker
+  backend stays opt-in (`sudo ruscker-enable-docker`).
+
+**Security**
+- Changing a user's role, **deleting** them, or resetting their password
+  now **revokes their live admin sessions immediately**, instead of
+  leaving the old (possibly elevated) role valid until the session
+  expired.
+
+**Docs**
+- Configuration is reframed around **two layers** — portal content
+  (managed in the admin panel) vs deployment settings (CLI flags / env),
+  with the YAML schema as the migration reference — and the quickstart
+  now leads with the `--db` showcase seed. Screenshots throughout the
+  site and the README.
 
 **Landing**
 - The Featured carousel is now **centered on the page**, with the

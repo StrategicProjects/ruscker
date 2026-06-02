@@ -347,3 +347,93 @@ jobs:
             --notes-file notes.md \
             --generate-notes \
             $pre
+
+  # --------------------------------------------------------------------
+  # Keep the Homebrew tap in lockstep with the release so
+  #   brew install strategicprojects/tap/ruscker
+  # always tracks the latest version (it used to drift — bumped by hand
+  # and forgotten). Renders the canonical formula
+  # (packaging/homebrew/ruscker.rb, the template) with this release's
+  # version + the three sha256 (two Linux tarballs from the release
+  # `.sha256` assets, the macOS source tarball computed here) and pushes
+  # it to StrategicProjects/homebrew-tap as Formula/ruscker.rb.
+  #
+  # Skipped for pre-releases. Needs a PAT with `contents:write` on the
+  # tap repo, stored as the `HOMEBREW_TAP_TOKEN` secret. If the secret
+  # is absent the job logs a warning and no-ops — it never fails a
+  # release.
+  # --------------------------------------------------------------------
+  homebrew:
+    needs: [meta, release]
+    if: needs.meta.outputs.prerelease == 'false'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Gate on tap token
+        id: gate
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -n "${TAP_TOKEN}" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::HOMEBREW_TAP_TOKEN not set — skipping Homebrew tap update for ${GITHUB_REF_NAME}"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout (for the canonical formula template)
+        if: steps.gate.outputs.ok == 'true'
+        uses: actions/checkout@v6
+
+      - name: Render formula from the release artifacts
+        if: steps.gate.outputs.ok == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Via env (not inline `${{ }}`) so a crafted tag name can't be
+          # interpolated into the shell. `version` is `${tag#v}` from meta.
+          V: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          v="$V"
+          tag="v${v}"
+          # Linux checksums: straight from the release `.sha256` assets.
+          amd=$(gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                  -p "ruscker-${v}-linux-amd64.tar.gz.sha256" -O - | awk '{print $1}')
+          arm=$(gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                  -p "ruscker-${v}-linux-arm64.tar.gz.sha256" -O - | awk '{print $1}')
+          # macOS builds from source: the GitHub auto-generated tag tarball.
+          src=$(curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${tag}.tar.gz" \
+                  | sha256sum | awk '{print $1}')
+          echo "macos=$src arm64=$arm amd64=$amd"
+          f=packaging/homebrew/ruscker.rb
+          # Bump version + the three sha256 in place. Each sha256 is matched
+          # by the URL line that precedes it (slurp mode), so the right
+          # checksum lands on the right platform block.
+          perl -0pi -e "s/version \"[0-9][^\"]*\"/version \"${v}\"/" "$f"
+          perl -0pi -e "s{(archive/refs/tags/v#\{version\}\.tar\.gz\"\n\s*sha256 \")[0-9a-f]{64}}{\${1}${src}}" "$f"
+          perl -0pi -e "s{(linux-arm64\.tar\.gz\"\n\s*sha256 \")[0-9a-f]{64}}{\${1}${arm}}" "$f"
+          perl -0pi -e "s{(linux-amd64\.tar\.gz\"\n\s*sha256 \")[0-9a-f]{64}}{\${1}${amd}}" "$f"
+          echo "--- rendered formula ---"; grep -nE 'version |sha256 ' "$f"
+          cp "$f" "${RUNNER_TEMP}/ruscker.rb"
+
+      - name: Publish to the tap
+        if: steps.gate.outputs.ok == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          V: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          v="$V"
+          git clone --depth 1 \
+            "https://x-access-token:${TAP_TOKEN}@github.com/StrategicProjects/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp "${RUNNER_TEMP}/ruscker.rb" tap/Formula/ruscker.rb
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/ruscker.rb
+          if git diff --cached --quiet; then
+            echo "tap already at ${v} — nothing to push"
+          else
+            git commit -m "ruscker ${v}"
+            git push
+          fi

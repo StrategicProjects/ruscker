@@ -84,9 +84,9 @@
         <th>{{ self.t("admin-specs-col-name") }}</th>
         <th>{{ self.t("admin-specs-col-kind") }}</th>
         <th>{{ self.t("admin-specs-col-state") }}</th>
-        <th class="star-cell" title="{{ self.t("admin-specs-col-featured") }}"><i class="ti ti-star" aria-hidden="true"></i></th>
         <th>{{ self.t("admin-specs-col-updated") }}</th>
         <th>{{ self.t("admin-specs-col-version") }}</th>
+        <th class="star-cell" title="{{ self.t("admin-specs-col-featured") }}"><i class="ti ti-star" aria-hidden="true"></i></th>
         <th class="actions-cell">{{ self.t("admin-specs-col-actions") }}</th>
       </tr>
     </thead>
@@ -102,34 +102,14 @@
           </td>
           <td><span class="pill pill-kind-{{ spec.kind }}">{{ spec.kind }}</span></td>
           <td><span class="pill pill-state-{{ spec.state }}">{{ spec.state }}</span></td>
-          {# Featured star (#521): toggle inline; solid when featured. Config
-             specs are read-only here (the flag lives in the YAML file). #}
-          <td class="star-cell">
-            {% if spec.config_only %}
-              <span class="star-toggle is-readonly" title="{{ self.t("admin-specs-featured-readonly") }}"><i class="ti {% if spec.featured %}ti-star-filled is-on{% else %}ti-star{% endif %}" aria-hidden="true"></i></span>
-            {% else %}
-              {# URL + titles ride in `data-*` (HTML-escaped) and are read via
-                 `$el.dataset` — never interpolated into the JS handler, so a
-                 spec id from an import can't break out of the string. #}
-              <button type="button" class="star-toggle" x-data="{ on: {{ spec.featured }}, busy: false }"
-                      data-toggle-url="{{ base }}/admin/specs/{{ spec.id }}/featured/toggle"
-                      data-title-on="{{ self.t("admin-specs-featured-on") }}"
-                      data-title-off="{{ self.t("admin-specs-featured-off") }}"
-                      :class="on ? 'is-on' : ''" :disabled="busy"
-                      :title="on ? $el.dataset.titleOn : $el.dataset.titleOff"
-                      @click="busy = true; const prev = on; on = !on;
-                              fetch($el.dataset.toggleUrl, { method: 'POST' })
-                                .then(r => r.ok ? r.json() : Promise.reject())
-                                .then(d => { on = d.featured })
-                                .catch(() => { on = prev })
-                                .finally(() => { busy = false })">
-                <i class="ti" :class="on ? 'ti-star-filled' : 'ti-star'" aria-hidden="true"></i>
-              </button>
-            {% endif %}
-          </td>
           {% if spec.config_only %}
           <td class="text-[color:var(--text-faint)]">—</td>
           <td class="text-[color:var(--text-faint)]">—</td>
+          {# Featured star (#521) — read-only for config-defined specs (the
+             flag lives in the YAML file). Sits next to the actions column. #}
+          <td class="star-cell">
+            <span class="star-toggle is-readonly" title="{{ self.t("admin-specs-featured-readonly") }}"><i class="ti {% if spec.featured %}ti-star-filled is-on{% else %}ti-star{% endif %}" aria-hidden="true"></i></span>
+          </td>
           <td class="actions-cell">
             {# Duplicate a YAML/config spec into a new, editable DB spec. #}
             <a href="{{ base }}/admin/specs/{{ spec.id }}/duplicate"
@@ -142,6 +122,27 @@
           {% else %}
           <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
+          {# Featured star (#521): inline toggle, solid when featured. Sits
+             next to the actions column. #}
+          <td class="star-cell">
+            {# URL + titles ride in `data-*` (HTML-escaped) and are read via
+               `$el.dataset` — never interpolated into the JS handler, so a
+               spec id from an import can't break out of the string. #}
+            <button type="button" class="star-toggle" x-data="{ on: {{ spec.featured }}, busy: false }"
+                    data-toggle-url="{{ base }}/admin/specs/{{ spec.id }}/featured/toggle"
+                    data-title-on="{{ self.t("admin-specs-featured-on") }}"
+                    data-title-off="{{ self.t("admin-specs-featured-off") }}"
+                    :class="on ? 'is-on' : ''" :disabled="busy"
+                    :title="on ? $el.dataset.titleOn : $el.dataset.titleOff"
+                    @click="busy = true; const prev = on; on = !on;
+                            fetch($el.dataset.toggleUrl, { method: 'POST' })
+                              .then(r => r.ok ? r.json() : Promise.reject())
+                              .then(d => { on = d.featured })
+                              .catch(() => { on = prev })
+                              .finally(() => { busy = false })">
+              <i class="ti" :class="on ? 'ti-star-filled' : 'ti-star'" aria-hidden="true"></i>
+            </button>
+          </td>
           <td class="actions-cell">
             <a href="{{ base }}/admin/specs/{{ spec.id }}/edit"
                class="admin-nav-link"
@@ -160,5 +161,9 @@
     </tbody>
   </table>
 {% endif %}
+
+{# Alpine powers the inline featured-star toggle (#521). Without it the
+   `x-data`/`:class` button never initializes and the star renders empty. #}
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 
 {% endblock %}

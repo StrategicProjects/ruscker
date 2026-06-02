@@ -9,6 +9,23 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.40 — 2026-06-02
+
+Two admin UX touches for managing apps.
+
+**Admin**
+- **Inline featured star** in the Apps table: toggle an app's Featured
+  flag straight from the list with a single click — solid star when on,
+  outline when off — without opening each app's editor.
+- **App form reorganized into three bands** so the layout maps to
+  intent: Identity (the essentials), a visible **Metadata & visibility**
+  band (Featured, access groups/users, updated date), and the
+  **Advanced** collapse for runtime knobs. Per-session tuning
+  (`seats-per-container`, `max-lifetime`) moved into Advanced; the
+  Container card is now just "which image to run".
+
+---
+
 ## v0.1.39 — 2026-06-02
 
 Polish for the Featured carousel and subject pills.

@@ -9,6 +9,28 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.38 — 2026-06-02
+
+A round of admin & landing UX polish.
+
+**Landing**
+- A **"Featured" carousel** of highlighted apps above the filters. Mark
+  an app `featured` and toggle "Show Featured carousel" in the Portal
+  editor; it only appears when both are set, and is a horizontal rail
+  (1–3 cards per viewport, the rest scroll).
+- Each card now shows its **subject** as a pill next to the type badge.
+
+**Admin**
+- The **Add/Edit App form** is reorganised into labelled section cards
+  with a sticky Save bar, matching the Portal editor.
+- The registry **credential** field is a real selector now, with a clear
+  "no saved credentials" hint when the store is empty.
+- A read-only **Groups** page derives each group's member users and the
+  apps it gates (from `access-groups`), so you can spot typos and see who
+  can use what.
+
+---
+
 ## v0.1.37 — 2026-06-01
 
 Catch a bad image in the editor, not at the first failed launch.

@@ -110,15 +110,18 @@
            @resize.window.debounce.150ms="measure()" aria-label="{{ self.t("highlights-title") }}">
     <div class="highlights-head">
       <div class="highlights-title"><i class="ti ti-star" aria-hidden="true"></i> {{ self.t("highlights-title") }}</div>
-      {# Chevrons appear only when there's more than one page (>3 featured). #}
-      <div class="highlights-nav" x-show="pages > 1" x-cloak>
-        <button type="button" class="highlights-arrow" @click="prev()" :disabled="page === 0"
-                aria-label="{{ self.t("highlights-prev") }}"><i class="ti ti-chevron-left" aria-hidden="true"></i></button>
-        <button type="button" class="highlights-arrow" @click="next()" :disabled="page >= pages - 1"
-                aria-label="{{ self.t("highlights-next") }}"><i class="ti ti-chevron-right" aria-hidden="true"></i></button>
-      </div>
     </div>
+    {# Chevrons overlay the card row, vertically centered on the left/right
+       edges (Material-Tailwind style). Shown only when there's more than one
+       page. They live inside the viewport so its overflow:hidden box keeps
+       them pinned to the visible cards. #}
     <div class="highlights-viewport">
+      <button type="button" class="highlights-arrow highlights-arrow--prev"
+              x-show="pages > 1" x-cloak @click="prev()" :disabled="page === 0"
+              aria-label="{{ self.t("highlights-prev") }}"><i class="ti ti-chevron-left" aria-hidden="true"></i></button>
+      <button type="button" class="highlights-arrow highlights-arrow--next"
+              x-show="pages > 1" x-cloak @click="next()" :disabled="page >= pages - 1"
+              aria-label="{{ self.t("highlights-next") }}"><i class="ti ti-chevron-right" aria-hidden="true"></i></button>
       <div class="highlights-track" x-ref="track" :style="trackStyle()">
       {% for card in cards %}
         {% if card.featured %}

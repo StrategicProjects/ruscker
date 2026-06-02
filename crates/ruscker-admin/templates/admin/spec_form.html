@@ -537,12 +537,27 @@
               <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
               {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
             </div>
-            <input id="f-reg-cred" type="text" name="docker_registry_credential"
-                   value="{{ form.docker_registry_credential }}"
-                   list="registry-cred-suggestions" class="spec-form-input">
-            <datalist id="registry-cred-suggestions">
-              {% for name in credential_names %}<option value="{{ name }}"></option>{% endfor %}
-            </datalist>
+            {% if credential_names.is_empty() %}
+              {# No saved credentials — guide the operator instead of a mute
+                 field (#504). A hidden input preserves any existing value
+                 (e.g. a later-deleted credential) so a save doesn't drop it. #}
+              <div class="spec-form-empty-hint">
+                <i class="ti ti-info-circle" aria-hidden="true"></i>
+                {{ self.t("spec-form-registry-none") }}
+              </div>
+              <input type="hidden" name="docker_registry_credential" value="{{ form.docker_registry_credential }}">
+            {% else %}
+              <select id="f-reg-cred" name="docker_registry_credential" class="spec-form-input theme-select">
+                <option value=""{% if form.docker_registry_credential.is_empty() %} selected{% endif %}>{{ self.t("spec-form-registry-none-option") }}</option>
+                {% for name in credential_names %}
+                  <option value="{{ name }}"{% if self.cred_selected(name) %} selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+                {# A set-but-unknown value (deleted / imported) stays selectable. #}
+                {% if !self.cred_known() %}
+                  <option value="{{ form.docker_registry_credential }}" selected>{{ form.docker_registry_credential }} ({{ self.t("spec-form-registry-missing") }})</option>
+                {% endif %}
+              </select>
+            {% endif %}
             <div class="spec-form-help">
               {{ self.t("spec-form-registry-help") }}
               <a href="{{ base }}/admin/credentials" target="_blank" rel="noopener" class="hover:underline">

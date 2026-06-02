@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.42 — 2026-06-02
+
+A follow-up fix for the featured star.
+
+**Admin**
+- **The featured star now fills in when toggled on.** The served icon
+  font ships only the outline star, so the "featured" state rendered an
+  empty glyph — the star appeared to vanish on click. It's now drawn as
+  an inline SVG that toggles solid ↔ outline, so featuring an app shows a
+  solid amber star as intended.
+
+---
+
 ## v0.1.41 — 2026-06-02
 
 Bug fixes for the admin Apps table plus Homebrew automation.

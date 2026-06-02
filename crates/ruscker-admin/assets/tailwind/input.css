@@ -340,7 +340,7 @@ body {
 /* Type + subject badges, grouped top-left over the cover (#507). */
 .rbadges {
   position: absolute; top: 8px; left: 8px; z-index: 2;
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   max-width: calc(100% - 44px);  /* leave room for the lock top-right */
 }
 .rbadge {
@@ -348,12 +348,15 @@ body {
   padding: 3px 9px; border-radius: 999px;
   letter-spacing: 0.4px;
 }
-/* Subject pill — neutral, frosted, truncates long subjects. */
+/* Subject pill — light, theme-matching chip; shows the full subject (no
+   truncation), wraps below the type badge if it's too long (#507). */
 .rbadge--subject {
-  background: rgba(20, 20, 20, 0.62); color: #fff;
-  letter-spacing: 0.2px;
-  max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  backdrop-filter: blur(2px);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  color: var(--text-muted);
+  border: 0.5px solid var(--border);
+  font-weight: 400; letter-spacing: 0.1px;
+  white-space: nowrap;
+  backdrop-filter: blur(3px);
 }
 
 /* Featured carousel (#506) — a horizontal scroll rail of full cards. The

@@ -20,7 +20,7 @@
 <div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
-  <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
+  <div class="editor-topbar">
     <div>
       <div class="text-[11px] text-[color:var(--text-faint)] uppercase tracking-wide">
         <a href="{{ base }}/admin/specs" class="hover:underline">{{ self.t("admin-nav-apps") }}</a>
@@ -60,10 +60,12 @@
           autocomplete="off">
 
       {# Type picker — 6 cards #}
-      <div class="spec-form-section">
-        <div class="spec-form-label-row">
-          <div class="spec-form-label">{{ self.t("spec-form-kind") }}</div>
-          {% call help(self.t("spec-help-kind")) %}{% endcall %}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-category" aria-hidden="true"></i></span>
+          <div>
+            <div class="editor-card__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
+          </div>
         </div>
         <div class="kind-picker">
           {% for k in display_type_options() %}
@@ -74,9 +76,14 @@
             </label>
           {% endfor %}
         </div>
-      </div>
+      </section>
 
-      <div class="spec-form-section-title">{{ self.t("spec-form-identity") }}</div>
+      {# ── Card: Identity ─────────────────────────────────────── #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-id-badge-2" aria-hidden="true"></i></span>
+          <div><div class="editor-card__title">{{ self.t("spec-form-identity") }}</div></div>
+        </div>
 
       <div class="spec-form-field">
         <div class="spec-form-label-row">
@@ -117,7 +124,14 @@
                   class="spec-form-input">{{ form.description }}</textarea>
       </div>
 
-      <div class="spec-form-section-title">{{ self.t("spec-form-visual") }}</div>
+      </section>
+
+      {# ── Card: Visual ───────────────────────────────────────── #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-photo" aria-hidden="true"></i></span>
+          <div><div class="editor-card__title">{{ self.t("spec-form-visual") }}</div></div>
+        </div>
 
       {# ── Card logo (#213) — pick from the library, upload inline, or
          (advanced) paste a path/URL. Picker-first: no path typing in the
@@ -282,9 +296,15 @@
         </div>
       </div>
 
+      </section>
+
+      {# ── Card: Container (only for container-backed kinds) ───── #}
       <template x-if="needsContainer()">
-        <div>
-          <div class="spec-form-section-title">{{ self.t("spec-form-container") }}</div>
+        <section class="editor-card">
+          <div class="editor-card__head">
+            <span class="editor-card__icon"><i class="ti ti-box" aria-hidden="true"></i></span>
+            <div><div class="editor-card__title">{{ self.t("spec-form-container") }}</div></div>
+          </div>
 
           <div class="spec-form-field">
             <div class="spec-form-label-row">
@@ -354,12 +374,16 @@
               <div class="spec-form-help">{{ self.t("spec-form-lifetime-help") }}</div>
             </div>
           </div>
-        </div>
+        </section>
       </template>
 
+      {# ── Card: External link (only for external kinds) ──────── #}
       <template x-if="needsLink()">
-        <div>
-          <div class="spec-form-section-title">{{ self.t("spec-form-link-section") }}</div>
+        <section class="editor-card">
+          <div class="editor-card__head">
+            <span class="editor-card__icon"><i class="ti ti-external-link" aria-hidden="true"></i></span>
+            <div><div class="editor-card__title">{{ self.t("spec-form-link-section") }}</div></div>
+          </div>
           <div class="spec-form-field">
             <div class="spec-form-label-row">
               <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
@@ -371,10 +395,15 @@
                    placeholder="https://example.com"
                    class="spec-form-input">
           </div>
-        </div>
+        </section>
       </template>
 
-      <div class="spec-form-section-title">{{ self.t("spec-form-meta") }}</div>
+      {# ── Card: Advanced (metadata + all the runtime knobs) ──── #}
+      <section class="editor-card">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-adjustments" aria-hidden="true"></i></span>
+          <div><div class="editor-card__title">{{ self.t("spec-form-meta") }}</div></div>
+        </div>
       <div class="spec-form-field">
         <div class="spec-form-label-row">
           <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
@@ -786,11 +815,16 @@
           </div>
         </div>
       </div>
+      </section>
     </form>
 
     {# ── RIGHT: live preview + actions ─────────────────────── #}
-    <aside class="spec-form-preview">
-      <div class="spec-form-section-title">{{ self.t("spec-form-preview") }}</div>
+    <aside class="spec-form-preview" style="top:96px">
+      <div class="editor-card editor-card--preview">
+        <div class="editor-card__head">
+          <span class="editor-card__icon"><i class="ti ti-eye" aria-hidden="true"></i></span>
+          <div><div class="editor-card__title">{{ self.t("spec-form-preview") }}</div></div>
+        </div>
 
       <div class="rcard" style="margin:0">
         <div class="rcover">
@@ -834,6 +868,7 @@
 
       <div class="spec-form-help" style="margin-top:8px">
         {{ self.t("spec-form-preview-help") }}
+      </div>
       </div>
 
       {% if mode.is_edit() %}

@@ -399,8 +399,14 @@ body {
 .highlights-arrow .ti { font-size: 18px; }
 /* Viewport caps at 3 cards and clips; the track pages via translateX — no
    horizontal scrollbar (#516). `position: relative` anchors the overlaid
-   chevrons. */
-.highlights-viewport { position: relative; overflow: hidden; max-width: calc(3 * var(--card-w) + 28px); }
+   chevrons. Vertical padding (with horizontal 0) gives the card's hover
+   lift + dark top border headroom so `overflow: hidden` doesn't shave it
+   off, while still clipping the rail at the left/right edges. */
+.highlights-viewport {
+  position: relative; overflow: hidden;
+  max-width: calc(3 * var(--card-w) + 28px);
+  padding: 6px 0;
+}
 .highlights-track {
   display: flex; gap: 14px;
   transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);

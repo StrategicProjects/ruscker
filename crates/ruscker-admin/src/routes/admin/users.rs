@@ -212,7 +212,13 @@ async fn set_role(
         return redirect_flash("last-admin");
     }
     match db::users::set_role(pool, &username, new_role, Some(admin.actor())).await {
-        Ok(()) => redirect_flash("saved"),
+        Ok(()) => {
+            // Kick the user's live sessions so the new role takes effect
+            // now, not after the cookie expires (#544) — a demotion must
+            // drop elevated access immediately.
+            state.admin_sessions.revoke_by_actor(&username).await;
+            redirect_flash("saved")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "set role failed");
             redirect_flash("bad-input")
@@ -240,7 +246,11 @@ async fn reset_password(
     // Admin-assigned password ⇒ prompt the user to change it next login.
     match db::users::set_password(pool, &username, &form.password, true, Some(admin.actor())).await
     {
-        Ok(()) => redirect_flash("saved"),
+        Ok(()) => {
+            // A password reset must invalidate existing sessions (#544).
+            state.admin_sessions.revoke_by_actor(&username).await;
+            redirect_flash("saved")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "reset password failed");
             redirect_flash("bad-input")
@@ -261,7 +271,11 @@ async fn delete(
         return redirect_flash("last-admin");
     }
     match db::users::delete(pool, &username, Some(admin.actor())).await {
-        Ok(()) => redirect_flash("deleted"),
+        Ok(()) => {
+            // A deleted user must lose access now, not at session expiry (#544).
+            state.admin_sessions.revoke_by_actor(&username).await;
+            redirect_flash("deleted")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "delete user failed");
             redirect_flash("bad-input")

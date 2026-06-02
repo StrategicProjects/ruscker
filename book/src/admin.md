@@ -56,15 +56,24 @@ replica; open its logs. Shows a banner when started without
 
 ### Apps
 The list of specs — apps, APIs and external links — with create, edit
-and delete. The add/edit form has a type selector, a **live card
-preview**, and a **logo picker** that pulls from the media library (no
-need to type `/assets/img/...` by hand). A **"?" help popover** on every
-field explains what it does.
+and delete. Each row has a **featured star** next to the actions: click
+it to toggle whether the app appears in the landing page's *Featured*
+carousel, inline, without opening the editor (solid = featured).
 
-Under a collapsible **Advanced** section, every remaining spec option is
+The add/edit form is organised into three bands so the layout maps to
+intent: **Identity** (id, name, description), a **Metadata & visibility**
+band (the featured flag, access groups/users, subject, logo and cover),
+and a collapsible **Advanced** band for runtime knobs. It has a type
+selector, a **live card preview**, and a **logo picker** that pulls from
+the media library (no need to type `/assets/img/...` by hand). A **"?"
+help popover** on every field explains what it does.
+
+Under the collapsible **Advanced** band, every remaining spec option is
 editable too — so an app can be configured end-to-end from the web UI,
 without touching YAML:
 
+- **Runtime** — seats per container, session lifetime, inner container
+  port and platform.
 - **API** (for `type: api`) — container port, rate limit, docs/health
   paths, permissive CORS.
 - **Scaling** — min/max replicas and concurrent requests per replica.

@@ -210,6 +210,8 @@ pub struct CardCtx<'a> {
     /// verbatim from `template-properties.subject` and rendered as-is
     /// in the UI — operators choose their own taxonomy.
     pub subject: Option<&'a str>,
+    /// Highlighted in the landing's "Featured" carousel (#506).
+    pub featured: bool,
     /// Card logo URL. Stored base-agnostic; a root-absolute value
     /// (e.g. `/assets/img/x.png`) is prefixed with the portal base
     /// path at construction (#294) so it resolves under `--base-path`.
@@ -280,6 +282,7 @@ impl<'a> CardCtx<'a> {
             access_open,
             active,
             subject,
+            featured: spec.is_featured(),
             logo,
             cover,
             updated_raw,

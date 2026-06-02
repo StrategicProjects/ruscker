@@ -124,6 +124,16 @@
                   class="spec-form-input">{{ form.description }}</textarea>
       </div>
 
+      {# Featured carousel flag (#506) — plain checkbox; native submit sends
+         `featured=on` only when checked. #}
+      <div class="spec-form-field">
+        <label class="spec-form-check">
+          <input type="checkbox" name="featured" value="on" {% if !form.featured.is_empty() %}checked{% endif %}>
+          <span>{{ self.t("spec-form-featured") }}</span>
+        </label>
+        <div class="spec-form-help">{{ self.t("spec-form-featured-help") }}</div>
+      </div>
+
       </section>
 
       {# ── Card: Visual ───────────────────────────────────────── #}

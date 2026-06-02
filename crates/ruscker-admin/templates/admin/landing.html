@@ -75,6 +75,15 @@
                placeholder="{{ self.t("landing-subtitle") }}" class="spec-form-input">
         <div class="spec-form-help">{{ self.t("admin-landing-portal-subtitle-help") }}</div>
       </div>
+      {# "Featured" carousel toggle (#506) — plain checkbox; the carousel
+         only shows when this is on AND at least one app is featured. #}
+      <div class="spec-form-field">
+        <label class="spec-form-check">
+          <input type="checkbox" name="show_highlights" value="on" {% if !form.show_highlights.is_empty() %}checked{% endif %}>
+          <span>{{ self.t("admin-landing-show-highlights") }}</span>
+        </label>
+        <div class="spec-form-help">{{ self.t("admin-landing-show-highlights-help") }}</div>
+      </div>
 
       </section>
 

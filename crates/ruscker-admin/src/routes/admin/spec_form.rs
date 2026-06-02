@@ -198,6 +198,9 @@ pub struct SpecForm {
     /// "active" | "inactive"
     pub state: String,
     pub subject: String,
+    /// "Featured" carousel flag (#506) — an HTML checkbox: present ("on")
+    /// when checked, absent when not.
+    pub featured: String,
     pub logo: String,
     /// Card-cover CSS background (`template-properties.cover`):
     /// a solid color or a gradient string. Empty ⇒ fall back to
@@ -319,6 +322,8 @@ impl SpecForm {
                 .map(str::to_string)
                 .unwrap_or_else(|| "active".into()),
             subject: tp.get_str("subject").map(str::to_string).unwrap_or_default(),
+            // Pre-check the "Featured" box from the spec (#506).
+            featured: if spec.is_featured() { "on".into() } else { String::new() },
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
             cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
             updated: tp.get_str("updated").map(str::to_string).unwrap_or_default(),
@@ -512,6 +517,9 @@ impl SpecForm {
             id: self.id.trim().to_string(),
             display_name: empty_to_none(&self.display_name),
             description: empty_to_none(&self.description),
+            // "Featured" carousel flag (#506) — checkbox present ⇒ true;
+            // absent ⇒ None (so a normal spec carries no `featured` noise).
+            featured: (!self.featured.trim().is_empty()).then_some(true),
             container_image,
             seats_per_container: parse_opt(&self.seats_per_container),
             max_lifetime: parse_opt(&self.max_lifetime),

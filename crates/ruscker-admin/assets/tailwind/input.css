@@ -355,6 +355,25 @@ body {
   max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   backdrop-filter: blur(2px);
 }
+
+/* Featured carousel (#506) — a horizontal scroll rail of full cards. The
+   card keeps its fixed width, so 1–3 fit per viewport and the rest scroll. */
+.highlights { margin-bottom: 22px; }
+.highlights-title {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--text);
+  letter-spacing: -0.01em; margin-bottom: 10px;
+}
+.highlights-title .ti { color: var(--color-teal-600); font-size: 15px; }
+.highlights-rail {
+  display: flex; gap: 14px;
+  overflow-x: auto; scroll-snap-type: x proximity;
+  padding-bottom: 8px; scrollbar-width: thin;
+}
+.highlights-rail > .rcard {
+  flex: 0 0 auto;            /* keep the fixed card width; never stretch */
+  scroll-snap-align: start;
+}
 .b-app     { background: #06d6a0; color: #04553f; }
 .b-talk    { background: #ffd166; color: #5a4400; }
 .b-report  { background: #ef476f; color: #ffffff; }
@@ -826,6 +845,14 @@ body {
   padding: 8px 10px;
 }
 .spec-form-empty-hint .ti { font-size: 14px; flex: none; }
+/* Checkbox row (e.g. the Featured / Show-highlights toggles, #506). */
+.spec-form-check {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--text); cursor: pointer;
+}
+.spec-form-check input[type="checkbox"] {
+  width: 15px; height: 15px; accent-color: var(--color-teal-600); cursor: pointer;
+}
 .spec-form-input {
   width: 100%;
   background: var(--surface);

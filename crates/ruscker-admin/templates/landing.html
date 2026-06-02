@@ -100,6 +100,63 @@
     </p>
   {% endif %}
 
+  {# ── Featured carousel (#506) — only when the toggle is on AND at least
+     one app is featured; otherwise it vanishes. A horizontal scroll rail
+     of the full cards (fixed width ⇒ 1–3 per row by viewport, the rest
+     scroll). Filter bindings are intentionally omitted: the rail always
+     shows the featured set, independent of the filters below. #}
+  {% if show_highlights && self.has_featured() %}
+  <section class="highlights" aria-label="{{ self.t("highlights-title") }}">
+    <div class="highlights-title"><i class="ti ti-star" aria-hidden="true"></i> {{ self.t("highlights-title") }}</div>
+    <div class="highlights-rail">
+      {% for card in cards %}
+        {% if card.featured %}
+        <a class="rcard {% if !card.active %}inactive{% endif %}"
+           href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}">
+          <div class="rcover">
+            {% match card.cover %}
+              {% when Some with (cover) %}<div class="rcover-bg" style="background: {{ cover }};"></div>
+              {% when None %}<div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+            {% endmatch %}
+            {% match card.logo %}{% when Some with (logo) %}
+              <img src="{{ logo }}" alt="" loading="lazy" onerror="this.style.display='none'"
+                   class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
+            {% when None %}
+              <span class="rcover-fallback">{{ card.id }}</span>
+            {% endmatch %}
+            <div class="rbadges">
+              <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
+              {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
+            </div>
+            <span class="rlock">
+              <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
+            </span>
+          </div>
+          <div class="rbody">
+            <div class="rtitle">{{ card.display_name }}</div>
+            <div class="rdesc">{{ card.description }}</div>
+            <div class="rmeta">
+              <span class="rmeta-left">
+                <span class="status-dot {{ card.status.dot_class() }}" title="{{ self.t(card.status.title_key()) }}"></span>
+                {% match card.status.label_key() %}
+                  {% when Some with (key) %}
+                    {% match card.updated_short.as_deref() %}
+                      {% when Some with (d) %}{{ self.t_with(key, "date", d) }}
+                      {% when None %}{{ self.t(key) }}
+                    {% endmatch %}
+                  {% when None %}<span class="text-[color:var(--text-faint)]" title="{{ self.t(card.status.title_key()) }}">—</span>
+                {% endmatch %}
+              </span>
+              <i class="ti ti-arrow-right arrow-go" aria-hidden="true"></i>
+            </div>
+          </div>
+        </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
   {# ── Filter row 1: search + theme select + sort + status ───── #}
   <div class="flex flex-wrap gap-2.5 items-center mb-3.5">
     <label class="search-pill flex-1 min-w-[180px]">

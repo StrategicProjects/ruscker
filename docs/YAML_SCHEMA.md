@@ -212,6 +212,7 @@ Field reference:
 | `analytics-origins` | string | none | Space-separated origins added to the landing CSP (`script-src`/`connect-src`/`img-src`). |
 | `custom-css` | string | none | **Trusted** raw CSS, injected as a `<style>` late in the landing `<head>` so it overrides the built-in styles. |
 | `show-admin-link` | bool | `true` | When `false`, anonymous visitors don't see the "Sign in" entrance. Logged-in users still see their panel link. |
+| `show-highlights` | bool | `true` | Show the "Featured" carousel above the filters. The carousel still only renders when at least one spec is `featured`. |
 | `logos[]` | list | `[]` | Header/footer logos (see below). |
 | `blocks[]` | list | `[]` | Custom HTML blocks (see below). |
 
@@ -604,6 +605,12 @@ Free-form key-value bag. The current landing template uses:
 | `icon` | `lock` \| `lock_open` | Access level |
 | `type` | `app` \| `package` \| `talk` \| `report` \| `api` | Badge category |
 | `subject` | string | Subject/topic of the app — drives the **Subject** filter facet on the landing |
+
+> **`featured`** (a top-level spec field, not a template-property): set
+> `featured: true` to highlight the app in the landing's **Featured**
+> carousel above the filters. The carousel shows only when
+> `landing-customization.show-highlights` is on (the default) and at least
+> one spec is featured. Default `false`.
 | `updated` | string | Display date (DD/MM/YYYY) |
 | `state` | `active` \| `inactive` | Whether to enable card |
 | `link` | URL | External URL for non-container specs |

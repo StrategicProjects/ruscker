@@ -660,3 +660,9 @@ admin-groups-no-apps = Aucune app restreinte à ce groupe
 
 highlights-prev = Précédents
 highlights-next = Suivants
+
+# Featured star toggle in the Apps table (#521)
+admin-specs-col-featured = À la une
+admin-specs-featured-on = En avant — cliquer pour retirer
+admin-specs-featured-off = Pas en avant — cliquer pour mettre en avant
+admin-specs-featured-readonly = Le statut « à la une » vient du fichier de config

@@ -664,3 +664,9 @@ admin-groups-no-apps = Nenhum app restrito a este grupo
 
 highlights-prev = Anteriores
 highlights-next = Próximos
+
+# Featured star toggle in the Apps table (#521)
+admin-specs-col-featured = Destaque
+admin-specs-featured-on = Destacado — clique para remover
+admin-specs-featured-off = Não destacado — clique para destacar
+admin-specs-featured-readonly = Destaque definido no arquivo de config

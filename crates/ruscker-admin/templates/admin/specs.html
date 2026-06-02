@@ -108,11 +108,17 @@
             {% if spec.config_only %}
               <span class="star-toggle is-readonly" title="{{ self.t("admin-specs-featured-readonly") }}"><i class="ti {% if spec.featured %}ti-star-filled is-on{% else %}ti-star{% endif %}" aria-hidden="true"></i></span>
             {% else %}
+              {# URL + titles ride in `data-*` (HTML-escaped) and are read via
+                 `$el.dataset` — never interpolated into the JS handler, so a
+                 spec id from an import can't break out of the string. #}
               <button type="button" class="star-toggle" x-data="{ on: {{ spec.featured }}, busy: false }"
+                      data-toggle-url="{{ base }}/admin/specs/{{ spec.id }}/featured/toggle"
+                      data-title-on="{{ self.t("admin-specs-featured-on") }}"
+                      data-title-off="{{ self.t("admin-specs-featured-off") }}"
                       :class="on ? 'is-on' : ''" :disabled="busy"
-                      :title="on ? '{{ self.t("admin-specs-featured-on") }}' : '{{ self.t("admin-specs-featured-off") }}'"
+                      :title="on ? $el.dataset.titleOn : $el.dataset.titleOff"
                       @click="busy = true; const prev = on; on = !on;
-                              fetch('{{ base }}/admin/specs/{{ spec.id }}/featured/toggle', { method: 'POST' })
+                              fetch($el.dataset.toggleUrl, { method: 'POST' })
                                 .then(r => r.ok ? r.json() : Promise.reject())
                                 .then(d => { on = d.featured })
                                 .catch(() => { on = prev })

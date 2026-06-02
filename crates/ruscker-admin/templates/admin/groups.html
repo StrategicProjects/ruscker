@@ -1,0 +1,53 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-groups-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-groups-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-groups-subtitle") }}</p>
+  </div>
+  <div class="text-xs text-[color:var(--text-faint)]">{{ groups.len() }}</div>
+</div>
+
+{% if groups.is_empty() %}
+  <div class="spec-form-empty-hint" style="max-width:44rem">
+    <i class="ti ti-users-group" aria-hidden="true"></i>
+    {{ self.t("admin-groups-empty") }}
+  </div>
+{% else %}
+  <div class="groups-grid">
+    {% for g in groups %}
+    <section class="editor-card group-card">
+      <div class="editor-card__head">
+        <span class="editor-card__icon"><i class="ti ti-users-group" aria-hidden="true"></i></span>
+        <div><div class="editor-card__title">{{ g.name }}</div></div>
+      </div>
+      <div class="group-col">
+        <div class="group-col-title">{{ self.t("admin-groups-members") }} · {{ g.members.len() }}</div>
+        {% if g.members.is_empty() %}
+          <span class="group-empty">{{ self.t("admin-groups-no-members") }}</span>
+        {% else %}
+          <div class="group-pills">
+            {% for m in g.members %}<a href="{{ base }}/admin/users" class="group-pill"><i class="ti ti-user" aria-hidden="true"></i> {{ m }}</a>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+      <div class="group-col">
+        <div class="group-col-title">{{ self.t("admin-groups-apps") }} · {{ g.apps.len() }}</div>
+        {% if g.apps.is_empty() %}
+          <span class="group-empty">{{ self.t("admin-groups-no-apps") }}</span>
+        {% else %}
+          <div class="group-pills">
+            {% for a in g.apps %}<a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="group-pill"><i class="ti ti-app-window" aria-hidden="true"></i> {{ a.name }}</a>{% endfor %}
+          </div>
+        {% endif %}
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% endblock %}

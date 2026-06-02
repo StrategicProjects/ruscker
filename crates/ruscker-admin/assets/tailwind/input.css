@@ -1233,6 +1233,20 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .group-pill .ti { font-size: 13px; color: var(--text-muted); }
 .group-empty { font-size: 12px; color: var(--text-faint); font-style: italic; }
 
+/* Featured-star toggle in the Apps table (#521). */
+.star-cell { width: 1%; text-align: center; white-space: nowrap; }
+.star-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: 0; background: none; border-radius: 6px;
+  color: var(--text-faint); cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.star-toggle:hover:not(:disabled):not(.is-readonly) { color: #eab308; background: var(--surface-soft); }
+.star-toggle.is-on { color: #eab308; }       /* amber when featured */
+.star-toggle:disabled { cursor: default; }
+.star-toggle.is-readonly { cursor: default; }
+.star-toggle .ti { font-size: 16px; }
+
 /* Header/footer center logos (#468): absolutely centred within the header
    bar / footer chrome (their empty middle), so they read as part of the bar
    itself — not a separate strip below the header / above the footer. The

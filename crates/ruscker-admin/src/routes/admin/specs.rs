@@ -6,11 +6,11 @@
 
 use askama::Template;
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Query, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Router,
+    Json, Router,
 };
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
@@ -30,7 +30,48 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/specs", get(index))
         .route("/admin/specs/import", post(import))
+        .route(
+            "/admin/specs/{id}/featured/toggle",
+            post(toggle_featured),
+        )
         .layer(DefaultBodyLimit::max(IMPORT_BODY_LIMIT))
+}
+
+#[derive(serde::Serialize)]
+struct ToggleResult {
+    featured: bool,
+}
+
+/// `POST /admin/specs/{id}/featured/toggle` — flip a spec's `featured`
+/// flag from the Apps table's star (#521), without opening the editor.
+/// Editor-gated; returns the new state as JSON for the optimistic UI.
+async fn toggle_featured(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let mut spec = match crate::db::specs::fetch_one(db, &id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+        Err(e) => {
+            tracing::error!(id, error = ?e, "fetch spec for toggle failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let now_featured = !spec.is_featured();
+    // None when off so a normal spec carries no `featured` noise in JSON.
+    spec.featured = now_featured.then_some(true);
+    if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(editor.actor())).await {
+        tracing::error!(id, error = ?e, "save featured toggle failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
+    }
+    Json(ToggleResult {
+        featured: now_featured,
+    })
+    .into_response()
 }
 
 /// One row out of the `specs` table, picked for the list view.
@@ -50,6 +91,11 @@ pub struct SpecRow {
     /// `SELECT` (which doesn't have the column) still maps.
     #[sqlx(default)]
     pub config_only: bool,
+    /// Highlighted in the landing's Featured carousel (#506). Not a column
+    /// — `featured` lives in `config_json`; the index fills this in from a
+    /// `list_all` pass so the table's star toggle (#521) reflects state.
+    #[sqlx(default)]
+    pub featured: bool,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -168,6 +214,22 @@ async fn index(
         }
     };
 
+    // Featured flag lives in `config_json`, not a column — fill it from a
+    // single `list_all` pass so the table's star toggle (#521) shows state.
+    {
+        use std::collections::HashSet;
+        let featured: HashSet<String> = crate::db::specs::list_all(database)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .filter(|s| s.is_featured())
+            .map(|s| s.id.clone())
+            .collect();
+        for row in &mut specs {
+            row.featured = featured.contains(&row.id);
+        }
+    }
+
     // Append specs that exist only in the YAML `--config` (not the DB) as
     // read-only "config-defined" rows (#303). They run + show on the
     // landing, so showing them here avoids the "where did my spec go?"
@@ -198,6 +260,7 @@ async fn index(
                 updated_at: Utc::now(), // not shown for config rows
                 version: 0,
                 config_only: true,
+                featured: s.is_featured(),
             });
         }
     }

@@ -1238,7 +1238,7 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .star-toggle {
   display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: 0; background: none; border-radius: 6px;
-  color: var(--text-faint); cursor: pointer;
+  color: var(--text-faint); cursor: pointer; vertical-align: middle;
   transition: color 0.12s, background 0.12s;
 }
 .star-toggle:hover:not(:disabled):not(.is-readonly) { color: #eab308; background: var(--surface-soft); }

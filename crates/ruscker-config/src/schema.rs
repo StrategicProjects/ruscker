@@ -431,6 +431,12 @@ pub struct LandingCustomization {
     #[serde(default, rename = "show-admin-link")]
     pub show_admin_link: Option<bool>,
 
+    /// Show the "Featured" carousel of highlighted apps above the filters
+    /// (#506). Default true; the carousel still only renders when at least
+    /// one spec is `featured`. Admin-managed via the landing editor.
+    #[serde(default, rename = "show-highlights")]
+    pub show_highlights: Option<bool>,
+
     /// Logos rendered in the public landing header / footer, each with a
     /// slot, alignment, optional click-through link and per-logo height.
     /// Admin-managed via the landing editor; survives import/export.
@@ -481,6 +487,12 @@ impl ThemePalette {
 }
 
 impl LandingCustomization {
+    /// Resolve [`Self::show_highlights`] — defaults to `true`. The carousel
+    /// itself only shows when at least one spec is featured (#506).
+    pub fn effective_show_highlights(&self) -> bool {
+        self.show_highlights.unwrap_or(true)
+    }
+
     /// Resolve [`Self::show_admin_link`] — defaults to `true` so the
     /// landing keeps the anonymous "Sign in" entrance unless an
     /// operator opts out.
@@ -567,6 +579,12 @@ pub struct Spec {
 
     /// Description shown on the card. Inline HTML is permitted.
     pub description: Option<String>,
+
+    /// Highlight this app in the landing's "Featured" carousel (#506).
+    /// Ruscker extension (not in ShinyProxy). `None`/`false` ⇒ normal card.
+    /// The carousel only renders when `landing-customization.show-highlights`
+    /// is on AND at least one spec is featured.
+    pub featured: Option<bool>,
 
     /// Docker image reference. If absent, this spec is a "link card"
     /// (external URL only, no container management).
@@ -966,6 +984,12 @@ impl Spec {
         self.access_groups
             .as_deref()
             .is_some_and(|gs| gs.iter().any(|g| groups.iter().any(|h| h == g)))
+    }
+
+    /// Whether this app is highlighted in the landing's "Featured"
+    /// carousel (#506). `None`/`false` ⇒ normal card.
+    pub fn is_featured(&self) -> bool {
+        self.featured.unwrap_or(false)
     }
 
     /// Effective minimum replicas (default 1 for containerized, 0 for
@@ -1585,6 +1609,7 @@ proxy:
             id: "pkg".to_string(),
             display_name: None,
             description: None,
+            featured: None,
             container_image: None,
             seats_per_container: None,
             max_lifetime: None,
@@ -1632,6 +1657,7 @@ proxy:
             id: "app".to_string(),
             display_name: None,
             description: None,
+            featured: None,
             container_image: Some("foo/bar:latest".to_string()),
             seats_per_container: None,
             max_lifetime: None,
@@ -1679,6 +1705,7 @@ proxy:
             id: "api".to_string(),
             display_name: None,
             description: None,
+            featured: None,
             container_image: Some("foo/api:latest".to_string()),
             seats_per_container: None,
             max_lifetime: None,

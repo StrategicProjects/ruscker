@@ -91,6 +91,9 @@ struct LandingPage<'a> {
     /// deploy policy from `landing-customization.show-admin-link`
     /// (default true); false hides the admin entrance on public portals.
     show_admin_link: bool,
+    /// Whether the "Featured" carousel may render (#506). The template also
+    /// checks that at least one card is featured via [`Self::has_featured`].
+    show_highlights: bool,
 }
 
 /// A landing logo resolved for rendering: `src` already carries the mount
@@ -116,6 +119,12 @@ impl<'a> LandingPage<'a> {
     /// whether to render a slot's chrome insert (header-left replaces the
     /// Ruscker mark; header-right sits after the chrome cluster; the
     /// `center` bucket still renders as a separate bar). See #468.
+    /// Any featured card? Gates the "Featured" carousel together with
+    /// `show_highlights` (#506).
+    fn has_featured(&self) -> bool {
+        self.cards.iter().any(|c| c.featured)
+    }
+
     fn has_logos_at(&self, slot: &str, align: &str) -> bool {
         self.logos.iter().any(|l| l.slot == slot && l.align == align)
     }
@@ -344,6 +353,8 @@ async fn index(
             .proxy
             .landing_customization
             .effective_show_admin_link(),
+        // Carousel toggle from the DB-backed editor (#506).
+        show_highlights: lc.effective_show_highlights(),
     };
     let mut resp = render(&page);
     // Widen *this page's* CSP so the analytics script can load/report.

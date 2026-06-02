@@ -115,6 +115,10 @@ pub struct LandingForm {
     /// logos.
     #[serde(default)]
     pub logos_json: String,
+    /// "Featured" carousel toggle (#506) — an HTML checkbox: present ("on")
+    /// when checked, absent when not (hence `#[serde(default)]`).
+    #[serde(default)]
+    pub show_highlights: String,
 }
 
 impl LandingForm {
@@ -145,6 +149,12 @@ impl LandingForm {
             analytics_origins: lc.analytics_origins.clone().unwrap_or_default(),
             custom_css: lc.custom_css.clone().unwrap_or_default(),
             logos_json: serde_json::to_string(&lc.logos).unwrap_or_else(|_| "[]".into()),
+            // Pre-check the box from the stored value (defaults to on).
+            show_highlights: if lc.effective_show_highlights() {
+                "on".into()
+            } else {
+                String::new()
+            },
         }
     }
 
@@ -194,6 +204,8 @@ impl LandingForm {
             // `show-admin-link` is a YAML deploy policy (#156), not an
             // editor field — never persisted from the form.
             show_admin_link: None,
+            // "Featured" carousel toggle (#506) — checkbox present ⇒ on.
+            show_highlights: Some(!self.show_highlights.trim().is_empty()),
             logos: parse_logos(&self.logos_json),
         }
     }

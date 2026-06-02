@@ -640,3 +640,10 @@ admin-landing-theme-dark = Tema oscuro
 admin-landing-theme-bg = Fondo
 admin-landing-theme-text = Texto
 admin-landing-theme-accent = Acento
+
+# Featured carousel (#506)
+highlights-title = Destacados
+spec-form-featured = Destacar esta app
+spec-form-featured-help = Muestra la app en el carrusel de Destacados arriba de la landing (si la opción está activada).
+admin-landing-show-highlights = Mostrar Destacados
+admin-landing-show-highlights-help = Muestra el carrusel de apps destacadas encima de los filtros. Se oculta si no hay ninguna destacada.

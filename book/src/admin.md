@@ -54,11 +54,15 @@ CPU and memory (refreshed over Server-Sent Events). Stop or restart a
 replica; open its logs. Shows a banner when started without
 `--docker`.
 
+![Monitoring dashboard: aggregate cards (containers, apps with replicas, active sessions, memory) above a per-replica table with live CPU sparklines and memory, and per-row stop/restart/logs actions.](images/admin-dashboard.png)
+
 ### Apps
 The list of specs — apps, APIs and external links — with create, edit
 and delete. Each row has a **featured star** next to the actions: click
 it to toggle whether the app appears in the landing page's *Featured*
 carousel, inline, without opening the editor (solid = featured).
+
+![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star (solid amber when featured) next to the edit and duplicate buttons.](images/admin-apps.png)
 
 The add/edit form is organised into three bands so the layout maps to
 intent: **Identity** (id, name, description), a **Metadata & visibility**
@@ -83,6 +87,8 @@ without touching YAML:
 Every advanced field is optional; leaving it blank keeps Ruscker's
 default, so the section stays out of the way until you need it.
 
+![Add/edit app form: the Kind selector and Identity/Visual bands on the left, with a live card preview on the right that updates as you type.](images/admin-spec-form.png)
+
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
@@ -98,6 +104,8 @@ and drop, or upload inline without leaving the form) to select a logo or
 cover. A "Choose image" button auto-uploads on file select for a one-click
 flow.
 
+![Media library: a gallery of images with built-in framework logos seeded alongside uploads, each tile showing its filename, size and type.](images/admin-media.png)
+
 ### Credentials
 A named, AES-256-GCM-encrypted store for registry credentials (needs
 `RUSCKER_MASTER_KEY`). Passwords never appear in the YAML or in the
@@ -111,6 +119,9 @@ There is no need to inline registry passwords in a spec.
 
 ### Landing editor
 Customise the public landing without a custom template:
+
+![Landing editor: section cards for the header (title, subtitle, Show Featured carousel toggle) and appearance (header + per-theme colours), with a live portal preview pane on the right.](images/admin-landing-editor.png)
+
 
 - **Colours + intro** — header background/foreground, a per-locale
   intro paragraph.

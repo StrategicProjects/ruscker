@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.45 — 2026-06-02
+
+Featured carousel layout polish.
+
+**Landing**
+- The Featured carousel is now **centered on the page**, with the
+  prev/next chevrons in the **side gutters outside the cards** (rather
+  than overlaid on them), vertically centered.
+
+---
+
 ## v0.1.44 — 2026-06-02
 
 A refreshed Featured carousel.

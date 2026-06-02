@@ -5,7 +5,7 @@ production-ready and horizontally scalable. Phase 8 (external auth) is
 the main optional, demand-driven work left. For what changed in each
 release, see the [release notes](./news.md).
 
-![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. The latest release v0.1.31 adds demo forks, URL-rewrite modernization, unified credentials, media library, portal logos, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
+![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-1.0 point releases add demo forks, URL-rewrite modernization, unified credentials, the media library, portal logos, admin UX polish, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
 
 ## Shipped
 

@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.44 — 2026-06-02
+
+A refreshed Featured carousel.
+
+**Landing**
+- **New carousel controls.** The prev/next chevrons are now circular
+  buttons overlaid on the card row, vertically centered on the left and
+  right edges (Material-Tailwind style), instead of a pair of buttons in
+  the section header. They stay pinned to the visible cards whether 1, 2
+  or 3 fit, and disappear when everything fits on one page.
+- **Fixed a hover clip.** A featured card's dark top border no longer
+  gets shaved off when you hover it inside the carousel.
+
+---
+
 ## v0.1.43 — 2026-06-02
 
 Another featured-star placement fix.

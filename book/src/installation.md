@@ -78,6 +78,25 @@ ruscker --version
 The binary has no shared-library dependencies and runs on any
 glibc-free or glibc Linux system.
 
+## Homebrew (macOS / Linux)
+
+For a local install — handy on a macOS workstation for development — use
+the tap:
+
+```sh
+brew install strategicprojects/tap/ruscker
+ruscker --version
+```
+
+On Linux the formula pulls the static musl binary from the matching
+release; on macOS it builds from source (so a Rust toolchain is fetched
+as a build dependency). Each release auto-publishes its formula to the
+tap, so `brew upgrade` tracks the latest version.
+
+> Ruscker spawns **Linux containers**, so the `--docker` backend needs a
+> Linux Docker host. A macOS Homebrew install is meant for running the
+> portal locally and for development, not for hosting app containers.
+
 ## Docker
 
 ```sh

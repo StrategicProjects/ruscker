@@ -215,6 +215,13 @@ pub trait AdminSessionStore: Send + Sync + std::fmt::Debug {
 
     /// Invalidate a session (logout / forced revoke).
     async fn remove(&self, id: &str);
+
+    /// Invalidate **every** live session belonging to `actor` (the DB
+    /// username). Called when a user is demoted, deleted, or has their
+    /// password reset, so a stale session can't keep the old (possibly
+    /// elevated) role until it expires (#544). Break-glass token
+    /// sessions (`actor == None`) are never matched.
+    async fn revoke_by_actor(&self, actor: &str);
 }
 
 /// Single-node admin session store. The default; replaced by
@@ -285,6 +292,13 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
 
     async fn remove(&self, id: &str) {
         self.sessions.remove(id);
+    }
+
+    async fn revoke_by_actor(&self, actor: &str) {
+        // Drop every entry whose actor matches; token sessions (None)
+        // never match a username, so they're left alone.
+        self.sessions
+            .retain(|_, e| e.actor.as_deref() != Some(actor));
     }
 }
 
@@ -601,6 +615,29 @@ mod tests {
         assert!(
             s.validate(&id).await.is_none(),
             "removed (logged-out) session is invalid"
+        );
+    }
+
+    #[tokio::test]
+    async fn admin_sessions_revoke_by_actor() {
+        let s = InMemoryAdminSessionStore::default_policy();
+        // Two sessions for alice (e.g. two browsers), one for bob, one token.
+        let a1 = s.create(Role::Admin, Some("alice".into())).await;
+        let a2 = s.create(Role::Admin, Some("alice".into())).await;
+        let bob = s.create(Role::Editor, Some("bob".into())).await;
+        let token = s.create(Role::Admin, None).await;
+
+        s.revoke_by_actor("alice").await;
+
+        assert!(s.validate(&a1).await.is_none(), "alice session 1 revoked");
+        assert!(s.validate(&a2).await.is_none(), "alice session 2 revoked");
+        assert!(
+            s.validate(&bob).await.is_some(),
+            "another user's session is untouched"
+        );
+        assert!(
+            s.validate(&token).await.is_some(),
+            "break-glass token session (actor=None) is never matched"
         );
     }
 

@@ -326,6 +326,23 @@ impl AdminSessionStore for PostgresAdminSessionStore {
             },
         );
     }
+
+    async fn revoke_by_actor(&self, actor: &str) {
+        // Authoritative delete of every session for this user (#544).
+        if let Err(e) = sqlx::query("DELETE FROM admin_sessions WHERE actor = $1")
+            .bind(actor)
+            .execute(&self.pool)
+            .await
+        {
+            warn!(error = ?e, "admin session revoke-by-actor DELETE failed");
+        }
+        // Evict this node's positive cache entries for the actor so it
+        // stops serving them immediately; negative tombstones and other
+        // users' entries stay. Sibling nodes ride the cache_ttl window,
+        // same as logout.
+        self.cache
+            .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────

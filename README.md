@@ -17,6 +17,10 @@ is megabytes, not hundreds of megabytes, and startup is instant.
 📖 **Documentation: <https://strategicprojects.github.io/ruscker/>**
 (install · migrating from ShinyProxy · configuration · admin · deploy).
 
+<p align="center">
+  <img src="book/src/images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters." width="860">
+</p>
+
 ## How it works
 
 Visitors and API clients hit one Ruscker process. It serves the landing
@@ -44,7 +48,7 @@ dashboard, and load balancing on top.
 |                        | ShinyProxy   | Shiny Server Free | **Ruscker**          |
 |------------------------|--------------|-------------------|----------------------|
 | Runtime                | JVM          | R process         | single Rust binary   |
-| Idle memory            | 300–500 MB   | —                 | **~16 MB**           |
+| Idle memory            | 300–500 MB   | —                 | **~14 MB**           |
 | Dependencies           | JVM          | R                 | none (static binary) |
 | Web admin panel        | ✗            | ✗                 | ✓                    |
 | Live monitoring dashboard | ✗         | ✗                 | ✓                    |
@@ -82,7 +86,7 @@ low tens:
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
 
-> **~540 MB → ~16 MB idle** — roughly a 30× cut, on the same machine
+> **~540 MB → ~14 MB idle** — roughly a 38× cut, on the same machine
 > serving the same apps. A real 31-spec config migrated with **no
 > unsupported features**, and apps spawn on demand.
 
@@ -111,6 +115,16 @@ What's in the box:
 300+ unit + integration tests run green on `cargo test` (no Docker
 required); extra feature-gated suites exercise a real Docker daemon
 (`docker-it`) and a full proxy + WebSocket end-to-end run (`e2e`).
+
+<p align="center">
+  <img src="book/src/images/admin-apps.png" alt="The admin Apps table: each spec row with kind/state, and a featured star in the Actions column to toggle landing-page highlighting inline." width="860">
+  <br><em>Apps catalogue — every spec field editable from the web UI, no YAML.</em>
+</p>
+
+<p align="center">
+  <img src="book/src/images/admin-dashboard.png" alt="The live monitoring dashboard: aggregate cards plus a per-replica table with CPU sparklines, memory, sessions and stop/restart/logs actions, streamed over SSE." width="860">
+  <br><em>Live monitoring dashboard — per-replica CPU/memory over Server-Sent Events.</em>
+</p>
 
 ## Install
 

@@ -10,8 +10,10 @@ with an existing ShinyProxy.
 sudo apt install ./ruscker_<version>_amd64.deb
 ```
 
-Put your apps in `/etc/ruscker/application.yml` and your secrets in
-`/etc/ruscker/ruscker.env` (read by the unit):
+Manage your **apps, landing page and users in the admin panel** at
+`/admin` — the unit runs with `--db`, so the catalog is live out of the
+box. `application.yml` only carries **deployment** settings; put your
+**secrets** in `/etc/ruscker/ruscker.env` (read by the unit):
 
 ```ini
 RUSCKER_ADMIN_TOKEN=...        # openssl rand -hex 32
@@ -23,7 +25,14 @@ DOCKER_REGISTRY_PASSWORD=...   # referenced as ${DOCKER_REGISTRY_PASSWORD} in th
 ## 2. Enable the container backend
 
 The shipped unit serves landing + admin + proxy but not the `--docker`
-backend. Enable it with a drop-in (so upgrades don't clobber it):
+backend. The easy path is the helper, which writes the drop-in for you
+(preserving your `--bind`/`--config`/`--db`):
+
+```sh
+sudo ruscker-enable-docker
+```
+
+Or do it by hand with a drop-in (so upgrades don't clobber it):
 
 ```sh
 sudo systemctl edit ruscker

@@ -846,6 +846,21 @@ impl<'a> SpecFormPage<'a> {
         self.locales.t(self.locale, key, None)
     }
 
+    /// Whether `name` is the currently-selected registry credential — marks
+    /// the `<option selected>` in the credential picker (#504).
+    fn cred_selected(&self, name: &str) -> bool {
+        self.form.docker_registry_credential == name
+    }
+
+    /// Whether the set credential is empty or a known stored name. False
+    /// when it's a value absent from the store (a deleted credential, or one
+    /// carried over from imported YAML) — the picker then keeps it as a
+    /// trailing option so a save doesn't silently drop it (#504).
+    fn cred_known(&self) -> bool {
+        let cur = self.form.docker_registry_credential.trim();
+        cur.is_empty() || self.credential_names.iter().any(|n| n.as_str() == cur)
+    }
+
     /// JSON-encoded initial form values, ready to drop into the
     /// `x-data` attribute of the live-preview Alpine component.
     fn form_initial_json(&self) -> String {

@@ -657,3 +657,6 @@ admin-groups-apps = Apps
 admin-groups-empty = Aucun groupe pour l'instant. Les groupes apparaissent quand vous définissez access-groups sur une app ou des groupes sur un utilisateur.
 admin-groups-no-members = Aucun membre
 admin-groups-no-apps = Aucune app restreinte à ce groupe
+
+highlights-prev = Précédents
+highlights-next = Suivants

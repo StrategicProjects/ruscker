@@ -647,3 +647,13 @@ spec-form-featured = Feature this app
 spec-form-featured-help = Shows the app in the Featured carousel at the top of the landing (when the toggle is on).
 admin-landing-show-highlights = Show Featured carousel
 admin-landing-show-highlights-help = Shows the carousel of featured apps above the filters. Hidden when nothing is featured.
+
+# Groups page (#503, read-only)
+admin-nav-groups = Groups
+admin-groups-title = Groups
+admin-groups-subtitle = Groups derived from apps (access-groups) and users — read-only. Edit on the user or the app.
+admin-groups-members = Members
+admin-groups-apps = Apps
+admin-groups-empty = No groups yet. Groups appear when you set access-groups on an app or groups on a user.
+admin-groups-no-members = No members
+admin-groups-no-apps = No app restricted to this group

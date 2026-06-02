@@ -647,3 +647,13 @@ spec-form-featured = Destacar esta app
 spec-form-featured-help = Muestra la app en el carrusel de Destacados arriba de la landing (si la opción está activada).
 admin-landing-show-highlights = Mostrar Destacados
 admin-landing-show-highlights-help = Muestra el carrusel de apps destacadas encima de los filtros. Se oculta si no hay ninguna destacada.
+
+# Groups page (#503, read-only)
+admin-nav-groups = Grupos
+admin-groups-title = Grupos
+admin-groups-subtitle = Grupos derivados de los apps (access-groups) y usuarios — solo lectura. Edita en el usuario o el app.
+admin-groups-members = Miembros
+admin-groups-apps = Apps
+admin-groups-empty = Aún no hay grupos. Aparecen cuando defines access-groups en un app o grupos en un usuario.
+admin-groups-no-members = Sin miembros
+admin-groups-no-apps = Ningún app restringido a este grupo

@@ -1194,6 +1194,28 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 /* Preview card sits in the sticky aside; let the frame breathe inside it. */
 .editor-card--preview { padding-bottom: 14px; }
 
+/* Groups page (#503, read-only) — one card per derived group. */
+.groups-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.group-col { margin-top: 12px; }
+.group-col-title {
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+}
+.group-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.group-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; color: var(--text); text-decoration: none;
+  background: var(--surface-soft); border: 0.5px solid var(--border);
+  border-radius: 999px; padding: 4px 10px;
+  transition: border-color 0.12s, background 0.12s;
+}
+.group-pill:hover { border-color: var(--color-teal-600); background: var(--surface); }
+.group-pill .ti { font-size: 13px; color: var(--text-muted); }
+.group-empty { font-size: 12px; color: var(--text-faint); font-style: italic; }
+
 /* Header/footer center logos (#468): absolutely centred within the header
    bar / footer chrome (their empty middle), so they read as part of the bar
    itself — not a separate strip below the header / above the footer. The

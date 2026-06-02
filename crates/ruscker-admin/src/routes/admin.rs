@@ -27,6 +27,7 @@ pub mod blocks;
 pub mod credentials;
 pub mod dashboard;
 pub mod disk;
+pub mod groups;
 pub mod images;
 pub mod landing;
 pub mod logs;
@@ -59,6 +60,7 @@ pub fn routes() -> Router<AppState> {
         .merge(landing::routes())
         .merge(blocks::routes())
         .merge(audit::routes())
+        .merge(groups::routes())
         .merge(logs::routes())
         .merge(users::routes())
 }

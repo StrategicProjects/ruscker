@@ -14,17 +14,13 @@ proxy:
   # and only the public landing + proxy are served.
   authentication: none
 
-  specs:
-    # A simple external-link card so the landing page isn't empty out
-    # of the box. Replace with your own apps / APIs.
-    - id: welcome
-      display-name: "Welcome to Ruscker"
-      description: "Edit /etc/ruscker/application.yml to add your apps."
-      template-properties:
-        type: package
-        state: active
-        link: https://github.com/StrategicProjects/ruscker
-
+  # Apps and APIs live in the database and are managed in the admin
+  # panel. On first run Ruscker auto-seeds a set of showcase cards, so
+  # the landing page is never empty out of the box — no starter spec is
+  # needed here (an old `welcome` placeholder used to live here; it just
+  # duplicated a DB card and showed up as a read-only CONFIG row in the
+  # admin, so it was dropped). Add your own apps below, or via the admin.
+  specs: []
     # Example containerized app (commented). Requires the --docker
     # backend — add `--docker` to ExecStart in the systemd unit and
     # give the `ruscker` user Docker access (see README.Debian).

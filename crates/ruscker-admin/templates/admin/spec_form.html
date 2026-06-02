@@ -124,16 +124,6 @@
                   class="spec-form-input">{{ form.description }}</textarea>
       </div>
 
-      {# Featured carousel flag (#506) — plain checkbox; native submit sends
-         `featured=on` only when checked. #}
-      <div class="spec-form-field">
-        <label class="spec-form-check">
-          <input type="checkbox" name="featured" value="on" {% if !form.featured.is_empty() %}checked{% endif %}>
-          <span>{{ self.t("spec-form-featured") }}</span>
-        </label>
-        <div class="spec-form-help">{{ self.t("spec-form-featured-help") }}</div>
-      </div>
-
       </section>
 
       {# ── Card: Visual ───────────────────────────────────────── #}
@@ -358,32 +348,6 @@
               <span x-text="pull.line" class="spec-form-input--mono" style="opacity:0.75"></span>
             </div>
           </div>
-
-          <div class="grid grid-cols-2 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-seats" class="spec-form-label">{{ self.t("spec-form-seats") }}</label>
-                {% call help(self.t("spec-help-seats")) %}{% endcall %}
-              </div>
-              <input id="f-seats" type="number" name="seats_per_container"
-                     value="{{ form.seats_per_container }}"
-                     min="1"
-                     placeholder="10"
-                     class="spec-form-input">
-            </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-lifetime" class="spec-form-label">{{ self.t("spec-form-lifetime") }}</label>
-                {% call help(self.t("spec-help-lifetime")) %}{% endcall %}
-              </div>
-              <input id="f-lifetime" type="number" name="max_lifetime"
-                     value="{{ form.max_lifetime }}"
-                     min="1"
-                     placeholder="360"
-                     class="spec-form-input">
-              <div class="spec-form-help">{{ self.t("spec-form-lifetime-help") }}</div>
-            </div>
-          </div>
         </section>
       </template>
 
@@ -414,6 +378,41 @@
           <span class="editor-card__icon"><i class="ti ti-adjustments" aria-hidden="true"></i></span>
           <div><div class="editor-card__title">{{ self.t("spec-form-meta") }}</div></div>
         </div>
+
+      {# Featured carousel flag (#506) — plain checkbox; native submit sends
+         `featured=on` only when checked. Lives here (visible metadata band,
+         #523) instead of buried under the runtime "Advanced" collapse. #}
+      <div class="spec-form-field">
+        <label class="spec-form-check">
+          <input type="checkbox" name="featured" value="on" {% if !form.featured.is_empty() %}checked{% endif %}>
+          <span>{{ self.t("spec-form-featured") }}</span>
+        </label>
+        <div class="spec-form-help">{{ self.t("spec-form-featured-help") }}</div>
+      </div>
+
+      {# Access — who may see + reach this app (#155). Promoted out of the
+         runtime "Advanced" collapse (#523): visibility is governance/metadata,
+         not a runtime knob. #}
+      <div class="grid grid-cols-2 gap-3">
+        <div class="spec-form-field">
+          <div class="spec-form-label-row">
+            <label for="f-acl-groups" class="spec-form-label">{{ self.t("spec-form-access-groups") }}</label>
+            {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
+          </div>
+          <input id="f-acl-groups" type="text" name="access_groups"
+                 value="{{ form.access_groups }}" placeholder="staff, ops" class="spec-form-input">
+        </div>
+        <div class="spec-form-field">
+          <div class="spec-form-label-row">
+            <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
+            {% call help(self.t("spec-help-access-users")) %}{% endcall %}
+          </div>
+          <input id="f-acl-users" type="text" name="access_users"
+                 value="{{ form.access_users }}" placeholder="alice, bob" class="spec-form-input">
+        </div>
+      </div>
+      <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
+
       <div class="spec-form-field">
         <div class="spec-form-label-row">
           <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
@@ -497,8 +496,38 @@
             </div>
           </template>
 
-          {# Runtime — inner port, platform, lifecycle #}
+          {# Runtime — seats/session, inner port, platform, lifecycle #}
           <div class="spec-form-subsection">{{ self.t("spec-form-runtime-section") }}</div>
+          {# Seats + max session lifetime — demoted from the always-visible
+             Container card (#523); they're per-session runtime tuning, not
+             "what image to run". Container-only. #}
+          <template x-if="needsContainer()">
+            <div class="grid grid-cols-2 gap-3">
+              <div class="spec-form-field">
+                <div class="spec-form-label-row">
+                  <label for="f-seats" class="spec-form-label">{{ self.t("spec-form-seats") }}</label>
+                  {% call help(self.t("spec-help-seats")) %}{% endcall %}
+                </div>
+                <input id="f-seats" type="number" name="seats_per_container"
+                       value="{{ form.seats_per_container }}"
+                       min="1"
+                       placeholder="10"
+                       class="spec-form-input">
+              </div>
+              <div class="spec-form-field">
+                <div class="spec-form-label-row">
+                  <label for="f-lifetime" class="spec-form-label">{{ self.t("spec-form-lifetime") }}</label>
+                  {% call help(self.t("spec-help-lifetime")) %}{% endcall %}
+                </div>
+                <input id="f-lifetime" type="number" name="max_lifetime"
+                       value="{{ form.max_lifetime }}"
+                       min="1"
+                       placeholder="360"
+                       class="spec-form-input">
+                <div class="spec-form-help">{{ self.t("spec-form-lifetime-help") }}</div>
+              </div>
+            </div>
+          </template>
           <div class="grid grid-cols-2 gap-3">
             <div class="spec-form-field">
               <div class="spec-form-label-row">
@@ -615,28 +644,6 @@
           {% if !form.docker_registry_domain.is_empty() || !form.docker_registry_username.is_empty() %}
           <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-registry-inline-note") }}</div>
           {% endif %}
-
-          {# Access — who may see + reach this app (#155) #}
-          <div class="spec-form-subsection">{{ self.t("spec-form-access-section") }}</div>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-acl-groups" class="spec-form-label">{{ self.t("spec-form-access-groups") }}</label>
-                {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
-              </div>
-              <input id="f-acl-groups" type="text" name="access_groups"
-                     value="{{ form.access_groups }}" placeholder="staff, ops" class="spec-form-input">
-            </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
-                {% call help(self.t("spec-help-access-users")) %}{% endcall %}
-              </div>
-              <input id="f-acl-users" type="text" name="access_users"
-                     value="{{ form.access_users }}" placeholder="alice, bob" class="spec-form-input">
-            </div>
-          </div>
-          <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
 
           {# Scaling — replica pool #}
           <div class="spec-form-subsection">{{ self.t("spec-form-scaling-section") }}</div>

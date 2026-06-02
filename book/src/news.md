@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.37 — 2026-06-01
+
+Catch a bad image in the editor, not at the first failed launch.
+
+**Admin**
+- The spec editor's **container image** field gains a **Check** button: it
+  asks the backend whether the image is already on the server and shows
+  ✓ on the server / ⬇ will be pulled on first launch (or flags a `${VAR}`
+  that resolves at pull time / Docker not connected).
+- When the image is absent, a **Pull** button fetches it right away and
+  streams the daemon's progress live; on completion the indicator settles
+  on present (success) or absent with the error line (failure). Private
+  images use the spec's selected registry credential.
+
+---
+
 ## v0.1.36 — 2026-06-01
 
 A favicon fix for Safari and a cleaner uninstall.

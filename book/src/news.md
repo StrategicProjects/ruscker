@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.39 — 2026-06-02
+
+Polish for the Featured carousel and subject pills.
+
+**Landing**
+- The **Featured carousel** is now paged: at most 3 cards with prev/next
+  chevrons (shown only when there are more than three), and no horizontal
+  scrollbar.
+- The **subject pill** on a card fits its full text and uses a lighter,
+  theme-matching style.
+
+---
+
 ## v0.1.38 — 2026-06-02
 
 A round of admin & landing UX polish.

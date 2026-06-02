@@ -106,9 +106,20 @@
      scroll). Filter bindings are intentionally omitted: the rail always
      shows the featured set, independent of the filters below. #}
   {% if show_highlights && self.has_featured() %}
-  <section class="highlights" aria-label="{{ self.t("highlights-title") }}">
-    <div class="highlights-title"><i class="ti ti-star" aria-hidden="true"></i> {{ self.t("highlights-title") }}</div>
-    <div class="highlights-rail">
+  <section class="highlights" x-data="ruscker.highlights()" x-init="$nextTick(() => measure())"
+           @resize.window.debounce.150ms="measure()" aria-label="{{ self.t("highlights-title") }}">
+    <div class="highlights-head">
+      <div class="highlights-title"><i class="ti ti-star" aria-hidden="true"></i> {{ self.t("highlights-title") }}</div>
+      {# Chevrons appear only when there's more than one page (>3 featured). #}
+      <div class="highlights-nav" x-show="pages > 1" x-cloak>
+        <button type="button" class="highlights-arrow" @click="prev()" :disabled="page === 0"
+                aria-label="{{ self.t("highlights-prev") }}"><i class="ti ti-chevron-left" aria-hidden="true"></i></button>
+        <button type="button" class="highlights-arrow" @click="next()" :disabled="page >= pages - 1"
+                aria-label="{{ self.t("highlights-next") }}"><i class="ti ti-chevron-right" aria-hidden="true"></i></button>
+      </div>
+    </div>
+    <div class="highlights-viewport">
+      <div class="highlights-track" x-ref="track" :style="trackStyle()">
       {% for card in cards %}
         {% if card.featured %}
         <a class="rcard {% if !card.active %}inactive{% endif %}"
@@ -153,6 +164,7 @@
         </a>
         {% endif %}
       {% endfor %}
+      </div>
     </div>
   </section>
   {% endif %}
@@ -443,6 +455,35 @@ window.ruscker.landing = () => ({
     list.sort((a, b) =>
       (a.dataset.name || '').localeCompare(b.dataset.name || ''));
     this._nameRanks = new Map(list.map((el, i) => [el, i]));
+  },
+});
+
+// Featured carousel (#516): page through the featured cards, max 3 per
+// view, via chevrons — no horizontal scrollbar (the viewport clips, the
+// track translates). Re-measures on resize.
+window.ruscker.highlights = () => ({
+  page: 0,
+  perPage: 3,
+  pages: 1,
+  step: 270, // card width + gap; refined by measure()
+  measure() {
+    const track = this.$refs.track;
+    if (!track || !track.children.length) return;
+    const total = track.children.length;
+    const cardW = track.children[0].getBoundingClientRect().width || 256;
+    const styles = getComputedStyle(track);
+    const gap = parseFloat(styles.columnGap || styles.gap) || 14;
+    this.step = cardW + gap;
+    const vpW = track.parentElement.getBoundingClientRect().width;
+    // Max 3 visible; fewer on narrow viewports.
+    this.perPage = Math.max(1, Math.min(3, Math.floor((vpW + gap) / this.step)));
+    this.pages = Math.max(1, Math.ceil(total / this.perPage));
+    if (this.page > this.pages - 1) this.page = this.pages - 1;
+  },
+  prev() { if (this.page > 0) this.page--; },
+  next() { if (this.page < this.pages - 1) this.page++; },
+  trackStyle() {
+    return 'transform: translateX(' + (-this.page * this.perPage * this.step) + 'px)';
   },
 });
 </script>

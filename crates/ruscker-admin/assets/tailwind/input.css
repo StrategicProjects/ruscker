@@ -362,21 +362,35 @@ body {
 /* Featured carousel (#506) — a horizontal scroll rail of full cards. The
    card keeps its fixed width, so 1–3 fit per viewport and the rest scroll. */
 .highlights { margin-bottom: 22px; }
+.highlights-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-bottom: 10px;
+}
 .highlights-title {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; font-weight: 600; color: var(--text);
-  letter-spacing: -0.01em; margin-bottom: 10px;
+  letter-spacing: -0.01em;
 }
 .highlights-title .ti { color: var(--color-teal-600); font-size: 15px; }
-.highlights-rail {
+.highlights-nav { display: flex; gap: 6px; }
+.highlights-arrow {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 8px;
+  border: 0.5px solid var(--border); background: var(--surface);
+  color: var(--text-muted); cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, opacity 0.12s;
+}
+.highlights-arrow:hover:not(:disabled) { border-color: var(--color-teal-600); color: var(--text); }
+.highlights-arrow:disabled { opacity: 0.35; cursor: default; }
+.highlights-arrow .ti { font-size: 16px; }
+/* Viewport caps at 3 cards and clips; the track pages via translateX — no
+   horizontal scrollbar (#516). */
+.highlights-viewport { overflow: hidden; max-width: calc(3 * var(--card-w) + 28px); }
+.highlights-track {
   display: flex; gap: 14px;
-  overflow-x: auto; scroll-snap-type: x proximity;
-  padding-bottom: 8px; scrollbar-width: thin;
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.highlights-rail > .rcard {
-  flex: 0 0 auto;            /* keep the fixed card width; never stretch */
-  scroll-snap-align: start;
-}
+.highlights-track > .rcard { flex: 0 0 auto; }
 .b-app     { background: #06d6a0; color: #04553f; }
 .b-talk    { background: #ffd166; color: #5a4400; }
 .b-report  { background: #ef476f; color: #ffffff; }

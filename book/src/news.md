@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.43 — 2026-06-02
+
+Another featured-star placement fix.
+
+**Admin**
+- The featured star now lives **inside the Actions column**, alongside
+  edit and duplicate, instead of in a separate column of its own.
+
+---
+
 ## v0.1.42 — 2026-06-02
 
 A follow-up fix for the featured star.

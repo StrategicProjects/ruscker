@@ -99,6 +99,8 @@ showcase cards. Click any live-demo card to see on-demand container
 spawn in action, then watch the [admin dashboard](./admin.md) to see
 the replica start, serve, and stop.
 
+![The seeded landing page on first boot: a Featured carousel of highlighted apps above a filterable grid of showcase cards (Shiny, Streamlit, Dash, Jupyter, RStudio, …).](images/landing.png)
+
 See [What Ruscker can serve](./use-cases.md) for the full framework
 list and [Configuration](./configuration.md) for every spec field
 (replica pools, CPU/memory limits, registry credentials, routing, rate

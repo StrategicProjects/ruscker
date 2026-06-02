@@ -17,6 +17,10 @@ ships as a **single static binary, no JVM**, and adds a real admin
 panel, a live monitoring dashboard, and load balancing. Idle footprint
 is megabytes, not hundreds of megabytes, and startup is instant.
 
+<p align="center">
+  <img src="images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters — all served by a single binary." width="860">
+</p>
+
 ## How it works
 
 Visitors and API clients hit one Ruscker process. It serves the landing

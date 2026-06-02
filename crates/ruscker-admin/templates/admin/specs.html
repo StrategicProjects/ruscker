@@ -108,7 +108,17 @@
           {# Featured star (#521) — read-only for config-defined specs (the
              flag lives in the YAML file). Sits next to the actions column. #}
           <td class="star-cell">
-            <span class="star-toggle is-readonly" title="{{ self.t("admin-specs-featured-readonly") }}"><i class="ti {% if spec.featured %}ti-star-filled is-on{% else %}ti-star{% endif %}" aria-hidden="true"></i></span>
+            {# Inline SVG star (not a font glyph): the served tabler subset
+               has no `ti-star-filled`, so a filled state rendered empty.
+               `fill` toggles solid/outline; `currentColor` picks up the
+               amber `.is-on` color. #}
+            <span class="star-toggle is-readonly{% if spec.featured %} is-on{% endif %}" title="{{ self.t("admin-specs-featured-readonly") }}">
+              <svg viewBox="0 0 24 24" class="star-ico" aria-hidden="true"
+                   fill="{% if spec.featured %}currentColor{% else %}none{% endif %}"
+                   stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+              </svg>
+            </span>
           </td>
           <td class="actions-cell">
             {# Duplicate a YAML/config spec into a new, editable DB spec. #}
@@ -140,7 +150,14 @@
                               .then(d => { on = d.featured })
                               .catch(() => { on = prev })
                               .finally(() => { busy = false })">
-              <i class="ti" :class="on ? 'ti-star-filled' : 'ti-star'" aria-hidden="true"></i>
+              {# Inline SVG star — `:fill` flips solid (featured) ↔ outline.
+                 Avoids the missing `ti-star-filled` font glyph that made the
+                 filled state render empty. #}
+              <svg viewBox="0 0 24 24" class="star-ico" aria-hidden="true"
+                   :fill="on ? 'currentColor' : 'none'"
+                   stroke="currentColor" stroke-width="1.5" stroke-linejoin="round">
+                <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+              </svg>
             </button>
           </td>
           <td class="actions-cell">

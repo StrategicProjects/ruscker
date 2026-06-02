@@ -1,7 +1,10 @@
 # Ruscker configuration — installed at /etc/ruscker/application.yml.
 #
-# This is a minimal, working starting point. Edit it for your apps,
-# then `systemctl restart ruscker`. Full schema reference:
+# This file holds DEPLOYMENT settings only. Your apps, landing page and
+# users are managed in the admin panel at /admin (the systemd unit runs
+# with --db, so the catalog is live out of the box) — you don't need to
+# add specs here. It stays as the ShinyProxy-compatible import format and
+# for GitOps if you prefer YAML. Full schema reference:
 # https://github.com/StrategicProjects/ruscker/blob/main/docs/YAML_SCHEMA.md
 #
 # NEVER put secrets here. Use ${ENV_VAR} interpolation and set the

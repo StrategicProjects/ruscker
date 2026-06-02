@@ -21,10 +21,13 @@ This:
 - installs `/usr/bin/ruscker`,
 - creates a `ruscker` system user,
 - installs a hardened `ruscker.service` unit and enables + starts it,
-- drops an example config at `/etc/ruscker/application.yml` and a
+- drops a minimal config at `/etc/ruscker/application.yml` and a
   secrets file at `/etc/ruscker/ruscker.env`,
 - **generates a unique admin token on first install and prints it
-  once** (there is no default password).
+  once** (there is no default password),
+- runs with the **admin catalog enabled** (`--db
+  /var/lib/ruscker/ruscker.db`), so the admin panel works out of the box
+  and a set of showcase apps seeds on first boot.
 
 ```sh
 systemctl status ruscker
@@ -32,10 +35,16 @@ curl http://localhost:8080/healthz
 sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env   # your admin token
 ```
 
-Edit `/etc/ruscker/application.yml`, put secrets in
-`/etc/ruscker/ruscker.env`, then `sudo systemctl restart ruscker`. See
-[Deploying in production](./deploying.md) to enable the `--docker`
-backend and put it behind nginx.
+Log in at `/admin` with the printed token to manage **apps, the landing
+page and users** — that's where day-to-day configuration lives (stored
+in the catalog DB, not the YAML). `application.yml` holds **deployment**
+settings; put secrets in `/etc/ruscker/ruscker.env`. After editing either
+file, `sudo systemctl restart ruscker`.
+
+To actually run the demo apps (and your own containers) enable the Docker
+backend: `sudo ruscker-enable-docker`. See [Deploying in
+production](./deploying.md) for nginx + TLS, and
+[Configuration](./configuration.md) for what lives where.
 
 ### Uninstall & reset
 

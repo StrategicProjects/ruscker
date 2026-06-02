@@ -15,10 +15,13 @@ Group=ruscker
 # RUSCKER_MASTER_KEY, RUSCKER_COOKIE_KEY, DOCKER_REGISTRY_PASSWORD, …
 # The leading `-` makes systemd tolerate the file being absent/empty.
 EnvironmentFile=-/etc/ruscker/ruscker.env
-# Default command: landing + admin + proxy. Add `--docker` to enable
-# the container backend (see /usr/share/doc/ruscker/README.Debian),
-# and `--db /var/lib/ruscker/ruscker.db` to persist the admin catalog.
-ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080
+# Default command: landing + admin + proxy, with the SQLite catalog at
+# /var/lib/ruscker/ruscker.db — so the admin panel works and the showcase
+# apps seed on first boot, no YAML editing required. Add `--docker` to
+# enable the container backend (the `ruscker` user then also needs Docker
+# access — run `sudo ruscker-enable-docker`, see
+# /usr/share/doc/ruscker/README.Debian).
+ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080 --db /var/lib/ruscker/ruscker.db
 Restart=on-failure
 RestartSec=5s
 

@@ -301,9 +301,17 @@
               {# On-demand presence check (#498). Pull-free; the badge below
                  reports present / absent / deferred. #}
               <button type="button" class="admin-login-btn" style="padding:7px 11px;font-size:12px;white-space:nowrap"
-                      @click="checkImage()" :disabled="imageCheck.loading || !(form.container_image || '').trim()">
+                      @click="checkImage()" :disabled="imageCheck.loading || pull.running || !(form.container_image || '').trim()">
                 <i class="ti ti-search" aria-hidden="true"></i>
                 {{ self.t("spec-form-image-check") }}
+              </button>
+              {# Pull on demand (#498 slice B) — offered once a check says the
+                 image is absent (but a name is typed). Streams progress below. #}
+              <button type="button" class="admin-login-btn" style="padding:7px 11px;font-size:12px;white-space:nowrap"
+                      x-show="imageCheck.status === 'absent'" x-cloak
+                      @click="pullImage()" :disabled="pull.running">
+                <i class="ti ti-cloud-download" aria-hidden="true"></i>
+                {{ self.t("spec-form-image-pull") }}
               </button>
             </div>
             <div class="spec-form-help" x-show="imageCheck.loading || imageCheck.status" x-cloak style="margin-top:5px">
@@ -313,6 +321,11 @@
               <span x-show="!imageCheck.loading && imageCheck.status === 'unresolved'"><i class="ti ti-variable" aria-hidden="true"></i> {{ self.t("spec-form-image-unresolved") }}</span>
               <span x-show="!imageCheck.loading && imageCheck.status === 'no-backend'"><i class="ti ti-plug-off" aria-hidden="true"></i> {{ self.t("spec-form-image-no-backend") }}</span>
               <span x-show="!imageCheck.loading && imageCheck.status === 'error'"><i class="ti ti-alert-triangle" aria-hidden="true"></i> {{ self.t("spec-form-image-error") }}</span>
+            </div>
+            {# Live pull progress (#498 slice B). #}
+            <div class="spec-form-help" x-show="pull.running || pull.line" x-cloak style="margin-top:5px">
+              <span x-show="pull.running"><i class="ti ti-loader-2" aria-hidden="true"></i> {{ self.t("spec-form-image-pulling") }}</span>
+              <span x-text="pull.line" class="spec-form-input--mono" style="opacity:0.75"></span>
             </div>
           </div>
 
@@ -889,6 +902,31 @@ window.ruscker.specForm = (initial, logoImages) => ({
     } catch (_) {
       this.imageCheck = { status: 'error', loading: false };
     }
+  },
+  // Pull an absent image on demand (#498 slice B), streaming the daemon's
+  // progress over SSE. A terminal `done` event closes the stream; we then
+  // re-check presence so the badge reflects success (present) or failure
+  // (still absent + the last `error:` line).
+  pull: { running: false, line: '' },
+  pullImage() {
+    const image = (this.form.container_image || '').trim();
+    if (!image || this.pull.running) return;
+    this.pull = { running: true, line: '' };
+    const base = window.RUSCKER_BASE || '';
+    const cred = encodeURIComponent(this.form.docker_registry_credential || '');
+    const url = base + '/admin/specs/image-pull?image=' + encodeURIComponent(image) + '&credential=' + cred;
+    const es = new EventSource(url);
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      es.close();
+      this.pull.running = false;
+      this.checkImage();
+    };
+    es.onmessage = (e) => { if (e.data) this.pull.line = e.data; };
+    es.addEventListener('done', finish);
+    es.onerror = finish;  // stream closed / network / 4xx — re-check tells us
   },
   // Prefix the base path on a root-absolute asset URL (#270). These
   // <img :src> values are set by Alpine at runtime, so the base-path

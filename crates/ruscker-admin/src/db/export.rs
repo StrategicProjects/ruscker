@@ -197,4 +197,60 @@ proxy:
         assert_eq!(cfg_out.proxy.bind_address, cfg_in.proxy.bind_address);
         assert_eq!(cfg_out.proxy.heartbeat_rate, cfg_in.proxy.heartbeat_rate);
     }
+
+    /// Coverage guard (#505): the spec is stored whole as `config_json`, so
+    /// importing a YAML and exporting it must preserve every recent field.
+    /// If a new field ever bypasses the round-trip, this test fails.
+    #[tokio::test]
+    async fn round_trip_preserves_recent_spec_fields() {
+        std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+        let yaml = r##"
+proxy:
+  title: Audit
+  specs:
+    - id: audit-app
+      display-name: Audit App
+      container-image: org/app:1.2
+      featured: true
+      platform: linux/amd64
+      seats-per-container: 5
+      min-replicas: 2
+      container-env:
+        FOO: bar
+        BAZ: qux
+      container-cmd: ["python", "app.py"]
+      access-groups: [admins, analysts]
+      access-users: [alice]
+      template-properties:
+        subject: Health
+        cover: "#123456"
+"##;
+        let pool = open_memory().await.unwrap();
+        let cfg_in = Config::from_yaml(yaml).unwrap();
+        import_all(&crate::db::ConfigDb::Sqlite(pool.clone()), &cfg_in)
+            .await
+            .unwrap();
+        let cfg_out = reconstruct_config(&pool).await.unwrap();
+
+        let s = cfg_out
+            .proxy
+            .specs
+            .iter()
+            .find(|s| s.id == "audit-app")
+            .expect("audit-app survives the round-trip");
+
+        assert_eq!(s.featured, Some(true), "featured (#506)");
+        assert_eq!(s.platform.as_deref(), Some("linux/amd64"));
+        assert_eq!(s.seats_per_container, Some(5));
+        assert_eq!(s.min_replicas, Some(2));
+        assert_eq!(s.container_cmd.as_deref(), Some(&["python".to_string(), "app.py".to_string()][..]));
+        let env = s.container_env.as_ref().expect("container-env");
+        assert_eq!(env.get("FOO").map(String::as_str), Some("bar"));
+        assert_eq!(env.get("BAZ").map(String::as_str), Some("qux"));
+        assert_eq!(s.access_groups.as_deref(), Some(&["admins".to_string(), "analysts".to_string()][..]));
+        assert_eq!(s.access_users.as_deref(), Some(&["alice".to_string()][..]));
+        // Subject ("tema") lives in template-properties.
+        assert_eq!(s.template_properties.get_str("subject"), Some("Health"));
+        assert_eq!(s.template_properties.get_str("cover"), Some("#123456"));
+    }
 }

@@ -9,6 +9,31 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.41 — 2026-06-02
+
+Bug fixes for the admin Apps table plus Homebrew automation.
+
+**Admin**
+- **Featured star now works in the Apps table.** The list page never
+  loaded Alpine, so the inline star rendered empty and didn't toggle;
+  it's loaded now. The star also moved next to the **Actions** column,
+  where featuring reads as a row action.
+
+**Packaging**
+- **Dropped the obsolete `welcome` starter spec** from the default
+  `/etc/ruscker/application.yml`. It predated the first-run showcase
+  seed, so on a fresh install it only duplicated a card and showed up
+  as a stray read-only CONFIG row in the admin. Fresh installs are now
+  clean (the showcase seed fills the landing).
+
+**CI**
+- The release workflow now **auto-publishes the Homebrew formula to the
+  tap** on every release, so `brew install strategicprojects/tap/ruscker`
+  tracks the latest version instead of drifting. (Requires a
+  `HOMEBREW_TAP_TOKEN` secret; no-ops with a warning if absent.)
+
+---
+
 ## v0.1.40 — 2026-06-02
 
 Two admin UX touches for managing apps.

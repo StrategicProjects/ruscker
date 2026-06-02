@@ -225,7 +225,12 @@
             <span class="rcover-fallback">{{ card.id }}</span>
           {% endmatch %}
 
-          <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
+          <div class="rbadges">
+            <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
+            {# Subject ("tema") pill next to the type — neutral so it doesn't
+               compete with the coloured type badge (#507). #}
+            {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
+          </div>
           <span class="rlock">
             <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
           </span>

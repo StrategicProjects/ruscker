@@ -337,11 +337,23 @@ body {
 .tint-api     { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #c7ebf3 100%); }
 .tint-link    { background: radial-gradient(120% 92% at 50% 36%, #ffffff 0%, #ffffff 16%, #ccd9f0 100%); }
 
+/* Type + subject badges, grouped top-left over the cover (#507). */
+.rbadges {
+  position: absolute; top: 8px; left: 8px; z-index: 2;
+  display: flex; align-items: center; gap: 4px;
+  max-width: calc(100% - 44px);  /* leave room for the lock top-right */
+}
 .rbadge {
-  position: absolute; top: 8px; left: 8px;
   font-size: 9px; font-weight: 500;
   padding: 3px 9px; border-radius: 999px;
-  letter-spacing: 0.4px; z-index: 2;
+  letter-spacing: 0.4px;
+}
+/* Subject pill — neutral, frosted, truncates long subjects. */
+.rbadge--subject {
+  background: rgba(20, 20, 20, 0.62); color: #fff;
+  letter-spacing: 0.2px;
+  max-width: 12ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  backdrop-filter: blur(2px);
 }
 .b-app     { background: #06d6a0; color: #04553f; }
 .b-talk    { background: #ffd166; color: #5a4400; }

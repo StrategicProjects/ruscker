@@ -793,7 +793,11 @@
           <template x-if="!form.logo">
             <span class="rcover-fallback" x-text="form.id || '—'"></span>
           </template>
-          <span class="rbadge" :class="'b-' + form.display_type" x-text="badgeText()"></span>
+          <div class="rbadges">
+            <span class="rbadge" :class="'b-' + form.display_type" x-text="badgeText()"></span>
+            {# Live subject ("tema") pill — mirrors the landing card (#507). #}
+            <span class="rbadge rbadge--subject" x-show="(form.subject || '').trim()" x-text="form.subject" :title="form.subject" x-cloak></span>
+          </div>
           <span class="rlock">
             <i class="ti" :class="isOpenAccess()
                 ? 'ti-lock-open text-[color:var(--color-lock-open)]'

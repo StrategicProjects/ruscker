@@ -668,3 +668,17 @@ admin-specs-col-featured = Destacado
 admin-specs-featured-on = Destacado — clic para quitar
 admin-specs-featured-off = No destacado — clic para destacar
 admin-specs-featured-readonly = El destacado se define en el archivo de config
+
+# Importacion selectiva (#557)
+admin-import-preview-title = Confirmar importación
+admin-import-preview-help = Elige qué apps importar
+admin-import-apps-label = apps
+admin-import-warnings-label = avisos
+admin-import-preview-none = El archivo no contiene ninguna app.
+admin-import-select-all = Seleccionar todo
+admin-import-col-status = Estado
+admin-import-badge-new = Nuevo
+admin-import-badge-new-help = Se creará (no está en el panel)
+admin-import-badge-update = Actualiza
+admin-import-badge-update-help = Sobrescribe una app ya existente en el panel
+admin-import-confirm = Importar seleccionados

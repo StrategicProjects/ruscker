@@ -105,6 +105,70 @@ pub async fn import_all(db: &ConfigDb, config: &Config) -> Result<ImportReport> 
     }
 }
 
+/// Import only the specs whose id is in `ids` (selective import, #557).
+/// Unlike [`import_all`], it touches **only the chosen specs** (plus an
+/// audit row) — never the landing customization or the proxy/server
+/// settings — so importing a subset of apps can't clobber a portal the
+/// operator configured in the panel. Mirrors `import_all`'s
+/// per-spec upsert + transaction.
+pub async fn import_selected(
+    db: &ConfigDb,
+    config: &Config,
+    ids: &[String],
+) -> Result<ImportReport> {
+    use std::collections::HashSet;
+    let want: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let now = Utc::now();
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin import tx")?;
+            let mut report = ImportReport::default();
+            for spec in config
+                .proxy
+                .specs
+                .iter()
+                .filter(|s| want.contains(s.id.as_str()))
+            {
+                tally(&mut report, upsert_in_tx(&mut tx, spec, now).await?);
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (NULL, 'spec.import', NULL, ?, ?)",
+            )
+            .bind(import_diff(&report)?)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit import")?;
+            tx.commit().await.context("commit import tx")?;
+            Ok(report)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin import tx")?;
+            let mut report = ImportReport::default();
+            for spec in config
+                .proxy
+                .specs
+                .iter()
+                .filter(|s| want.contains(s.id.as_str()))
+            {
+                tally(&mut report, upsert_in_tx_pg(&mut tx, spec, now).await?);
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (NULL, 'spec.import', NULL, $1, $2)",
+            )
+            .bind(import_diff(&report)?)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit import")?;
+            tx.commit().await.context("commit import tx")?;
+            Ok(report)
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum UpsertOutcome {
     Created,
@@ -656,6 +720,30 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(audit_count.0, 2);
+    }
+
+    #[tokio::test]
+    async fn import_selected_imports_only_the_chosen_subset() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let cfg = Config::from_yaml(&fixture_yaml()).unwrap();
+        assert!(cfg.proxy.specs.len() >= 2, "fixture needs ≥2 specs");
+        let chosen = cfg.proxy.specs[0].id.clone();
+        let other = cfg.proxy.specs[1].id.clone();
+
+        let r = import_selected(&db, &cfg, std::slice::from_ref(&chosen))
+            .await
+            .unwrap();
+        assert_eq!(r.created, 1, "only the one selected spec is imported");
+        assert_eq!(r.updated + r.unchanged, 0);
+
+        assert!(
+            fetch_one(&db, &chosen).await.unwrap().is_some(),
+            "chosen spec landed in the DB"
+        );
+        assert!(
+            fetch_one(&db, &other).await.unwrap().is_none(),
+            "unselected spec was NOT imported"
+        );
     }
 
     #[tokio::test]

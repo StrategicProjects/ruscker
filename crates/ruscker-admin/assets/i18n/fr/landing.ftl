@@ -668,3 +668,17 @@ admin-specs-col-featured = À la une
 admin-specs-featured-on = En avant — cliquer pour retirer
 admin-specs-featured-off = Pas en avant — cliquer pour mettre en avant
 admin-specs-featured-readonly = Le statut « à la une » vient du fichier de config
+
+# Import selectif (#557)
+admin-import-preview-title = Confirmer l'import
+admin-import-preview-help = Choisissez les apps à importer
+admin-import-apps-label = apps
+admin-import-warnings-label = avertissements
+admin-import-preview-none = Le fichier ne contient aucune app.
+admin-import-select-all = Tout sélectionner
+admin-import-col-status = Statut
+admin-import-badge-new = Nouveau
+admin-import-badge-new-help = Sera créé (absent du panneau)
+admin-import-badge-update = Met à jour
+admin-import-badge-update-help = Écrase une app déjà dans le panneau
+admin-import-confirm = Importer la sélection

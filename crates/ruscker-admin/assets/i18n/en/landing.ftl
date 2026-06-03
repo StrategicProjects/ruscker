@@ -668,3 +668,17 @@ admin-specs-col-featured = Featured
 admin-specs-featured-on = Featured — click to remove
 admin-specs-featured-off = Not featured — click to feature
 admin-specs-featured-readonly = Featured is set in the config file
+
+# Selective import (#557)
+admin-import-preview-title = Confirm import
+admin-import-preview-help = Pick which apps to import
+admin-import-apps-label = apps
+admin-import-warnings-label = warnings
+admin-import-preview-none = The file contains no apps.
+admin-import-select-all = Select all
+admin-import-col-status = Status
+admin-import-badge-new = New
+admin-import-badge-new-help = Will be created (not in the panel)
+admin-import-badge-update = Updates
+admin-import-badge-update-help = Overwrites an app already in the panel
+admin-import-confirm = Import selected

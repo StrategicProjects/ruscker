@@ -1,0 +1,80 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-import-preview-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-import-preview-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">
+      {{ self.t("admin-import-preview-help") }}
+      — {{ rows.len() }} {{ self.t("admin-import-apps-label") }}{% if warning_count > 0 %} ·
+      <span style="color:var(--color-lock)">{{ warning_count }} {{ self.t("admin-import-warnings-label") }}</span>{% endif %}
+    </p>
+  </div>
+</div>
+
+{% if rows.is_empty() %}
+  <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)]">
+    <p>{{ self.t("admin-import-preview-none") }}</p>
+    <a href="{{ base }}/admin/specs" class="admin-nav-link mt-3 inline-block">{{ self.t("admin-import-cancel") }}</a>
+  </div>
+{% else %}
+<form method="post" action="{{ base }}/admin/specs/import/confirm" enctype="multipart/form-data">
+  {# Original YAML round-tripped so the confirm is stateless. ${VAR} stays
+     literal end-to-end (#260) — no secret is resolved here. #}
+  <textarea name="yaml" hidden>{{ raw_yaml }}</textarea>
+
+  <table class="admin-table">
+    <thead>
+      <tr>
+        <th class="import-check-cell">
+          <input type="checkbox" checked
+                 title="{{ self.t("admin-import-select-all") }}"
+                 onclick="document.querySelectorAll('input[name=ids]').forEach(function(c){c.checked=this.checked}.bind(this))">
+        </th>
+        <th>{{ self.t("admin-specs-col-id") }}</th>
+        <th>{{ self.t("admin-specs-col-name") }}</th>
+        <th>{{ self.t("admin-specs-col-kind") }}</th>
+        <th>{{ self.t("admin-import-col-status") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="import-check-cell">
+          <input type="checkbox" name="ids" value="{{ row.id }}" checked>
+        </td>
+        <td class="id-cell">{{ row.id }}</td>
+        <td>{% if row.display_name.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ row.display_name }}{% endif %}</td>
+        <td><span class="pill pill-kind-{{ row.kind }}">{{ row.kind }}</span></td>
+        <td>
+          {% if row.exists %}
+            <span class="pill" title="{{ self.t("admin-import-badge-update-help") }}">{{ self.t("admin-import-badge-update") }}</span>
+          {% else %}
+            <span class="pill pill-kind-app" title="{{ self.t("admin-import-badge-new-help") }}">{{ self.t("admin-import-badge-new") }}</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="flex items-center justify-end gap-2 mt-4">
+    <a href="{{ base }}/admin/specs" class="admin-nav-link" style="font-size:12px">
+      {{ self.t("admin-import-cancel") }}
+    </a>
+    <button type="submit" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
+      <i class="ti ti-file-import" aria-hidden="true"></i>
+      {{ self.t("admin-import-confirm") }}
+    </button>
+  </div>
+</form>
+{% endif %}
+
+<style>
+  .import-check-cell { width: 1%; text-align: center; }
+</style>
+
+{% endblock %}

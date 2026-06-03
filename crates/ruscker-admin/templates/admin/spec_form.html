@@ -429,7 +429,11 @@
 
       {# ── Advanced (collapsible): API, scaling, resources, lifecycle.
            Every field is optional — leaving it blank keeps the schema
-           default, so casual operators never have to open this. ──── #}
+           default, so casual operators never have to open this.
+           Container-only: an external Link/Package (kind External) has no
+           image or runtime to tune, so the whole section is hidden for it
+           — only container-backed kinds (app/api/talk/report) see it. ── #}
+      <template x-if="needsContainer()">
       <div class="spec-form-advanced">
         <button type="button" class="spec-form-advanced-toggle"
                 :class="advancedOpen ? 'is-open' : ''"
@@ -832,6 +836,7 @@
           </div>
         </div>
       </div>
+      </template>
       </section>
     </form>
 

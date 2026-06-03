@@ -52,14 +52,14 @@
   {% if containers.is_empty() %}
   <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-containers") }}</p>
   {% else %}
-  <table class="w-full text-sm disk-table" style="border-collapse:collapse">
+  <table class="w-full text-sm disk-table" style="border-collapse:collapse" data-enhance>
     <thead>
       <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
         <th class="py-2">{{ self.t("admin-disk-col-container") }}</th>
         <th>{{ self.t("admin-disk-col-app") }}</th>
         <th>{{ self.t("admin-disk-col-image") }}</th>
         <th>{{ self.t("admin-disk-col-status") }}</th>
-        <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+        <th style="text-align:right" data-nosort>{{ self.t("admin-users-col-actions") }}</th>
       </tr>
     </thead>
     <tbody>
@@ -115,14 +115,14 @@
   {% if images.is_empty() %}
   <p class="text-sm text-[color:var(--text-faint)] py-4">{{ self.t("admin-disk-no-images") }}</p>
   {% else %}
-  <table class="w-full text-sm disk-table" style="border-collapse:collapse">
+  <table class="w-full text-sm disk-table" style="border-collapse:collapse" data-enhance>
     <thead>
       <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
         <th class="py-2">{{ self.t("admin-disk-col-image") }}</th>
         <th>{{ self.t("admin-disk-col-id") }}</th>
         <th style="text-align:right">{{ self.t("admin-disk-col-size") }}</th>
         <th>{{ self.t("admin-disk-col-usage") }}</th>
-        <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+        <th style="text-align:right" data-nosort>{{ self.t("admin-users-col-actions") }}</th>
       </tr>
     </thead>
     <tbody>

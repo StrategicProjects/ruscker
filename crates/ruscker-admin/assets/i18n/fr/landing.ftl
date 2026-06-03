@@ -415,6 +415,8 @@ admin-import-ok = Import terminé : { $created } créés, { $updated } mis à jo
 admin-import-ok-warnings = { $warnings } avertissement(s) de validation — vérifiez les identifiants intégrés et les noms vides.
 admin-import-ok-assets = { $creds } identifiant(s) et { $logos } image(s) importés dans le panneau.
 admin-import-drop = Glissez votre application.yml ici ou cliquez pour parcourir
+admin-table-search = Rechercher…
+admin-table-no-results = Aucun résultat
 admin-import-err = Échec de l import : { $msg }
 
 # Gradient builder

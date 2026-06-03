@@ -70,14 +70,14 @@
 </form>
 
 {# ── Existing users ────────────────────────────────────────────── #}
-<table class="w-full text-sm" style="border-collapse:collapse">
+<table class="w-full text-sm" style="border-collapse:collapse" data-enhance>
   <thead>
     <tr class="text-left text-[color:var(--text-muted)]" style="border-bottom:0.5px solid var(--border)">
       <th class="py-2">{{ self.t("admin-users-col-user") }}</th>
       <th>{{ self.t("admin-users-col-role") }}</th>
       <th>{{ self.t("admin-users-col-groups") }}</th>
       <th>{{ self.t("admin-users-col-created") }}</th>
-      <th style="text-align:right">{{ self.t("admin-users-col-actions") }}</th>
+      <th style="text-align:right" data-nosort>{{ self.t("admin-users-col-actions") }}</th>
     </tr>
   </thead>
   <tbody>

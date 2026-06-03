@@ -346,6 +346,16 @@ async fn upload_inline(
     inline_err(StatusCode::BAD_REQUEST, "no file field in upload")
 }
 
+/// Asset path of the built-in Ruscker mark — what a card falls back to
+/// when its image is deleted (#560), so it never renders a broken image.
+/// Seeded into Media as a built-in (#433), so it's always available.
+const RUSCKER_DEFAULT_LOGO: &str = "/assets/img/ruscker-mark.svg";
+
+/// True when a `logo`/`cover` value points at `filename`.
+fn references_image(value: &str, filename: &str) -> bool {
+    value == filename || value.contains(&format!("/assets/img/{filename}"))
+}
+
 async fn delete(
     editor: RequireEditor,
     State(state): State<AppState>,
@@ -354,12 +364,56 @@ async fn delete(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    match db::images::delete_one(pool, &id, Some(editor.actor())).await {
-        Ok(filename) => {
-            // Drop the cached thumbnail of the deleted image (#301).
-            if let Some(name) = filename {
-                crate::routes::assets::invalidate_thumb(&name);
+
+    // Find the filename first, so we can fix up any app that used it before
+    // it's gone — otherwise that card would render a broken image (#560).
+    let filename = match db::images::filename_for(pool, &id).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return Redirect::to("/admin/media").into_response(), // already gone
+        Err(err) => {
+            tracing::error!(error = ?err, id, "image lookup failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "lookup failed").into_response();
+        }
+    };
+
+    // Reset every spec that used the image: a referencing `logo` falls back
+    // to the Ruscker mark; a referencing `cover` is cleared (kind tint).
+    let mut reset = 0usize;
+    if let Ok(specs) = db::specs::list_all(pool).await {
+        for spec in specs {
+            let logo_hit = spec
+                .template_properties
+                .get_str("logo")
+                .is_some_and(|v| references_image(v, &filename));
+            let cover_hit = spec
+                .template_properties
+                .get_str("cover")
+                .is_some_and(|v| references_image(v, &filename));
+            if !logo_hit && !cover_hit {
+                continue;
             }
+            let mut spec = spec;
+            if logo_hit {
+                spec.template_properties
+                    .set_str("logo", RUSCKER_DEFAULT_LOGO);
+            }
+            if cover_hit {
+                spec.template_properties.remove("cover");
+            }
+            if let Err(e) = db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
+                tracing::warn!(spec = %spec.id, error = ?e, "reset spec image on delete failed");
+            } else {
+                reset += 1;
+            }
+        }
+    }
+
+    match db::images::delete_one(pool, &id, Some(editor.actor())).await {
+        Ok(name) => {
+            if let Some(n) = name {
+                crate::routes::assets::invalidate_thumb(&n);
+            }
+            tracing::info!(id, %filename, reset, "image deleted; apps reset to default logo");
             Redirect::to("/admin/media").into_response()
         }
         Err(err) => {

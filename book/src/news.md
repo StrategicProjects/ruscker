@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.52 — 2026-06-03
+
+Friendlier YAML import.
+
+**Admin**
+- The import dialog now has a **drag-and-drop zone** in place of the bare
+  file input. Drop an `application.yml` onto it or click to browse; the
+  prompt is localized (the old native **"Choose file"** button always
+  showed in the browser's language, never the panel's).
+- After a selective import, the result message now reports **how many
+  credentials and images** were pulled in alongside the apps — e.g.
+  *"… 3 credential(s) and 12 image(s) imported"* — so the logo→Media and
+  password→credential-store moves are visible, not silent.
+
 ## v0.1.51 — 2026-06-03
 
 Media import + safe deletion.

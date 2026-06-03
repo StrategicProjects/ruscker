@@ -44,7 +44,7 @@ proper admin panel, a monitoring dashboard, and load balancing.
 
 ## In production
 
-Ruscker is on **v0.1.51** and runs in production today. Where the
+Ruscker is on **v0.1.52** and runs in production today. Where the
 JVM-based stack it replaced idled at hundreds of megabytes, Ruscker
 idles in the low tens:
 

@@ -194,6 +194,24 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<ImageMeta>> {
         .collect())
 }
 
+/// The filename for an image id, without deleting — so a caller can find
+/// what references it before removing it (#560).
+pub async fn filename_for(db: &ConfigDb, id: &str) -> Result<Option<String>> {
+    let row: Option<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as("SELECT filename FROM images WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .context("lookup image filename (sqlite)")?,
+        ConfigDb::Postgres(pool) => sqlx::query_as("SELECT filename FROM images WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .context("lookup image filename (postgres)")?,
+    };
+    Ok(row.map(|(f,)| f))
+}
+
 /// Delete an image by id. Returns the deleted row's filename (so the
 /// caller can invalidate caches keyed by it, #301), or `None` if no
 /// such image existed. Audit row is written when a row was removed.

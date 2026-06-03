@@ -834,6 +834,19 @@ impl TemplateProperties {
         self.0.get(key).and_then(|v| v.as_str())
     }
 
+    /// Set a string property (e.g. reset a card `logo` to a default).
+    pub fn set_str(&mut self, key: &str, value: &str) {
+        self.0.insert(
+            key.to_string(),
+            serde_yaml_ng::Value::String(value.to_string()),
+        );
+    }
+
+    /// Remove a property (e.g. clear a `cover` whose image was deleted).
+    pub fn remove(&mut self, key: &str) {
+        self.0.remove(key);
+    }
+
     pub fn type_field(&self) -> Option<&str> {
         self.get_str("type")
     }

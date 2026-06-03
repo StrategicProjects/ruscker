@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/specs", get(index))
         .route("/admin/specs/import", post(import))
+        .route("/admin/specs/import/confirm", post(import_confirm))
         .route(
             "/admin/specs/{id}/featured/toggle",
             post(toggle_featured),
@@ -152,6 +153,41 @@ struct SpecsPage<'a> {
 }
 
 impl<'a> SpecsPage<'a> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+/// One row in the import preview (#557).
+struct ImportRow {
+    id: String,
+    display_name: String,
+    kind: &'static str,
+    /// `true` ⇒ the import would **update** a spec already in the DB;
+    /// `false` ⇒ it's **new**.
+    exists: bool,
+}
+
+#[derive(Template)]
+#[template(path = "admin/import_preview.html")]
+struct ImportPreviewPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    base: std::sync::Arc<str>,
+    nav_section: &'static str,
+    role: Role,
+    /// The apps the uploaded YAML carries, in file order.
+    rows: Vec<ImportRow>,
+    /// The original YAML, round-tripped through a hidden field so the
+    /// confirm step is stateless (`${VAR}` stays literal — #260).
+    raw_yaml: String,
+    /// Validation warnings across the whole file (shown as a count).
+    warning_count: usize,
+}
+
+impl<'a> ImportPreviewPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
@@ -316,9 +352,15 @@ async fn index(
 /// No separate dry-run/preview step yet (issue #8 wants one) —
 /// import is idempotent and never deletes, so re-importing is
 /// safe; a preview is a follow-up.
+/// Step 1 of the import (#557): parse the uploaded YAML and render a
+/// **preview** — the list of apps it carries, each marked new vs updates,
+/// with a checkbox — so the operator confirms which to import. Nothing is
+/// written to the DB here.
 async fn import(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
     mut multipart: Multipart,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
@@ -349,31 +391,112 @@ async fn import(
         return redirect_err("no file selected");
     };
 
-    // Parse (env-interpolation + raw-text credential scan happen
-    // inside from_yaml; parse failure → error flash).
+    // Parse (env-interpolation + raw-text credential scan happen inside
+    // from_yaml; parse failure → error flash).
     let config = match ruscker_config::Config::from_yaml(&raw) {
         Ok(c) => c,
         Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
     };
-    // Validation warnings (embedded creds, empty names, dup ids…)
-    // — surfaced as a count; non-fatal, import still proceeds.
     let report = ruscker_config::validate::run(&config);
     let warning_count = report.warnings.len() + config.raw_warnings.len();
 
-    match crate::db::specs::import_all(pool, &config).await {
+    // Which ids already exist in the DB (→ "updates", vs "new").
+    let existing: std::collections::HashSet<String> = crate::db::specs::list_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+
+    let rows: Vec<ImportRow> = config
+        .proxy
+        .specs
+        .iter()
+        .map(|s| ImportRow {
+            exists: existing.contains(&s.id),
+            kind: match s.kind() {
+                ruscker_config::SpecKind::Shiny => "shiny",
+                ruscker_config::SpecKind::InteractiveApp => "interactive",
+                ruscker_config::SpecKind::Api => "api",
+                ruscker_config::SpecKind::External => "external",
+            },
+            display_name: s.display_name.clone().unwrap_or_default(),
+            id: s.id.clone(),
+        })
+        .collect();
+
+    let page = ImportPreviewPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "specs",
+        role: editor.role,
+        rows,
+        raw_yaml: raw,
+        warning_count,
+    };
+    super::render(&page)
+}
+
+/// Step 2 of the import (#557): import only the **checked** specs. The
+/// preview form re-posts the original YAML (hidden) plus one `ids` field
+/// per selected spec, as multipart so repeated `ids` collect cleanly.
+async fn import_confirm(
+    _: RequireEditor,
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let mut raw: Option<String> = None;
+    let mut ids: Vec<String> = Vec::new();
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let name = field.name().map(str::to_string);
+                match name.as_deref() {
+                    Some("yaml") => raw = field.text().await.ok(),
+                    Some("ids") => {
+                        if let Ok(v) = field.text().await {
+                            ids.push(v);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return redirect_err(&format!("multipart parse: {e}")),
+        }
+    }
+    let Some(raw) = raw else {
+        return redirect_err("missing config");
+    };
+    // Nothing checked → no-op, back to the list with a zero flash.
+    if ids.is_empty() {
+        return Redirect::to("/admin/specs?import=ok&created=0&updated=0&unchanged=0&warnings=0")
+            .into_response();
+    }
+    let config = match ruscker_config::Config::from_yaml(&raw) {
+        Ok(c) => c,
+        Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
+    };
+    match crate::db::specs::import_selected(pool, &config, &ids).await {
         Ok(r) => {
             tracing::info!(
                 created = r.created, updated = r.updated, unchanged = r.unchanged,
-                warnings = warning_count, "YAML import via admin"
+                selected = ids.len(), "selective YAML import via admin"
             );
             Redirect::to(&format!(
-                "/admin/specs?import=ok&created={}&updated={}&unchanged={}&warnings={}",
-                r.created, r.updated, r.unchanged, warning_count
+                "/admin/specs?import=ok&created={}&updated={}&unchanged={}&warnings=0",
+                r.created, r.updated, r.unchanged
             ))
             .into_response()
         }
         Err(e) => {
-            tracing::error!(error = ?e, "import_all failed");
+            tracing::error!(error = ?e, "import_selected failed");
             redirect_err(&format!("import failed: {e}"))
         }
     }

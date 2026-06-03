@@ -165,6 +165,7 @@ pub mod images;
 pub mod landing;
 pub mod landing_blocks;
 pub mod showcase;
+pub mod spec_access;
 pub mod specs;
 pub mod users;
 

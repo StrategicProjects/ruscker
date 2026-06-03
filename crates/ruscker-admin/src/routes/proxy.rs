@@ -238,6 +238,10 @@ async fn forward(
     // 2. External link: bounce.
     if spec.kind() == SpecKind::External {
         if let Some(target) = spec.template_properties.get_str("link") {
+            // Count the external-card click (#549). The landing routes
+            // external cards through `/app/{id}` precisely so this click
+            // is visible to Ruscker. Best-effort — never blocks the bounce.
+            record_access(&state, &spec.id).await;
             return Redirect::to(target).into_response();
         }
         return (
@@ -568,6 +572,10 @@ async fn forward(
     //    in the tracker, so subsequent requests touch the same
     //    entry instead of registering a duplicate.
     if !cookie_used && spec_kind_needs_sticky(spec.kind()) {
+        // A new sticky session = a new app visit (#549). Counting here
+        // (not per request) means assets/WebSocket/polling don't inflate
+        // it, and direct `/app/{id}` URLs (no landing) still count.
+        record_access(&state, &spec.id).await;
         let session = StickySession {
             session_id,
             spec_id: spec.id.clone(),
@@ -602,6 +610,17 @@ fn attach_inflight_to_body(resp: Response, guard: InflightGuard) -> Response {
 
 fn spec_kind_needs_sticky(kind: SpecKind) -> bool {
     matches!(kind, SpecKind::Shiny | SpecKind::InteractiveApp)
+}
+
+/// Best-effort per-spec access count (#549). A counter write must never
+/// break the request being served, so a missing DB or a write error is
+/// ignored (logged at debug).
+async fn record_access(state: &AppState, spec_id: &str) {
+    if let Some(db) = state.db.as_ref() {
+        if let Err(e) = crate::db::spec_access::record(db, spec_id).await {
+            tracing::debug!(spec = spec_id, error = ?e, "spec access count failed");
+        }
+    }
 }
 
 // ── API policy helpers (rate limit + CORS) ─────────────────────────

@@ -244,7 +244,6 @@ impl<'a> CardCtx<'a> {
     /// links under `--base-path` (the per-request HTML body rewriter
     /// was removed in #294, so prefixing happens at construction now).
     pub fn from_spec(spec: &'a Spec, base: &str) -> Self {
-        let kind = spec.kind();
         let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
         // The card's access lock reflects the *real* access rule
@@ -267,13 +266,12 @@ impl<'a> CardCtx<'a> {
         let updated_date = updated_raw.and_then(parse_dmy);
         let updated_short = updated_date.map(|d| d.format("%d/%m").to_string());
         let status = compute_status(updated_date, Utc::now().date_naive());
-        let href = match kind {
-            // External links are operator-authored absolute URLs — never
-            // base-prefixed. Containerized specs route under the portal,
-            // so their `/app/<id>/` path must carry the base path (#294).
-            SpecKind::External => tp.get_str("link").unwrap_or("#").to_string(),
-            _ => format!("{base}/app/{}/", spec.id),
-        };
+        // Every card routes through the portal under `/app/<id>/` (carries
+        // the base path, #294). Containerized specs proxy there; External
+        // specs 302 from there to their link — which is what lets Ruscker
+        // **count** external-card clicks (#549) and apply the same access
+        // guard, instead of the card linking straight out and bypassing us.
+        let href = format!("{base}/app/{}/", spec.id);
         Self {
             id: &spec.id,
             display_name: spec.display_name.as_deref().unwrap_or(&spec.id),

@@ -822,6 +822,11 @@ body {
   text-align: right;
   white-space: nowrap;
 }
+/* Access counter column (#549) — tabular figures so totals line up. */
+.admin-table .access-cell {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
 .pill {
   display: inline-flex; align-items: center;
   padding: 2px 8px;

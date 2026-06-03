@@ -86,6 +86,7 @@
         <th>{{ self.t("admin-specs-col-state") }}</th>
         <th>{{ self.t("admin-specs-col-updated") }}</th>
         <th>{{ self.t("admin-specs-col-version") }}</th>
+        <th title="{{ self.t("admin-specs-col-access-help") }}">{{ self.t("admin-specs-col-access") }}</th>
         <th class="actions-cell">{{ self.t("admin-specs-col-actions") }}</th>
       </tr>
     </thead>
@@ -104,6 +105,7 @@
           {% if spec.config_only %}
           <td class="text-[color:var(--text-faint)]">—</td>
           <td class="text-[color:var(--text-faint)]">—</td>
+          <td class="access-cell">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</td>
           <td class="actions-cell">
             {# Featured star (#521) — read-only for config-defined specs (the
                flag lives in the YAML file). Inline SVG, not a font glyph: the
@@ -128,6 +130,7 @@
           {% else %}
           <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
+          <td class="access-cell">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</td>
           <td class="actions-cell">
             {# Featured star (#521): inline toggle, solid when featured, right
                in the actions column. URL + titles ride in `data-*`

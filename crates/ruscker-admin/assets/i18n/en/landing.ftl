@@ -105,7 +105,7 @@ admin-users-subtitle = Create and manage who can sign in, and at which level.
 admin-users-new = New user
 admin-users-create = Create
 admin-users-initial-password = Initial password
-admin-users-initial-password-hint = The user must change it on first login.
+admin-users-initial-password-hint = At least 8 characters. The user must change it on first login.
 admin-users-role = Role
 admin-users-col-user = User
 admin-users-col-role = Role
@@ -127,7 +127,9 @@ admin-users-flash-created = User created.
 admin-users-flash-saved = Changes saved.
 admin-users-flash-deleted = User removed.
 admin-users-flash-last-admin = Can't remove or demote the last administrator.
-admin-users-flash-bad-input = Invalid input (empty username or password under 8 characters).
+admin-users-flash-bad-input = Invalid input: the username may contain only letters, digits and _ . @ - , and the password needs at least 8 characters.
+admin-users-username-rule = Letters, digits and _ . @ - only (no spaces or accents).
+admin-users-password-rule = At least 8 characters.
 admin-users-flash-exists = A user with that name already exists.
 
 # Admin dashboard

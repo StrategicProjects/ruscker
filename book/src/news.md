@@ -9,6 +9,23 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.51 — 2026-06-03
+
+Media import + safe deletion.
+
+**Admin**
+- Importing a ShinyProxy `application.yml` now copies each selected app's
+  **local logo into the Media library**, so it shows up in `/admin/media`
+  and not just on the card. Logos that are URLs, data URIs, empty or
+  traversal-looking are skipped.
+- Inline Docker registry passwords in an imported config are moved into
+  the **named credentials store** (encrypted at rest), de-duplicated, and
+  the spec is rewired to reference the credential — the password never
+  lands in the spec config.
+- **Deleting a Media image that is in use no longer breaks the card.** The
+  apps using it fall back to the default Ruscker logo (a cover image is
+  cleared), and the confirm dialog spells this out before you delete.
+
 ## v0.1.50 — 2026-06-03
 
 Selective YAML import.

@@ -96,6 +96,10 @@ pub struct SpecRow {
     /// `list_all` pass so the table's star toggle (#521) reflects state.
     #[sqlx(default)]
     pub featured: bool,
+    /// Total accesses (#549) — filled by the index from a `spec_access`
+    /// SUM, not a column on `specs`. `0` when never accessed.
+    #[sqlx(default)]
+    pub access_count: i64,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -214,6 +218,11 @@ async fn index(
         }
     };
 
+    // Access totals (#549) — a `spec_access` SUM per spec; absent ⇒ 0.
+    let access = crate::db::spec_access::totals(database)
+        .await
+        .unwrap_or_default();
+
     // Featured flag lives in `config_json`, not a column — fill it from a
     // single `list_all` pass so the table's star toggle (#521) shows state.
     {
@@ -227,6 +236,7 @@ async fn index(
             .collect();
         for row in &mut specs {
             row.featured = featured.contains(&row.id);
+            row.access_count = access.get(&row.id).copied().unwrap_or(0);
         }
     }
 
@@ -261,6 +271,7 @@ async fn index(
                 version: 0,
                 config_only: true,
                 featured: s.is_featured(),
+                access_count: access.get(&s.id).copied().unwrap_or(0),
             });
         }
     }

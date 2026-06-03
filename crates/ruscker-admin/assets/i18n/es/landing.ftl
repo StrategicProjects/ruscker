@@ -105,7 +105,7 @@ admin-users-subtitle = Crea y gestiona quién accede al panel y con qué nivel.
 admin-users-new = Nuevo usuario
 admin-users-create = Crear
 admin-users-initial-password = Contraseña inicial
-admin-users-initial-password-hint = El usuario deberá cambiarla en el primer acceso.
+admin-users-initial-password-hint = Mínimo 8 caracteres. El usuario deberá cambiarla en el primer acceso.
 admin-users-role = Nivel
 admin-users-col-user = Usuario
 admin-users-col-role = Nivel
@@ -127,7 +127,9 @@ admin-users-flash-created = Usuario creado.
 admin-users-flash-saved = Cambios guardados.
 admin-users-flash-deleted = Usuario eliminado.
 admin-users-flash-last-admin = No se puede eliminar ni degradar al último administrador.
-admin-users-flash-bad-input = Datos inválidos (usuario vacío o contraseña de menos de 8 caracteres).
+admin-users-flash-bad-input = Datos inválidos: el usuario solo puede tener letras, números y _ . @ - , y la contraseña necesita al menos 8 caracteres.
+admin-users-username-rule = Solo letras, números y _ . @ - (sin espacios ni acentos).
+admin-users-password-rule = Mínimo 8 caracteres.
 admin-users-flash-exists = Ya existe un usuario con ese nombre.
 
 # Admin dashboard

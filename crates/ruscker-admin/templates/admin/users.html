@@ -31,7 +31,8 @@
   <div class="flex flex-wrap items-end gap-3">
     <label class="admin-login-field" style="margin:0;flex:1 1 180px">
       <span class="admin-login-label">{{ self.t("admin-login-username-label") }}</span>
-      <input type="text" name="username" required autocapitalize="none" placeholder="jane">
+      <input type="text" name="username" required autocapitalize="none" placeholder="jane"
+             pattern="[A-Za-z0-9_.@\-]+" title="{{ self.t("admin-users-username-rule") }}">
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-initial-password") }}</span>
@@ -40,8 +41,8 @@
          the page — no Alpine dependency, so it works even if Alpine is
          absent (cf. the #433 images-gallery regression). #}
       <span style="position:relative;display:block">
-        <input type="password" name="password" required autocomplete="new-password"
-               placeholder="••••••••" style="padding-right:2.2rem">
+        <input type="password" name="password" required minlength="8" autocomplete="new-password"
+               placeholder="••••••••" title="{{ self.t("admin-users-password-rule") }}" style="padding-right:2.2rem">
         <button type="button" tabindex="-1" class="pw-reveal"
                 title="{{ self.t("admin-pw-reveal") }}"
                 style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
@@ -111,7 +112,8 @@
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/password"
                 style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
             <span style="position:relative;display:inline-block">
-              <input type="password" name="password" placeholder="{{ self.t("admin-users-new-password") }}"
+              <input type="password" name="password" required minlength="8" placeholder="{{ self.t("admin-users-new-password") }}"
+                     title="{{ self.t("admin-users-password-rule") }}"
                      style="width:140px;padding-right:1.8rem" autocomplete="new-password">
               <button type="button" tabindex="-1" class="pw-reveal"
                       title="{{ self.t("admin-pw-reveal") }}"

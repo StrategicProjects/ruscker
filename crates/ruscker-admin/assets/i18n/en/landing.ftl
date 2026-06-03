@@ -413,6 +413,8 @@ admin-import-submit = Import
 admin-import-cancel = Cancel
 admin-import-ok = Import complete: { $created } created, { $updated } updated, { $unchanged } unchanged.
 admin-import-ok-warnings = { $warnings } validation warning(s) — review embedded credentials and empty names.
+admin-import-ok-assets = { $creds } credential(s) and { $logos } image(s) imported into the panel.
+admin-import-drop = Drag your application.yml here or click to browse
 admin-import-err = Import failed: { $msg }
 
 # Gradient builder

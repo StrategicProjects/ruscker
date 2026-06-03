@@ -31,11 +31,29 @@
 {% endmatch %}
 
 <dialog id="import-modal" class="import-dialog">
-  <form method="post" action="{{ base }}/admin/specs/import" enctype="multipart/form-data" class="import-form">
-    <h2 class="text-base font-medium mb-1">{{ self.t("admin-import-title") }}</h2>
-    <p class="text-xs text-[color:var(--text-muted)] mb-3">{{ self.t("admin-import-help") }}</p>
-    <label class="block text-xs mb-1">{{ self.t("admin-import-file") }}</label>
-    <input type="file" name="file" accept=".yml,.yaml" required class="import-file" />
+  <form method="post" action="{{ base }}/admin/specs/import" enctype="multipart/form-data" class="import-form"
+        x-data="{ name: '', drag: false }">
+    <h2 class="import-h2">{{ self.t("admin-import-title") }}</h2>
+    <p class="import-sub">{{ self.t("admin-import-help") }}</p>
+
+    {# Custom dropzone: hides the native file input (whose "Choose file"
+       button can't be localized — it follows the browser UI language) and
+       renders our own PT/EN/ES/FR prompt. Clicking the <label> opens the
+       picker natively; a drop sets the hidden input's `files`. #}
+    <label class="import-dropzone" :class="{ 'is-drag': drag }"
+           @dragover.prevent="drag = true" @dragleave.prevent="drag = false"
+           @drop.prevent="drag = false; if ($event.dataTransfer.files.length) { $refs.file.files = $event.dataTransfer.files; name = $refs.file.files[0].name }">
+      <input type="file" name="file" accept=".yml,.yaml" required x-ref="file" class="import-dz-input"
+             @change="name = $refs.file.files.length ? $refs.file.files[0].name : ''" />
+      <svg class="import-dz-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <path d="M7 10l5-5 5 5"/><path d="M12 5v12"/>
+      </svg>
+      <p class="import-dz-prompt" x-show="!name">{{ self.t("admin-import-drop") }}</p>
+      <p class="import-dz-file" x-show="name" x-text="name" x-cloak></p>
+      <p class="import-dz-hint">{{ self.t("admin-import-file") }}</p>
+    </label>
     <div class="flex justify-end gap-2 mt-4">
       <button type="button" class="admin-nav-link" style="font-size:12px"
               onclick="document.getElementById('import-modal').close()">
@@ -63,12 +81,38 @@
     background: var(--surface, #fff); color: var(--text-primary);
   }
   .import-dialog::backdrop { background: rgba(0,0,0,0.35); }
-  .import-form { padding: 20px; }
-  .import-file {
-    width: 100%; font-size: 12px; padding: 8px;
-    border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.3));
-    border-radius: 8px;
+  .import-form { padding: 22px; }
+  [x-cloak] { display: none !important; }
+  .import-h2 { font-size: 15px; font-weight: 600; margin-bottom: 4px; }
+  .import-sub {
+    font-size: 12px; line-height: 1.5; margin-bottom: 16px;
+    color: var(--text-muted);
   }
+  .import-dropzone {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 7px; text-align: center; cursor: pointer; position: relative;
+    padding: 30px 20px; border-radius: 12px;
+    border: 1.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.35));
+    background: var(--surface-soft, rgba(120,120,120,0.04));
+    transition: border-color .15s ease, background .15s ease, transform .15s ease;
+  }
+  .import-dropzone:hover {
+    border-color: var(--accent, #2563eb);
+    background: color-mix(in srgb, var(--accent, #2563eb) 5%, transparent);
+  }
+  .import-dropzone.is-drag {
+    border-color: var(--accent, #2563eb); border-style: solid;
+    background: color-mix(in srgb, var(--accent, #2563eb) 9%, transparent);
+    transform: scale(1.01);
+  }
+  /* visually hidden but still label-triggerable + form-validatable */
+  .import-dz-input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .import-dz-ico { width: 34px; height: 34px; color: var(--accent, #2563eb); opacity: .85; }
+  .import-dropzone.is-drag .import-dz-ico { animation: import-bounce .55s ease infinite alternate; }
+  @keyframes import-bounce { to { transform: translateY(-3px); } }
+  .import-dz-prompt { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+  .import-dz-file { font-size: 13px; font-weight: 600; color: var(--accent, #2563eb); word-break: break-all; }
+  .import-dz-hint { font-size: 11px; color: var(--text-faint, var(--text-muted)); }
 </style>
 
 {% if specs.is_empty() %}

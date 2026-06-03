@@ -122,6 +122,12 @@ pub struct SpecsQuery {
     pub unchanged: Option<usize>,
     #[serde(default)]
     pub warnings: Option<usize>,
+    /// Inline registry passwords lifted into the credential store (#560 B).
+    #[serde(default)]
+    pub creds: Option<usize>,
+    /// Spec logos copied into the Media library (#560 A).
+    #[serde(default)]
+    pub logos: Option<usize>,
     /// Error message (URL-encoded) when `import=err`.
     #[serde(default)]
     pub msg: Option<String>,
@@ -204,6 +210,17 @@ fn build_flash(locales: &Locales, loc: Locale, q: &SpecsQuery) -> Option<Flash> 
             args.set("updated", q.updated.unwrap_or(0) as i64);
             args.set("unchanged", q.unchanged.unwrap_or(0) as i64);
             let mut text = locales.t(loc, "admin-import-ok", Some(&args));
+            // #560 A/B: note how many logos went to the Media library and how
+            // many inline passwords were lifted into the credential store.
+            let creds = q.creds.unwrap_or(0);
+            let logos = q.logos.unwrap_or(0);
+            if creds > 0 || logos > 0 {
+                let mut aargs = FluentArgs::new();
+                aargs.set("creds", creds as i64);
+                aargs.set("logos", logos as i64);
+                text.push(' ');
+                text.push_str(&locales.t(loc, "admin-import-ok-assets", Some(&aargs)));
+            }
             let warnings = q.warnings.unwrap_or(0);
             if warnings > 0 {
                 let mut wargs = FluentArgs::new();
@@ -498,8 +515,8 @@ async fn import_confirm(
                 "selective YAML import via admin"
             );
             Redirect::to(&format!(
-                "/admin/specs?import=ok&created={}&updated={}&unchanged={}&warnings=0",
-                r.created, r.updated, r.unchanged
+                "/admin/specs?import=ok&created={}&updated={}&unchanged={}&warnings=0&creds={}&logos={}",
+                r.created, r.updated, r.unchanged, creds, logos
             ))
             .into_response()
         }

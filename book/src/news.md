@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.47 — 2026-06-03
+
+Better diagnostics when an app won't start.
+
+**Proxy / Docker**
+- When a spawned container **crashes on startup** (e.g. an app that halts
+  because it can't reach its database), Ruscker now **fails fast** —
+  reporting `exited (code N) during startup` instead of waiting out the
+  full 60s readiness timeout — and **attaches the tail of the container's
+  logs** to the failure. The real cause (a DB connection error, a missing
+  env var, a crash) is visible in the warn log and the admin Logs tab
+  without re-running the container by hand.
+
+---
+
 ## v0.1.46 — 2026-06-02
 
 Admin catalog on by default, plus a session-revocation fix.

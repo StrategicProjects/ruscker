@@ -5,7 +5,7 @@ Status: living document. Tracks the Phase 5 security audit
 **[accepted limitation]**, or **[deferred]**. File references use
 `crate/path:symbol` so they survive line-number drift.
 
-> **Scope.** This covers v0.1.46: single-operator install, Ruscker
+> **Scope.** This covers v0.1.47: single-operator install, Ruscker
 > behind a TLS-terminating reverse proxy, Docker on the same host.
 > Multi-tenant / shared-team auth (OIDC, RBAC) is out of scope until
 > Phase 8.

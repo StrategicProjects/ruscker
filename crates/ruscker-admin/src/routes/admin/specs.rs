@@ -444,7 +444,7 @@ async fn import(
 /// preview form re-posts the original YAML (hidden) plus one `ids` field
 /// per selected spec, as multipart so repeated `ids` collect cleanly.
 async fn import_confirm(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {
@@ -479,15 +479,21 @@ async fn import_confirm(
         return Redirect::to("/admin/specs?import=ok&created=0&updated=0&unchanged=0&warnings=0")
             .into_response();
     }
-    let config = match ruscker_config::Config::from_yaml(&raw) {
+    let mut config = match ruscker_config::Config::from_yaml(&raw) {
         Ok(c) => c,
         Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
     };
+    // #560 B: lift inline registry passwords into the encrypted credential
+    // store and rewire the selected specs to reference them by name, so the
+    // plaintext never lands in `config_json`. Runs before the spec upsert
+    // (it mutates the specs that get imported). Best-effort.
+    let creds = extract_inline_credentials(&state, &mut config, &ids, editor.actor()).await;
     match crate::db::specs::import_selected(pool, &config, &ids).await {
         Ok(r) => {
             tracing::info!(
                 created = r.created, updated = r.updated, unchanged = r.unchanged,
-                selected = ids.len(), "selective YAML import via admin"
+                selected = ids.len(), credentials = creds,
+                "selective YAML import via admin"
             );
             Redirect::to(&format!(
                 "/admin/specs?import=ok&created={}&updated={}&unchanged={}&warnings=0",
@@ -502,6 +508,115 @@ async fn import_confirm(
     }
 }
 
+/// Sanitize a registry domain/username into a credential-name-safe slug
+/// (alphanumeric + `_.-`), falling back to `registry` when empty.
+fn sanitize_cred_name(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches('-');
+    if trimmed.is_empty() {
+        "registry".into()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// #560 B: for each **selected** spec carrying an inline
+/// `docker-registry-password`, create (or reuse) a named credential in the
+/// encrypted store and rewire the spec to reference it, dropping the inline
+/// password. Dedupes by `(domain, username, password)` so N identical specs
+/// share one credential. A literal password is AES-encrypted; a `${VAR}`
+/// stays verbatim (#260). Returns how many credentials were created.
+async fn extract_inline_credentials(
+    state: &AppState,
+    config: &mut ruscker_config::Config,
+    ids: &[String],
+    actor: &str,
+) -> usize {
+    use std::collections::{HashMap, HashSet};
+    let Some(db) = state.db.as_ref() else {
+        return 0;
+    };
+    let want: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    // Names already taken, so a new credential never clobbers an existing one.
+    let mut used: HashSet<String> = crate::db::credentials::list_all(db)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|c| c.name)
+        .collect();
+    let mut by_triple: HashMap<(String, String, String), String> = HashMap::new();
+    let mut created = 0usize;
+
+    for spec in config
+        .proxy
+        .specs
+        .iter_mut()
+        .filter(|s| want.contains(s.id.as_str()))
+    {
+        let password = match spec.docker_registry_password.as_deref() {
+            Some(p) if !p.is_empty() => p.to_string(),
+            _ => continue,
+        };
+        let domain = spec.docker_registry_domain.clone().unwrap_or_default();
+        let username = spec.docker_registry_username.clone().unwrap_or_default();
+        let triple = (domain.clone(), username.clone(), password.clone());
+
+        let name = if let Some(n) = by_triple.get(&triple) {
+            n.clone()
+        } else {
+            let base = sanitize_cred_name(if !domain.is_empty() {
+                &domain
+            } else if !username.is_empty() {
+                &username
+            } else {
+                "registry"
+            });
+            let mut name = format!("imported-{base}");
+            let mut i = 2;
+            while used.contains(&name) {
+                name = format!("imported-{base}-{i}");
+                i += 1;
+            }
+            match crate::db::credentials::upsert(
+                db,
+                &state.master_key,
+                &name,
+                &domain,
+                &username,
+                &password,
+                Some(actor),
+            )
+            .await
+            {
+                Ok(_) => {
+                    created += 1;
+                    used.insert(name.clone());
+                    by_triple.insert(triple, name.clone());
+                    name
+                }
+                Err(e) => {
+                    tracing::warn!(spec = %spec.id, error = ?e, "import: credential upsert failed");
+                    continue;
+                }
+            }
+        };
+
+        // Rewire: reference the named credential, drop the inline secret.
+        spec.docker_registry_credential = Some(name);
+        spec.docker_registry_password = None;
+    }
+    created
+}
+
 fn redirect_err(msg: &str) -> Response {
     // Keep the message short + URL-safe enough for a query param.
     let encoded: String = msg
@@ -514,4 +629,20 @@ fn redirect_err(msg: &str) -> Response {
         .take(200)
         .collect();
     Redirect::to(&format!("/admin/specs?import=err&msg={encoded}")).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_cred_name;
+
+    #[test]
+    fn sanitize_cred_name_slugs_and_falls_back() {
+        assert_eq!(
+            sanitize_cred_name("registry.example.com"),
+            "registry.example.com"
+        );
+        assert_eq!(sanitize_cred_name("reg/with space!"), "reg-with-space");
+        assert_eq!(sanitize_cred_name(""), "registry");
+        assert_eq!(sanitize_cred_name("---"), "registry");
+    }
 }

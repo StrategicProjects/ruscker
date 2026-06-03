@@ -100,6 +100,10 @@ pub struct SpecRow {
     /// SUM, not a column on `specs`. `0` when never accessed.
     #[sqlx(default)]
     pub access_count: i64,
+    /// Inline-SVG daily-usage sparkline (#549 follow-up), rendered from the
+    /// last days' buckets. Empty when there's no usage to draw.
+    #[sqlx(default)]
+    pub trend_svg: String,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -218,10 +222,20 @@ async fn index(
         }
     };
 
-    // Access totals (#549) — a `spec_access` SUM per spec; absent ⇒ 0.
+    // Access totals (#549) — a `spec_access` SUM per spec; absent ⇒ 0 —
+    // and the last 14 days' series for the sparkline.
     let access = crate::db::spec_access::totals(database)
         .await
         .unwrap_or_default();
+    let series = crate::db::spec_access::recent_series(database, 14)
+        .await
+        .unwrap_or_default();
+    let spark = |id: &str| {
+        series
+            .get(id)
+            .map(|s| crate::db::spec_access::sparkline_svg(s))
+            .unwrap_or_default()
+    };
 
     // Featured flag lives in `config_json`, not a column — fill it from a
     // single `list_all` pass so the table's star toggle (#521) shows state.
@@ -237,6 +251,7 @@ async fn index(
         for row in &mut specs {
             row.featured = featured.contains(&row.id);
             row.access_count = access.get(&row.id).copied().unwrap_or(0);
+            row.trend_svg = spark(&row.id);
         }
     }
 
@@ -272,6 +287,7 @@ async fn index(
                 config_only: true,
                 featured: s.is_featured(),
                 access_count: access.get(&s.id).copied().unwrap_or(0),
+                trend_svg: spark(&s.id),
             });
         }
     }

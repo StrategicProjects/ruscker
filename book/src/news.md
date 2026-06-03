@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.54 — 2026-06-03
+
+Clearer user-account form.
+
+**Admin**
+- Creating a user no longer fails silently. The username and password
+  inputs now enforce their rules in the browser — **at least 8
+  characters** for the password (create and reset), and **letters,
+  digits and `_ . @ -` only** for the username — instead of letting a
+  bad value through to a vague "invalid input" message. The field hints
+  and the error message spell out the rules.
+
 ## v0.1.53 — 2026-06-03
 
 Searchable, sortable admin tables.

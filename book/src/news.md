@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.53 — 2026-06-03
+
+Searchable, sortable admin tables.
+
+**Admin**
+- Every data table in the admin (Apps, Users, Credentials, both
+  disk-panel tables) now has a **search box** that filters rows as you
+  type and **clickable column headers** to sort ascending/descending
+  (numeric-aware, so version/access/size sort as numbers). The Actions
+  column stays inert.
+- The spec form no longer shows the **Advanced** section for external
+  **Link**/**Package** cards — there's no image or container to tune, so
+  only the external-link card remains for those kinds.
+
 ## v0.1.52 — 2026-06-03
 
 Friendlier YAML import.

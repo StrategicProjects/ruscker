@@ -490,9 +490,11 @@ async fn import_confirm(
     let creds = extract_inline_credentials(&state, &mut config, &ids, editor.actor()).await;
     match crate::db::specs::import_selected(pool, &config, &ids).await {
         Ok(r) => {
+            // #560 A: bring the specs' --images-dir logos into the Media library.
+            let logos = import_referenced_logos(&state, &config, &ids, editor.actor()).await;
             tracing::info!(
                 created = r.created, updated = r.updated, unchanged = r.unchanged,
-                selected = ids.len(), credentials = creds,
+                selected = ids.len(), credentials = creds, logos = logos,
                 "selective YAML import via admin"
             );
             Redirect::to(&format!(
@@ -617,6 +619,89 @@ async fn extract_inline_credentials(
     created
 }
 
+/// Extract a local image filename from a spec `logo` value, or `None` for
+/// external URLs / data URIs / empty. Accepts `/assets/img/<file>` or a
+/// bare `<file>`; rejects path-traversal.
+fn local_img_filename(value: &str) -> Option<String> {
+    let v = value.trim();
+    if v.is_empty()
+        || v.starts_with("http://")
+        || v.starts_with("https://")
+        || v.starts_with("data:")
+    {
+        return None;
+    }
+    let f = v.rsplit('/').next().unwrap_or(v);
+    if f.is_empty() || f.contains("..") {
+        return None;
+    }
+    Some(f.to_string())
+}
+
+/// #560 A: copy each **selected** spec's local logo file (served today from
+/// `--images-dir`) into the Media library, so it's manageable there — the
+/// reported "shows on the card but not in Media" gap. Needs `--images-dir`
+/// set and the file present; external-URL logos and files already in Media
+/// are skipped. The YAML carries only the filename, so the bytes come from
+/// the server's `images_dir`. Returns how many images were added.
+async fn import_referenced_logos(
+    state: &AppState,
+    config: &ruscker_config::Config,
+    ids: &[String],
+    actor: &str,
+) -> usize {
+    use std::collections::HashSet;
+    let (Some(db), Some(dir)) = (state.db.as_ref(), state.images_dir.as_ref()) else {
+        return 0;
+    };
+    let want: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    let mut imported = 0usize;
+    let mut seen: HashSet<String> = HashSet::new();
+    for spec in config
+        .proxy
+        .specs
+        .iter()
+        .filter(|s| want.contains(s.id.as_str()))
+    {
+        let Some(logo) = spec.template_properties.get_str("logo") else {
+            continue;
+        };
+        let Some(filename) = local_img_filename(logo) else {
+            continue;
+        };
+        if !seen.insert(filename.clone()) {
+            continue; // already handled this file in this import
+        }
+        // Already in the Media DB? then it's not a --images-dir-only file.
+        if crate::db::images::fetch_by_filename(db, &filename)
+            .await
+            .ok()
+            .flatten()
+            .is_some()
+        {
+            continue;
+        }
+        let bytes = match std::fs::read(dir.join(&filename)) {
+            Ok(b) => b,
+            Err(_) => continue, // not on disk → nothing to copy
+        };
+        match crate::images::process_upload(&filename, None, bytes) {
+            Ok(processed) => {
+                if crate::db::images::insert(db, processed, Some(actor))
+                    .await
+                    .is_ok()
+                {
+                    imported += 1;
+                }
+            }
+            Err(e) => {
+                tracing::warn!(file = %filename, error = ?e, "import: logo → Media failed")
+            }
+        }
+    }
+    imported
+}
+
 fn redirect_err(msg: &str) -> Response {
     // Keep the message short + URL-safe enough for a query param.
     let encoded: String = msg
@@ -633,7 +718,20 @@ fn redirect_err(msg: &str) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_cred_name;
+    use super::{local_img_filename, sanitize_cred_name};
+
+    #[test]
+    fn local_img_filename_extracts_or_skips() {
+        assert_eq!(
+            local_img_filename("/assets/img/logo.svg").as_deref(),
+            Some("logo.svg")
+        );
+        assert_eq!(local_img_filename("bare.png").as_deref(), Some("bare.png"));
+        assert_eq!(local_img_filename("https://x.org/a.png"), None);
+        assert_eq!(local_img_filename("data:image/png;base64,AA"), None);
+        assert_eq!(local_img_filename(""), None);
+        assert_eq!(local_img_filename("/assets/img/../../etc/passwd"), None);
+    }
 
     #[test]
     fn sanitize_cred_name_slugs_and_falls_back() {

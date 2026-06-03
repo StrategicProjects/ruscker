@@ -1,6 +1,6 @@
 # Roadmap
 
-Ruscker is at **v0.1.47** — Phases 0 through 7 are done and the proxy is
+Ruscker is at **v0.1.48** — Phases 0 through 7 are done and the proxy is
 production-ready and horizontally scalable. Phase 8 (external auth) is
 the main optional, demand-driven work left. For what changed in each
 release, see the [release notes](./news.md).
@@ -71,7 +71,7 @@ can serve any session; one scaler leader via Postgres advisory locks,
 with failover. A runnable 2-instance compose harness lives in
 `examples/ha/`. See [Deployment shapes](./architecture.md#deployment-shapes).
 
-### Post-phase polish → **v0.1.4 – v0.1.47**
+### Post-phase polish → **v0.1.4 – v0.1.48**
 
 Incremental improvements shipped after Phase 7.
 

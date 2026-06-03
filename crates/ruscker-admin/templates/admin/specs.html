@@ -121,7 +121,7 @@
     <pre class="mt-3 inline-block text-[11px] text-left bg-[color:var(--surface-soft)] px-3 py-2 rounded">ruscker import application.yml --db &lt;path&gt;</pre>
   </div>
 {% else %}
-  <table class="admin-table">
+  <table class="admin-table" data-enhance>
     <thead>
       <tr>
         <th>{{ self.t("admin-specs-col-id") }}</th>
@@ -131,7 +131,7 @@
         <th>{{ self.t("admin-specs-col-updated") }}</th>
         <th>{{ self.t("admin-specs-col-version") }}</th>
         <th title="{{ self.t("admin-specs-col-access-help") }}">{{ self.t("admin-specs-col-access") }}</th>
-        <th class="actions-cell">{{ self.t("admin-specs-col-actions") }}</th>
+        <th class="actions-cell" data-nosort>{{ self.t("admin-specs-col-actions") }}</th>
       </tr>
     </thead>
     <tbody>

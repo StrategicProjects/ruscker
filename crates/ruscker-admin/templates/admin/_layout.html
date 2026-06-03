@@ -259,5 +259,111 @@ window.ruscker.imagePicker = (filenames) => ({
   </a>
 </footer>
 
+{# ── Shared table enhancer (search + column sort) ──────────────────
+   Progressive enhancement, zero deps: any `<table data-enhance>` in the
+   admin gets a search box above it and clickable, sortable headers
+   (skip a header with `data-nosort`, e.g. the actions column). Runs on
+   every admin page so each data table opts in with one attribute. The
+   localized labels are injected once here so the script stays static. #}
+<script>
+  window.RUSCKER_TABLE_I18N = {
+    search: "{{ self.t("admin-table-search") }}",
+    noResults: "{{ self.t("admin-table-no-results") }}"
+  };
+</script>
+<style>
+  .admin-table-toolbar { margin: 0 0 10px; }
+  .admin-table-search {
+    width: 100%; max-width: 320px; font-size: 13px; padding: 7px 11px;
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.3));
+    border-radius: 8px; background: var(--surface, #fff); color: var(--text-primary);
+  }
+  .admin-table-search:focus { outline: none; border-color: var(--accent, #2563eb); }
+  th.admin-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.admin-th-sort::after { content: '↕'; opacity: .3; margin-left: 5px; font-size: 10px; }
+  th.admin-th-sort[data-sort-dir='asc']::after  { content: '↑'; opacity: .9; }
+  th.admin-th-sort[data-sort-dir='desc']::after { content: '↓'; opacity: .9; }
+  .admin-table-empty { text-align: center; padding: 18px; color: var(--text-muted); font-size: 13px; }
+</style>
+<script>
+(function () {
+  var I18N = window.RUSCKER_TABLE_I18N || { search: 'Search', noResults: 'No results' };
+
+  function compare(a, b) {
+    var na = parseFloat(a.replace(/[^0-9.\-]/g, '')), nb = parseFloat(b.replace(/[^0-9.\-]/g, ''));
+    var aNum = a !== '' && /[0-9]/.test(a) && !isNaN(na);
+    var bNum = b !== '' && /[0-9]/.test(b) && !isNaN(nb);
+    if (aNum && bNum) return na - nb;
+    return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+  }
+
+  function enhance(table) {
+    var tbody = table.tBodies[0];
+    var headRow = table.tHead && table.tHead.rows[0];
+    if (!tbody || !headRow) return;
+
+    function dataRows() {
+      return Array.prototype.filter.call(tbody.rows, function (r) { return !r.dataset.tableEmpty; });
+    }
+    function cellVal(row, idx) {
+      var c = row.cells[idx];
+      if (!c) return '';
+      return c.dataset.sortValue !== undefined ? c.dataset.sortValue : c.textContent.trim();
+    }
+
+    // search toolbar
+    var wrap = document.createElement('div');
+    wrap.className = 'admin-table-toolbar';
+    var input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'admin-table-search';
+    input.setAttribute('aria-label', I18N.search);
+    input.placeholder = I18N.search;
+    wrap.appendChild(input);
+    table.parentNode.insertBefore(wrap, table);
+
+    // empty-state row
+    var emptyRow = document.createElement('tr');
+    emptyRow.dataset.tableEmpty = '1';
+    emptyRow.style.display = 'none';
+    var emptyCell = document.createElement('td');
+    emptyCell.colSpan = headRow.cells.length;
+    emptyCell.className = 'admin-table-empty';
+    emptyCell.textContent = I18N.noResults;
+    emptyRow.appendChild(emptyCell);
+    tbody.appendChild(emptyRow);
+
+    function applyFilter() {
+      var q = input.value.trim().toLowerCase(), visible = 0;
+      dataRows().forEach(function (r) {
+        var match = !q || r.textContent.toLowerCase().indexOf(q) !== -1;
+        r.style.display = match ? '' : 'none';
+        if (match) visible++;
+      });
+      emptyRow.style.display = visible ? 'none' : '';
+    }
+    input.addEventListener('input', applyFilter);
+
+    // sortable headers
+    Array.prototype.forEach.call(headRow.cells, function (th, idx) {
+      if (th.hasAttribute('data-nosort')) return;
+      th.classList.add('admin-th-sort');
+      th.addEventListener('click', function () {
+        var asc = th.dataset.sortDir !== 'asc';
+        Array.prototype.forEach.call(headRow.cells, function (h) { if (h !== th) delete h.dataset.sortDir; });
+        th.dataset.sortDir = asc ? 'asc' : 'desc';
+        dataRows()
+          .sort(function (a, b) { return compare(cellVal(a, idx), cellVal(b, idx)) * (asc ? 1 : -1); })
+          .forEach(function (r) { tbody.insertBefore(r, emptyRow); });
+      });
+    });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('table[data-enhance]').forEach(enhance);
+  });
+})();
+</script>
+
 </body>
 </html>

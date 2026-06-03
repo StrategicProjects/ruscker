@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.48 — 2026-06-03
+
+A built-in access counter.
+
+**Admin**
+- An **"Accesses" column** in the Apps table shows how many times each
+  card/app has been used. App visits are counted once per session (not
+  per request), and **external-link cards** are counted too — clicks now
+  route through the portal so Ruscker can see them. Direct `/app/{id}`
+  URLs that skip the landing still count. No external analytics needed.
+
+---
+
 ## v0.1.47 — 2026-06-03
 
 Better diagnostics when an app won't start.

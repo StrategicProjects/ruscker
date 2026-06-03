@@ -628,11 +628,12 @@ fn local_img_filename(value: &str) -> Option<String> {
         || v.starts_with("http://")
         || v.starts_with("https://")
         || v.starts_with("data:")
+        || v.contains("..")
     {
         return None;
     }
     let f = v.rsplit('/').next().unwrap_or(v);
-    if f.is_empty() || f.contains("..") {
+    if f.is_empty() {
         return None;
     }
     Some(f.to_string())

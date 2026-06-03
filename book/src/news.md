@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.50 — 2026-06-03
+
+Selective YAML import.
+
+**Admin**
+- Importing a ShinyProxy `application.yml` now shows a **preview list of
+  the apps** it contains — each marked **New** or **Updates**, with a
+  checkbox — so you confirm **which to import** instead of taking the
+  whole file. Only the checked apps are imported; the landing and
+  settings are left untouched.
+
+---
+
 ## v0.1.49 — 2026-06-03
 
 Access-counter follow-ups.

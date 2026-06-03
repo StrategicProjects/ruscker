@@ -584,6 +584,12 @@ async fn forward(
         set_sticky_cookie(&cookies, &state.cookie_key, &session, is_https);
     }
 
+    // API specs aren't sticky, so count each forwarded call here (#549
+    // follow-up). One per request — for an API, each call *is* the access.
+    if spec.kind() == SpecKind::Api {
+        record_access(&state, &spec.id).await;
+    }
+
     let resp = with_cors(resp, cors_on);
     // Keep the in-flight count up until the response body is fully streamed
     // to the client, not just until this handler returns (#424).

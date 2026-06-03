@@ -105,7 +105,10 @@
           {% if spec.config_only %}
           <td class="text-[color:var(--text-faint)]">—</td>
           <td class="text-[color:var(--text-faint)]">—</td>
-          <td class="access-cell">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</td>
+          <td class="access-cell">
+            <span class="access-num">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</span>
+            {% if !spec.trend_svg.is_empty() %}<span class="sparkline-wrap" title="{{ self.t("admin-specs-col-access-help") }}">{{ spec.trend_svg|safe }}</span>{% endif %}
+          </td>
           <td class="actions-cell">
             {# Featured star (#521) — read-only for config-defined specs (the
                flag lives in the YAML file). Inline SVG, not a font glyph: the
@@ -130,7 +133,10 @@
           {% else %}
           <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
-          <td class="access-cell">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</td>
+          <td class="access-cell">
+            <span class="access-num">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</span>
+            {% if !spec.trend_svg.is_empty() %}<span class="sparkline-wrap" title="{{ self.t("admin-specs-col-access-help") }}">{{ spec.trend_svg|safe }}</span>{% endif %}
+          </td>
           <td class="actions-cell">
             {# Featured star (#521): inline toggle, solid when featured, right
                in the actions column. URL + titles ride in `data-*`

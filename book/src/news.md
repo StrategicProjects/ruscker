@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.49 — 2026-06-03
+
+Access-counter follow-ups.
+
+**Admin**
+- The Accesses column now shows a small **daily-usage sparkline** (last
+  14 days) next to each total.
+- **API specs are counted too** — one access per call (they aren't
+  session-based, so each request is the access).
+
+---
+
 ## v0.1.48 — 2026-06-03
 
 A built-in access counter.

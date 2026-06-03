@@ -59,6 +59,11 @@ pub const READINESS_TIMEOUT: Duration = Duration::from_secs(60);
 /// How often to retry the TCP connect during readiness polling.
 pub const READINESS_INTERVAL: Duration = Duration::from_millis(250);
 
+/// How many trailing container log lines to attach to a readiness
+/// failure so the operator can see *why* an app didn't come up (e.g. a
+/// failed DB connection) without re-running the container by hand (#550).
+const READINESS_LOG_TAIL: usize = 40;
+
 /// How long we wait for a graceful SIGTERM before bollard's stop
 /// API escalates to SIGKILL. ShinyProxy uses 10 s; we match.
 pub const STOP_TIMEOUT_SECS: i32 = 10;
@@ -269,8 +274,10 @@ impl LocalDockerBackend {
                 CoreError::Backend(format!("no address for upstream {}", self.upstream_host))
             })?;
 
-        // 5. Wait for the container's process to bind that port.
-        wait_for_ready(upstream).await?;
+        // 5. Wait for the container's process to bind that port. Passes
+        //    the backend + container id so a startup crash fails fast and
+        //    the error carries the container's log tail (#550).
+        wait_for_ready(self, &container_id, upstream).await?;
 
         Ok(Replica {
             id: replica_id,
@@ -970,21 +977,77 @@ fn cpu_percent_from_delta(
 /// Per-spec health-check overrides (e.g. `api.health_path`) are a
 /// Phase 3.5 refinement. For now we settle for "any HTTP response
 /// means ready".
-async fn wait_for_ready(addr: SocketAddr) -> CoreResult<()> {
+/// `Some(exit_code)` once the container has stopped/exited, `None` while
+/// it is still running (or inspect failed — treat as "keep waiting").
+/// Mirrors the string-matching style of `state_from_docker` so it's
+/// robust across bollard enum shapes (#550 A).
+async fn container_exit_code(docker: &Docker, container_id: &str) -> Option<i64> {
+    let info = docker.inspect_container(container_id, None).await.ok()?;
+    let state = info.state?;
+    let status = format!("{:?}", state.status).to_ascii_lowercase();
+    if status.contains("exited") || status.contains("dead") {
+        Some(state.exit_code.unwrap_or(-1))
+    } else {
+        None
+    }
+}
+
+/// Build a readiness-failure error enriched with the tail of the
+/// container's logs (#550 B). Best-effort: if logs can't be read, just
+/// return the headline. The tail surfaces in the operator-facing warn
+/// log and the admin Logs tab — it is never returned to an end user.
+async fn readiness_failure(
+    backend: &LocalDockerBackend,
+    container_id: &str,
+    headline: String,
+) -> CoreError {
+    match backend.logs_for_container(container_id, READINESS_LOG_TAIL).await {
+        Ok(lines) if !lines.is_empty() => CoreError::Backend(format!(
+            "{headline}\n--- last {} container log line(s) ---\n{}",
+            lines.len(),
+            lines.join("\n")
+        )),
+        _ => CoreError::Backend(headline),
+    }
+}
+
+/// Two-phase readiness with crash detection. On any failure the returned
+/// error carries the tail of the container's logs (#550). The
+/// `container_id` and the backend handle let us inspect the container
+/// state (to fail fast on a startup crash) and read its logs.
+async fn wait_for_ready(
+    backend: &LocalDockerBackend,
+    container_id: &str,
+    addr: SocketAddr,
+) -> CoreResult<()> {
     let deadline = std::time::Instant::now() + READINESS_TIMEOUT;
 
     // Phase 1: TCP connect.
     loop {
         match TcpStream::connect(addr).await {
             Ok(_) => break,
-            Err(_) if std::time::Instant::now() < deadline => {
-                sleep(READINESS_INTERVAL).await;
-            }
             Err(e) => {
-                return Err(CoreError::Backend(format!(
-                    "container at {addr} never accepted TCP within {:?}: {e}",
-                    READINESS_TIMEOUT
-                )));
+                // (#550 A) Fail fast if the container already exited —
+                // e.g. it crashed on startup (a failed DB connection) —
+                // rather than burning the whole readiness budget.
+                if let Some(code) = container_exit_code(&backend.docker, container_id).await {
+                    return Err(readiness_failure(
+                        backend,
+                        container_id,
+                        format!("container at {addr} exited (code {code}) during startup, before it accepted TCP"),
+                    )
+                    .await);
+                }
+                if std::time::Instant::now() < deadline {
+                    sleep(READINESS_INTERVAL).await;
+                } else {
+                    return Err(readiness_failure(
+                        backend,
+                        container_id,
+                        format!("container at {addr} never accepted TCP within {:?}: {e}", READINESS_TIMEOUT),
+                    )
+                    .await);
+                }
             }
         }
     }
@@ -1006,14 +1069,27 @@ async fn wait_for_ready(addr: SocketAddr) -> CoreResult<()> {
         };
         match tokio::time::timeout(Duration::from_secs(2), attempt).await {
             Ok(Ok(n)) if n > 0 => return Ok(()),
-            _ if std::time::Instant::now() < deadline => {
-                sleep(READINESS_INTERVAL).await;
-            }
             _ => {
-                return Err(CoreError::Backend(format!(
-                    "container at {addr} accepted TCP but never answered HTTP within {:?}",
-                    READINESS_TIMEOUT
-                )));
+                // (#550 A) Same fail-fast for a crash that happens after
+                // the port briefly opened (TCP accepted, then exited).
+                if let Some(code) = container_exit_code(&backend.docker, container_id).await {
+                    return Err(readiness_failure(
+                        backend,
+                        container_id,
+                        format!("container at {addr} exited (code {code}) during startup, before it answered HTTP"),
+                    )
+                    .await);
+                }
+                if std::time::Instant::now() < deadline {
+                    sleep(READINESS_INTERVAL).await;
+                } else {
+                    return Err(readiness_failure(
+                        backend,
+                        container_id,
+                        format!("container at {addr} accepted TCP but never answered HTTP within {:?}", READINESS_TIMEOUT),
+                    )
+                    .await);
+                }
             }
         }
     }
@@ -1261,6 +1337,53 @@ mod tests {
         assert_eq!(cfg.cmd, Some(cmd), "cmd override not applied");
 
         backend.stop(&replica.id).await.expect("stop");
+    }
+
+    /// #550: a container that crashes on startup (e.g. it can't reach its
+    /// DB) fails the spawn *fast* — not after the full readiness timeout —
+    /// and the error carries the container's log tail so the operator sees
+    /// *why* without re-running `docker run` by hand.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn spawn_failure_surfaces_exit_and_logs() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        // Publish :80 but never listen on it; print a diagnostic line,
+        // then exit non-zero a moment later — mimicking an app that halts
+        // because it couldn't connect to its database.
+        let req = ruscker_core::SpawnRequest::new("itest-crash", &image)
+            .with_port(80)
+            .with_cmd(vec![
+                "sh".into(),
+                "-c".into(),
+                "echo 'FATAL: could not connect to database'; sleep 1; exit 7".into(),
+            ]);
+        let started = std::time::Instant::now();
+        let err = backend
+            .spawn_request(&req)
+            .await
+            .expect_err("a crashing container must fail the spawn");
+        let elapsed = started.elapsed();
+        let msg = err.to_string();
+
+        // (A) fails fast — well under the 60 s readiness timeout.
+        assert!(
+            elapsed < std::time::Duration::from_secs(30),
+            "expected fast failure on crash, took {elapsed:?}"
+        );
+        assert!(
+            msg.contains("exited") && msg.contains("code 7"),
+            "exit code not reported in error: {msg}"
+        );
+        // (B) the container's log tail is attached.
+        assert!(
+            msg.contains("could not connect to database"),
+            "container log tail missing from error: {msg}"
+        );
+
+        // Reap the dead (label-scoped) container.
+        let _ = backend.prune_stopped().await;
     }
 
     /// #453 part B: the disk-panel methods see a live replica + its image

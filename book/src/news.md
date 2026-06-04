@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.57 — 2026-06-04
+
+Consistent Media filter styling.
+
+**Admin**
+- The Media library's search box and type filter now use the same look
+  as the other admin controls (they were previously unstyled / a
+  mismatched pill).
+
 ## v0.1.56 — 2026-06-04
 
 Filter the Media library by type.

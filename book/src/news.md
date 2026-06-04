@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.64 — 2026-06-04
+
+Audit fixes, batch 5 (Docker backend).
+
+**Fixes (from the code audit)**
+- The Docker backend distinguishes a real image-not-found (404) from a
+  daemon error, rebuilds replica uptime from the container's real
+  creation time after a restart, and maps container state by matching
+  the API enum directly (#586).
+- The disk panel's "unused images" detection cross-references the real
+  running containers instead of an unreliable per-image count, so an
+  image in use is no longer flagged as reclaimable (#585).
+
 ## v0.1.63 — 2026-06-04
 
 Audit fixes, batch 4.

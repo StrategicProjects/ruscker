@@ -170,6 +170,17 @@ pub struct AppState {
     /// closes. Shared (Arc) so the signal handler and every request
     /// handler observe the same flag.
     pub draining: Arc<std::sync::atomic::AtomicBool>,
+
+    /// Hot-path spec cache (#587): `find_spec` runs on every proxied
+    /// request (incl. every subresource), and a DB-first lookup parses
+    /// `config_json` each time. This caches the resolved spec by id for a
+    /// short TTL ([`crate::routes::proxy::SPEC_CACHE_TTL`]) so a page
+    /// load's burst of requests hits memory, not the DB. Only positive
+    /// results are cached (so the map stays bounded by the real catalog);
+    /// the TTL bounds staleness so an admin edit takes effect without any
+    /// explicit invalidation wiring. Shared so every cloned `AppState`
+    /// sees the same cache.
+    pub spec_cache: Arc<dashmap::DashMap<String, (Arc<ruscker_config::Spec>, std::time::Instant)>>,
 }
 
 impl AppState {
@@ -225,6 +236,7 @@ impl AdminServer {
             leader: std::sync::Arc::new(leader::AlwaysLeader),
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            spec_cache: Arc::new(dashmap::DashMap::new()),
         };
         Ok(Self {
             addr,

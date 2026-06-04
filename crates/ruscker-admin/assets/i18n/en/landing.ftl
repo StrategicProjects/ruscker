@@ -261,6 +261,7 @@ admin-images-choose = Choose image
 admin-images-builtin = Built-in logos
 admin-images-builtin-tag = built-in
 admin-images-uploaded = Image uploaded:
+admin-images-renamed = renamed because this name was already taken:
 admin-images-empty = No images yet. Upload the first one above.
 admin-images-delete = Delete
 admin-images-delete-confirm = Delete this image? Specs referencing the filename will fall back to the tinted cover.

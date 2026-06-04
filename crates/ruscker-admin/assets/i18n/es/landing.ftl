@@ -261,6 +261,7 @@ admin-images-choose = Elegir imagen
 admin-images-builtin = Logos integrados
 admin-images-builtin-tag = integrado
 admin-images-uploaded = Imagen subida:
+admin-images-renamed = renombrada porque este nombre ya estaba en uso:
 admin-images-empty = Aún no hay imágenes. Suba la primera arriba.
 admin-images-delete = Eliminar
 admin-images-delete-confirm = ¿Eliminar esta imagen? Las specs que referencian el archivo mostrarán el cover tintado.

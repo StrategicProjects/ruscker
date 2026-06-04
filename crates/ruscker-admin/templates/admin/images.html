@@ -23,6 +23,9 @@
   <div class="admin-flash-ok mb-4" role="status">
     <i class="ti ti-check" aria-hidden="true"></i>
     {{ self.t("admin-images-uploaded") }} <code>{{ name }}</code>
+    {% match flash_renamed %}{% when Some with (original) %}
+      <span class="text-[color:var(--text-muted)]">— {{ self.t("admin-images-renamed") }} <code>{{ original }}</code></span>
+    {% when None %}{% endmatch %}
   </div>
 {% when None %}{% endmatch %}
 

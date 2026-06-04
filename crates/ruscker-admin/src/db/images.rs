@@ -212,6 +212,50 @@ pub async fn filename_for(db: &ConfigDb, id: &str) -> Result<Option<String>> {
     Ok(row.map(|(f,)| f))
 }
 
+/// Cheap existence check by filename (no BLOB fetched). Used to pick a
+/// non-colliding name for a manual upload.
+pub async fn filename_taken(db: &ConfigDb, name: &str) -> Result<bool> {
+    let row: Option<(i64,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT 1 FROM images WHERE filename = ? LIMIT 1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .context("image filename exists (sqlite)")?
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT 1 FROM images WHERE filename = $1 LIMIT 1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .context("image filename exists (postgres)")?
+        }
+    };
+    Ok(row.is_some())
+}
+
+/// Resolve a free filename for a manual upload: returns `desired` if no
+/// image row uses it, otherwise the first free `stem-N.ext` variant
+/// (N = 2, 3, …). This lets a same-named upload keep BOTH images instead
+/// of silently overwriting the existing one. The YAML-import path keeps
+/// using exact names (it pre-checks and skips), so it never calls this.
+pub async fn unique_filename(db: &ConfigDb, desired: &str) -> Result<String> {
+    if !filename_taken(db, desired).await? {
+        return Ok(desired.to_string());
+    }
+    let (stem, ext) = match desired.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (desired.to_string(), String::new()),
+    };
+    for n in 2..=9999 {
+        let candidate = format!("{stem}-{n}{ext}");
+        if !filename_taken(db, &candidate).await? {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!("no free filename for {desired} after 9999 tries")
+}
+
 /// Delete an image by id. Returns the deleted row's filename (so the
 /// caller can invalidate caches keyed by it, #301), or `None` if no
 /// such image existed. Audit row is written when a row was removed.

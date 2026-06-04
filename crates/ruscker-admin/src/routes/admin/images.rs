@@ -70,6 +70,9 @@ struct ImagesPage<'a> {
     refs: String,
     /// Set on successful upload — drives a one-shot toast.
     flash_uploaded: Option<String>,
+    /// The originally-requested name when the upload was auto-renamed to
+    /// avoid overwriting an existing image — drives the "renamed" note.
+    flash_renamed: Option<String>,
     flash_error: Option<String>,
 }
 
@@ -132,7 +135,7 @@ async fn index(
     loc: Locale,
     theme: Theme,
 ) -> Response {
-    render_index(&state, loc, theme, editor.role, None, None).await
+    render_index(&state, loc, theme, editor.role, None, None, None).await
 }
 
 async fn render_index(
@@ -141,6 +144,7 @@ async fn render_index(
     theme: Theme,
     role: Role,
     flash_uploaded: Option<String>,
+    flash_renamed: Option<String>,
     flash_error: Option<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
@@ -188,6 +192,7 @@ async fn render_index(
         images,
         refs,
         flash_uploaded,
+        flash_renamed,
         flash_error,
     };
     super::render(&page)
@@ -208,6 +213,7 @@ async fn upload(
     // through everything and pick the first one whose field_name
     // matches; other fields (CSRF token, etc.) are ignored.
     let mut last_uploaded_name: Option<String> = None;
+    let mut last_renamed_from: Option<String> = None;
     let mut last_error: Option<String> = None;
 
     loop {
@@ -235,7 +241,7 @@ async fn upload(
             continue; // empty file input — nothing chosen
         }
 
-        let processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
             Ok(p) => p,
             Err(err) => {
                 tracing::warn!(error = ?err, filename, "rejecting upload");
@@ -243,11 +249,26 @@ async fn upload(
                 continue;
             }
         };
+        // Don't silently overwrite a same-named image: pick a free name
+        // (`logo.webp` → `logo-2.webp`) so both are kept, and tell the
+        // operator it was renamed. The import path keeps exact names.
+        let desired = processed.filename.clone();
+        let unique = match db::images::unique_filename(pool, &desired).await {
+            Ok(u) => u,
+            Err(err) => {
+                tracing::error!(error = ?err, "unique filename failed");
+                last_error = Some(format!("save: {err}"));
+                continue;
+            }
+        };
+        if unique != desired {
+            processed.filename = unique.clone();
+            last_renamed_from = Some(desired);
+        }
         let stored_name = processed.filename.clone();
         match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_id) => {
-                // A re-upload replaced the bytes behind this filename —
-                // drop any cached thumbnail so the new image shows (#301).
+                // Drop any cached thumbnail keyed by this filename (#301).
                 crate::routes::assets::invalidate_thumb(&stored_name);
                 last_uploaded_name = Some(stored_name);
             }
@@ -264,6 +285,7 @@ async fn upload(
         theme,
         editor.role,
         last_uploaded_name,
+        last_renamed_from,
         last_error,
     )
     .await
@@ -322,10 +344,19 @@ async fn upload_inline(
         if bytes.is_empty() {
             continue;
         }
-        let processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
             Ok(p) => p,
             Err(err) => return inline_err(StatusCode::UNPROCESSABLE_ENTITY, err.to_string()),
         };
+        // Auto-rename on collision so we never overwrite an existing image;
+        // the JSON returns the actual stored name, which the picker uses.
+        match db::images::unique_filename(pool, &processed.filename).await {
+            Ok(u) => processed.filename = u,
+            Err(err) => {
+                tracing::error!(error = ?err, "inline unique filename failed");
+                return inline_err(StatusCode::INTERNAL_SERVER_ERROR, "save failed");
+            }
+        }
         let name = processed.filename.clone();
         return match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_) => {

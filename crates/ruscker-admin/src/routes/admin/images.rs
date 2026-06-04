@@ -13,12 +13,13 @@
 
 use askama::Template;
 use axum::{
-    extract::{DefaultBodyLimit, Multipart, Path, State},
+    extract::{DefaultBodyLimit, Multipart, Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
-    Json, Router,
+    Form, Json, Router,
 };
+use serde::Deserialize;
 
 use crate::auth::{RequireEditor, Role};
 use crate::db;
@@ -41,6 +42,7 @@ pub fn routes() -> Router<AppState> {
         // full page navigation to the media library.
         .route("/admin/media/upload-inline", post(upload_inline))
         .route("/admin/media/{id}/delete", post(delete))
+        .route("/admin/media/{id}/rename", post(rename))
         // 301 from the old path so any bookmarks / in-flight
         // links keep working.
         .route(
@@ -129,13 +131,30 @@ impl<'a> ImagesPage<'a> {
 
 }
 
+#[derive(Deserialize)]
+struct MediaQuery {
+    /// Error code from a failed rename redirect (`taken` | `invalid`).
+    #[serde(default)]
+    error: Option<String>,
+}
+
 async fn index(
     editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
+    Query(q): Query<MediaQuery>,
 ) -> Response {
-    render_index(&state, loc, theme, editor.role, None, None, None).await
+    // A rename can bounce back with an error code; localize it into the
+    // shared error flash. Success is silent — the renamed tile is visible.
+    let flash_error = q.error.as_deref().map(|code| {
+        let key = match code {
+            "taken" => "admin-images-rename-taken",
+            _ => "admin-images-rename-invalid",
+        };
+        state.locales.t(loc, key, None)
+    });
+    render_index(&state, loc, theme, editor.role, None, None, flash_error).await
 }
 
 async fn render_index(
@@ -385,6 +404,132 @@ const RUSCKER_DEFAULT_LOGO: &str = "/assets/img/ruscker-mark.svg";
 /// True when a `logo`/`cover` value points at `filename`.
 fn references_image(value: &str, filename: &str) -> bool {
     value == filename || value.contains(&format!("/assets/img/{filename}"))
+}
+
+/// Rewrite a `logo`/`cover`/landing URL that referenced `old` to point at
+/// `new`, in both the bare-filename and `/assets/img/<file>` forms.
+fn rewrite_reference(value: &str, old: &str, new: &str) -> String {
+    if value == old {
+        return new.to_string();
+    }
+    value.replace(
+        &format!("/assets/img/{old}"),
+        &format!("/assets/img/{new}"),
+    )
+}
+
+#[derive(Deserialize)]
+struct RenameForm {
+    newname: String,
+}
+
+/// Rename a Media image. The new name keeps the original extension (the
+/// BLOB is unchanged); a collision is rejected (not silently suffixed —
+/// the operator chose this name). Every spec logo/cover and landing logo
+/// that referenced the old name is rewritten to the new one, so cards
+/// don't break.
+async fn rename(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Form(form): Form<RenameForm>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let old = match db::images::filename_for(pool, &id).await {
+        Ok(Some(f)) => f,
+        Ok(None) => return Redirect::to("/admin/media").into_response(),
+        Err(err) => {
+            tracing::error!(error = ?err, id, "rename lookup failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "lookup failed").into_response();
+        }
+    };
+
+    // Keep the original extension; sanitize the operator's stem.
+    let old_ext = old.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+    let san = crate::images::sanitize_basename(&form.newname);
+    let new = if old_ext.is_empty() {
+        san.clone()
+    } else {
+        crate::images::rewrite_extension(&san, old_ext)
+    };
+    if san.trim_matches('.').is_empty() {
+        return Redirect::to("/admin/media?error=invalid").into_response();
+    }
+    if new == old {
+        return Redirect::to("/admin/media").into_response(); // no-op
+    }
+    match db::images::filename_taken(pool, &new).await {
+        Ok(true) => return Redirect::to("/admin/media?error=taken").into_response(),
+        Ok(false) => {}
+        Err(err) => {
+            tracing::error!(error = ?err, "rename collision check failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "check failed").into_response();
+        }
+    }
+
+    // Rewrite spec logo/cover references old → new.
+    if let Ok(specs) = db::specs::list_all(pool).await {
+        for spec in specs {
+            let logo_hit = spec
+                .template_properties
+                .get_str("logo")
+                .is_some_and(|v| references_image(v, &old));
+            let cover_hit = spec
+                .template_properties
+                .get_str("cover")
+                .is_some_and(|v| references_image(v, &old));
+            if !logo_hit && !cover_hit {
+                continue;
+            }
+            let mut spec = spec;
+            if logo_hit {
+                if let Some(v) = spec.template_properties.get_str("logo") {
+                    let nv = rewrite_reference(v, &old, &new);
+                    spec.template_properties.set_str("logo", &nv);
+                }
+            }
+            if cover_hit {
+                if let Some(v) = spec.template_properties.get_str("cover") {
+                    let nv = rewrite_reference(v, &old, &new);
+                    spec.template_properties.set_str("cover", &nv);
+                }
+            }
+            if let Err(e) = db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
+                tracing::warn!(spec = %spec.id, error = ?e, "rewrite spec image on rename failed");
+            }
+        }
+    }
+
+    // Rewrite landing header/footer logo URLs old → new.
+    if let Ok(mut lc) = db::landing::fetch(pool).await {
+        let mut touched = false;
+        for logo in &mut lc.logos {
+            if references_image(&logo.url, &old) {
+                logo.url = rewrite_reference(&logo.url, &old, &new);
+                touched = true;
+            }
+        }
+        if touched {
+            if let Err(e) = db::landing::update(pool, &lc, Some(editor.actor())).await {
+                tracing::warn!(error = ?e, "rewrite landing logos on rename failed");
+            }
+        }
+    }
+
+    match db::images::rename(pool, &id, &new, Some(editor.actor())).await {
+        Ok(()) => {
+            crate::routes::assets::invalidate_thumb(&old);
+            crate::routes::assets::invalidate_thumb(&new);
+            tracing::info!(id, %old, %new, "image renamed; references rewritten");
+            Redirect::to("/admin/media").into_response()
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, id, "image rename failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "rename failed").into_response()
+        }
+    }
 }
 
 async fn delete(

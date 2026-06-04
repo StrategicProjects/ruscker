@@ -101,6 +101,21 @@
               </div>
             </template>
           </div>
+          {# Rename: prompt for a new name (extension is kept server-side),
+             then submit. References on cards/landing follow the rename. The
+             prompt text must carry no apostrophe — Askama escapes it and the
+             browser would break the single-quoted JS string (cf. #532). #}
+          <form method="post" :action="assetUrl('/admin/media/' + img.id + '/rename')"
+                @submit="
+                  let nn = prompt('{{ self.t("admin-images-rename-prompt") }}', img.filename);
+                  if (!nn || !nn.trim() || nn.trim() === img.filename) { $event.preventDefault(); return; }
+                  $el.querySelector('input[name=newname]').value = nn.trim();
+                ">
+            <input type="hidden" name="newname">
+            <button type="submit" class="image-tile-rename" title="{{ self.t("admin-images-rename") }}">
+              <i class="ti ti-pencil" aria-hidden="true"></i>
+            </button>
+          </form>
           <form method="post" :action="assetUrl('/admin/media/' + img.id + '/delete')"
                 @submit="if (!confirm(img.in_use ? '{{ self.t("admin-images-delete-confirm-inuse") }}' : '{{ self.t("admin-images-delete-confirm") }}')) $event.preventDefault()">
             <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">

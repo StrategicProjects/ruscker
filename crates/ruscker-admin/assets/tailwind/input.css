@@ -1339,6 +1339,18 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .image-tile:hover .image-tile-delete { opacity: 1; }
 .image-tile-delete:hover { background: var(--color-lock); }
 
+.image-tile-rename {
+  position: absolute; top: 6px; right: 32px;
+  background: rgba(0, 0, 0, 0.6); color: white;
+  border: none; border-radius: 4px;
+  width: 22px; height: 22px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s;
+}
+.image-tile-rename i { font-size: 13px; }
+.image-tile:hover .image-tile-rename { opacity: 1; }
+.image-tile-rename:hover { background: var(--accent, #2563eb); }
+
 /* ─── Credentials store ───────────────────────────────────────── */
 .creds-form {
   background: var(--surface);

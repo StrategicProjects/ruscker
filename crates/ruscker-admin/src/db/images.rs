@@ -256,6 +256,60 @@ pub async fn unique_filename(db: &ConfigDb, desired: &str) -> Result<String> {
     anyhow::bail!("no free filename for {desired} after 9999 tries")
 }
 
+/// Rename an image (filename only — the id and BLOB are untouched).
+/// The caller must ensure `new_filename` is free and fix up any
+/// references first. Writes an `image.rename` audit row.
+pub async fn rename(db: &ConfigDb, id: &str, new_filename: &str, actor: Option<&str>) -> Result<()> {
+    let now = Utc::now();
+    let target = format!("image:{id}");
+    let diff = serde_json::to_string(&serde_json::json!({ "filename": new_filename }))?;
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (sqlite)")?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'image.rename', ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit image.rename (sqlite)")?;
+            tx.commit().await.context("commit image rename")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (postgres)")?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'image.rename', $2, $3, $4)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit image.rename (postgres)")?;
+            tx.commit().await.context("commit image rename")?;
+        }
+    }
+    Ok(())
+}
+
 /// Delete an image by id. Returns the deleted row's filename (so the
 /// caller can invalidate caches keyed by it, #301), or `None` if no
 /// such image existed. Audit row is written when a row was removed.

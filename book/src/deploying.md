@@ -252,6 +252,15 @@ rest serve traffic. If the leader dies its lock releases and another
 takes over within one scaler tick — nothing to configure. Each instance
 logs its role at startup (`acquired leadership` / `standing by`).
 
+> **Use a direct Postgres connection for the leader lock.** The advisory
+> lock is **session-scoped** — it lives on one specific backend
+> connection and is held for the process's lifetime. Point
+> `--config-db-url` (or `--session-store-url`) at Postgres **directly**, or
+> through a pooler in **session** mode only. A transaction-pooling proxy
+> (e.g. PgBouncer in transaction mode) hands the lock-holding connection
+> to other clients between statements, which can break the single-leader
+> guarantee and let two instances scale at once.
+
 **App traffic** doesn't need sticky upstreams — proxy sessions are
 shared (the sticky cookie is a shared-key HMAC and the `proxy_sessions`
 table is shared), so round-robin is fine for `/app` and `/api`. Keep

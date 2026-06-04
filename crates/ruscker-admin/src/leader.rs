@@ -36,6 +36,13 @@
 //! Single-node (SQLite, or no config DB) installs use [`AlwaysLeader`]:
 //! there's only one process, so it's always the leader and the scaler
 //! runs unconditionally — zero added dependencies.
+//!
+//! **Operational requirement:** because the lock is session-scoped, the
+//! Postgres URL (`--config-db-url` / `--session-store-url`) must reach the
+//! server **directly** or through a pooler in *session* mode only. A
+//! transaction-pooling proxy (PgBouncer transaction mode) reassigns the
+//! lock-holding backend connection between statements, which can break the
+//! single-leader guarantee. See the HA section of the deploy guide.
 
 use std::time::Duration;
 use sqlx::postgres::PgConnection;

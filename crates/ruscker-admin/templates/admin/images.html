@@ -70,7 +70,7 @@
      leaving `q`/`filtered` undefined and no tiles). The browser un-escapes
      `&quot;` back to `"` before Alpine parses it. #}
   <div x-data="ruscker.mediaGallery({{ self.images_json() }})" x-cloak>
-    <div class="mb-4 flex flex-wrap items-center gap-2">
+    <div class="mt-6 mb-4 flex flex-wrap items-center gap-2">
       <input type="search" x-model="q"
              placeholder="{{ self.t("admin-images-search") }}"
              class="admin-table-search">

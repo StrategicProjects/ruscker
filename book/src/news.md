@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.58 — 2026-06-04
+
+Docs: lead with Ruscker.
+
+**Documentation**
+- The introduction, README and the former "Ruscker vs. alternatives"
+  page (now **"Where Ruscker fits"**) were rewritten to describe what
+  Ruscker is and does rather than compare it against other systems — the
+  feature-comparison table and competitor framing are gone, while the
+  useful Ruscker-specific guidance (sub-path strip model, secrets via
+  env-var) stays.
+
 ## v0.1.57 — 2026-06-04
 
 Consistent Media filter styling.

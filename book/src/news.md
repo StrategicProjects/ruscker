@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.65 — 2026-06-04
+
+Audit fixes, batch 6 (hot-path cache).
+
+**Performance (from the code audit)**
+- The proxy caches the resolved spec for each request for a short window
+  (1s) instead of querying the database on every request — including
+  every subresource of a page load (#587).
+
 ## v0.1.64 — 2026-06-04
 
 Audit fixes, batch 5 (Docker backend).

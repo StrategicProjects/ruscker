@@ -1,17 +1,17 @@
 # FAQ
 
-### Is Ruscker really compatible with my ShinyProxy `application.yml`?
+### Can I import my existing `application.yml`?
 
-Yes — Ruscker reads the ShinyProxy YAML schema. Point it at your existing
+Yes — Ruscker reads the familiar YAML schema. Point it at your existing
 file and run `ruscker validate application.yml --strict-compat` to get a
-report of any ShinyProxy feature Ruscker doesn't support yet (it refuses
-to silently ignore them). See [Migrating from ShinyProxy](./migrating.md).
+report of any feature Ruscker doesn't support yet (it refuses to silently
+ignore them). See [Migrate an existing config](./migrating.md).
 
-### Do I need Java or the JVM?
+### What does Ruscker need to run?
 
-No. Ruscker is a single static binary written in Rust. There's no JVM, no
-Java toolchain, and no application server to manage — the idle footprint
-is **~14 MB** instead of the hundreds of MB a JVM-based proxy idles at.
+Just the binary and a Docker host. Ruscker is a single static binary
+written in Rust — no language runtime, no toolchain, and no application
+server to manage alongside it. The idle footprint is **~14 MB**.
 
 ### Which app frameworks can it host?
 
@@ -20,7 +20,7 @@ the reference case, but Streamlit, Dash, Voilà, Gradio, Panel, Bokeh,
 Plumber, FastAPI, Flask, and plain web services all work. The full list
 is in [What Ruscker can serve](./use-cases.md).
 
-### Does it isolate sessions like ShinyProxy (and unlike Shiny Server Free)?
+### Does it isolate sessions?
 
 Yes. Stateful apps get **one container per session** with sticky routing
 and WebSocket forwarding by default. Stateless APIs are load-balanced

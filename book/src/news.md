@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.55 — 2026-06-04
+
+Media filename management.
+
+**Admin**
+- Uploading an image whose name already exists no longer **silently
+  overwrites** it — the upload is kept under a free name
+  (`logo.webp` → `logo-2.webp`) and the toast says it was renamed.
+- New **rename** action on each Media tile. The new name keeps the
+  original extension, a taken name is refused, and every card logo/cover
+  and landing logo that referenced the old name is **rewritten** to the
+  new one — so nothing breaks.
+
 ## v0.1.54 — 2026-06-03
 
 Clearer user-account form.

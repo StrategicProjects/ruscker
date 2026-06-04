@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.63 — 2026-06-04
+
+Audit fixes, batch 4.
+
+**Reliability (from the code audit)**
+- The auto-scaler now refuses to spawn past `max-replicas`, re-checked
+  under the spawn lock — a defensive cap against races and split-brain
+  HA leaders (#581).
+
 ## v0.1.62 — 2026-06-04
 
 Audit fixes, batch 3.

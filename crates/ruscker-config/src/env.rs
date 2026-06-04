@@ -94,10 +94,41 @@ pub fn interpolate(input: &str) -> Result<String> {
             output.push_str(line);
             continue;
         }
-        output.push_str(&interpolate_line(line)?);
+        // Interpolate only the code part, leaving any trailing inline
+        // comment verbatim — a `${VAR}` that appears only in a comment
+        // (e.g. `port: 3838  # uses ${VAR}`) must not hard-fail the parse.
+        let (code, comment) = split_inline_comment(line);
+        output.push_str(&interpolate_line(code)?);
+        output.push_str(comment);
     }
 
     Ok(output)
+}
+
+/// Split a line into its `(code, comment)` parts at the first **inline**
+/// `#` comment — a `#` that is outside quotes and preceded by whitespace
+/// (or at the very start). Returns `(line, "")` when there is no inline
+/// comment. This lets interpolation skip a `${VAR}` that only appears in a
+/// trailing comment, which would otherwise raise `MissingEnvVar`.
+///
+/// A `#` that is inside a quoted scalar (`url: "http://x#frag"`) or that
+/// sits mid-token (`tag: a#b`, a valid YAML scalar) is **not** a comment.
+fn split_inline_comment(line: &str) -> (&str, &str) {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut prev_ws = true; // start-of-line counts as "preceded by whitespace"
+    for (i, b) in line.bytes().enumerate() {
+        match b {
+            b'\'' if !in_double => in_single = !in_single,
+            b'"' if !in_single => in_double = !in_double,
+            b'#' if !in_single && !in_double && prev_ws => {
+                return (&line[..i], &line[i..]);
+            }
+            _ => {}
+        }
+        prev_ws = b == b' ' || b == b'\t';
+    }
+    (line, "")
 }
 
 /// Resolve `${VAR}` / `${VAR:-default}` in a single scalar value (e.g. a
@@ -323,5 +354,44 @@ proxy:
         assert!(!is_pure_env_ref("plainsecret"));
         assert!(!is_pure_env_ref(""));
         assert!(!is_pure_env_ref("${}")); // empty braces, no valid name
+    }
+
+    #[test]
+    fn inline_comment_var_is_not_interpolated() {
+        // #584: a `${VAR}` that only appears in a trailing comment must not
+        // fail the parse, even when the var is undefined.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::remove_var("RUSCKER_ONLY_IN_COMMENT");
+        let out = interpolate("port: 3838  # uses ${RUSCKER_ONLY_IN_COMMENT}\n").unwrap();
+        assert_eq!(out, "port: 3838  # uses ${RUSCKER_ONLY_IN_COMMENT}\n");
+    }
+
+    #[test]
+    fn inline_comment_kept_while_value_interpolates() {
+        with_env(&[("RUSCKER_PORT", "9000")], || {
+            let out = interpolate("port: ${RUSCKER_PORT}  # default ${UNSET_VAR}\n").unwrap();
+            assert_eq!(out, "port: 9000  # default ${UNSET_VAR}\n");
+        });
+    }
+
+    #[test]
+    fn hash_inside_quotes_is_not_a_comment() {
+        with_env(&[("RUSCKER_FRAG", "frag")], || {
+            // The `#` is inside the quoted value, so the whole value
+            // interpolates; nothing is treated as a comment.
+            let out = interpolate("url: \"http://x/#${RUSCKER_FRAG}\"\n").unwrap();
+            assert_eq!(out, "url: \"http://x/#frag\"\n");
+        });
+    }
+
+    #[test]
+    fn flow_mapping_container_env_is_preserved_verbatim() {
+        // #584/#260: an inline (flow-mapping) `container-env` keeps its
+        // `${VAR}` literal, so an app secret never resolves at parse.
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        env::remove_var("RUSCKER_DB_PASSWORD");
+        let yaml = "container-env: {DB_PASSWORD: \"${RUSCKER_DB_PASSWORD}\"}\n";
+        let out = interpolate(yaml).unwrap();
+        assert_eq!(out, yaml, "flow-mapping container-env preserved verbatim");
     }
 }

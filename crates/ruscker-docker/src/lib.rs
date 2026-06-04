@@ -303,10 +303,18 @@ impl LocalDockerBackend {
         // the round-trip when the image is present, mirroring the
         // operator's expectation of "no-op when local". A flaky
         // network shouldn't stop a container that's already on
-        // the host.
-        if self.docker.inspect_image(image).await.is_ok() {
-            tracing::debug!(image, "image present locally; skipping pull");
-            return Ok(());
+        // the host. A transient daemon error (not a 404) is logged but
+        // still falls through to a pull — the spawn needs the image, and
+        // pulling is idempotent (#586).
+        match image_is_present(&self.docker, image).await {
+            Ok(true) => {
+                tracing::debug!(image, "image present locally; skipping pull");
+                return Ok(());
+            }
+            Ok(false) => {} // genuinely absent → pull below
+            Err(e) => {
+                tracing::warn!(image, error = %e, "image presence check failed; attempting pull");
+            }
         }
         let opts = CreateImageOptions {
             from_image: Some(image.to_string()),
@@ -537,14 +545,21 @@ impl ContainerBackend for LocalDockerBackend {
                 }
             };
 
-            let state = state_from_docker(c.state.as_ref().map(|s| format!("{s:?}").to_ascii_lowercase()).as_deref());
+            let state = state_from_enum(c.state.as_ref());
+            // Use the container's real creation time so a Ruscker restart
+            // doesn't reset every pre-existing replica's uptime to 0 (#586).
+            // `created` is Unix seconds; fall back to now if absent.
+            let started_at = c
+                .created
+                .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0))
+                .unwrap_or_else(Utc::now);
             replicas.push(Replica {
                 id: replica_id,
                 spec_id,
                 container_id: c.id.unwrap_or_default(),
                 upstream,
                 state,
-                started_at: Utc::now(), // exact value would need inspect()
+                started_at,
                 sessions_active: 0,
                 sessions_max: 0,
                 host: None,
@@ -735,12 +750,12 @@ impl ContainerBackend for LocalDockerBackend {
     }
 
     async fn image_present(&self, image: &str) -> CoreResult<bool> {
-        // Same pull-free check `ensure_image_pulled` uses to skip a
-        // redundant pull. `inspect_image` resolves `repo` → `repo:latest`
-        // natively; a 404 (image absent) is a clean `Ok(false)`, not an
-        // error — the editor's indicator distinguishes "absent" from a
-        // real daemon failure (#498).
-        Ok(self.docker.inspect_image(image).await.is_ok())
+        // `inspect_image` resolves `repo` → `repo:latest` natively. A real
+        // 404 is a clean `Ok(false)` (absent); any other daemon failure
+        // is an `Err`, so the editor's indicator distinguishes "absent"
+        // from a real failure (#498) instead of reporting both as absent
+        // (#586).
+        image_is_present(&self.docker, image).await
     }
 
     async fn pull_image(
@@ -1095,6 +1110,35 @@ async fn wait_for_ready(
     }
 }
 
+/// Is `image` present on `docker`? Distinguishes a true 404 (`Ok(false)`,
+/// absent) from any other daemon error (`Err`), so a transient failure
+/// isn't silently reported as "absent" and doesn't trigger a needless
+/// pull on every spawn (#586).
+async fn image_is_present(docker: &Docker, image: &str) -> CoreResult<bool> {
+    match docker.inspect_image(image).await {
+        Ok(_) => Ok(true),
+        Err(bollard::errors::Error::DockerResponseServerError { status_code: 404, .. }) => {
+            Ok(false)
+        }
+        Err(e) => Err(backend_err("inspect image", e)),
+    }
+}
+
+/// Map a container summary's state enum to a [`ReplicaState`]. Matching the
+/// enum variants directly is robust across bollard versions — the previous
+/// `format!("{:?}")` string-matching happened to work but would break on a
+/// bollard bump (#586). Unknown/absent ⇒ `Starting` (conservative).
+fn state_from_enum(s: Option<&ContainerSummaryStateEnum>) -> ReplicaState {
+    use ContainerSummaryStateEnum as E;
+    match s {
+        Some(E::RUNNING) => ReplicaState::Ready,
+        Some(E::CREATED | E::RESTARTING) => ReplicaState::Starting,
+        Some(E::PAUSED) => ReplicaState::Draining,
+        Some(E::EXITED | E::DEAD | E::REMOVING) => ReplicaState::Stopped,
+        _ => ReplicaState::Starting,
+    }
+}
+
 fn state_from_docker(s: Option<&str>) -> ReplicaState {
     match s {
         Some(s) if s.contains("running") => ReplicaState::Ready,
@@ -1150,6 +1194,18 @@ mod tests {
         assert_eq!(state_from_docker(Some("paused")), ReplicaState::Draining);
         assert_eq!(state_from_docker(Some("exited")), ReplicaState::Stopped);
         assert_eq!(state_from_docker(None), ReplicaState::Starting);
+    }
+
+    #[test]
+    fn state_from_enum_maps_variants_directly() {
+        use ContainerSummaryStateEnum as E;
+        assert_eq!(state_from_enum(Some(&E::RUNNING)), ReplicaState::Ready);
+        assert_eq!(state_from_enum(Some(&E::CREATED)), ReplicaState::Starting);
+        assert_eq!(state_from_enum(Some(&E::RESTARTING)), ReplicaState::Starting);
+        assert_eq!(state_from_enum(Some(&E::PAUSED)), ReplicaState::Draining);
+        assert_eq!(state_from_enum(Some(&E::EXITED)), ReplicaState::Stopped);
+        assert_eq!(state_from_enum(Some(&E::DEAD)), ReplicaState::Stopped);
+        assert_eq!(state_from_enum(None), ReplicaState::Starting);
     }
 
     #[test]

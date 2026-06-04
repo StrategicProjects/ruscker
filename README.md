@@ -5,17 +5,18 @@
        alt="Ruscker" height="56">
 </picture>
 
-A lightweight Rust alternative to **ShinyProxy** and **Shiny Server
-Free**. Serves and load-balances containerized interactive web apps
-(R/Shiny, Streamlit, Dash, Voilà) and stateless HTTP APIs (Plumber2,
-FastAPI) behind a single proxy, with a custom landing page and an
-admin panel.
+**Ruscker** is a high-performance **portal and orchestrator** for
+containerized web workloads. It serves and load-balances
+container-per-session interactive apps (R/Shiny, Streamlit, Dash, Voilà,
+Jupyter, RStudio) and container-per-API stateless HTTP services
+(Plumber2, FastAPI) behind a single proxy, with a custom landing page and
+an admin panel.
 
-It ships as a **single static binary, no JVM** — so the idle footprint
-is megabytes, not hundreds of megabytes, and startup is instant.
+It ships as a **single, ultra-lightweight static binary** with **instant
+startup** — the idle footprint sits in the low tens of megabytes.
 
 📖 **Documentation: <https://strategicprojects.github.io/ruscker/>**
-(install · migrating from ShinyProxy · configuration · admin · deploy).
+(install · migrate · configure · admin · deploy).
 
 <p align="center">
   <img src="book/src/images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters." width="860">
@@ -36,26 +37,18 @@ containers are reaped automatically.
 
 ## Why Ruscker
 
-- **ShinyProxy** is mature but heavy: a JVM that idles at hundreds of
-  MB, slow to start, configured by hand-editing YAML and restarting.
-- **Shiny Server Free** doesn't isolate sessions or scale.
-- **Both** have weak admin UIs ("edit YAML and restart").
+Modern web workloads want speed and minimal overhead. Ruscker delivers
+that without giving up convenience:
 
-Ruscker keeps ShinyProxy's `application.yml` schema (so migration is
-friction-free) and adds a real admin panel, a live monitoring
-dashboard, and load balancing on top.
-
-|                        | ShinyProxy   | Shiny Server Free | **Ruscker**          |
-|------------------------|--------------|-------------------|----------------------|
-| Runtime                | JVM          | R process         | single Rust binary   |
-| Idle memory            | 300–500 MB   | —                 | **~14 MB**           |
-| Dependencies           | JVM          | R                 | none (static binary) |
-| Web admin panel        | ✗            | ✗                 | ✓                    |
-| Live monitoring dashboard | ✗         | ✗                 | ✓                    |
-| Session isolation      | ✓            | ✗                 | ✓                    |
-| Auto-scaling           | manual       | ✗                 | automatic            |
-| Native HTTP APIs       | limited      | ✗                 | ✓ (Plumber/FastAPI)  |
-| ShinyProxy YAML        | —            | —                 | 100% compatible      |
+- **Zero-friction migration** — bring your apps over with a familiar
+  YAML schema, no rewrite.
+- **Single compiled binary** — one artifact to ship and run, with a tiny
+  idle footprint (~14 MB) and instant startup.
+- **Batteries included** — a real admin panel, a live monitoring
+  dashboard, and load balancing, out of the box.
+- **Anything in a container** — interactive apps and stateless HTTP APIs
+  alike, isolated per session or pooled per replica, with an auto-scaler
+  that spawns and reaps containers on demand.
 
 ## What it can serve
 
@@ -80,15 +73,14 @@ tool" cases) is in
 **Production-ready and running in production.** Releases are
 multi-arch (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
-has the current version. Where the JVM-based
-stack it replaced idled at hundreds of megabytes, Ruscker idles in the
-low tens:
+has the current version. Built for efficiency, Ruscker's idle footprint
+sits in the low tens of megabytes:
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
 
-> **~540 MB → ~14 MB idle** — roughly a 38× cut, on the same machine
-> serving the same apps. A real 31-spec config migrated with **no
-> unsupported features**, and apps spawn on demand.
+> **~540 MB → ~14 MB idle** — measured on a real production deployment,
+> the same machine serving the same apps. A real 31-spec config migrated
+> with **no unsupported features**, and apps spawn on demand.
 
 What's in the box:
 
@@ -181,7 +173,7 @@ cargo build --release          # rustup fetches the pinned toolchain on first ru
 ## Quickstart
 
 ```bash
-# Validate a config (and check ShinyProxy-feature compatibility)
+# Validate a config (and pre-flight migration compatibility)
 ruscker validate examples/application.yml --strict-compat
 
 # Run the portal + admin + proxy with the Docker backend
@@ -221,7 +213,7 @@ ruscker show    <path>               # render YAML with env vars interpolated
 
 ## YAML compatibility
 
-Ruscker reads ShinyProxy's `application.yml` schema unchanged and adds
+Ruscker reads an existing `application.yml` schema unchanged and adds
 Ruscker-specific fields (API specs, replica pools, landing
 customization) as you go. Migration is typically a one-line change in
 your reverse proxy — point it at Ruscker on the same port and paths.

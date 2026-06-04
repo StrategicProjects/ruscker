@@ -5,17 +5,17 @@
 
 # Ruscker
 
-**Ruscker** is a **portal and orchestrator** for containerized web
-workloads behind one proxy. It handles two shapes:
+**Ruscker** is a high-performance **portal and orchestrator** for
+containerized web workloads. Behind a single proxy, it manages both:
 
 - **Container-per-session** interactive apps — R/Shiny, Streamlit,
   Dash, Voilà, Jupyter, RStudio.
 - **Container-per-API** stateless HTTP services — Plumber2, FastAPI.
 
-It keeps a ShinyProxy-compatible YAML schema for low-friction migration,
-ships as a **single static binary, no JVM**, and adds a real admin
-panel, a live monitoring dashboard, and load balancing. Idle footprint
-is megabytes, not hundreds of megabytes, and startup is instant.
+Deployed as a single, ultra-lightweight **static binary** with **instant
+startup**, Ruscker comes fully equipped with an **admin panel**,
+**real-time monitoring**, and **load balancing**. It uses a familiar
+YAML schema, so migration is smooth and configuration is effortless.
 
 <p align="center">
   <img src="images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters — all served by a single binary." width="860">
@@ -34,25 +34,29 @@ containers are reaped automatically.
   <img src="images/architecture.svg" alt="How Ruscker works: browsers and API clients reach one Ruscker binary, which reverse-proxies to app containers it spawns on demand through the Docker daemon." width="640">
 </p>
 
-## Why
+## Why Ruscker
 
-ShinyProxy is mature but heavy: a JVM that idles at hundreds of MB,
-slow to start, configured by hand-editing YAML and restarting. Shiny
-Server Free doesn't isolate sessions or scale. Ruscker keeps
-ShinyProxy's YAML schema (so migration is friction-free) and adds a
-proper admin panel, a monitoring dashboard, and load balancing.
+Modern web workloads demand speed and minimal overhead. Ruscker is
+engineered to keep the runtime light while staying compatible:
+
+- **Zero-friction migration** — bring your apps over with a familiar
+  YAML schema, no rewrite.
+- **Single compiled binary** — one artifact to ship and run, with a tiny
+  idle footprint and instant startup.
+- **Batteries included** — a proper admin panel, a live monitoring
+  dashboard, and load balancing, out of the box.
 
 ## In production
 
-Ruscker is on **v0.1.57** and runs in production today. Where the
-JVM-based stack it replaced idled at hundreds of megabytes, Ruscker
-idles in the low tens:
+Ruscker is on **v0.1.57** and runs in production today. Built for extreme
+efficiency, its idle footprint sits in the low tens of megabytes:
 
-> **~540 MB → ~14 MB idle** — roughly a 38× cut.
+> **~540 MB → ~14 MB idle** — measured on a real production deployment.
 
-A real 31-spec config migrated with **no unsupported features**, and
-apps spawn on demand. Releases are multi-arch and **cosign-signed**;
-the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
+It handles complex, multi-spec configurations with **no unsupported
+features** during migration, and apps spawn on demand reliably. Releases
+are multi-arch and **cosign-signed**; the [Roadmap](./roadmap.md) tracks
+what's shipped and what's next.
 
 ## What's in the box
 
@@ -74,8 +78,8 @@ the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
   Viewer / Editor / Admin roles**, and a live monitoring dashboard
   (CPU/memory, live-follow logs, stop/restart).
 - **Sub-path mounting**: serve the whole portal under a prefix via
-  `server.context-path` (ShinyProxy-compatible) or `--base-path`. Health
-  probes (`/healthz`, `/readyz`) stay at the root for load balancers.
+  `server.context-path` or `--base-path`. Health probes (`/healthz`,
+  `/readyz`) stay at the root for load balancers.
 - **Operations**: graceful shutdown, structured (JSON) logging, per-API
   rate limiting + CORS, request body-size limits, gzip/br compression,
   immutable-versioned static assets, and an opt-in Prometheus `/metrics`
@@ -89,13 +93,12 @@ the [Roadmap](./roadmap.md) tracks what's shipped and what's next.
 - [Quickstart](./quickstart.md) — from zero to a running app in minutes.
 - [What Ruscker can serve](./use-cases.md) — Shiny, Streamlit, Dash,
   FastAPI, JupyterLab, LLM UIs, BI tools, and more.
-- [Ruscker vs. alternatives](./alternatives.md) — how it compares to
-  ShinyProxy, Shiny Server, Posit Connect, and JupyterHub.
+- [Where Ruscker fits](./alternatives.md) — what Ruscker is for and when
+  to use it.
 - [Installation](./installation.md) — Docker, the `.deb`, or `brew`.
-- [Migrating from ShinyProxy](./migrating.md) — point Ruscker at your
+- [Migrate an existing config](./migrating.md) — point Ruscker at your
   existing `application.yml`.
 - [Configuration](./configuration.md) — the full YAML reference.
 - [The admin panel](./admin.md) — what each screen does.
-- [Deploying in production](./deploying.md) — systemd + nginx,
-  side-by-side with ShinyProxy.
+- [Deploying in production](./deploying.md) — systemd + nginx.
 - [Roadmap](./roadmap.md) — shipped phases and what's planned.

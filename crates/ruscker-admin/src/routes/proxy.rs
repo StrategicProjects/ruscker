@@ -922,12 +922,15 @@ fn set_sticky_cookie(
 /// Reserved `/app/{spec}` sub-path the splash polls for readiness.
 const COLD_PROBE_PATH: &str = "/__ruscker_ready";
 
-/// Whether `spec` has a replica that can serve right now (no spawn) —
-/// the same `pick_replica` test the forward path uses.
+/// Whether `spec` has a replica that can **accept a new session right
+/// now** (Ready with a free seat) — no spawn. Strict (`pick_accepting`):
+/// a full replica returns `false`, so the splash gate scales out instead
+/// of routing the visitor onto an over-subscribed `seats-per-container`
+/// replica (#582).
 async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
     let routing = spec.effective_routing();
     let reg = state.replicas.read().await;
-    pick_replica(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
+    pick_accepting(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
 }
 
 /// True for a top-level document navigation (a GET whose `Accept`
@@ -1037,7 +1040,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     // usable — never hand traffic to a Starting/Draining/Failed one.
     {
         let reg = state.replicas.read().await;
-        if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing, api) {
+        if let Some(r) = pick_accepting(reg.replicas_of(&spec.id), routing, api) {
             return Ok(r);
         }
     }
@@ -1059,15 +1062,34 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     {
         let reg = state.replicas.read().await;
         let replicas = reg.replicas_of(&spec.id);
-        if let Some(r) = pick_replica(replicas, routing, api) {
+        // An accepting replica (Ready + free seat) → use it.
+        if let Some(r) = pick_accepting(replicas, routing, api) {
             return Ok(r);
         }
-        // A sibling may have spawned one that's still coming up (not yet
-        // `Ready`): reuse it rather than spawning a duplicate — that's
-        // the whole point of the coalescer.
-        if let Some(r) = replicas.first() {
+        // Coalescing: a sibling that holds the spawn mutex before us may
+        // have spawned a replica that's still `Starting` — it'll have
+        // seats once Ready, so reuse it instead of spawning a duplicate.
+        if let Some(r) = replicas.iter().find(|r| r.state == ReplicaState::Starting) {
             return Ok(r.clone());
         }
+        // Every existing replica is full (no free seat) and none is coming
+        // up. Seat-based specs honour `seats-per-container` by scaling out:
+        // spawn another replica when under `max-replicas` (#582) rather than
+        // oversubscribing a full one. APIs don't use seats (the auto-scaler
+        // sizes them), so they overload immediately. Only at the replica
+        // cap (or when a spawn would have nothing to fall back to) do seat
+        // specs overload via `pick_replica`'s Ready fallback — never
+        // exceeding `max`. The spec mutex serializes us with the splash
+        // gate's background spawn, so the cap holds.
+        let count = replicas.len();
+        let max = spec.effective_max_replicas() as usize;
+        if api || count >= max {
+            if let Some(r) = pick_replica(replicas, routing, api) {
+                return Ok(r);
+            }
+            // Nothing usable (all Failed/Stopped) — fall through to spawn.
+        }
+        // Seat-based + under max (or nothing usable) → spawn a new replica.
     }
 
     let backend = state
@@ -1089,7 +1111,7 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
         inner_port = ?inner_port,
         with_creds = creds.is_some(),
         with_limits = !limits.is_empty(),
-        "spawning first replica"
+        "spawning replica on demand"
     );
     // Resolve `${VAR}` in container-env here, at the point of use, and
     // fail the spawn naming the missing var (#314) — never inject a
@@ -1254,13 +1276,26 @@ fn pick_index(n: usize) -> usize {
 /// scaler adds real capacity on sustained saturation). Returns `None`
 /// only when no `Ready` replica exists, so the caller spawns.
 fn pick_replica(replicas: &[Replica], routing: RoutingStrategy, api: bool) -> Option<Replica> {
-    select(replicas.iter().filter(|r| r.is_accepting()), routing, api).or_else(|| {
+    pick_accepting(replicas, routing, api).or_else(|| {
+        // Overload fallback: no replica has a free seat, so route to any
+        // `Ready` one rather than 502. Callers that can scale out instead
+        // (the proxy's `pick_or_spawn`, the splash gate) use the strict
+        // `pick_accepting` and only fall back to this at `max-replicas`
+        // (#582).
         select(
             replicas.iter().filter(|r| r.state == ReplicaState::Ready),
             routing,
             api,
         )
     })
+}
+
+/// Strict pick: only a `Ready` replica that still has a **free seat**
+/// (`is_accepting`). Returns `None` when every replica is full — the
+/// signal to scale out rather than oversubscribe a `seats-per-container`
+/// limit (#582). Unlike [`pick_replica`], it never returns a full replica.
+fn pick_accepting(replicas: &[Replica], routing: RoutingStrategy, api: bool) -> Option<Replica> {
+    select(replicas.iter().filter(|r| r.is_accepting()), routing, api)
 }
 
 /// Pick one replica from `candidates` per `routing`. Round-robin spreads
@@ -2241,5 +2276,68 @@ docker-registry-password: hunter2
         // A missing id is not cached (map stays bounded by the catalog).
         assert!(find_spec(&state, "ghost").await.is_none());
         assert!(state.spec_cache.get("ghost").is_none());
+    }
+
+    /// A full Ready replica (seats=1, 1 session) for `spec_id`.
+    fn full_replica(spec_id: &str) -> Replica {
+        Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: spec_id.to_string(),
+            container_id: "full".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 1,
+            sessions_max: 1,
+            host: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn pick_or_spawn_scales_out_when_all_full_under_max() {
+        // #582: the only replica is full (seats=1) and we're under
+        // max-replicas → spawn another rather than overloading it.
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(0),
+        });
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: scaleout\ncontainer-image: test:latest\nseats-per-container: 1\nmax-replicas: 3",
+        )
+        .unwrap();
+        state.replicas.write().await.add(full_replica("scaleout"));
+
+        let _ = pick_or_spawn(&state, &spec).await.expect("pick_or_spawn");
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            1,
+            "scaled out instead of overloading the full replica"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("scaleout").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn pick_or_spawn_overloads_at_max_instead_of_spawning() {
+        // At the replica cap with everything full → reuse the least-loaded
+        // replica, never exceed max-replicas.
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(0),
+        });
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: capped\ncontainer-image: test:latest\nseats-per-container: 1\nmax-replicas: 1",
+        )
+        .unwrap();
+        state.replicas.write().await.add(full_replica("capped"));
+
+        let _ = pick_or_spawn(&state, &spec).await.expect("pick_or_spawn");
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            0,
+            "no spawn at max-replicas"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("capped").len(), 1);
     }
 }

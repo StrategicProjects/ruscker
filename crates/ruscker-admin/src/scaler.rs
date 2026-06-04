@@ -733,6 +733,21 @@ async fn spawn_one(
         .clone();
     let _guard = spec_mutex.lock().await;
 
+    // Defensive cap (#581): re-read the live replica count under the spawn
+    // mutex and refuse to exceed `max-replicas`. The scaler already checks
+    // `count < max` before calling, but that snapshot is taken before the
+    // lock; this backstop also covers a split-brain second leader (HA
+    // without a direct Postgres connection, #596). A no-op return is
+    // correct — the caller asked to add capacity "if there's room", and
+    // there isn't. (Manual restart removes the old replica from the
+    // registry before calling here, so it still sees room: count = max-1.)
+    let max = spec.effective_max_replicas() as usize;
+    let live = state.replicas.read().await.replicas_of(&spec.id).len();
+    if live >= max {
+        tracing::debug!(spec = %spec.id, live, max, "spawn skipped: already at max-replicas");
+        return Ok(());
+    }
+
     let image = spec
         .container_image
         .as_deref()
@@ -1103,6 +1118,37 @@ proxy:
             "DB-only spec scaled to its min-replicas"
         );
         assert_eq!(state.replicas.read().await.replicas_of("dbonly").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn spawn_one_refuses_to_exceed_max_replicas() {
+        // #581 defensive cap: a spawn attempt while the spec is already at
+        // max-replicas is a no-op (re-checked under the spawn mutex), so a
+        // raced pre-lock decision can't overshoot the cap.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n  - id: capped\n    container-image: nginx:alpine\n    min-replicas: 1\n    max-replicas: 2\n",
+            backend.clone(),
+        );
+        // Pre-load the registry to max (2 replicas).
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(fake_replica("capped"));
+            reg.add(fake_replica("capped"));
+        }
+        let spec: ruscker_config::Spec = serde_yaml_ng::from_str(
+            "id: capped\ncontainer-image: nginx:alpine\nmin-replicas: 1\nmax-replicas: 2",
+        )
+        .unwrap();
+        crate::scaler::spawn_replica(&state, &spec).await.unwrap();
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            0,
+            "no spawn while already at max-replicas"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("capped").len(), 2);
     }
 
     #[tokio::test]

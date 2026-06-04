@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.56 — 2026-06-04
+
+Filter the Media library by type.
+
+**Admin**
+- The Media gallery gains a **type filter** next to the filename search.
+  Its options come from the formats actually present (typically SVG and
+  WebP — raster uploads are re-encoded to WebP), and it combines with the
+  text search.
+
 ## v0.1.55 — 2026-06-04
 
 Media filename management.

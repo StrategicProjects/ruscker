@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.60 — 2026-06-04
+
+Audit fixes, batch 1.
+
+**Fixes (from the code audit)**
+- **Config:** a `${VAR}` reference that appears only in a trailing inline
+  comment (`port: 3838  # uses ${VAR}`) no longer hard-fails parsing
+  (#584).
+- **WebSocket:** close frames now forward the real close code and reason
+  to the peer instead of an empty close (#583).
+
 ## v0.1.59 — 2026-06-04
 
 FAQ cleanup + a Media spacing fix.

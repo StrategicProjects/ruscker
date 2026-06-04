@@ -93,13 +93,12 @@ what's shipped and what's next.
 - [Quickstart](./quickstart.md) — from zero to a running app in minutes.
 - [What Ruscker can serve](./use-cases.md) — Shiny, Streamlit, Dash,
   FastAPI, JupyterLab, LLM UIs, BI tools, and more.
-- [Ruscker vs. alternatives](./alternatives.md) — how it compares to
-  ShinyProxy, Shiny Server, Posit Connect, and JupyterHub.
+- [Where Ruscker fits](./alternatives.md) — what Ruscker is for and when
+  to use it.
 - [Installation](./installation.md) — Docker, the `.deb`, or `brew`.
-- [Migrating from ShinyProxy](./migrating.md) — point Ruscker at your
+- [Migrate an existing config](./migrating.md) — point Ruscker at your
   existing `application.yml`.
 - [Configuration](./configuration.md) — the full YAML reference.
 - [The admin panel](./admin.md) — what each screen does.
-- [Deploying in production](./deploying.md) — systemd + nginx,
-  side-by-side with ShinyProxy.
+- [Deploying in production](./deploying.md) — systemd + nginx.
 - [Roadmap](./roadmap.md) — shipped phases and what's planned.

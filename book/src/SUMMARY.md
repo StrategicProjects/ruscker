@@ -2,7 +2,7 @@
 
 [Introduction](./introduction.md)
 [What Ruscker can serve](./use-cases.md)
-[Ruscker vs. alternatives](./alternatives.md)
+[Where Ruscker fits](./alternatives.md)
 
 # User guide
 

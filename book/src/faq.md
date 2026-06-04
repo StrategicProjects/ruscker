@@ -32,8 +32,8 @@ No. Ruscker drives the **Docker** daemon. A single Docker host is the
 common case; for more capacity it can schedule across several Docker
 daemons over `ssh://` or `tcp://` (see
 [multi-host scheduling](./deploying.md)). There's no Kubernetes
-requirement — if you're all-in on k8s, see the
-[alternatives](./alternatives.md).
+requirement — if you're all-in on k8s, see
+[where Ruscker fits](./alternatives.md).
 
 ### How does scaling work?
 

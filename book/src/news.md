@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.61 — 2026-06-04
+
+Audit fixes, batch 2 (DB performance).
+
+**Performance (from the code audit)**
+- The Apps-list trend query is now index-backed instead of full-scanning
+  `spec_access` on every render (#589).
+- `featured` is a real spec column, so the Apps list no longer
+  deserializes every spec's `config_json` just to know which cards are
+  featured (#588).
+
 ## v0.1.60 — 2026-06-04
 
 Audit fixes, batch 1.

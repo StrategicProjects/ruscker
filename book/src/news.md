@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.62 — 2026-06-04
+
+Audit fixes, batch 3.
+
+**Performance & docs (from the code audit)**
+- WebSocket binary/ping/pong frames forward zero-copy instead of copying
+  each frame (#595).
+- The HA deploy guide now documents that the scaler leader lock needs a
+  direct (non-transaction-pooled) Postgres connection (#596).
+
 ## v0.1.61 — 2026-06-04
 
 Audit fixes, batch 2 (DB performance).

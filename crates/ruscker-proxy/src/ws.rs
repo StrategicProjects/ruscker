@@ -17,14 +17,35 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::ws::{Message as AxMsg, WebSocket};
+use axum::extract::ws::{CloseFrame as AxClose, Message as AxMsg, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
 use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{header, HeaderValue};
+use tokio_tungstenite::tungstenite::protocol::CloseFrame as TgClose;
 use tokio_tungstenite::tungstenite::Message as TgMsg;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+
+/// Translate a client (axum) close frame to the upstream (tungstenite)
+/// shape, preserving the close code and reason. Forwarding the real frame
+/// — instead of an empty `Close(None)` — lets the peer see the actual
+/// intent (e.g. 1001 going-away vs 1011 internal error).
+fn ax_close_to_tg(c: Option<AxClose>) -> Option<TgClose> {
+    c.map(|f| TgClose {
+        code: f.code.into(),
+        reason: f.reason.as_str().into(),
+    })
+}
+
+/// Translate an upstream (tungstenite) close frame to the client (axum)
+/// shape, preserving code and reason.
+fn tg_close_to_ax(c: Option<TgClose>) -> Option<AxClose> {
+    c.map(|f| AxClose {
+        code: f.code.into(),
+        reason: f.reason.as_str().into(),
+    })
+}
 
 /// Tear a connection down if neither side sends a frame for this long.
 /// Shiny/Streamlit heartbeat well under this, so it only catches dead or
@@ -116,7 +137,12 @@ async fn client_to_upstream(
             Ok(AxMsg::Binary(b)) => TgMsg::binary(b.to_vec()),
             Ok(AxMsg::Ping(p)) => TgMsg::Ping(p.to_vec().into()),
             Ok(AxMsg::Pong(p)) => TgMsg::Pong(p.to_vec().into()),
-            Ok(AxMsg::Close(_)) => break,
+            Ok(AxMsg::Close(frame)) => {
+                // Forward the client's actual close code/reason, then stop
+                // (don't also send the fallback Close(None) below).
+                let _ = tx.send(TgMsg::Close(ax_close_to_tg(frame))).await;
+                return;
+            }
             Err(err) => {
                 tracing::debug!(error = ?err, "client ws error");
                 break;
@@ -126,7 +152,7 @@ async fn client_to_upstream(
             break;
         }
     }
-    // Client side ended — ask the upstream to close too.
+    // Client side ended without an explicit close — ask upstream to close.
     let _ = tx.send(TgMsg::Close(None)).await;
 }
 
@@ -143,7 +169,11 @@ async fn upstream_to_client(
             Ok(TgMsg::Binary(b)) => AxMsg::Binary(b.to_vec().into()),
             Ok(TgMsg::Ping(p)) => AxMsg::Ping(p.to_vec().into()),
             Ok(TgMsg::Pong(p)) => AxMsg::Pong(p.to_vec().into()),
-            Ok(TgMsg::Close(_)) => break,
+            Ok(TgMsg::Close(frame)) => {
+                // Forward the upstream's actual close code/reason, then stop.
+                let _ = tx.send(AxMsg::Close(tg_close_to_ax(frame))).await;
+                return;
+            }
             // Raw frames are an opt-in tungstenite mode we don't enable.
             Ok(TgMsg::Frame(_)) => break,
             Err(err) => {
@@ -180,4 +210,36 @@ fn now_ms() -> u64 {
         .get_or_init(std::time::Instant::now)
         .elapsed()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn close_frame_translation_preserves_code_and_reason() {
+        // axum → tungstenite (client closing toward upstream)
+        let ax = Some(AxClose {
+            code: 1011,
+            reason: "boom".into(),
+        });
+        let tg = ax_close_to_tg(ax).expect("some");
+        assert_eq!(u16::from(tg.code), 1011);
+        assert_eq!(tg.reason.as_str(), "boom");
+
+        // tungstenite → axum (upstream closing toward client)
+        let tg2 = Some(TgClose {
+            code: 1001u16.into(),
+            reason: "going away".into(),
+        });
+        let ax2 = tg_close_to_ax(tg2).expect("some");
+        assert_eq!(ax2.code, 1001);
+        assert_eq!(ax2.reason.as_str(), "going away");
+    }
+
+    #[test]
+    fn close_frame_translation_passes_none_through() {
+        assert!(ax_close_to_tg(None).is_none());
+        assert!(tg_close_to_ax(None).is_none());
+    }
 }

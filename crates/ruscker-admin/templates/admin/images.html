@@ -73,14 +73,12 @@
     <div class="mb-4 flex flex-wrap items-center gap-2">
       <input type="search" x-model="q"
              placeholder="{{ self.t("admin-images-search") }}"
-             class="admin-input flex-1 min-w-0 max-w-xs text-sm"
-             style="padding:6px 10px">
+             class="admin-table-search">
       {# Type filter — options derived from the images actually present
          (typically SVG + WebP), so it adapts and never offers an empty
          filter. Hidden when there's only one type. #}
       <template x-if="types().length > 1">
-        <select x-model="type" class="admin-input text-sm theme-select"
-                style="padding:6px 10px;width:auto"
+        <select x-model="type" class="admin-table-select"
                 aria-label="{{ self.t("admin-images-type-all") }}">
           <option value="">{{ self.t("admin-images-type-all") }}</option>
           <template x-for="t in types()" :key="t">

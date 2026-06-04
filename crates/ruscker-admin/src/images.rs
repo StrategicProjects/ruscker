@@ -149,7 +149,7 @@ pub fn process_upload(
 
 /// Strip any directory components and any leading dots, lowercase
 /// the result. Prevents path-traversal via crafted filenames.
-fn sanitize_basename(name: &str) -> String {
+pub(crate) fn sanitize_basename(name: &str) -> String {
     let basename = std::path::Path::new(name)
         .file_name()
         .and_then(|s| s.to_str())
@@ -162,7 +162,7 @@ fn sanitize_basename(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
-fn rewrite_extension(name: &str, new_ext: &str) -> String {
+pub(crate) fn rewrite_extension(name: &str, new_ext: &str) -> String {
     let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
     format!("{stem}.{new_ext}")
 }

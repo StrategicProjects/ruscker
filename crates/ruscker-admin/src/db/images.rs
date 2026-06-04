@@ -212,6 +212,104 @@ pub async fn filename_for(db: &ConfigDb, id: &str) -> Result<Option<String>> {
     Ok(row.map(|(f,)| f))
 }
 
+/// Cheap existence check by filename (no BLOB fetched). Used to pick a
+/// non-colliding name for a manual upload.
+pub async fn filename_taken(db: &ConfigDb, name: &str) -> Result<bool> {
+    let row: Option<(i64,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT 1 FROM images WHERE filename = ? LIMIT 1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .context("image filename exists (sqlite)")?
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT 1 FROM images WHERE filename = $1 LIMIT 1")
+                .bind(name)
+                .fetch_optional(pool)
+                .await
+                .context("image filename exists (postgres)")?
+        }
+    };
+    Ok(row.is_some())
+}
+
+/// Resolve a free filename for a manual upload: returns `desired` if no
+/// image row uses it, otherwise the first free `stem-N.ext` variant
+/// (N = 2, 3, …). This lets a same-named upload keep BOTH images instead
+/// of silently overwriting the existing one. The YAML-import path keeps
+/// using exact names (it pre-checks and skips), so it never calls this.
+pub async fn unique_filename(db: &ConfigDb, desired: &str) -> Result<String> {
+    if !filename_taken(db, desired).await? {
+        return Ok(desired.to_string());
+    }
+    let (stem, ext) = match desired.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (desired.to_string(), String::new()),
+    };
+    for n in 2..=9999 {
+        let candidate = format!("{stem}-{n}{ext}");
+        if !filename_taken(db, &candidate).await? {
+            return Ok(candidate);
+        }
+    }
+    anyhow::bail!("no free filename for {desired} after 9999 tries")
+}
+
+/// Rename an image (filename only — the id and BLOB are untouched).
+/// The caller must ensure `new_filename` is free and fix up any
+/// references first. Writes an `image.rename` audit row.
+pub async fn rename(db: &ConfigDb, id: &str, new_filename: &str, actor: Option<&str>) -> Result<()> {
+    let now = Utc::now();
+    let target = format!("image:{id}");
+    let diff = serde_json::to_string(&serde_json::json!({ "filename": new_filename }))?;
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (sqlite)")?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'image.rename', ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit image.rename (sqlite)")?;
+            tx.commit().await.context("commit image rename")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (postgres)")?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'image.rename', $2, $3, $4)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit image.rename (postgres)")?;
+            tx.commit().await.context("commit image rename")?;
+        }
+    }
+    Ok(())
+}
+
 /// Delete an image by id. Returns the deleted row's filename (so the
 /// caller can invalidate caches keyed by it, #301), or `None` if no
 /// such image existed. Audit row is written when a row was removed.

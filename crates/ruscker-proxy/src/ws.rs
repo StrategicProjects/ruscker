@@ -133,10 +133,13 @@ async fn client_to_upstream(
     while let Some(msg) = rx.next().await {
         last.store(now_ms(), Ordering::Relaxed);
         let out = match msg {
+            // Binary/Ping/Pong are `bytes::Bytes` on both sides → pass them
+            // through zero-copy (no per-frame heap copy) for high-throughput
+            // binary Shiny/Streamlit traffic.
             Ok(AxMsg::Text(t)) => TgMsg::text(t.to_string()),
-            Ok(AxMsg::Binary(b)) => TgMsg::binary(b.to_vec()),
-            Ok(AxMsg::Ping(p)) => TgMsg::Ping(p.to_vec().into()),
-            Ok(AxMsg::Pong(p)) => TgMsg::Pong(p.to_vec().into()),
+            Ok(AxMsg::Binary(b)) => TgMsg::Binary(b),
+            Ok(AxMsg::Ping(p)) => TgMsg::Ping(p),
+            Ok(AxMsg::Pong(p)) => TgMsg::Pong(p),
             Ok(AxMsg::Close(frame)) => {
                 // Forward the client's actual close code/reason, then stop
                 // (don't also send the fallback Close(None) below).
@@ -166,9 +169,10 @@ async fn upstream_to_client(
         last.store(now_ms(), Ordering::Relaxed);
         let out = match msg {
             Ok(TgMsg::Text(t)) => AxMsg::Text(t.to_string().into()),
-            Ok(TgMsg::Binary(b)) => AxMsg::Binary(b.to_vec().into()),
-            Ok(TgMsg::Ping(p)) => AxMsg::Ping(p.to_vec().into()),
-            Ok(TgMsg::Pong(p)) => AxMsg::Pong(p.to_vec().into()),
+            // Zero-copy pass-through (shared `bytes::Bytes`).
+            Ok(TgMsg::Binary(b)) => AxMsg::Binary(b),
+            Ok(TgMsg::Ping(p)) => AxMsg::Ping(p),
+            Ok(TgMsg::Pong(p)) => AxMsg::Pong(p),
             Ok(TgMsg::Close(frame)) => {
                 // Forward the upstream's actual close code/reason, then stop.
                 let _ = tx.send(AxMsg::Close(tg_close_to_ax(frame))).await;

@@ -791,10 +791,45 @@ pub(crate) fn apply_public_path(env: &mut [String], cmd: &mut Option<Vec<String>
     }
 }
 
+/// How long a resolved spec stays cached on the proxy hot path (#587).
+/// Short enough that an admin edit (including an access-control change)
+/// takes effect within this window without explicit invalidation, long
+/// enough that one page load's burst of subresource requests all hit the
+/// cache instead of the DB.
+pub(crate) const SPEC_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
 pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
-    // DB-first — the operator-editable catalog (admin UI + showcase
-    // seed) shadows the YAML for matching ids. Cheap: single indexed
-    // SELECT by primary key.
+    // Hot path: `find_spec` runs on every proxied request. Serve a recent
+    // resolution from the in-memory cache to skip a DB SELECT +
+    // config_json parse; the TTL bounds staleness (#587).
+    if let Some(entry) = state.spec_cache.get(id) {
+        if entry.1.elapsed() < SPEC_CACHE_TTL {
+            return Some((*entry.0).clone());
+        }
+    }
+    let resolved = load_spec(state, id).await;
+    match &resolved {
+        // Cache only positives, so the map stays bounded by the real
+        // catalog; refresh the timestamp on every (re)load.
+        Some(spec) => {
+            state
+                .spec_cache
+                .insert(id.to_string(), (std::sync::Arc::new(spec.clone()), std::time::Instant::now()));
+        }
+        // A now-missing spec (deleted/renamed): drop any stale entry so
+        // the cache doesn't pin a removed spec.
+        None => {
+            state.spec_cache.remove(id);
+        }
+    }
+    resolved
+}
+
+/// Resolve a spec by id without the cache: DB-first — the operator-
+/// editable catalog (admin UI + showcase seed) shadows the YAML for
+/// matching ids — then the YAML `--config`. A single indexed SELECT by
+/// primary key.
+async fn load_spec(state: &AppState, id: &str) -> Option<Spec> {
     if let Some(db) = state.db.as_ref() {
         match crate::db::specs::fetch_one(db, id).await {
             Ok(Some(spec)) => return Some(spec),
@@ -1770,6 +1805,7 @@ mod tests {
             leader: StdArc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
+            spec_cache: StdArc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -2157,5 +2193,53 @@ docker-registry-password: hunter2
             "two cold spawns should run in parallel, took {:?}",
             elapsed
         );
+    }
+
+    #[tokio::test]
+    async fn find_spec_serves_from_cache_within_ttl() {
+        // #587: a recent resolution is served from the in-memory cache
+        // instead of re-querying the DB; clearing the cache re-reads.
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(0),
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        let cdb = crate::db::ConfigDb::Sqlite(crate::db::open_memory().await.unwrap());
+        let v1: Spec =
+            serde_yaml_ng::from_str("id: alpha\ncontainer-image: nginx\ndisplay-name: Old").unwrap();
+        crate::db::specs::upsert_one(&cdb, &v1, None).await.unwrap();
+        state.db = Some(cdb);
+
+        // First lookup resolves from the DB and populates the cache.
+        let first = find_spec(&state, "alpha").await.expect("found");
+        assert_eq!(first.display_name.as_deref(), Some("Old"));
+
+        // Change it in the DB out from under the cache.
+        let v2: Spec =
+            serde_yaml_ng::from_str("id: alpha\ncontainer-image: nginx\ndisplay-name: New").unwrap();
+        crate::db::specs::upsert_one(state.db.as_ref().unwrap(), &v2, None)
+            .await
+            .unwrap();
+
+        // Within the TTL, the cache still serves the old value.
+        let cached = find_spec(&state, "alpha").await.expect("found");
+        assert_eq!(
+            cached.display_name.as_deref(),
+            Some("Old"),
+            "served from cache within TTL"
+        );
+
+        // Clearing the cache makes the next lookup re-read the DB.
+        state.spec_cache.clear();
+        let fresh = find_spec(&state, "alpha").await.expect("found");
+        assert_eq!(
+            fresh.display_name.as_deref(),
+            Some("New"),
+            "DB value after cache clear"
+        );
+
+        // A missing id is not cached (map stays bounded by the catalog).
+        assert!(find_spec(&state, "ghost").await.is_none());
+        assert!(state.spec_cache.get("ghost").is_none());
     }
 }

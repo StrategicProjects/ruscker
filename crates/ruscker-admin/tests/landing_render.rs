@@ -42,6 +42,7 @@ fn app_state() -> AppState {
         leader: std::sync::Arc::new(ruscker_admin::leader::AlwaysLeader),
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        spec_cache: std::sync::Arc::new(dashmap::DashMap::new()),
     }
 }
 

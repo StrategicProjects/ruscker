@@ -968,6 +968,7 @@ mod tests {
             leader: Arc::new(crate::leader::AlwaysLeader),
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            spec_cache: Arc::new(dashmap::DashMap::new()),
         }
     }
 

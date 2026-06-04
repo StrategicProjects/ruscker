@@ -260,7 +260,9 @@ async fn index(
     };
 
     // Placeholder-free SELECT, so one query string serves both backends.
-    let sql = "SELECT id, display_name, kind, state, updated_at, version
+    // `featured` is now a column (#588) — read it here instead of
+    // deserializing every spec's config_json in a second pass.
+    let sql = "SELECT id, display_name, kind, state, updated_at, version, featured
            FROM specs
            ORDER BY updated_at DESC, id ASC";
     let loaded = match database {
@@ -290,22 +292,11 @@ async fn index(
             .unwrap_or_default()
     };
 
-    // Featured flag lives in `config_json`, not a column — fill it from a
-    // single `list_all` pass so the table's star toggle (#521) shows state.
-    {
-        use std::collections::HashSet;
-        let featured: HashSet<String> = crate::db::specs::list_all(database)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .filter(|s| s.is_featured())
-            .map(|s| s.id.clone())
-            .collect();
-        for row in &mut specs {
-            row.featured = featured.contains(&row.id);
-            row.access_count = access.get(&row.id).copied().unwrap_or(0);
-            row.trend_svg = spark(&row.id);
-        }
+    // Per-row access total + sparkline (#549). `featured` already came from
+    // the lean SELECT (#588), so there's no second config_json deserialize.
+    for row in &mut specs {
+        row.access_count = access.get(&row.id).copied().unwrap_or(0);
+        row.trend_svg = spark(&row.id);
     }
 
     // Append specs that exist only in the YAML `--config` (not the DB) as

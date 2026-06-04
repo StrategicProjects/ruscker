@@ -428,8 +428,8 @@ async fn upsert_in_tx(
             sqlx::query(
                 "INSERT INTO specs (id, display_name, description, kind,
                                     container_image, config_json, state,
-                                    created_at, updated_at, version)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                                    created_at, updated_at, version, featured)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
             )
             .bind(&spec.id)
             .bind(spec.display_name.as_deref())
@@ -440,6 +440,7 @@ async fn upsert_in_tx(
             .bind(state)
             .bind(now)
             .bind(now)
+            .bind(spec.is_featured())
             .execute(&mut **tx)
             .await
             .with_context(|| format!("insert spec {}", spec.id))?;
@@ -466,7 +467,7 @@ async fn upsert_in_tx(
                 "UPDATE specs
                     SET display_name = ?, description = ?, kind = ?,
                         container_image = ?, config_json = ?, state = ?,
-                        updated_at = ?, version = ?
+                        updated_at = ?, version = ?, featured = ?
                   WHERE id = ?",
             )
             .bind(spec.display_name.as_deref())
@@ -477,6 +478,7 @@ async fn upsert_in_tx(
             .bind(state)
             .bind(now)
             .bind(next_version)
+            .bind(spec.is_featured())
             .bind(&spec.id)
             .execute(&mut **tx)
             .await
@@ -528,8 +530,8 @@ async fn upsert_in_tx_pg(
             sqlx::query(
                 "INSERT INTO specs (id, display_name, description, kind,
                                     container_image, config_json, state,
-                                    created_at, updated_at, version)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1)",
+                                    created_at, updated_at, version, featured)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10)",
             )
             .bind(&spec.id)
             .bind(spec.display_name.as_deref())
@@ -540,6 +542,7 @@ async fn upsert_in_tx_pg(
             .bind(state)
             .bind(now)
             .bind(now)
+            .bind(spec.is_featured())
             .execute(&mut **tx)
             .await
             .with_context(|| format!("insert spec {}", spec.id))?;
@@ -566,8 +569,8 @@ async fn upsert_in_tx_pg(
                 "UPDATE specs
                     SET display_name = $1, description = $2, kind = $3,
                         container_image = $4, config_json = $5, state = $6,
-                        updated_at = $7, version = $8
-                  WHERE id = $9",
+                        updated_at = $7, version = $8, featured = $9
+                  WHERE id = $10",
             )
             .bind(spec.display_name.as_deref())
             .bind(spec.description.as_deref())
@@ -577,6 +580,7 @@ async fn upsert_in_tx_pg(
             .bind(state)
             .bind(now)
             .bind(next_version)
+            .bind(spec.is_featured())
             .bind(&spec.id)
             .execute(&mut **tx)
             .await

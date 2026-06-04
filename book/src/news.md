@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.59 — 2026-06-04
+
+FAQ cleanup + a Media spacing fix.
+
+**Docs & admin**
+- The FAQ questions were reworded to describe Ruscker directly rather
+  than compare it to other systems (finishing the docs pass).
+- The Media library's search/filter toolbar no longer touches the
+  drag-drop upload zone above it.
+
 ## v0.1.58 — 2026-06-04
 
 Docs: lead with Ruscker.

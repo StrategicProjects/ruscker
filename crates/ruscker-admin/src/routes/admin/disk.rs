@@ -41,7 +41,7 @@ struct ImageRow {
     /// Primary `repo:tag`, or an untagged marker.
     name: String,
     size_bytes: i64,
-    /// A container currently uses it (`containers > 0`).
+    /// A live managed container is built from it (matched by tag or id).
     used_by_container: bool,
     /// A current spec references it by tag.
     used_by_spec: bool,
@@ -156,9 +156,17 @@ async fn index(
     // image as "in use by a spec" so the panel won't offer to remove it.
     let spec_images = spec_image_refs(&state).await;
 
+    // The image refs live containers are actually built from — the
+    // reliable in-use signal (the daemon's per-image container count is
+    // unreliable, #585).
+    let container_images = container_image_refs(&containers);
+
     let stopped_count = containers.iter().filter(|c| !c.running).count();
     let images_total_bytes = images.iter().map(|i| i.size_bytes).sum();
-    let images: Vec<ImageRow> = images.into_iter().map(|i| image_row(i, &spec_images)).collect();
+    let images: Vec<ImageRow> = images
+        .into_iter()
+        .map(|i| image_row(i, &spec_images, &container_images))
+        .collect();
     let unused_images_count = images.iter().filter(|r| !r.in_use()).count();
 
     super::render(&DiskPage {
@@ -191,16 +199,43 @@ async fn spec_image_refs(state: &AppState) -> HashSet<String> {
         .collect()
 }
 
-/// An image is safe to reclaim when no container uses it (`containers`
-/// is 0 or unknown-as-non-positive) **and** no current spec references
-/// it by tag. Same rule the per-row remove button uses.
-fn image_unused(i: &ImageInfo, spec_images: &HashSet<String>) -> bool {
-    i.containers <= 0 && !i.tags.iter().any(|t| spec_images.contains(t))
+/// Image refs (tags + ids) that a live managed container is built from.
+/// This is the reliable "in use by a container" signal: the daemon's
+/// `ImageSummary.containers` count is `-1` (uncomputed) on a plain
+/// `list_images`, so a positive count can't be relied on (#585). A
+/// non-Ruscker container isn't in this set, but `remove_image` (no
+/// `--force`) refuses a truly in-use image, so the actual removal stays
+/// safe — only the displayed count could be optimistic for those.
+fn container_image_refs(containers: &[ManagedContainer]) -> HashSet<String> {
+    containers.iter().map(|c| c.image.clone()).collect()
+}
+
+/// True when a managed container is built from this image (by tag or id).
+fn image_used_by_container(i: &ImageInfo, container_images: &HashSet<String>) -> bool {
+    container_images.contains(&i.id) || i.tags.iter().any(|t| container_images.contains(t))
+}
+
+/// An image is safe to reclaim when no managed container is built from it
+/// **and** no current spec references it by tag. Same rule the per-row
+/// remove button uses. (Uses the real container set, not the unreliable
+/// `ImageInfo.containers` count — #585.)
+fn image_unused(
+    i: &ImageInfo,
+    spec_images: &HashSet<String>,
+    container_images: &HashSet<String>,
+) -> bool {
+    !image_used_by_container(i, container_images)
+        && !i.tags.iter().any(|t| spec_images.contains(t))
 }
 
 /// Build a display row, resolving the primary tag and the in-use flags.
-fn image_row(i: ImageInfo, spec_images: &HashSet<String>) -> ImageRow {
+fn image_row(
+    i: ImageInfo,
+    spec_images: &HashSet<String>,
+    container_images: &HashSet<String>,
+) -> ImageRow {
     let used_by_spec = i.tags.iter().any(|t| spec_images.contains(t));
+    let used_by_container = image_used_by_container(&i, container_images);
     let name = i
         .tags
         .first()
@@ -218,7 +253,7 @@ fn image_row(i: ImageInfo, spec_images: &HashSet<String>) -> ImageRow {
         short_id,
         name,
         size_bytes: i.size_bytes,
-        used_by_container: i.containers > 0,
+        used_by_container,
         used_by_spec,
         id: i.id,
     }
@@ -296,9 +331,11 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
         }
     };
     let spec_images = spec_image_refs(&state).await;
+    let container_images =
+        container_image_refs(&backend.list_managed_containers().await.unwrap_or_default());
     let unused: Vec<String> = images
         .into_iter()
-        .filter(|i| image_unused(i, &spec_images))
+        .filter(|i| image_unused(i, &spec_images, &container_images))
         .map(|i| i.id)
         .collect();
     if unused.is_empty() {
@@ -339,23 +376,32 @@ mod tests {
         }
     }
 
-    /// #463: bulk prune must reclaim only images no container uses and no
-    /// spec references — never an image still in use.
+    /// #463/#585: bulk prune must reclaim only images no container is built
+    /// from and no spec references — using the real container set, not the
+    /// unreliable `ImageInfo.containers` count.
     #[test]
     fn image_unused_only_when_no_container_and_no_spec() {
         let catalog: HashSet<String> = ["nginx:alpine".to_string()].into_iter().collect();
+        // A live container built from "other:1".
+        let in_use: HashSet<String> = ["other:1".to_string()].into_iter().collect();
+        let none: HashSet<String> = HashSet::new();
 
         // Referenced by a spec → in use, never pruned.
-        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog));
-        // A container uses it → in use.
-        assert!(!image_unused(&img(&["other:1"], 3), &catalog));
+        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog, &none));
+        // A live container is built from it → in use (regardless of the
+        // bogus `containers` count, which is -1 in practice).
+        assert!(!image_unused(&img(&["other:1"], -1), &catalog, &in_use));
         // No container, not in the catalog → reclaimable.
-        assert!(image_unused(&img(&["leftover:1"], 0), &catalog));
+        assert!(image_unused(&img(&["leftover:1"], 0), &catalog, &none));
         // Dangling (untagged), no container → reclaimable.
-        assert!(image_unused(&img(&[], 0), &catalog));
-        // Daemon couldn't count containers (-1, non-positive) and it's not
-        // in the catalog → treated as reclaimable; remove_image runs
-        // without --force, so the daemon still refuses a truly in-use one.
-        assert!(image_unused(&img(&["x:1"], -1), &catalog));
+        assert!(image_unused(&img(&[], 0), &catalog, &none));
+        // `containers == -1` (uncomputed) but nothing actually uses it →
+        // reclaimable; the previous code's reliance on `containers <= 0`
+        // would have agreed here, but it WRONGLY also flagged in-use
+        // images whose count came back -1 (#585) — now caught by `in_use`.
+        assert!(image_unused(&img(&["x:1"], -1), &catalog, &none));
+        // Matched by image id, not tag → in use.
+        let by_id: HashSet<String> = ["sha256:abc".to_string()].into_iter().collect();
+        assert!(!image_unused(&img(&["untagged:1"], -1), &catalog, &by_id));
     }
 }

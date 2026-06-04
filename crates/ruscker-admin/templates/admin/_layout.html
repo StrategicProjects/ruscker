@@ -279,6 +279,17 @@ window.ruscker.imagePicker = (filenames) => ({
     border-radius: 8px; background: var(--surface, #fff); color: var(--text-primary);
   }
   .admin-table-search:focus { outline: none; border-color: var(--accent, #2563eb); }
+  /* Companion <select> matching .admin-table-search, so a search + filter
+     pair (e.g. the Media gallery) looks like one consistent control. */
+  .admin-table-select {
+    font-size: 13px; padding: 7px 30px 7px 11px;
+    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.3));
+    border-radius: 8px; background-color: var(--surface, #fff); color: var(--text-primary);
+    appearance: none; -webkit-appearance: none; cursor: pointer;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat: no-repeat; background-position: right 10px center; background-size: 12px;
+  }
+  .admin-table-select:focus { outline: none; border-color: var(--accent, #2563eb); }
   th.admin-th-sort { cursor: pointer; user-select: none; white-space: nowrap; }
   th.admin-th-sort::after { content: '↕'; opacity: .3; margin-left: 5px; font-size: 10px; }
   th.admin-th-sort[data-sort-dir='asc']::after  { content: '↑'; opacity: .9; }

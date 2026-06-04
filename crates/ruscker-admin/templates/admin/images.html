@@ -70,11 +70,24 @@
      leaving `q`/`filtered` undefined and no tiles). The browser un-escapes
      `&quot;` back to `"` before Alpine parses it. #}
   <div x-data="ruscker.mediaGallery({{ self.images_json() }})" x-cloak>
-    <div class="mb-4">
+    <div class="mb-4 flex flex-wrap items-center gap-2">
       <input type="search" x-model="q"
              placeholder="{{ self.t("admin-images-search") }}"
-             class="admin-input w-full max-w-xs text-sm"
+             class="admin-input flex-1 min-w-0 max-w-xs text-sm"
              style="padding:6px 10px">
+      {# Type filter — options derived from the images actually present
+         (typically SVG + WebP), so it adapts and never offers an empty
+         filter. Hidden when there's only one type. #}
+      <template x-if="types().length > 1">
+        <select x-model="type" class="admin-input text-sm theme-select"
+                style="padding:6px 10px;width:auto"
+                aria-label="{{ self.t("admin-images-type-all") }}">
+          <option value="">{{ self.t("admin-images-type-all") }}</option>
+          <template x-for="t in types()" :key="t">
+            <option :value="t" x-text="t.toUpperCase()"></option>
+          </template>
+        </select>
+      </template>
     </div>
 
     <section class="image-gallery">
@@ -148,11 +161,27 @@
   window.ruscker.mediaGallery = (items) => ({
     all: Array.isArray(items) ? items : [],
     q: '',
+    type: '',
     shown: 24,
     page: 24,
+    // File extension, lowercased (e.g. "svg", "webp"). Drives the type
+    // filter, whose options are derived from what's actually present —
+    // raster uploads are stored as WebP, so png/jpeg never appear.
+    ext(name) {
+      const i = (name || '').lastIndexOf('.');
+      return i >= 0 ? name.slice(i + 1).toLowerCase() : '';
+    },
+    types() {
+      return [...new Set(this.all.map((i) => this.ext(i.filename)).filter(Boolean))].sort();
+    },
     filtered() {
       const t = this.q.trim().toLowerCase();
-      return t ? this.all.filter((i) => i.filename.toLowerCase().includes(t)) : this.all;
+      const ty = this.type;
+      return this.all.filter(
+        (i) =>
+          (!t || i.filename.toLowerCase().includes(t)) &&
+          (!ty || this.ext(i.filename) === ty)
+      );
     },
     // Prefix the base path on a root-absolute asset/action URL so the
     // gallery works under `--base-path /box` (#270) — these URLs are

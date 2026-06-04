@@ -273,6 +273,7 @@ admin-images-inuse = Utilisé
 admin-images-inuse-help = Utilisé par une carte ou un logo de la landing
 admin-images-delete-confirm-inuse = Cette image est UTILISÉE. La supprimer rétablit le logo Ruscker par défaut sur les apps concernées (la carte ne casse pas). Supprimer ?
 admin-images-search = Rechercher des images…
+admin-images-type-all = Tous les types
 admin-images-no-match = Aucune image ne correspond à la recherche.
 
 # Admin credentials

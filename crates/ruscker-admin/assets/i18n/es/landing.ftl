@@ -273,6 +273,7 @@ admin-images-inuse = En uso
 admin-images-inuse-help = Usada en una tarjeta o un logo de la landing
 admin-images-delete-confirm-inuse = Esta imagen está EN USO. Al eliminarla, los apps que la usan vuelven al logo predeterminado de Ruscker (la tarjeta no se rompe). ¿Eliminar?
 admin-images-search = Buscar imágenes…
+admin-images-type-all = Todos los tipos
 admin-images-no-match = Ninguna imagen coincide con la búsqueda.
 
 # Admin credentials

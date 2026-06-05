@@ -149,6 +149,79 @@ struct DashboardSnapshot {
     rows: Vec<ReplicaRow>,
 }
 
+/// One app's replicas, grouped for the dashboard's accordion (#623).
+/// Built from the flat `rows` for the server-side render; the SSE-driven
+/// JS regroups the snapshot itself, so this stays a pure view projection.
+struct AppGroup {
+    spec_id: String,
+    display_name: String,
+    /// Single uppercase letter for the avatar tile.
+    initial: String,
+    /// Replica count.
+    n: usize,
+    /// The worst replica's dot class + label, so the collapsed head
+    /// surfaces an app that needs attention without expanding it.
+    state_dot: &'static str,
+    state_label: String,
+    /// Summed across the app's replicas.
+    sessions_active: u32,
+    sessions_max: u32,
+    replicas: Vec<ReplicaRow>,
+}
+
+/// Group flat replica rows by spec, preserving first-seen order, and
+/// summarise each group (count, worst state, summed sessions).
+fn group_rows(rows: &[ReplicaRow]) -> Vec<AppGroup> {
+    // Higher = more attention-worthy; the group head shows the max.
+    fn severity(state: &str) -> u8 {
+        match state {
+            "failed" => 4,
+            "stopped" => 3,
+            "draining" => 2,
+            "starting" => 1,
+            _ => 0, // ready
+        }
+    }
+    let mut order: Vec<&str> = Vec::new();
+    let mut buckets: std::collections::HashMap<&str, Vec<ReplicaRow>> =
+        std::collections::HashMap::new();
+    for r in rows {
+        if !buckets.contains_key(r.spec_id.as_str()) {
+            order.push(r.spec_id.as_str());
+        }
+        buckets.entry(r.spec_id.as_str()).or_default().push(r.clone());
+    }
+    order
+        .into_iter()
+        .map(|spec_id| {
+            let reps = buckets.remove(spec_id).unwrap_or_default();
+            let display_name = reps
+                .first()
+                .map(|r| r.display_name.clone())
+                .unwrap_or_else(|| spec_id.to_string());
+            let initial = display_name
+                .chars()
+                .next()
+                .map(|c| c.to_uppercase().to_string())
+                .unwrap_or_default();
+            let worst = reps.iter().max_by_key(|r| severity(r.state));
+            let state_dot = worst.map(|r| r.state_dot).unwrap_or("dot-off");
+            let state_label = worst.map(|r| r.state_label.clone()).unwrap_or_default();
+            AppGroup {
+                spec_id: spec_id.to_string(),
+                display_name,
+                initial,
+                n: reps.len(),
+                state_dot,
+                state_label,
+                sessions_active: reps.iter().map(|r| r.sessions_active).sum(),
+                sessions_max: reps.iter().map(|r| r.sessions_max).sum(),
+                replicas: reps,
+            }
+        })
+        .collect()
+}
+
 #[derive(Template)]
 #[template(path = "admin/dashboard.html")]
 struct DashboardPage<'a> {
@@ -174,6 +247,8 @@ struct DashboardPage<'a> {
     total_memory_bytes: u64,
     total_memory_display: String,
     rows: Vec<ReplicaRow>,
+    /// The same replicas grouped by app for the accordion render (#623).
+    groups: Vec<AppGroup>,
     /// JSON of the same snapshot, embedded in a `<script
     /// type="application/json">` tag so the SSE-driven JS
     /// patcher has a starting state without an immediate
@@ -283,6 +358,7 @@ async fn index(
         tracker_sessions: snap.tracker_sessions,
         total_memory_bytes: snap.total_memory_bytes,
         total_memory_display: snap.total_memory_display.clone(),
+        groups: group_rows(&snap.rows),
         rows: snap.rows.clone(),
         snapshot_json,
     };
@@ -864,6 +940,7 @@ mod tests {
             tracker_sessions: 0,
             total_memory_bytes: 0,
             total_memory_display: "—".to_string(),
+            groups: group_rows(&rows),
             rows,
             snapshot_json: "{}".to_string(),
         };
@@ -979,6 +1056,29 @@ mod tests {
         assert!(html.contains("dot-warm"));
         // sessions column
         assert!(html.contains("3</span>") || html.contains(">3<"));
+    }
+
+    #[test]
+    fn renders_replicas_grouped_by_app_in_accordion_cards() {
+        // #623 redesign: each app is one expandable `.app-group` card with
+        // its replicas as `.replica-row`s — not a flat table. Two replicas
+        // of one spec collapse into a single group (n = 2).
+        let html = render_with(
+            vec![
+                fake_row("shiny", "Shiny One", ReplicaState::Ready, 2, 5),
+                fake_row("shiny", "Shiny One", ReplicaState::Starting, 0, 5),
+                fake_row("api", "API Two", ReplicaState::Ready, 9, 100),
+            ],
+            true,
+        );
+        // Grouped structure, not the old table.
+        assert!(html.contains("app-group__head"), "uses accordion heads");
+        assert!(html.contains("replica-row"), "uses replica rows");
+        assert!(!html.contains("dash-table"), "old flat table is gone");
+        // Two specs → two groups; the worst state (starting) surfaces on the
+        // shiny group's head, and its summed sessions are 2/10.
+        assert_eq!(html.matches("class=\"app-group ").count(), 2, "one card per app");
+        assert!(html.contains(">2<span class=\"faint\">/10<"), "summed sessions on the head");
     }
 
     #[test]

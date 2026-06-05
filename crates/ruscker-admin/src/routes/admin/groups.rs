@@ -1,13 +1,22 @@
-//! Admin > Groups (read-only, #503).
+//! Admin > Groups (#503 read-only + #540 CRUD).
 //!
 //! Groups in Ruscker are **derived**, not a first-class entity: a group is
 //! any name that appears in a user's memberships or a spec's `access-groups`.
 //! This page surfaces them — for each group, its member users and the apps it
-//! gates — so an operator can spot typos / orphan groups and see who can use
-//! what. No CRUD: memberships are edited on the user, app access on the spec.
+//! gates — and lets an Admin **rename**, **delete**, and add/remove members.
+//! Because there's no `groups` table, every edit rewrites the name across the
+//! users and specs that reference it; a group exists exactly as long as
+//! something points at it (adding the first member creates it; removing the
+//! last reference makes it disappear).
 
 use askama::Template;
-use axum::{extract::State, response::Response, routing::get, Router};
+use axum::{
+    extract::{Query, State},
+    response::{IntoResponse, Redirect, Response},
+    routing::{get, post},
+    Form, Router,
+};
+use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::auth::{RequireAdmin, Role};
@@ -16,7 +25,12 @@ use crate::theme::Theme;
 use crate::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/admin/groups", get(index))
+    Router::new()
+        .route("/admin/groups", get(index))
+        .route("/admin/groups/rename", post(rename))
+        .route("/admin/groups/delete", post(delete))
+        .route("/admin/groups/members/add", post(add_member))
+        .route("/admin/groups/members/remove", post(remove_member))
 }
 
 /// One app reference inside a group (id + display name).
@@ -45,6 +59,9 @@ struct GroupsPage<'a> {
     /// Current session role (always Admin here) — drives nav gating.
     role: Role,
     groups: Vec<GroupView>,
+    /// All usernames, for the "add member" picker.
+    all_users: Vec<String>,
+    flash: Option<String>,
 }
 
 impl GroupsPage<'_> {
@@ -53,26 +70,40 @@ impl GroupsPage<'_> {
     }
 }
 
+#[derive(Deserialize)]
+struct GroupsQuery {
+    #[serde(default)]
+    flash: Option<String>,
+}
+
+fn redirect_flash(flash: &str) -> Response {
+    Redirect::to(&format!("/admin/groups?flash={flash}")).into_response()
+}
+
 async fn index(
     _: RequireAdmin,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
+    Query(q): Query<GroupsQuery>,
 ) -> Response {
     // group name → (member usernames, apps id→name). BTree everywhere so the
     // page is deterministically ordered (groups, members, apps) with no dups.
     let mut map: BTreeMap<String, (BTreeSet<String>, BTreeMap<String, String>)> = BTreeMap::new();
+    let mut all_users: Vec<String> = Vec::new();
 
     // Users contribute members.
     if let Some(db) = state.db.as_ref() {
         if let Ok(users) = crate::db::users::list_all(db).await {
             for u in users {
+                all_users.push(u.username.clone());
                 for g in u.groups {
                     map.entry(g).or_default().0.insert(u.username.clone());
                 }
             }
         }
     }
+    all_users.sort();
 
     // Specs contribute apps (by `access-groups`).
     let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
@@ -109,6 +140,142 @@ async fn index(
         nav_section: "groups",
         role: Role::Admin,
         groups,
+        all_users,
+        flash: q.flash,
     };
     super::render(&page)
+}
+
+/// A group name is a free-form label; reject only what would break storage
+/// (groups are stored comma-joined) or render the entry invisible.
+fn clean_group(raw: &str) -> Option<String> {
+    let g = raw.trim();
+    if g.is_empty() || g.contains(',') {
+        return None;
+    }
+    Some(g.to_string())
+}
+
+/// Rewrite group `old` everywhere it's referenced. `new = Some(n)` renames it
+/// (folding into `n` if a user/spec already has both); `new = None` deletes
+/// it. Touches both user memberships and spec `access-groups`.
+async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) {
+    let Some(db) = state.db.as_ref() else { return };
+
+    if let Ok(users) = crate::db::users::list_all(db).await {
+        for u in users {
+            if !u.groups.iter().any(|g| g == old) {
+                continue;
+            }
+            let mut groups: Vec<String> = u.groups.into_iter().filter(|g| g != old).collect();
+            if let Some(n) = new {
+                if !groups.iter().any(|g| g == n) {
+                    groups.push(n.to_string());
+                }
+            }
+            if let Err(e) = crate::db::users::set_groups(db, &u.username, &groups, Some(actor)).await
+            {
+                tracing::warn!(user = %u.username, error = ?e, "group rewrite (user) failed");
+            }
+        }
+    }
+
+    if let Ok(specs) = crate::db::specs::list_all(db).await {
+        for spec in specs {
+            let Some(ag) = spec.access_groups.as_ref() else {
+                continue;
+            };
+            if !ag.iter().any(|g| g == old) {
+                continue;
+            }
+            let mut groups: Vec<String> = ag.iter().filter(|g| *g != old).cloned().collect();
+            if let Some(n) = new {
+                if !groups.iter().any(|g| g == n) {
+                    groups.push(n.to_string());
+                }
+            }
+            let mut spec = spec;
+            // An empty `access-groups` becomes `None` (no group gate) rather
+            // than an empty list — keeps the effective-access logic simple.
+            spec.access_groups = if groups.is_empty() { None } else { Some(groups) };
+            if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(actor)).await {
+                tracing::warn!(spec = %spec.id, error = ?e, "group rewrite (spec) failed");
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct RenameForm {
+    old: String,
+    new: String,
+}
+
+async fn rename(admin: RequireAdmin, State(state): State<AppState>, Form(f): Form<RenameForm>) -> Response {
+    let (Some(old), Some(new)) = (clean_group(&f.old), clean_group(&f.new)) else {
+        return redirect_flash("bad-input");
+    };
+    if old == new {
+        return redirect_flash("renamed");
+    }
+    rewrite_group(&state, &old, Some(&new), admin.actor()).await;
+    redirect_flash("renamed")
+}
+
+#[derive(Deserialize)]
+struct DeleteForm {
+    name: String,
+}
+
+async fn delete(admin: RequireAdmin, State(state): State<AppState>, Form(f): Form<DeleteForm>) -> Response {
+    let Some(name) = clean_group(&f.name) else {
+        return redirect_flash("bad-input");
+    };
+    rewrite_group(&state, &name, None, admin.actor()).await;
+    redirect_flash("deleted")
+}
+
+#[derive(Deserialize)]
+struct MemberForm {
+    group: String,
+    username: String,
+}
+
+async fn add_member(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Form(f): Form<MemberForm>,
+) -> Response {
+    let Some(group) = clean_group(&f.group) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::users::fetch(db, &f.username).await {
+        Ok(Some(u)) => {
+            let mut groups = u.groups;
+            if !groups.iter().any(|g| g == &group) {
+                groups.push(group);
+            }
+            let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
+            redirect_flash("member-added")
+        }
+        _ => redirect_flash("bad-input"),
+    }
+}
+
+async fn remove_member(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Form(f): Form<MemberForm>,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    if let Ok(Some(u)) = crate::db::users::fetch(db, &f.username).await {
+        let groups: Vec<String> = u.groups.into_iter().filter(|g| g != &f.group).collect();
+        let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
+    }
+    redirect_flash("member-removed")
 }

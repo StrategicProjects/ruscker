@@ -12,6 +12,34 @@
   <div class="text-xs text-[color:var(--text-faint)]">{{ groups.len() }}</div>
 </div>
 
+{% match flash %}{% when Some with (f) %}
+  <div class="admin-flash-ok mb-4" role="status" style="{% if f == "bad-input" %}background:rgba(239,68,68,0.12);color:var(--text-primary){% endif %}">
+    <i class="ti ti-{% if f == "bad-input" %}alert-circle{% else %}check{% endif %}" aria-hidden="true"></i>
+    {% if f == "renamed" %}{{ self.t("admin-groups-flash-renamed") }}
+    {% else if f == "deleted" %}{{ self.t("admin-groups-flash-deleted") }}
+    {% else if f == "member-added" %}{{ self.t("admin-groups-flash-member-added") }}
+    {% else if f == "member-removed" %}{{ self.t("admin-groups-flash-member-removed") }}
+    {% else %}{{ self.t("admin-groups-flash-bad-input") }}{% endif %}
+  </div>
+{% when None %}{% endmatch %}
+
+{# Create a group: a group exists once a user belongs to it, so "create" =
+   add its first member under a new name. #}
+{% if !all_users.is_empty() %}
+<form method="post" action="{{ base }}/admin/groups/members/add" class="group-create">
+  <span class="group-create-label">{{ self.t("admin-groups-new-group-title") }}</span>
+  <input type="text" name="group" required placeholder="{{ self.t("admin-groups-new-name") }}"
+         pattern="[^,]+" class="admin-table-search" style="max-width:200px">
+  <select name="username" required class="admin-table-select">
+    <option value="">{{ self.t("admin-groups-pick-user") }}</option>
+    {% for u in all_users %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+  </select>
+  <button type="submit" class="admin-login-btn" style="width:auto;padding:7px 12px;font-size:12px">
+    <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-groups-create") }}
+  </button>
+</form>
+{% endif %}
+
 {% if groups.is_empty() %}
   <div class="spec-form-empty-hint" style="max-width:44rem">
     <i class="ti ti-users-group" aria-hidden="true"></i>
@@ -23,7 +51,20 @@
     <section class="editor-card group-card">
       <div class="editor-card__head">
         <span class="editor-card__icon"><i class="ti ti-users-group" aria-hidden="true"></i></span>
-        <div><div class="editor-card__title">{{ g.name }}</div></div>
+        <div class="flex-1"><div class="editor-card__title">{{ g.name }}</div></div>
+        {# Rename: prompt for a new name (read the old one from the DOM, not
+           interpolated into JS, so a name with a quote can't break it). #}
+        <form method="post" action="{{ base }}/admin/groups/rename" style="display:inline"
+              onsubmit="var i=this.querySelector('input[name=new]'); var n=prompt('{{ self.t("admin-groups-rename-prompt") }}', this.querySelector('input[name=old]').value); if(n===null||!n.trim()||n.indexOf(',')>=0){return false;} i.value=n.trim();">
+          <input type="hidden" name="old" value="{{ g.name }}">
+          <input type="hidden" name="new">
+          <button type="submit" class="group-action" title="{{ self.t("admin-groups-rename") }}"><i class="ti ti-pencil" aria-hidden="true"></i></button>
+        </form>
+        <form method="post" action="{{ base }}/admin/groups/delete" style="display:inline"
+              onsubmit="return confirm('{{ self.t("admin-groups-delete-confirm") }}');">
+          <input type="hidden" name="name" value="{{ g.name }}">
+          <button type="submit" class="group-action group-action-del" title="{{ self.t("admin-groups-delete") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+        </form>
       </div>
       <div class="group-col">
         <div class="group-col-title">{{ self.t("admin-groups-members") }} · {{ g.members.len() }}</div>
@@ -31,8 +72,28 @@
           <span class="group-empty">{{ self.t("admin-groups-no-members") }}</span>
         {% else %}
           <div class="group-pills">
-            {% for m in g.members %}<a href="{{ base }}/admin/users" class="group-pill"><i class="ti ti-user" aria-hidden="true"></i> {{ m }}</a>{% endfor %}
+            {% for m in g.members %}
+            <span class="group-pill">
+              <i class="ti ti-user" aria-hidden="true"></i> {{ m }}
+              <form method="post" action="{{ base }}/admin/groups/members/remove" style="display:inline"
+                    onsubmit="return confirm('{{ self.t("admin-groups-remove-member-confirm") }}');">
+                <input type="hidden" name="group" value="{{ g.name }}">
+                <input type="hidden" name="username" value="{{ m }}">
+                <button type="submit" class="group-pill-x" title="{{ self.t("admin-groups-remove-member") }}">×</button>
+              </form>
+            </span>
+            {% endfor %}
           </div>
+        {% endif %}
+        {% if !all_users.is_empty() %}
+        <form method="post" action="{{ base }}/admin/groups/members/add" class="group-add-member">
+          <input type="hidden" name="group" value="{{ g.name }}">
+          <select name="username" required class="admin-table-select" style="flex:1;min-width:0">
+            <option value="">{{ self.t("admin-groups-pick-user") }}</option>
+            {% for u in all_users %}<option value="{{ u }}">{{ u }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="group-action" title="{{ self.t("admin-groups-add-member") }}"><i class="ti ti-user-plus" aria-hidden="true"></i></button>
+        </form>
         {% endif %}
       </div>
       <div class="group-col">
@@ -49,5 +110,27 @@
     {% endfor %}
   </div>
 {% endif %}
+
+<style>
+  .group-create {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    margin-bottom: 18px; padding: 12px 14px;
+    background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px;
+  }
+  .group-create-label { font-size: 13px; font-weight: 500; }
+  .group-action {
+    background: none; border: 0; cursor: pointer; color: var(--text-muted);
+    padding: 4px; border-radius: 6px; line-height: 0; display: inline-flex;
+  }
+  .group-action:hover { background: var(--surface-soft); color: var(--text-primary); }
+  .group-action-del:hover { color: var(--color-lock); }
+  .group-pill { display: inline-flex; align-items: center; gap: 4px; }
+  .group-pill-x {
+    background: none; border: 0; cursor: pointer; color: var(--text-faint);
+    font-size: 14px; line-height: 1; padding: 0 0 0 3px;
+  }
+  .group-pill-x:hover { color: var(--color-lock); }
+  .group-add-member { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+</style>
 
 {% endblock %}

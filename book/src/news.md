@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.69 — 2026-06-05
+
+Lighter image and asset serving.
+
+**Performance**
+- Card images: a warm thumbnail hit and an ETag revalidation no longer
+  re-read the full source blob from the database/disk — the content hash
+  is remembered per file (#592).
+- The bundled CSS/JS are brotli/gzip-compressed once at startup instead of
+  being re-encoded on every request; clients get the precompressed variant
+  they accept (#593).
+
 ## v0.1.68 — 2026-06-05
 
 Manage groups from the admin.

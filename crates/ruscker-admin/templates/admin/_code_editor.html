@@ -1,0 +1,112 @@
+{# Syntax-highlighted code editor (design handoff #623).
+
+   Progressive enhancement: any `.code-editor-wrap` on the page gets its
+   transparent `.code-editor-ta` <textarea> highlighted into the sibling
+   `.code-editor-pre`, scroll-synced. The textarea keeps its `name` and
+   value, so the surrounding form submits exactly as before — this is a
+   pure view layer, no backend contract changes. `data-mode` picks the
+   tokenizer ("css" default, or "html"). Single-pass tokenizers ported
+   from the prototype; framework-free so it works on any page. #}
+<script>
+(function () {
+  function escHtml(s) {
+    return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+
+  function highlightCSS(raw) {
+    var out = "", i = 0, n = raw.length;
+    while (i < n) {
+      if (raw[i] === "/" && raw[i + 1] === "*") {
+        var e = raw.indexOf("*/", i + 2), end = e < 0 ? n : e + 2;
+        out += '<span class="tok-comment">' + escHtml(raw.slice(i, end)) + "</span>"; i = end; continue;
+      }
+      if (raw[i] === '"' || raw[i] === "'") {
+        var q = raw[i], j = i + 1;
+        while (j < n && raw[j] !== q) { if (raw[j] === "\\") j++; j++; }
+        out += '<span class="tok-string">' + escHtml(raw.slice(i, j + 1)) + "</span>"; i = j + 1; continue;
+      }
+      if (raw[i] === "@") {
+        var ma = raw.slice(i).match(/^@[\w-]+/);
+        if (ma) { out += '<span class="tok-atrule">' + escHtml(ma[0]) + "</span>"; i += ma[0].length; continue; }
+      }
+      if (raw.slice(i, i + 10) === "!important") {
+        out += '<span class="tok-important">!important</span>'; i += 10; continue;
+      }
+      if (raw[i] === "#") {
+        var mh = raw.slice(i).match(/^#[0-9a-fA-F]{3,8}\b/);
+        if (mh) { out += '<span class="tok-hexcolor">' + escHtml(mh[0]) + "</span>"; i += mh[0].length; continue; }
+      }
+      if (/[\w-]/.test(raw[i]) && i > 0) {
+        var mp = raw.slice(i).match(/^([\w-]+)(\s*:(?!:))/);
+        if (mp) {
+          var ctx = raw.slice(0, i).replace(/\/\*[\s\S]*?\*\//g, "");
+          var inBlock = (ctx.match(/[{]/g) || []).length > (ctx.match(/[}]/g) || []).length;
+          if (inBlock) { out += '<span class="tok-prop">' + escHtml(mp[1]) + "</span>"; i += mp[1].length; continue; }
+        }
+      }
+      if (/[\d.]/.test(raw[i]) && (i === 0 || !/[\w#]/.test(raw[i - 1]))) {
+        var mn = raw.slice(i).match(/^-?\d*\.?\d+(px|em|rem|%|vh|vw|s|ms|deg|fr|ch|ex|vmin|vmax|svh)?\b/);
+        if (mn) { out += '<span class="tok-number">' + escHtml(mn[0]) + "</span>"; i += mn[0].length; continue; }
+      }
+      if ((raw[i] === "." || raw[i] === "#") && (i === 0 || /[\n\r,{ ]/.test(raw[i - 1]))) {
+        var ms = raw.slice(i).match(/^[.#][\w-]+/);
+        if (ms) { out += '<span class="tok-selector">' + escHtml(ms[0]) + "</span>"; i += ms[0].length; continue; }
+      }
+      out += escHtml(raw[i++]);
+    }
+    return out + "\n";
+  }
+
+  function highlightHTML(raw) {
+    var out = "", i = 0, n = raw.length;
+    while (i < n) {
+      if (raw.slice(i, i + 4) === "<!--") {
+        var e = raw.indexOf("-->", i + 4), end = e < 0 ? n : e + 3;
+        out += '<span class="tok-comment">' + escHtml(raw.slice(i, end)) + "</span>"; i = end; continue;
+      }
+      if (raw[i] === "<") {
+        var mt = raw.slice(i).match(/^<\/?([\w:-]+)/);
+        if (mt) { out += '<span class="tok-tag">' + escHtml(raw.slice(i, i + mt[0].length)) + "</span>"; i += mt[0].length; continue; }
+      }
+      if (raw[i] === ">" || (raw[i] === "/" && raw[i + 1] === ">")) {
+        var s = raw[i] === "/" ? "/>" : ">";
+        out += '<span class="tok-tag">' + escHtml(s) + "</span>"; i += s.length; continue;
+      }
+      if (raw[i] === '"' || raw[i] === "'") {
+        var q = raw[i], j = i + 1;
+        while (j < n && raw[j] !== q) j++;
+        out += '<span class="tok-string">' + escHtml(raw.slice(i, j + 1)) + "</span>"; i = j + 1; continue;
+      }
+      var am = raw.slice(i).match(/^[\w:-]+(?=\s*=)/);
+      if (am) { out += '<span class="tok-attr">' + escHtml(am[0]) + "</span>"; i += am[0].length; continue; }
+      out += escHtml(raw[i++]);
+    }
+    return out + "\n";
+  }
+
+  function highlight(code, mode) {
+    return mode === "html" ? highlightHTML(code) : highlightCSS(code);
+  }
+
+  function wire(wrap) {
+    if (wrap._wired) return;
+    var ta = wrap.querySelector(".code-editor-ta");
+    var pre = wrap.querySelector(".code-editor-pre");
+    if (!ta || !pre) return;
+    wrap._wired = true;
+    var mode = wrap.getAttribute("data-mode") || "css";
+    function hl() { pre.innerHTML = highlight(ta.value || "", mode); }
+    function sync() { pre.scrollTop = ta.scrollTop; pre.scrollLeft = ta.scrollLeft; }
+    ta.addEventListener("input", hl);
+    ta.addEventListener("scroll", sync);
+    hl();
+  }
+
+  function init() {
+    var nodes = document.querySelectorAll(".code-editor-wrap");
+    for (var k = 0; k < nodes.length; k++) wire(nodes[k]);
+  }
+  if (document.readyState !== "loading") init();
+  else document.addEventListener("DOMContentLoaded", init);
+})();
+</script>

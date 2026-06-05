@@ -289,6 +289,46 @@ body {
   border: 0.5px solid var(--border); border-radius: 12px; background: var(--surface);
 }
 
+/* ─── Syntax-highlighted code editor (design handoff #623) ─────────
+ * A transparent <textarea> over a highlighted <pre>; the tokenizers run
+ * client-side (see admin/_code_editor.html). The textarea keeps its name
+ * and value, so the form submits exactly as before — purely a view layer.
+ * VS Code "Dark+" palette, dark in both themes (it's a code surface). */
+.code-editor-wrap {
+  position: relative;
+  border: 1px solid #30363d; border-radius: 10px; overflow: hidden;
+  background: #0d1117;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.code-editor-pre, .code-editor-ta {
+  margin: 0; padding: 14px 16px; width: 100%; box-sizing: border-box;
+  font: inherit; line-height: inherit; tab-size: 2;
+  white-space: pre-wrap; word-wrap: break-word; overflow: auto;
+}
+.code-editor-pre {
+  position: absolute; inset: 0; pointer-events: none;
+  color: #e6edf3; border: none; background: transparent; overflow: hidden;
+}
+.code-editor-ta {
+  position: relative; z-index: 1;
+  background: transparent; color: transparent; caret-color: #e6edf3;
+  resize: vertical; border: none; outline: none; min-height: 120px;
+}
+.code-editor-ta::selection { background: rgba(56, 139, 253, 0.3); color: transparent; }
+.code-editor-ta::placeholder { color: #484f58; }
+
+.tok-comment   { color: #6a9955; font-style: italic; }
+.tok-string    { color: #ce9178; }
+.tok-atrule    { color: #c586c0; }
+.tok-selector  { color: #d7ba7d; }
+.tok-prop      { color: #9cdcfe; }
+.tok-number    { color: #b5cea8; }
+.tok-hexcolor  { color: #ce9178; font-weight: 500; }
+.tok-important { color: #f44747; font-weight: 700; }
+.tok-tag       { color: #4ec9b0; }
+.tok-attr      { color: #9cdcfe; }
+
 /* ─── Sticky filter cluster (design handoff #623) ─────────────────
  * Keeps search + filters reachable while scrolling a long catalog. The
  * portal header isn't sticky, so this sticks to the viewport top (top:0)

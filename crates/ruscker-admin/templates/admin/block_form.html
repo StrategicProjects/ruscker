@@ -32,8 +32,11 @@
 
     <div class="spec-form-field">
       <label class="spec-form-label">{{ self.t("admin-blocks-html") }}</label>
-      <textarea name="html" rows="8" class="spec-form-input spec-form-input--mono"
-                placeholder="&lt;div&gt;…&lt;/div&gt;">{{ html }}</textarea>
+      <div class="code-editor-wrap" data-mode="html">
+        <pre class="code-editor-pre" aria-hidden="true"></pre>
+        <textarea name="html" rows="8" class="code-editor-ta" spellcheck="false"
+                  placeholder="&lt;div&gt;…&lt;/div&gt;">{{ html }}</textarea>
+      </div>
       <div class="spec-form-help">{{ self.t("admin-blocks-html-help") }}</div>
     </div>
 
@@ -62,5 +65,8 @@
     </div>
   </form>
 </div>
+
+{# Syntax highlighting for the HTML block editor (#623). #}
+{% include "admin/_code_editor.html" %}
 
 {% endblock %}

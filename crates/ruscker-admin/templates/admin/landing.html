@@ -421,9 +421,12 @@
       <div class="spec-form-section-title">{{ self.t("admin-landing-analytics") }}</div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-analytics-html") }}</label>
-        <textarea name="analytics_html" rows="3" x-model="form.analytics_html"
-                  placeholder="&lt;script defer data-domain=&quot;...&quot; src=&quot;https://plausible.io/js/script.js&quot;&gt;&lt;/script&gt;"
-                  class="spec-form-input spec-form-input--mono">{{ form.analytics_html }}</textarea>
+        <div class="code-editor-wrap" data-mode="html">
+          <pre class="code-editor-pre" aria-hidden="true"></pre>
+          <textarea name="analytics_html" rows="3" x-model="form.analytics_html" spellcheck="false"
+                    placeholder="&lt;script defer data-domain=&quot;...&quot; src=&quot;https://plausible.io/js/script.js&quot;&gt;&lt;/script&gt;"
+                    class="code-editor-ta">{{ form.analytics_html }}</textarea>
+        </div>
         <div class="spec-form-help">{{ self.t("admin-landing-analytics-html-help") }}</div>
       </div>
       <div class="spec-form-field">
@@ -447,9 +450,12 @@
         </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-custom-css") }}</label>
-        <textarea name="custom_css" rows="6" x-model="form.custom_css"
-                  placeholder=".rcard { border-radius: 6px } &#10;:root { --color-link: #1d9e75 }"
-                  class="spec-form-input spec-form-input--mono">{{ form.custom_css }}</textarea>
+        <div class="code-editor-wrap" data-mode="css">
+          <pre class="code-editor-pre" aria-hidden="true"></pre>
+          <textarea name="custom_css" rows="6" x-model="form.custom_css" spellcheck="false"
+                    placeholder=".rcard { border-radius: 6px } &#10;:root { --color-link: #1d9e75 }"
+                    class="code-editor-ta">{{ form.custom_css }}</textarea>
+        </div>
         <div class="spec-form-help">{{ self.t("admin-landing-custom-css-help") }}</div>
       </div>
       </section>
@@ -590,6 +596,9 @@
 
 {# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
 {% include "admin/_blocks_editor.html" %}
+
+{# Syntax highlighting for the CSS / analytics-HTML editors (#623). #}
+{% include "admin/_code_editor.html" %}
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>

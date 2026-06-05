@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.67 — 2026-06-05
+
+Close the seat over-admission race.
+
+**Fix (from the code audit)**
+- Completes #582: the proxy reserves a seat **atomically** when it picks
+  a replica, so two concurrent first-requests can't both grab the last
+  free seat of a `seats-per-container` replica. Combined with the
+  scale-out in v0.1.66, a burst of new sessions now spawns up to
+  `max-replicas` (one per seat) instead of over-packing a single one.
+
 ## v0.1.66 — 2026-06-04
 
 Honor seats-per-container under load.

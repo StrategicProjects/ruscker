@@ -48,7 +48,7 @@ engineered to keep the runtime light while staying compatible:
 
 ## In production
 
-Ruscker is on **v0.1.66** and runs in production today. Built for extreme
+Ruscker is on **v0.1.67** and runs in production today. Built for extreme
 efficiency, its idle footprint sits in the low tens of megabytes:
 
 > **~540 MB → ~14 MB idle** — measured on a real production deployment.

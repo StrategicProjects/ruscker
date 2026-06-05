@@ -185,6 +185,110 @@ body {
   .topbar-progress { transition: opacity 0.25s ease; }
 }
 
+/* ─── Dashboard: KPI cards + app-grouped replicas (handoff #623) ───
+ * Replaces the flat replica table with metric cards on top and one
+ * expandable card per app. Dot classes reuse the server-emitted names
+ * (dot-on/pulse/warm/off) so no Rust mapping changes. The head and each
+ * replica row share one 8-column grid so they line up. */
+.dash-metrics {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px;
+}
+@media (max-width: 1024px) { .dash-metrics { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 640px) { .dash-metrics { grid-template-columns: repeat(2, 1fr); } }
+.metric {
+  background: var(--surface); border: 0.5px solid var(--border);
+  border-radius: 12px; padding: 15px 16px;
+}
+.metric__label {
+  font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.metric__label .ti { font-size: 14px; color: var(--text-faint); }
+.metric__value {
+  font-size: 28px; font-weight: 600; line-height: 1; letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.metric__value small { font-size: 14px; font-weight: 400; color: var(--text-faint); }
+.metric__sub { font-size: 11px; color: var(--text-faint); margin-top: 7px; }
+
+/* status dots — names match dashboard.rs `state_codes` */
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot-on { background: var(--ok, #10b981); }
+.dot-warm { background: var(--warn, #f59e0b); }
+.dot-off { background: #9ca3af; }
+.dot-pulse { background: var(--info, #3b82f6); animation: dash-pulse 1.4s ease-in-out infinite; }
+@keyframes dash-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .dot-pulse { animation: none; } }
+
+.bar-track {
+  height: 4px; background: var(--surface-soft); border-radius: 2px; overflow: hidden;
+  width: 100%; margin-top: 4px;
+}
+.bar-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+/* shared 8-column grid for the group head and each replica row */
+.dash-cols, .app-group__head, .replica-row {
+  display: grid;
+  grid-template-columns: 22px 1.6fr 84px 96px 1fr 1fr 96px 64px;
+  align-items: center; gap: 10px;
+}
+.dash-cols { padding: 4px 16px 8px; }
+.col-h {
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+}
+
+.app-group {
+  border: 0.5px solid var(--border); border-radius: 12px; background: var(--surface);
+  margin-bottom: 10px; overflow: hidden;
+}
+.app-group__head {
+  padding: 12px 16px; cursor: pointer; transition: background 0.12s; background: var(--surface);
+}
+.app-group__head:hover { background: var(--surface-soft); }
+.app-group.is-open .app-group__head { border-bottom: 0.5px solid var(--border-soft); }
+.app-group__chev {
+  color: var(--text-faint); transition: transform 0.2s ease; font-size: 16px; display: inline-flex;
+}
+.app-group.is-open .app-group__chev { transform: rotate(90deg); }
+.app-group__name { font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 9px; min-width: 0; }
+.app-group__name > span { min-width: 0; }
+.app-group__id { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); display: block; }
+.app-group__logo {
+  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 13px; border: 0.5px solid var(--border);
+  background: var(--surface-soft);
+}
+.app-group__replicas {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted);
+}
+.app-group__state { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; }
+
+.replica-list { background: var(--surface-soft); }
+.app-group:not(.is-open) .replica-list { display: none; }
+.replica-row { padding: 9px 16px; border-top: 0.5px solid var(--border-soft); font-size: 12px; }
+.replica-row .cid { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.replica-actions { display: flex; gap: 2px; justify-content: flex-end; color: var(--text-faint); }
+.replica-actions a, .replica-actions button {
+  border: 0; background: transparent; color: var(--text-faint); cursor: pointer;
+  width: 26px; height: 26px; border-radius: 6px;
+  display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+}
+.replica-actions a:hover, .replica-actions button:hover { background: var(--surface); color: var(--text); }
+.replica-actions .is-danger:hover { color: var(--color-lock, #ef4444); }
+
+.metric-cell { font-size: 12px; }
+.metric-cell .v { display: block; }
+.tnum { font-variant-numeric: tabular-nums; }
+.muted { color: var(--text-muted); }
+.faint { color: var(--text-faint); }
+.mono { font-family: var(--font-mono); }
+
+.dash-empty {
+  text-align: center; padding: 48px 20px; color: var(--text-muted);
+  border: 0.5px solid var(--border); border-radius: 12px; background: var(--surface);
+}
+
 /* ─── Sticky filter cluster (design handoff #623) ─────────────────
  * Keeps search + filters reachable while scrolling a long catalog. The
  * portal header isn't sticky, so this sticks to the viewport top (top:0)

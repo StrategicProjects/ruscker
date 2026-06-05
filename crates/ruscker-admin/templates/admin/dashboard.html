@@ -5,105 +5,22 @@
 {% block content %}
 
 <style>
-  /* Scoped to the dashboard; reuses tokens from the global
-     theme so light/dark switching keeps working. */
-  .dash-metric-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 12px;
-    margin-bottom: 24px;
-  }
-  @media (max-width: 1080px) {
-    .dash-metric-grid { grid-template-columns: repeat(3, 1fr); }
-  }
-  @media (max-width: 720px) {
-    .dash-metric-grid { grid-template-columns: repeat(2, 1fr); }
-  }
-  .dash-metric {
-    border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
-    border-radius: 10px;
-    padding: 14px 16px;
-  }
-  .dash-metric-label {
-    font-size: 12px;
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
-  }
-  .dash-metric-value { font-size: 22px; font-weight: 500; line-height: 1.1; }
-  .dash-metric-sub { font-size: 11px; color: var(--text-faint); margin-top: 4px; }
+  /* Most dashboard styling now lives in the global stylesheet (the
+     #623 redesign: .dash-metrics/.metric, .app-group, .replica-row,
+     .dot-*). Only the connection banner and the inline sparkline — both
+     dashboard-specific — stay here. */
   .dash-banner {
     margin-bottom: 18px;
     padding: 10px 14px;
     border-radius: 8px;
-    background: color-mix(in srgb, var(--color-accent, #3b82f6) 10%, transparent);
-    color: var(--text-primary);
+    background: color-mix(in srgb, var(--info, #3b82f6) 10%, transparent);
+    color: var(--text);
     font-size: 12px;
     display: flex;
     align-items: center;
     gap: 8px;
   }
-  .dash-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  .dash-table th {
-    text-align: left;
-    font-weight: 500;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    color: var(--text-muted);
-    padding: 8px 10px;
-    border-bottom: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2));
-  }
-  .dash-table td {
-    padding: 10px;
-    border-bottom: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.15));
-    vertical-align: middle;
-  }
-  .dash-dot {
-    width: 8px; height: 8px; border-radius: 50%;
-    display: inline-block;
-  }
-  .dot-on { background: #10b981; }
-  .dot-warm { background: #f59e0b; }
-  .dot-off { background: #6b7280; }
-  .dot-pulse {
-    background: #3b82f6;
-    animation: dash-pulse 1.5s ease-in-out infinite;
-  }
-  @keyframes dash-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .dash-mono {
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
-    font-size: 11px;
-    color: var(--text-muted);
-  }
-  .dash-empty {
-    padding: 32px 16px;
-    text-align: center;
-    color: var(--text-muted);
-    font-size: 13px;
-    border: 0.5px dashed var(--color-border-tertiary, rgba(120,120,120,0.2));
-    border-radius: 10px;
-  }
-  .dash-action {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    border-radius: 6px;
-    font-size: 14px;
-    vertical-align: middle;
-  }
-  .dash-action:hover { background: var(--color-background-secondary, rgba(120,120,120,0.12)); }
-  .dash-action--danger:hover { color: #ef4444; }
-  /* Inline CPU/memory trend sparkline next to the numeric value. */
-  .dash-metric-val { display: inline-block; min-width: 3.2em; }
+  /* Inline CPU/memory trend sparkline in a replica row. */
   .dash-spark { vertical-align: middle; margin-left: 6px; opacity: 0.75; }
 </style>
 
@@ -121,104 +38,100 @@
   </div>
 {% endif %}
 
-<div class="dash-metric-grid" id="dash-metrics">
+<div class="dash-metrics" id="dash-metrics">
   {# Capacity → load → resources. The two session metrics sit side by
      side so they can be compared (#469); tooltips spell out the
      difference (replica-reported vs. proxy-tracked sticky sessions). #}
-  <div class="dash-metric">
-    <div class="dash-metric-label"><i class="ti ti-box"></i>{{ self.t("admin-dashboard-metric-containers") }}</div>
-    <div class="dash-metric-value" data-metric="containers">{{ total_containers }}</div>
+  <div class="metric">
+    <div class="metric__label"><i class="ti ti-box"></i>{{ self.t("admin-dashboard-metric-containers") }}</div>
+    <div class="metric__value" data-metric="containers">{{ total_containers }}</div>
   </div>
-  <div class="dash-metric">
-    <div class="dash-metric-label"><i class="ti ti-apps"></i>{{ self.t("admin-dashboard-metric-specs") }}</div>
-    <div class="dash-metric-value" data-metric="specs">{{ spec_count }}</div>
+  <div class="metric">
+    <div class="metric__label"><i class="ti ti-apps"></i>{{ self.t("admin-dashboard-metric-specs") }}</div>
+    <div class="metric__value" data-metric="specs">{{ spec_count }}</div>
   </div>
-  <div class="dash-metric" title="{{ self.t("admin-dashboard-metric-sessions-help") }}">
-    <div class="dash-metric-label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
-    <div class="dash-metric-value" data-metric="sessions">{{ total_sessions }}</div>
+  <div class="metric" title="{{ self.t("admin-dashboard-metric-sessions-help") }}">
+    <div class="metric__label"><i class="ti ti-users"></i>{{ self.t("admin-dashboard-metric-sessions") }}</div>
+    <div class="metric__value" data-metric="sessions">{{ total_sessions }}</div>
   </div>
-  <div class="dash-metric" title="{{ self.t("admin-dashboard-metric-tracker-help") }}">
-    <div class="dash-metric-label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
-    <div class="dash-metric-value" data-metric="tracker">{{ tracker_sessions }}</div>
+  <div class="metric" title="{{ self.t("admin-dashboard-metric-tracker-help") }}">
+    <div class="metric__label"><i class="ti ti-activity"></i>{{ self.t("admin-dashboard-metric-tracker") }}</div>
+    <div class="metric__value" data-metric="tracker">{{ tracker_sessions }}</div>
   </div>
-  <div class="dash-metric">
-    <div class="dash-metric-label"><i class="ti ti-database"></i>{{ self.t("admin-dashboard-metric-memory") }}</div>
-    <div class="dash-metric-value" data-metric="memory">{{ total_memory_display }}</div>
+  <div class="metric">
+    <div class="metric__label"><i class="ti ti-database"></i>{{ self.t("admin-dashboard-metric-memory") }}</div>
+    <div class="metric__value" data-metric="memory">{{ total_memory_display }}</div>
   </div>
 </div>
 
 <h2 class="text-sm font-medium mb-2">{{ self.t("admin-dashboard-replicas-heading") }}</h2>
 
-<div id="dash-rows-empty" class="dash-empty"{% if !rows.is_empty() %} style="display:none"{% endif %}>{{ self.t("admin-dashboard-no-replicas") }}</div>
-<div id="dash-rows-wrap" style="border: 0.5px solid var(--color-border-tertiary, rgba(120,120,120,0.2)); border-radius: 10px; overflow: hidden;{% if rows.is_empty() %} display:none;{% endif %}">
-  <table class="dash-table">
-    <thead>
-      <tr>
-        <th style="width: 24px;"></th>
-        <th>{{ self.t("admin-dashboard-col-spec") }}</th>
-        <th>{{ self.t("admin-dashboard-col-state") }}</th>
-        <th>{{ self.t("admin-dashboard-col-uptime") }}</th>
-        <th>{{ self.t("admin-dashboard-col-sessions") }}</th>
-        <th>{{ self.t("admin-dashboard-col-cpu") }}</th>
-        <th>{{ self.t("admin-dashboard-col-memory") }}</th>
-        <th>{{ self.t("admin-dashboard-col-host") }}</th>
-        <th>{{ self.t("admin-dashboard-col-container") }}</th>
-        <th style="width: 84px;"></th>
-      </tr>
-    </thead>
-    <tbody id="dash-rows"
-           data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}"
-           data-logs-title="{{ self.t("admin-logs-title") }}"
-           data-stop-label="{{ self.t("admin-dashboard-action-stop") }}"
-           data-restart-label="{{ self.t("admin-dashboard-action-restart") }}"
-           data-confirm-stop="{{ self.t("admin-dashboard-confirm-stop") }}"
-           data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}"
-           data-can-manage="{% if role.can_manage() %}1{% endif %}">
-      {% for row in rows %}
-        <tr data-replica-id="{{ row.replica_id }}">
-          <td><span class="dash-dot {{ row.state_dot }}"></span></td>
-          <td>
-            <div style="font-weight: 500;">{{ row.display_name }}</div>
-            <div class="dash-mono">{{ row.spec_id }}</div>
-          </td>
-          <td>{{ row.state_label }}</td>
-          <td class="dash-mono">{{ row.uptime }}</td>
-          <td>{{ row.sessions_active }}<span style="color: var(--text-muted)">/{{ row.sessions_max }}</span></td>
-          <td>
-            {% match row.cpu_display %}
-              {% when Some with (s) %}{{ s }}
-              {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
-            {% endmatch %}
-          </td>
-          <td>
-            {% match row.memory_display %}
-              {% when Some with (s) %}{{ s }}
-              {% when None %}<span style="color: var(--text-faint)" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>
-            {% endmatch %}
-          </td>
-          <td>{% if row.host.is_empty() %}<span style="color:var(--text-faint)">local</span>{% else %}{{ row.host }}{% endif %}</td>
-          <td class="dash-mono">{{ row.container_short }}</td>
-          <td style="white-space: nowrap;">
-            {# logs + stop/restart are all Editor/Admin only (matched by
-               the RequireEditor route guards) — logs can carry sensitive
-               data (#261). #}
-            {% if role.can_manage() %}
-            <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"
-               class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>
-            <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/restart"
-                  style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
-              <button type="submit" class="dash-action" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh"></i></button>
-            </form>
-            <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/stop"
-                  style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
-              <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop"></i></button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
+{# Column header for the grouped accordion (shares the .replica-row grid). #}
+<div class="dash-cols">
+  <span></span>
+  <span class="col-h">{{ self.t("admin-dashboard-col-spec") }}</span>
+  <span class="col-h">{{ self.t("admin-dashboard-replicas-heading") }}</span>
+  <span class="col-h">{{ self.t("admin-dashboard-col-state") }}</span>
+  <span class="col-h">{{ self.t("admin-dashboard-col-sessions") }}</span>
+  <span class="col-h">{{ self.t("admin-dashboard-col-cpu") }}</span>
+  <span class="col-h">{{ self.t("admin-dashboard-col-memory") }}</span>
+  <span></span>
+</div>
+
+<div id="dash-empty" class="dash-empty"{% if !groups.is_empty() %} style="display:none"{% endif %}>{{ self.t("admin-dashboard-no-replicas") }}</div>
+
+{# App-grouped accordion (#623). Each app is an expandable card; the JS
+   patcher rebuilds this container on every SSE tick, preserving which
+   groups are open. Server-rendered open so it works without JS. The
+   shared meta strings live on the container's dataset. #}
+<div id="dash-groups"{% if groups.is_empty() %} style="display:none"{% endif %}
+     data-pending-label="{{ self.t("admin-dashboard-metrics-pending") }}"
+     data-logs-title="{{ self.t("admin-logs-title") }}"
+     data-stop-label="{{ self.t("admin-dashboard-action-stop") }}"
+     data-restart-label="{{ self.t("admin-dashboard-action-restart") }}"
+     data-confirm-stop="{{ self.t("admin-dashboard-confirm-stop") }}"
+     data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}"
+     data-can-manage="{% if role.can_manage() %}1{% endif %}">
+  {% for g in groups %}
+  <div class="app-group is-open" data-spec-id="{{ g.spec_id }}">
+    <div class="app-group__head" role="button" tabindex="0" aria-expanded="true">
+      <span class="app-group__chev"><i class="ti ti-chevron-right" aria-hidden="true"></i></span>
+      <span class="app-group__name">
+        <span class="app-group__logo">{{ g.initial }}</span>
+        <span><span class="truncate">{{ g.display_name }}</span><span class="app-group__id">{{ g.spec_id }}</span></span>
+      </span>
+      <span class="app-group__replicas"><i class="ti ti-stack-2" aria-hidden="true"></i>{{ g.n }}</span>
+      <span class="app-group__state"><span class="dot {{ g.state_dot }}"></span>{{ g.state_label }}</span>
+      <span class="metric-cell tnum">{{ g.sessions_active }}<span class="faint">/{{ g.sessions_max }}</span></span>
+      <span></span>
+      <span></span>
+    </div>
+    <div class="replica-list">
+      {% for row in g.replicas %}
+      <div class="replica-row" data-replica-id="{{ row.replica_id }}">
+        <span><span class="dot {{ row.state_dot }}"></span></span>
+        <span><span class="cid">{{ row.container_short }}</span>{% if !row.host.is_empty() %} <span class="faint">· {{ row.host }}</span>{% endif %}</span>
+        <span class="mono faint">{{ row.uptime }}</span>
+        <span class="muted">{{ row.state_label }}</span>
+        <span class="metric-cell tnum">{{ row.sessions_active }}<span class="faint">/{{ row.sessions_max }}</span></span>
+        <span class="metric-cell tnum">{% match row.cpu_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="faint" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>{% endmatch %}</span>
+        <span class="metric-cell tnum">{% match row.memory_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="faint">—</span>{% endmatch %}</span>
+        <span class="replica-actions">
+          {% if role.can_manage() %}
+          <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"><i class="ti ti-file-text" aria-hidden="true"></i></a>
+          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/restart" style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
+            <button type="submit" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh" aria-hidden="true"></i></button>
+          </form>
+          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/stop" style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
+            <button type="submit" class="is-danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop" aria-hidden="true"></i></button>
+          </form>
+          {% endif %}
+        </span>
+      </div>
       {% endfor %}
-    </tbody>
-  </table>
+    </div>
+  </div>
+  {% endfor %}
 </div>
 
 {# Tiny SSE patcher. No framework — just EventSource +
@@ -227,8 +140,9 @@
 <script id="dash-initial-snapshot" type="application/json">{{ snapshot_json|safe }}</script>
 <script>
 (function () {
-  var tbodyEl = document.getElementById('dash-rows');
-  var ds = (tbodyEl && tbodyEl.dataset) || {};
+  var container = document.getElementById('dash-groups');
+  var emptyEl = document.getElementById('dash-empty');
+  var ds = (container && container.dataset) || {};
   var pendingLabel = ds.pendingLabel || 'awaiting first reading';
   var logsTitle = ds.logsTitle || 'Logs';
   var stopLabel = ds.stopLabel || 'Stop';
@@ -240,31 +154,15 @@
   // SSE-patched rows consistent with the initial server render.
   var canManage = !!ds.canManage;
 
+  // Which app groups the user has collapsed (spec_id → true). Groups are
+  // open by default, so this survives the SSE rebuild and a new app shows
+  // up expanded.
+  var closed = {};
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
     });
-  }
-
-  // Tiny inline sparkline (relative min..max of its own series). No
-  // chart lib — a single SVG polyline. Returns '' for <2 points so
-  // a just-spawned replica shows nothing rather than a flat dot.
-  function spark(values, stroke) {
-    if (!values || values.length < 2) return '';
-    var w = 56, h = 16, pad = 1.5;
-    var min = Math.min.apply(null, values);
-    var max = Math.max.apply(null, values);
-    var range = (max - min) || 1;
-    var n = values.length;
-    var pts = values.map(function (v, i) {
-      var x = pad + (w - 2 * pad) * (i / (n - 1));
-      var y = pad + (h - 2 * pad) * (1 - (v - min) / range);
-      return x.toFixed(1) + ',' + y.toFixed(1);
-    }).join(' ');
-    return '<svg class="dash-spark" width="' + w + '" height="' + h
-      + '" viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" aria-hidden="true">'
-      + '<polyline fill="none" stroke="' + stroke + '" stroke-width="1.2" points="'
-      + pts + '"/></svg>';
   }
 
   function metric(name, value) {
@@ -272,68 +170,93 @@
     if (el && el.textContent !== String(value)) el.textContent = value;
   }
 
-  function metricCell(display) {
+  // A metric cell's text, or a faint "—" placeholder when the reading
+  // hasn't arrived yet.
+  function cell(display) {
     return display !== null && display !== undefined
       ? escapeHtml(display)
-      : '<span style="color: var(--text-faint)" title="' + escapeHtml(pendingLabel) + '">—</span>';
+      : '<span class="faint" title="' + escapeHtml(pendingLabel) + '">—</span>';
   }
+
   function actionsHtml(row) {
     if (!canManage) return '';
     var base = window.RUSCKER_BASE || '';
     var rid = encodeURIComponent(row.replica_id);
     return ''
       + '<a href="' + base + '/admin/dashboard/logs/' + rid + '" title="' + escapeHtml(logsTitle)
-        + '" class="dash-action" style="color: var(--text-muted)"><i class="ti ti-file-text"></i></a>'
+        + '"><i class="ti ti-file-text"></i></a>'
       + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
         + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
-        + '<button type="submit" class="dash-action" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
+        + '<button type="submit" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
       + '</form>'
       + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
         + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
-        + '<button type="submit" class="dash-action dash-action--danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
+        + '<button type="submit" class="is-danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
       + '</form>';
   }
 
-  // One renderer per <td>, in column order. Each returns that cell's
-  // inner HTML; CELL_TD carries its `<td>` attributes. We diff per cell
-  // so a tick only rewrites the cells whose value actually changed (#292)
-  // — uptime/CPU/mem change every tick, but the name/host/actions cells
-  // stay put, so we stop churning their DOM.
-  var CELL_TD = ['', '', '', ' class="dash-mono"', '', '', '', '', ' class="dash-mono"', ' style="white-space: nowrap;"'];
-  var CELLS = [
-    function (row) { return '<span class="dash-dot ' + escapeHtml(row.state_dot) + '"></span>'; },
-    function (row) { return '<div style="font-weight: 500;">' + escapeHtml(row.display_name) + '</div><div class="dash-mono">' + escapeHtml(row.spec_id) + '</div>'; },
-    function (row) { return escapeHtml(row.state_label); },
-    function (row) { return escapeHtml(row.uptime); },
-    function (row) { return row.sessions_active + '<span style="color: var(--text-muted)">/' + row.sessions_max + '</span>'; },
-    function (row) { return '<span class="dash-metric-val">' + metricCell(row.cpu_display) + '</span>' + spark(row.cpu_history, 'var(--accent, #1d9e75)'); },
-    function (row) { return '<span class="dash-metric-val">' + metricCell(row.memory_display) + '</span>' + spark(row.mem_history, 'var(--accent-2, #5dcaa5)'); },
-    function (row) { return row.host ? escapeHtml(row.host) : '<span style="color:var(--text-faint)">local</span>'; },
-    function (row) { return escapeHtml(row.container_short); },
-    function (row) { return actionsHtml(row); }
-  ];
+  // Mirror of dashboard.rs `severity`: higher = more attention-worthy,
+  // so a group head shows its worst replica's state.
+  function severity(state) {
+    return state === 'failed' ? 4
+      : state === 'stopped' ? 3
+      : state === 'draining' ? 2
+      : state === 'starting' ? 1 : 0;
+  }
 
-  // Render or update a <tr>: a fresh row builds all cells once; an
-  // existing one rewrites only the cells whose HTML changed.
-  function renderRow(tr, row) {
-    var i, html;
-    if (!tr._cells) {
-      html = '';
-      tr._cells = [];
-      for (i = 0; i < CELLS.length; i++) {
-        tr._cells[i] = CELLS[i](row);
-        html += '<td' + CELL_TD[i] + '>' + tr._cells[i] + '</td>';
-      }
-      tr.innerHTML = html;
-      return;
-    }
-    for (i = 0; i < CELLS.length; i++) {
-      var c = CELLS[i](row);
-      if (c !== tr._cells[i]) {
-        tr.children[i].innerHTML = c;
-        tr._cells[i] = c;
-      }
-    }
+  // Group flat replica rows by spec, preserving first-seen order, and
+  // summarise each group — the same projection the server does in Rust.
+  function groupRows(rows) {
+    var order = [], buckets = {};
+    rows.forEach(function (r) {
+      if (!buckets[r.spec_id]) { buckets[r.spec_id] = []; order.push(r.spec_id); }
+      buckets[r.spec_id].push(r);
+    });
+    return order.map(function (id) {
+      var reps = buckets[id], worst = reps[0], sa = 0, sm = 0;
+      reps.forEach(function (r) {
+        if (severity(r.state) > severity(worst.state)) worst = r;
+        sa += r.sessions_active; sm += r.sessions_max;
+      });
+      var name = reps[0].display_name || id;
+      return {
+        spec_id: id, display_name: name,
+        initial: (name.charAt(0) || '').toUpperCase(),
+        n: reps.length, state_dot: worst.state_dot, state_label: worst.state_label,
+        sessions_active: sa, sessions_max: sm, replicas: reps
+      };
+    });
+  }
+
+  function replicaRowHtml(row) {
+    var host = row.host ? ' <span class="faint">· ' + escapeHtml(row.host) + '</span>' : '';
+    return '<div class="replica-row" data-replica-id="' + escapeHtml(row.replica_id) + '">'
+      + '<span><span class="dot ' + escapeHtml(row.state_dot) + '"></span></span>'
+      + '<span><span class="cid">' + escapeHtml(row.container_short) + '</span>' + host + '</span>'
+      + '<span class="mono faint">' + escapeHtml(row.uptime) + '</span>'
+      + '<span class="muted">' + escapeHtml(row.state_label) + '</span>'
+      + '<span class="metric-cell tnum">' + row.sessions_active + '<span class="faint">/' + row.sessions_max + '</span></span>'
+      + '<span class="metric-cell tnum">' + cell(row.cpu_display) + '</span>'
+      + '<span class="metric-cell tnum">' + cell(row.memory_display) + '</span>'
+      + '<span class="replica-actions">' + actionsHtml(row) + '</span>'
+      + '</div>';
+  }
+
+  function groupHtml(g, isOpen) {
+    var reps = g.replicas.map(replicaRowHtml).join('');
+    return '<div class="app-group' + (isOpen ? ' is-open' : '') + '" data-spec-id="' + escapeHtml(g.spec_id) + '">'
+      + '<div class="app-group__head" role="button" tabindex="0" aria-expanded="' + (isOpen ? 'true' : 'false') + '">'
+        + '<span class="app-group__chev"><i class="ti ti-chevron-right"></i></span>'
+        + '<span class="app-group__name"><span class="app-group__logo">' + escapeHtml(g.initial) + '</span>'
+          + '<span><span class="truncate">' + escapeHtml(g.display_name) + '</span>'
+          + '<span class="app-group__id">' + escapeHtml(g.spec_id) + '</span></span></span>'
+        + '<span class="app-group__replicas"><i class="ti ti-stack-2"></i>' + g.n + '</span>'
+        + '<span class="app-group__state"><span class="dot ' + escapeHtml(g.state_dot) + '"></span>' + escapeHtml(g.state_label) + '</span>'
+        + '<span class="metric-cell tnum">' + g.sessions_active + '<span class="faint">/' + g.sessions_max + '</span></span>'
+        + '<span></span><span></span>'
+      + '</div>'
+      + '<div class="replica-list">' + reps + '</div>'
+      + '</div>';
   }
 
   function apply(snap) {
@@ -343,45 +266,44 @@
     metric('tracker', snap.tracker_sessions);
     metric('memory', snap.total_memory_display);
 
-    var tbody = document.getElementById('dash-rows');
-    var wrap = document.getElementById('dash-rows-wrap');
-    var empty = document.getElementById('dash-rows-empty');
-    if (!tbody || !wrap || !empty) return;
-
-    if (!snap.rows || snap.rows.length === 0) {
-      wrap.style.display = 'none';
-      empty.style.display = '';
-      tbody.innerHTML = '';
+    if (!container) return;
+    var rows = snap.rows || [];
+    if (rows.length === 0) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      if (emptyEl) emptyEl.style.display = '';
       return;
     }
-    wrap.style.display = '';
-    empty.style.display = 'none';
+    if (emptyEl) emptyEl.style.display = 'none';
+    container.style.display = '';
 
-    // Build new rows keyed by replica_id. Reuse existing <tr>
-    // when the id matches so the browser preserves any focus /
-    // selection inside (defensive — we don't have any inputs
-    // here yet, but cheap).
-    var existing = {};
-    Array.prototype.forEach.call(tbody.children, function (tr) {
-      var id = tr.dataset.replicaId;
-      if (id) existing[id] = tr;
-    });
+    // Rebuild the whole grouped container each tick. Far simpler than a
+    // per-row diff and cheap at this scale (a handful of apps, ~1 tick/s);
+    // the open/closed state lives in `closed`, not the DOM, so it survives.
+    container.innerHTML = groupRows(rows).map(function (g) {
+      return groupHtml(g, !closed[g.spec_id]);
+    }).join('');
+  }
 
-    // Reuse existing <tr>s (preserving their per-cell cache so the diff
-    // works) and place them in the snapshot's order; only new replicas
-    // build a fresh row. Moving a node in `replaceChildren` keeps its
-    // children + cache — no innerHTML rewrite for unchanged rows (#292).
-    var frag = document.createDocumentFragment();
-    snap.rows.forEach(function (row) {
-      var tr = existing[row.replica_id];
-      if (!tr) {
-        tr = document.createElement('tr');
-        tr.dataset.replicaId = row.replica_id;
-      }
-      renderRow(tr, row);
-      frag.appendChild(tr);
-    });
-    tbody.replaceChildren(frag);
+  // Expand/collapse a group on head click or Enter/Space. Delegated on the
+  // container so it keeps working after every innerHTML rebuild. Action
+  // buttons live in the replica list, not the head, so they don't toggle.
+  function toggleFromEvent(e) {
+    var head = e.target.closest && e.target.closest('.app-group__head');
+    if (!head || !container.contains(head)) return;
+    if (e.type === 'keydown') {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+    }
+    var group = head.parentElement;
+    var id = group.getAttribute('data-spec-id');
+    var open = group.classList.toggle('is-open');
+    head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) { delete closed[id]; } else { closed[id] = true; }
+  }
+  if (container) {
+    container.addEventListener('click', toggleFromEvent);
+    container.addEventListener('keydown', toggleFromEvent);
   }
 
   // The initial render already populated the DOM, but parsing

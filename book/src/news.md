@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.68 — 2026-06-05
+
+Manage groups from the admin.
+
+**Admin**
+- The Groups page (`/admin/groups`) is now editable: rename or delete a
+  group (the change propagates across user memberships and app
+  access-groups), add or remove members, and create a group by adding its
+  first member (#540).
+
 ## v0.1.67 — 2026-06-05
 
 Close the seat over-admission race.

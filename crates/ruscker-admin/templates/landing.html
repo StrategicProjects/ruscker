@@ -173,6 +173,9 @@
   </section>
   {% endif %}
 
+  {# ── Sticky filter cluster (#623): search + filters + meta stay
+     reachable while the catalog scrolls under them. ── #}
+  <div class="portal-sticky">
   {# ── Filter row 1: search + theme select + sort + status ───── #}
   <div class="flex flex-wrap gap-2.5 items-center mb-3.5">
     <label class="search-pill flex-1 min-w-[180px]">
@@ -260,6 +263,7 @@
       {{ self.t("filter-clear") }}
     </button>
   </div>
+  </div>{# /portal-sticky #}
 
   {# ── Card grid (fixed-width cards, columns auto-fill) ──────── #}
   <section class="cards-grid" x-ref="grid">

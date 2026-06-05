@@ -85,9 +85,14 @@
     {% for u in users %}
       <tr style="border-bottom:0.5px solid var(--border)">
         <td class="py-2">
-          <span class="font-medium">{{ u.username }}</span>
-          {% if u.username == me %}<span class="text-xs text-[color:var(--text-faint)]"> ({{ self.t("admin-users-you") }})</span>{% endif %}
-          {% if u.must_change_password %}<i class="ti ti-alert-triangle" title="{{ self.t("admin-users-must-change") }}" style="color:var(--text-faint)"></i>{% endif %}
+          <span class="user-cell">
+            <span class="rk-avatar" data-avatar="{{ u.username }}" aria-hidden="true"></span>
+            <span>
+              <span class="font-medium">{{ u.username }}</span>
+              {% if u.username == me %}<span class="text-xs text-[color:var(--text-faint)]"> ({{ self.t("admin-users-you") }})</span>{% endif %}
+              {% if u.must_change_password %}<i class="ti ti-alert-triangle" title="{{ self.t("admin-users-must-change") }}" style="color:var(--text-faint)"></i>{% endif %}
+            </span>
+          </span>
         </td>
         <td>
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/role" style="display:flex;gap:6px;align-items:center">
@@ -100,6 +105,11 @@
           </form>
         </td>
         <td>
+          {% if !u.groups.is_empty() %}
+          <div class="group-badges">
+            {% for g in u.groups %}<span class="group-badge" data-group="{{ g }}">{{ g }}</span>{% endfor %}
+          </div>
+          {% endif %}
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/groups" style="display:flex;gap:6px;align-items:center">
             <input type="text" name="groups" value="{{ u.groups|join(", ") }}" autocapitalize="none"
                    placeholder="{{ self.t("admin-users-groups-placeholder") }}" style="width:160px">
@@ -148,5 +158,29 @@
     var icon = btn.querySelector('i');
     if (icon) icon.className = 'ti ' + (reveal ? 'ti-eye-off' : 'ti-eye');
   });
+
+  // Avatars + group badges (#623): deterministic colour from a name hash,
+  // so each user/group keeps a stable colour with no backend involvement.
+  (function () {
+    function hue(s) {
+      var h = 0;
+      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+      return h;
+    }
+    function initials(s) {
+      var p = s.replace(/[^A-Za-z0-9]+/g, " ").trim().split(" ");
+      return ((p[0] || "").charAt(0) + (p.length > 1 ? (p[1] || "").charAt(0) : "")).toUpperCase() || "?";
+    }
+    document.querySelectorAll(".rk-avatar[data-avatar]").forEach(function (el) {
+      var name = el.getAttribute("data-avatar"), hu = hue(name);
+      el.style.background = "hsl(" + hu + " 48% 42%)";
+      if (!el.textContent) el.textContent = initials(name);
+    });
+    document.querySelectorAll(".group-badge[data-group]").forEach(function (el) {
+      var hu = hue(el.getAttribute("data-group"));
+      el.style.background = "hsl(" + hu + " 70% 92%)";
+      el.style.color = "hsl(" + hu + " 55% 28%)";
+    });
+  })();
 </script>
 {% endblock %}

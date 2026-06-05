@@ -289,6 +289,24 @@ body {
   border: 0.5px solid var(--border); border-radius: 12px; background: var(--surface);
 }
 
+/* ─── User avatars + group badges (design handoff #623) ───────────
+ * Colour is derived client-side from a hash of the name (see the inline
+ * script in users.html), so it's deterministic per user/group with no
+ * backend or schema involvement. */
+.rk-avatar {
+  flex: none; width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 12px; color: #fff; line-height: 1;
+  text-transform: uppercase; user-select: none;
+}
+.group-badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; font-size: 10px; border-radius: 999px;
+  font-weight: 500; letter-spacing: 0.02em; white-space: nowrap;
+}
+.user-cell { display: inline-flex; align-items: center; gap: 10px; }
+.group-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

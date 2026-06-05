@@ -89,6 +89,22 @@ default, so the section stays out of the way until you need it.
 
 ![Add/edit app form: the Kind selector and Identity/Visual bands on the left, with a live card preview on the right that updates as you type.](images/admin-spec-form.png)
 
+### Groups
+Groups (`/admin/groups`, admin-only) gate which apps a user sees. They're
+**derived**, not a separate table: a group exists as long as a user belongs
+to it or an app lists it under `access-groups`. The page shows every group
+with its members and the apps it gates, and lets you edit them in place:
+
+- **Rename** a group — the change propagates across every user membership
+  and every app that references it.
+- **Delete** a group — it's removed everywhere (an app left with no groups
+  becomes open to all).
+- **Add / remove members** inline, and **create** a group by adding its
+  first member under a new name.
+
+Edits touch the database-managed users and apps. An app defined in the
+`serve --config` YAML stays read-only here (edit the file for those).
+
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.

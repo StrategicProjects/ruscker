@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.71 — 2026-06-05
+
+Dashboard redesign: replicas grouped by app.
+
+**Interface**
+- The monitoring dashboard now groups replicas into one expandable card per
+  app instead of a flat table. Each card's header shows the app, its replica
+  count, the worst replica's state, and total sessions; expand it to see the
+  per-replica detail and the restart/stop/logs actions. The headline KPIs
+  were restyled to match (#623).
+
 ## v0.1.70 — 2026-06-05
 
 First slices of the UX redesign.

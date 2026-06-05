@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.70 — 2026-06-05
+
+First slices of the UX redesign.
+
+**Interface**
+- The public portal's search and filters now stay pinned to the top while
+  the catalog scrolls under them (#623).
+- The monitoring dashboard's headline numbers count up to their value on
+  load (honoring reduced-motion) (#623).
+- Groundwork for the redesign: shared shadow tokens and
+  perceived-performance primitives (top progress bar, shimmer skeletons,
+  content reveal), and the high-fidelity design handoff vendored under
+  `docs/design-handoff/` for reference (#623).
+
 ## v0.1.69 — 2026-06-05
 
 Lighter image and asset serving.

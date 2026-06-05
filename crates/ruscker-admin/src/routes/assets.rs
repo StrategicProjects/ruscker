@@ -47,6 +47,14 @@ const THUMB_MAX_DIM: u32 = 96;
 /// after a re-upload/delete here (#301).
 static THUMB_CACHE: LazyLock<DashMap<(String, u64), Vec<u8>>> = LazyLock::new(DashMap::new);
 
+/// `filename → content hash` of the full image bytes. Uploads never
+/// overwrite a filename (a re-upload auto-renames), so a live filename's
+/// content is immutable — letting us answer a warm thumbnail hit or an
+/// ETag revalidation without re-reading the blob from the DB/disk (#592).
+/// Invalidated alongside [`THUMB_CACHE`] on every mutation, so it shares
+/// the same coherence: a hash never outlives the bytes it was taken from.
+static IMAGE_DIGEST: LazyLock<DashMap<String, u64>> = LazyLock::new(DashMap::new);
+
 /// Drop a filename's cached thumbnails. With the content-addressed key
 /// (#313) the cache is already cross-node correct — changed bytes hash to
 /// a different key, so no node serves a stale thumbnail — but the old
@@ -55,6 +63,9 @@ static THUMB_CACHE: LazyLock<DashMap<(String, u64), Vec<u8>>> = LazyLock::new(Da
 /// memory bounded (the intent of #301).
 pub(crate) fn invalidate_thumb(filename: &str) {
     THUMB_CACHE.retain(|(name, _), _| name != filename);
+    // Same hook, same coherence: drop the cached digest so the next request
+    // re-reads the blob and re-hashes it rather than trusting a stale hash.
+    IMAGE_DIGEST.remove(filename);
 }
 
 /// Fast, non-cryptographic content hash for the thumbnail cache key —
@@ -98,6 +109,30 @@ mod thumb_cache_tests {
 
         // Don't leak test state into other tests sharing the process-wide map.
         THUMB_CACHE.remove(&("keep.png".into(), 1));
+    }
+
+    #[test]
+    fn etag_from_hash_matches_full_bytes_path() {
+        // #592: the digest fast path must yield the byte-identical ETag the
+        // blob path would, or a cached digest would mint a different
+        // validator and break revalidation.
+        let bytes = b"some-image-bytes";
+        assert_eq!(etag_for(bytes), etag_from_hash(content_hash(bytes)));
+    }
+
+    #[test]
+    fn invalidate_thumb_drops_the_cached_digest() {
+        // #592: changing/removing a file must clear its remembered hash so
+        // the next request re-reads the blob instead of trusting a stale one.
+        IMAGE_DIGEST.insert("digest-drop.png".into(), 42);
+        IMAGE_DIGEST.insert("digest-keep.png".into(), 7);
+
+        invalidate_thumb("digest-drop.png");
+
+        assert!(!IMAGE_DIGEST.contains_key("digest-drop.png"), "named file's digest cleared");
+        assert!(IMAGE_DIGEST.contains_key("digest-keep.png"), "other file's digest kept");
+
+        IMAGE_DIGEST.remove("digest-keep.png");
     }
 }
 
@@ -297,14 +332,34 @@ async fn serve_card_image(
 
     let want_thumb = q.thumb.is_some();
 
+    // Blob-free fast paths (#592): if we already know this file's content
+    // hash, a warm thumbnail hit and an ETag revalidation can both be
+    // answered without re-reading the (potentially large) blob from the
+    // DB/disk. The digest is invalidated wherever the bytes change, so it's
+    // never stale (see [`IMAGE_DIGEST`]).
+    if let Some(hash) = IMAGE_DIGEST.get(&filename).map(|h| *h) {
+        if want_thumb {
+            if let Some(cached) = THUMB_CACHE.get(&(filename.clone(), hash)) {
+                return serve_thumbnail_bytes(&req_headers, cached.clone());
+            }
+            // Thumbnail not generated yet → fall through to read + resize.
+        } else {
+            let etag = etag_from_hash(hash);
+            if if_none_match(&req_headers, &etag) {
+                return not_modified(&etag);
+            }
+            // Modified / no validator → fall through to read + send the blob.
+        }
+    }
+
     // Resolve the full image bytes: DB first, then the on-disk fallback.
-    // We fetch on every `?thumb` request too — the source hash is the
-    // cache key (#313), so the bytes are needed to look the thumbnail up.
-    // The blob is small; the expensive step the cache still skips is the
-    // decode+resize below.
+    // Reached only on a cold digest, an uncached thumbnail, or a 200 send.
     let Some((mime, bytes)) = fetch_image_bytes(&state, &filename).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // Hash once and remember it, so the next request can take a fast path.
+    let hash = content_hash(&bytes);
+    IMAGE_DIGEST.insert(filename.clone(), hash);
 
     // Vector / no resize needed → serve as-is. Raster + `?thumb` →
     // serve the content-addressed cached thumbnail if present, else
@@ -312,7 +367,7 @@ async fn serve_card_image(
     // `(filename, hash(bytes))`, so a re-upload on any HA node naturally
     // misses here and regenerates — never a stale thumbnail (#313).
     if want_thumb && mime != "image/svg+xml" {
-        let key = (filename.clone(), content_hash(&bytes));
+        let key = (filename.clone(), hash);
         if let Some(cached) = THUMB_CACHE.get(&key) {
             return serve_thumbnail_bytes(&req_headers, cached.clone());
         }
@@ -337,7 +392,7 @@ async fn serve_card_image(
 
     // Full image: ETag-validated so a revalidation returns a cheap 304
     // instead of re-sending the blob (#290).
-    let etag = etag_for(&bytes);
+    let etag = etag_from_hash(hash);
     if if_none_match(&req_headers, &etag) {
         return not_modified(&etag);
     }
@@ -446,11 +501,15 @@ fn serve_dynamic(body: Vec<u8>, content_type: &str, etag: &str) -> Response {
 /// A weak-ish ETag for an image blob — a fast non-crypto hash of the
 /// bytes (it's a cache validator, not a security control). Changes iff
 /// the content changes.
+/// ETag for an already-computed content hash. Used on the blob-free fast
+/// path (#592) so a cached digest yields the exact same validator as a
+/// fresh read would.
+fn etag_from_hash(hash: u64) -> String {
+    format!("\"{hash:x}\"")
+}
+
 fn etag_for(bytes: &[u8]) -> String {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    bytes.hash(&mut h);
-    format!("\"{:x}\"", h.finish())
+    etag_from_hash(content_hash(bytes))
 }
 
 /// Does the request's `If-None-Match` match `etag` (or `*`)?

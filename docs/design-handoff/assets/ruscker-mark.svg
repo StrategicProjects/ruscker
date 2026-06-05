@@ -1,0 +1,7 @@
+<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="512" height="512" role="img" aria-label="Ruscker">
+  <title>Ruscker — Pilha de containers</title>
+  <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"></polygon>
+  <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"></polygon>
+  <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"></polygon>
+</svg>

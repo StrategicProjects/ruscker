@@ -581,6 +581,11 @@ pub fn router(state: AppState) -> Router {
 /// `images_dir` argument is now ignored because state carries the
 /// fallback directory itself (set via [`AdminServer::with_images_dir`]).
 pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router {
+    // Precompress the bundled CSS/JS up front so the first request already
+    // has the brotli/gzip variants ready, and the CompressionLayer never
+    // re-encodes these immutable bytes per request (#593).
+    routes::assets::warm_precompression();
+
     // Ruscker's own surfaces (landing, admin, prefs, assets) get
     // security response headers. The proxy routes do NOT — those
     // forward upstream app responses verbatim, and injecting our

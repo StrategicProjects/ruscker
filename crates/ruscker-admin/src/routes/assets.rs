@@ -47,6 +47,79 @@ const THUMB_MAX_DIM: u32 = 96;
 /// after a re-upload/delete here (#301).
 static THUMB_CACHE: LazyLock<DashMap<(String, u64), Vec<u8>>> = LazyLock::new(DashMap::new);
 
+/// Brotli + gzip of a bundled text asset, computed once and reused —
+/// keyed by the static body's address (each `const` is a distinct, fixed
+/// address) (#593). Lets us serve a precompressed variant by
+/// `Accept-Encoding` so the outer CompressionLayer doesn't re-encode these
+/// immutable bytes on every request. `Bytes` so a per-request clone is a
+/// refcount bump, not a copy.
+static PRECOMPRESSED: LazyLock<DashMap<usize, (axum::body::Bytes, axum::body::Bytes)>> =
+    LazyLock::new(DashMap::new);
+
+/// Brotli- and gzip-encode `body` (max quality — this runs once). Brotli
+/// quality 11 / window 22 and gzip `best` match what a static-asset CDN
+/// would ship; the cost is paid at startup, not per request.
+fn compress_both(body: &[u8]) -> (axum::body::Bytes, axum::body::Bytes) {
+    use std::io::Write;
+
+    let mut br = Vec::new();
+    {
+        let mut w = brotli::CompressorWriter::new(&mut br, 4096, 11, 22);
+        let _ = w.write_all(body);
+    }
+
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let _ = gz.write_all(body);
+    let gz = gz.finish().unwrap_or_default();
+
+    (axum::body::Bytes::from(br), axum::body::Bytes::from(gz))
+}
+
+/// Warm the precompression cache for every bundled text asset, so the
+/// first request after boot already has the encoded bytes ready (#593).
+/// Called once from server setup.
+pub(crate) fn warm_precompression() {
+    for body in [STYLES_CSS, TABLER_CSS, ALPINE_JS] {
+        PRECOMPRESSED
+            .entry(body.as_ptr() as usize)
+            .or_insert_with(|| compress_both(body));
+    }
+}
+
+/// Does an `Accept-Encoding` header offer `token` (with a non-zero,
+/// explicit-or-implicit quality)? A plain token-list match — enough for
+/// the `br`/`gzip` browsers actually send; we don't haggle over q-values.
+fn encoding_accepted(accept: &str, token: &str) -> bool {
+    accept.split(',').any(|part| {
+        let mut it = part.trim().split(';');
+        let name = it.next().unwrap_or("").trim();
+        if !name.eq_ignore_ascii_case(token) {
+            return false;
+        }
+        // Reject only an explicit `q=0` ("I do NOT accept this").
+        !it.any(|p| p.trim().replace(' ', "").eq_ignore_ascii_case("q=0"))
+    })
+}
+
+/// Pick the best precompressed variant a client accepts — brotli first,
+/// then gzip — filling the cache on a cold miss. `None` ⇒ serve raw.
+fn precompressed_variant(
+    body: &'static [u8],
+    accept: Option<&str>,
+) -> Option<(&'static str, axum::body::Bytes)> {
+    let accept = accept?;
+    let entry = PRECOMPRESSED
+        .entry(body.as_ptr() as usize)
+        .or_insert_with(|| compress_both(body));
+    if encoding_accepted(accept, "br") {
+        Some(("br", entry.0.clone()))
+    } else if encoding_accepted(accept, "gzip") {
+        Some(("gzip", entry.1.clone()))
+    } else {
+        None
+    }
+}
+
 /// `filename → content hash` of the full image bytes. Uploads never
 /// overwrite a filename (a re-upload auto-renames), so a live filename's
 /// content is immutable — letting us answer a warm thumbnail hit or an
@@ -249,11 +322,11 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route(
             "/assets/styles.css",
-            get(|q| serve_versioned(q, STYLES_CSS, "text/css; charset=utf-8")),
+            get(|q, h| serve_versioned(q, h, STYLES_CSS, "text/css; charset=utf-8")),
         )
         .route(
             "/assets/icons/tabler-icons.min.css",
-            get(|q| serve_versioned(q, TABLER_CSS, "text/css; charset=utf-8")),
+            get(|q, h| serve_versioned(q, h, TABLER_CSS, "text/css; charset=utf-8")),
         )
         .route(
             "/assets/icons/tabler-icons.woff2",
@@ -273,7 +346,7 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/assets/js/alpine.min.js",
-            get(|q| serve_versioned(q, ALPINE_JS, "application/javascript; charset=utf-8")),
+            get(|q, h| serve_versioned(q, h, ALPINE_JS, "application/javascript; charset=utf-8")),
         )
         // Tech showcase logos. URLs match the seeded specs in migration 0009.
         .route("/assets/showcase/bokeh.svg", get(|| serve(SHOWCASE_BOKEH, SVG)))
@@ -566,14 +639,36 @@ async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
 /// never serve stale bytes under a non-versioned URL.
 async fn serve_versioned(
     Query(q): Query<AssetVer>,
+    req_headers: HeaderMap,
     body: &'static [u8],
     content_type: &'static str,
 ) -> Response {
-    if q.v.is_some() {
-        serve_with_cache(body, content_type, "public, max-age=31536000, immutable")
+    // A versioned URL is immutable (bytes change only with `?v`); an
+    // un-versioned hit gets the short cache so an upgrade is picked up.
+    let cache = if q.v.is_some() {
+        "public, max-age=31536000, immutable"
     } else {
-        serve(body, content_type).await
+        "public, max-age=300"
+    };
+
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+    // The body varies by encoding now, so shared caches must key on it.
+    headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+
+    let accept = req_headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok());
+    // Serve the precompressed variant when the client accepts one. The
+    // `Content-Encoding` we set makes the outer CompressionLayer skip it
+    // (it never re-encodes an already-encoded body), so these immutable
+    // bytes are compressed once, not per request (#593).
+    if let Some((encoding, bytes)) = precompressed_variant(body, accept) {
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static(encoding));
+        return (StatusCode::OK, headers, bytes).into_response();
     }
+    (StatusCode::OK, headers, body).into_response()
 }
 
 #[cfg(test)]
@@ -608,5 +703,84 @@ mod tests {
         assert_eq!(mime_from_extension("a.svg"), "image/svg+xml");
         assert_eq!(mime_from_extension("a.webp"), "image/webp");
         assert_eq!(mime_from_extension("a.unknown"), "application/octet-stream");
+    }
+
+    // ── Precompression (#593) ──────────────────────────────────────
+
+    fn gunzip(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Read;
+        let mut out = Vec::new();
+        flate2::read::GzDecoder::new(bytes).read_to_end(&mut out).unwrap();
+        out
+    }
+
+    fn unbrotli(bytes: &[u8]) -> Vec<u8> {
+        use std::io::Read;
+        let mut out = Vec::new();
+        brotli::Decompressor::new(bytes, 4096).read_to_end(&mut out).unwrap();
+        out
+    }
+
+    #[test]
+    fn compress_both_roundtrips_to_the_original() {
+        // A precompressed variant must decode back to the exact bytes — a
+        // truncated/garbled body would silently break every page.
+        let src = b"body{color:red}/* padded so compression actually engages */".repeat(20);
+        let (br, gz) = compress_both(&src);
+        assert!(br.len() < src.len(), "brotli should shrink repetitive text");
+        assert_eq!(unbrotli(&br), src, "brotli decodes to the original");
+        assert_eq!(gunzip(&gz), src, "gzip decodes to the original");
+    }
+
+    #[test]
+    fn encoding_accepted_matches_tokens_not_substrings() {
+        assert!(encoding_accepted("gzip, br", "br"));
+        assert!(encoding_accepted("gzip, deflate, br", "gzip"));
+        assert!(encoding_accepted("br;q=1.0", "br"));
+        // `q=0` is an explicit refusal.
+        assert!(!encoding_accepted("br;q=0", "br"));
+        // Don't match a token embedded in another (e.g. "xbr").
+        assert!(!encoding_accepted("xbr", "br"));
+        assert!(!encoding_accepted("identity", "gzip"));
+    }
+
+    #[tokio::test]
+    async fn serve_versioned_serves_brotli_when_accepted() {
+        let mut h = HeaderMap::new();
+        h.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("gzip, br"));
+        let resp = serve_versioned(
+            Query(AssetVer { v: Some("x".into()) }),
+            h,
+            STYLES_CSS,
+            "text/css; charset=utf-8",
+        )
+        .await;
+        let hd = resp.headers();
+        assert_eq!(hd.get(header::CONTENT_ENCODING).unwrap(), "br");
+        assert_eq!(hd.get(header::VARY).unwrap(), "accept-encoding");
+        assert!(hd
+            .get(header::CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("immutable"));
+        let body = to_bytes(resp.into_body(), 8 << 20).await.unwrap();
+        assert_eq!(unbrotli(&body), STYLES_CSS, "served bytes decode to the asset");
+    }
+
+    #[tokio::test]
+    async fn serve_versioned_serves_raw_without_accept_encoding() {
+        // No `Accept-Encoding` → raw bytes, no `Content-Encoding`, so the
+        // CompressionLayer (or the client) handles it as before.
+        let resp = serve_versioned(
+            Query(AssetVer { v: None }),
+            HeaderMap::new(),
+            STYLES_CSS,
+            "text/css; charset=utf-8",
+        )
+        .await;
+        assert!(resp.headers().get(header::CONTENT_ENCODING).is_none());
+        let body = to_bytes(resp.into_body(), 8 << 20).await.unwrap();
+        assert_eq!(&body[..], STYLES_CSS);
     }
 }

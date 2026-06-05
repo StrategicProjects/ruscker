@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.73 — 2026-06-05
+
+Cold-start apps spawn again; syntax-highlighted code editors.
+
+**Fixes**
+- An app with `min-replicas: 0` (cold start) and no `max-replicas` could
+  never start a container — the default resolved to `max-replicas: 0`, so
+  the on-demand spawn was a no-op and the booting splash hung. The default
+  now floors at 1 for containerized apps (#623/#582).
+
+**Interface**
+- The Appearance custom-CSS / analytics-HTML editors and the custom HTML
+  blocks editor now have VS Code-style live syntax highlighting (#623).
+
 ## v0.1.72 — 2026-06-05
 
 Fix a cold-start splash that could hang.

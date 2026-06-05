@@ -44,6 +44,12 @@ unic-langid = { workspace = true }
 # Embedded assets
 include_dir = { workspace = true }
 
+# Precompress the bundled CSS/JS once at startup (#593) instead of letting
+# the CompressionLayer re-encode these immutable bytes on every request.
+# Both already compile transitively (tower-http → async-compression).
+flate2 = "1.1"
+brotli = "8.0"
+
 # Errors / logging
 anyhow = { workspace = true }
 thiserror = { workspace = true }

@@ -1014,10 +1014,19 @@ impl Spec {
         })
     }
 
-    /// Effective maximum replicas (defaults to `min_replicas`, so no
-    /// auto-scaling unless the operator opts in).
+    /// Effective maximum replicas. Defaults to `min-replicas`, so there's
+    /// no auto-scaling unless the operator opts in — **but never below 1
+    /// for a containerized spec.** A cold-start app sets `min-replicas: 0`
+    /// (don't pre-spawn) and usually leaves `max-replicas` unset; without
+    /// this floor that resolves to `max = 0`, and the on-demand spawn path
+    /// (`spawn_one`'s `live >= max` cap) would refuse to ever start a
+    /// container — the cold-start splash then polls forever. `External`
+    /// specs have no container, so they stay at 0.
     pub fn effective_max_replicas(&self) -> u32 {
-        self.max_replicas.unwrap_or_else(|| self.effective_min_replicas())
+        self.max_replicas.unwrap_or_else(|| match self.kind() {
+            SpecKind::External => 0,
+            _ => self.effective_min_replicas().max(1),
+        })
     }
 
     /// Hard lifetime cap in **seconds** (`max-lifetime` is authored in
@@ -1598,6 +1607,28 @@ proxy:
         assert_eq!(config.proxy.title, "Test");
         assert_eq!(config.proxy.specs.len(), 1);
         assert_eq!(config.proxy.specs[0].id, "hello");
+    }
+
+    #[test]
+    fn cold_start_spec_still_scales_to_one() {
+        // A cold-start app sets `min-replicas: 0` (don't pre-spawn) and
+        // usually leaves `max-replicas` unset. effective-max must NOT
+        // resolve to 0 — that would make the on-demand spawn a no-op
+        // (`spawn_one`'s `live >= max` cap) and hang the cold-start splash
+        // forever. A containerized spec floors at 1.
+        let yaml = "proxy:\n  specs:\n    - id: cold\n      container-image: nginx:alpine\n      min-replicas: 0\n";
+        let spec = &serde_yaml_ng::from_str::<Config>(yaml).unwrap().proxy.specs[0];
+        assert_eq!(spec.effective_min_replicas(), 0, "cold start: no pre-spawn");
+        assert_eq!(spec.effective_max_replicas(), 1, "but can scale to one on demand");
+
+        // Defaults unchanged when nothing is set (min 1 ⇒ max 1) and an
+        // explicit max is still honoured.
+        let dflt = "proxy:\n  specs:\n    - id: d\n      container-image: nginx\n";
+        let s = &serde_yaml_ng::from_str::<Config>(dflt).unwrap().proxy.specs[0];
+        assert_eq!(s.effective_max_replicas(), 1);
+        let cap = "proxy:\n  specs:\n    - id: c\n      container-image: nginx\n      min-replicas: 0\n      max-replicas: 4\n";
+        let s = &serde_yaml_ng::from_str::<Config>(cap).unwrap().proxy.specs[0];
+        assert_eq!(s.effective_max_replicas(), 4, "explicit max is honoured");
     }
 
     #[test]

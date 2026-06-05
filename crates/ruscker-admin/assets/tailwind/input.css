@@ -74,6 +74,9 @@
   --border: #e8e6df;
   --border-soft: #f0eee8;
   --border-strong: #c0c0bb;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.16);
 }
 
 /* OS-driven dark (no explicit cookie) */
@@ -89,6 +92,9 @@
     --border: #2a2a2a;
     --border-soft: #232323;
     --border-strong: #404040;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.6);
   }
 }
 
@@ -104,6 +110,9 @@
   --border: #2a2a2a;
   --border-soft: #232323;
   --border-strong: #404040;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.6);
 }
 
 /* ─── Base typography ─────────────────────────────────────────── */
@@ -112,6 +121,68 @@ body {
   font-family: var(--font-display);
   font-weight: 400;
   font-feature-settings: "cv02", "cv11";
+}
+
+/* ─── Perceived-performance primitives (design handoff #623) ──────
+ * The redesign's stated focus is *perceived* speed. These are the
+ * shared building blocks the screens reuse: a thin top progress bar on
+ * navigation, shimmer skeletons while data loads, and a short, mostly
+ * uniform reveal when real content arrives. Reference:
+ * docs/design-handoff/ (assets/ruscker.css). All honor
+ * prefers-reduced-motion. The count-up for live metrics is a small
+ * Alpine helper that ships with the screen that uses it (dashboard),
+ * not here — these are CSS-only. */
+
+/* Top progress bar — the page toggles `.is-active` (HTMX/Alpine) while
+ * a navigation/fetch is in flight, and grows its width as it proceeds. */
+.topbar-progress {
+  position: fixed; top: 0; left: 0; height: 2.5px; z-index: 500;
+  width: 0; opacity: 0;
+  background: linear-gradient(90deg, var(--color-teal-400), var(--color-teal-200));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--color-teal-400) 70%, transparent);
+  transition: width 0.2s ease, opacity 0.25s ease;
+}
+.topbar-progress.is-active { opacity: 1; }
+
+/* Shimmer skeletons. Put `.sk` on a sized box to get the shimmer; add
+ * `.sk-line` (text row) or `.sk-pill` (rounded) to shape it. */
+.sk {
+  position: relative; overflow: hidden; border-radius: 6px;
+  background: color-mix(in srgb, var(--text) 9%, var(--surface));
+}
+.sk::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(
+    90deg, transparent,
+    color-mix(in srgb, var(--surface) 75%, transparent), transparent);
+  animation: sk-shimmer 1.3s ease-in-out infinite;
+}
+@keyframes sk-shimmer { 100% { transform: translateX(100%); } }
+.sk-line { height: 10px; border-radius: 5px; }
+.sk-pill { border-radius: 999px; }
+
+/* Reveal once real data arrives — short, so it never fights the
+ * perceived-speed goal. `.stagger` cascades its direct children with a
+ * small per-item delay (capped so long lists don't drag). */
+.fade-in { animation: fade-in 0.32s ease both; }
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.stagger > * { animation: fade-in 0.3s ease both; }
+.stagger > *:nth-child(2) { animation-delay: 0.03s; }
+.stagger > *:nth-child(3) { animation-delay: 0.06s; }
+.stagger > *:nth-child(4) { animation-delay: 0.09s; }
+.stagger > *:nth-child(5) { animation-delay: 0.12s; }
+.stagger > *:nth-child(6) { animation-delay: 0.15s; }
+.stagger > *:nth-child(7) { animation-delay: 0.18s; }
+.stagger > *:nth-child(8) { animation-delay: 0.21s; }
+.stagger > *:nth-child(n + 9) { animation-delay: 0.24s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk::after { animation: none; }
+  .fade-in, .stagger > * { animation: none; }
+  .topbar-progress { transition: opacity 0.25s ease; }
 }
 
 /* ─── Filter row: search pill + sort button ───────────────────── */

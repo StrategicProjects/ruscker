@@ -428,9 +428,9 @@ async fn forward(
     //    pick/spawn. Also pin down the session_id we'll track
     //    this visitor under so the cookie and the tracker share
     //    the same identity.
-    let (replica, session_id, cookie_used) =
+    let (replica, session_id, cookie_used, seat_reserved) =
         match resolve_replica(&state, &spec, &cookies).await {
-            Ok(triple) => triple,
+            Ok(quad) => quad,
             Err(err) => {
                 tracing::error!(spec = %spec.id, error = ?err, "resolve replica failed");
                 return with_cors(
@@ -448,7 +448,7 @@ async fn forward(
     if spec_kind_needs_sticky(spec.kind()) {
         let outcome = state
             .sessions
-            .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id)
+            .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id, seat_reserved)
             .await;
         // stop-on-logout (#337): when a *known* user first registers a
         // session on a spec that opts in, index it so their logout can
@@ -856,7 +856,7 @@ async fn resolve_replica(
     state: &AppState,
     spec: &Spec,
     cookies: &Cookies,
-) -> anyhow::Result<(Replica, uuid::Uuid, bool)> {
+) -> anyhow::Result<(Replica, uuid::Uuid, bool, bool)> {
     if let Some(raw) = cookies.get(COOKIE_NAME) {
         if let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) {
             // Defense in depth: a cookie for spec A must not
@@ -875,14 +875,18 @@ async fn resolve_replica(
                 // pick + new session rather than 502-ing the visitor.
                 if let Some(r) = alive {
                     if matches!(r.state, ReplicaState::Ready | ReplicaState::Draining) {
-                        return Ok((r, session.session_id, true));
+                        // Existing session — its seat is already counted, so
+                        // nothing is reserved here (4th = false).
+                        return Ok((r, session.session_id, true, false));
                     }
                 }
             }
         }
     }
-    let r = pick_or_spawn(state, spec).await?;
-    Ok((r, uuid::Uuid::new_v4(), false))
+    // New session: `pick_or_spawn` already reserved its seat (when it
+    // returns `reserved = true`), so the session tracker must not re-count.
+    let (r, reserved) = pick_or_spawn(state, spec).await?;
+    Ok((r, uuid::Uuid::new_v4(), false, reserved))
 }
 
 /// Build + set the sticky cookie from an explicit `StickySession`
@@ -1029,19 +1033,28 @@ fn cold_start_splash(spec: &Spec, base: &str) -> Response {
 /// keyed by spec id. Entries stay around forever; that's a few
 /// dozen bytes per spec and `Mutex<()>` has no payload to
 /// matter. Phase 4 GC sweeps them when a spec is deleted.
-async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica> {
+async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<(Replica, bool)> {
     let routing = spec.effective_routing();
     // APIs balance by in-flight requests, not seats (#424).
     let api = matches!(spec.kind(), SpecKind::Api);
+    // Seat-based specs (Shiny / interactive apps) reserve the chosen
+    // replica's seat ATOMICALLY with the pick — under the same write lock —
+    // so two concurrent first-requests can't both grab the last free seat
+    // (#582 part 1). APIs don't use seats. The returned `bool` tells the
+    // caller a seat was already counted here, so the session tracker must
+    // not increment it again. This path runs only for a *new* session (a
+    // live sticky cookie short-circuits in `resolve_replica`), so the
+    // write lock here is per-new-session, not per-request.
+    let reserve = !api;
 
-    // Fast path: read lock, no spawn coordination needed. Route to a
-    // replica that's actually `Ready` (preferably with a free seat) per
-    // the spec's strategy; only fall through to spawn when none is
-    // usable — never hand traffic to a Starting/Draining/Failed one.
+    // Fast path: pick + reserve under one write lock.
     {
-        let reg = state.replicas.read().await;
+        let mut reg = state.replicas.write().await;
         if let Some(r) = pick_accepting(reg.replicas_of(&spec.id), routing, api) {
-            return Ok(r);
+            if reserve {
+                reg.inc_sessions(&r.id);
+            }
+            return Ok((r, reserve));
         }
     }
 
@@ -1060,32 +1073,47 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     // that ran ahead of us already populated the registry; we
     // skip the spawn and reuse what they made.
     {
-        let reg = state.replicas.read().await;
-        let replicas = reg.replicas_of(&spec.id);
-        // An accepting replica (Ready + free seat) → use it.
-        if let Some(r) = pick_accepting(replicas, routing, api) {
-            return Ok(r);
+        let mut reg = state.replicas.write().await;
+        // An accepting replica (Ready + free seat) → use it (and reserve).
+        if let Some(r) = pick_accepting(reg.replicas_of(&spec.id), routing, api) {
+            if reserve {
+                reg.inc_sessions(&r.id);
+            }
+            return Ok((r, reserve));
         }
         // Coalescing: a sibling that holds the spawn mutex before us may
-        // have spawned a replica that's still `Starting` — it'll have
-        // seats once Ready, so reuse it instead of spawning a duplicate.
-        if let Some(r) = replicas.iter().find(|r| r.state == ReplicaState::Starting) {
-            return Ok(r.clone());
+        // have spawned a replica that's still `Starting` — reuse it instead
+        // of spawning a duplicate, BUT only if it still has a free seat
+        // (its spawner already reserved one): otherwise we'd oversubscribe
+        // it, so fall through to spawn our own (#582 part 1).
+        if let Some(r) = reg
+            .replicas_of(&spec.id)
+            .iter()
+            .find(|r| r.state == ReplicaState::Starting && r.available_seats() > 0)
+            .cloned()
+        {
+            if reserve {
+                reg.inc_sessions(&r.id);
+            }
+            return Ok((r, reserve));
         }
-        // Every existing replica is full (no free seat) and none is coming
-        // up. Seat-based specs honour `seats-per-container` by scaling out:
-        // spawn another replica when under `max-replicas` (#582) rather than
-        // oversubscribing a full one. APIs don't use seats (the auto-scaler
-        // sizes them), so they overload immediately. Only at the replica
-        // cap (or when a spawn would have nothing to fall back to) do seat
-        // specs overload via `pick_replica`'s Ready fallback — never
-        // exceeding `max`. The spec mutex serializes us with the splash
-        // gate's background spawn, so the cap holds.
-        let count = replicas.len();
+        // Every existing replica is full (no free seat) and none coming up
+        // with room. Seat-based specs honour `seats-per-container` by
+        // scaling out: spawn another when under `max-replicas` (#582) rather
+        // than oversubscribing. APIs don't use seats (the auto-scaler sizes
+        // them), so they overload immediately. Only at the replica cap (or
+        // when a spawn would have nothing to fall back to) do seat specs
+        // overload via `pick_replica`'s Ready fallback — never exceeding
+        // `max`. The spec mutex serializes us with the splash gate's
+        // background spawn, so the cap holds.
+        let count = reg.replicas_of(&spec.id).len();
         let max = spec.effective_max_replicas() as usize;
         if api || count >= max {
-            if let Some(r) = pick_replica(replicas, routing, api) {
-                return Ok(r);
+            if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing, api) {
+                if reserve {
+                    reg.inc_sessions(&r.id);
+                }
+                return Ok((r, reserve));
             }
             // Nothing usable (all Failed/Stopped) — fall through to spawn.
         }
@@ -1146,10 +1174,18 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<Replica>
     // right capacity from the first request.
     replica.sessions_max = spec.effective_seats();
 
-    // Take the write lock only for the insert — a few microseconds
-    // — and release before the spec mutex unwinds.
-    state.replicas.write().await.add(replica.clone());
-    Ok(replica)
+    // Take the write lock only for the insert — a few microseconds — and
+    // release before the spec mutex unwinds. Reserve the new replica's
+    // first seat for the request that triggered the spawn (#582 part 1),
+    // so the session tracker doesn't double-count it.
+    {
+        let mut reg = state.replicas.write().await;
+        reg.add(replica.clone());
+        if reserve {
+            reg.inc_sessions(&replica.id);
+        }
+    }
+    Ok((replica, reserve))
 }
 
 /// Build optional registry credentials from a spec. Returns
@@ -2186,8 +2222,8 @@ docker-registry-password: hunter2
         }
         let mut replica_ids = std::collections::HashSet::new();
         for t in tasks {
-            let r = t.await.expect("join");
-            replica_ids.insert(r.id);
+            let (replica, _reserved) = t.await.expect("join");
+            replica_ids.insert(replica.id);
         }
 
         assert_eq!(
@@ -2290,6 +2326,54 @@ docker-registry-password: hunter2
             sessions_active: 1,
             sessions_max: 1,
             host: None,
+        }
+    }
+
+    /// A Ready replica with one FREE seat (seats=1, 0 sessions).
+    fn accepting_replica(spec_id: &str) -> Replica {
+        Replica {
+            sessions_active: 0,
+            ..full_replica(spec_id)
+        }
+    }
+
+    #[tokio::test]
+    async fn pick_or_spawn_reserves_seat_atomically_under_race() {
+        // #582 part 1: two concurrent first-requests for the same spec,
+        // one free seat. With the atomic pick+reserve they must NOT both
+        // grab it — one reserves the seat, the other sees it full and
+        // scales out (max-replicas: 2), so they get distinct replicas.
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(40),
+        });
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: race\ncontainer-image: test:latest\nseats-per-container: 1\nmax-replicas: 2",
+        )
+        .unwrap();
+        state.replicas.write().await.add(accepting_replica("race"));
+
+        let (s1, s2) = (state.clone(), state.clone());
+        let (p1, p2) = (spec.clone(), spec.clone());
+        let (a, b) = tokio::join!(
+            tokio::spawn(async move { pick_or_spawn(&s1, &p1).await.expect("a").0 }),
+            tokio::spawn(async move { pick_or_spawn(&s2, &p2).await.expect("b").0 }),
+        );
+        let ra = a.unwrap();
+        let rb = b.unwrap();
+        assert_ne!(
+            ra.id, rb.id,
+            "concurrent picks must not share the last seat (atomic reserve)"
+        );
+        assert_eq!(
+            state.replicas.read().await.replicas_of("race").len(),
+            2,
+            "scaled out to a second replica instead of oversubscribing"
+        );
+        // No replica holds more than its 1 seat.
+        for r in state.replicas.read().await.replicas_of("race") {
+            assert!(r.sessions_active <= r.sessions_max, "no over-admission");
         }
     }
 

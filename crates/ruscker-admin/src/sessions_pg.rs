@@ -308,6 +308,7 @@ impl SessionStore for PostgresSessionStore {
         session_id: Uuid,
         spec_id: &str,
         replica_id: &ReplicaId,
+        seat_reserved: bool,
     ) -> TouchOutcome {
         match self.try_touch(session_id, spec_id, replica_id).await {
             Ok(TouchRow { inserted: true, .. }) => {
@@ -316,12 +317,17 @@ impl SessionStore for PostgresSessionStore {
                 // truth read back from the shared table — an absolute
                 // value, so a concurrent reconcile can't lose a blind
                 // `+1` (B2). On a count read error, fall back to the
-                // old blind bump rather than skip the admission.
+                // old blind bump rather than skip the admission. The
+                // absolute `set_session_count` already accounts for any
+                // seat reserved at pick (#582 part 1); only the blind-bump
+                // fallback must skip when the seat was pre-reserved.
                 match self.count_for_replica(replica_id).await {
                     Ok(n) => registry.write().await.set_session_count(replica_id, n),
                     Err(e) => {
                         warn!(error = %e, "replica count read failed; using blind bump");
-                        registry.write().await.inc_sessions(replica_id);
+                        if !seat_reserved {
+                            registry.write().await.inc_sessions(replica_id);
+                        }
                     }
                 }
                 self.local_len.fetch_add(1, Ordering::Relaxed);
@@ -502,7 +508,7 @@ mod tests {
         // First touch registers + increments immediately.
         let sid = Uuid::new_v4();
         assert_eq!(
-            store.touch_or_register(&reg, sid, "alpha", &rid).await,
+            store.touch_or_register(&reg, sid, "alpha", &rid, false).await,
             TouchOutcome::Registered
         );
         assert_eq!(store.len(), 1);
@@ -510,7 +516,7 @@ mod tests {
 
         // Second touch only refreshes.
         assert_eq!(
-            store.touch_or_register(&reg, sid, "alpha", &rid).await,
+            store.touch_or_register(&reg, sid, "alpha", &rid, false).await,
             TouchOutcome::Touched
         );
 
@@ -578,7 +584,7 @@ mod tests {
         // A registers a session.
         let sid = Uuid::new_v4();
         assert_eq!(
-            a.touch_or_register(&reg_a, sid, "alpha", &rid).await,
+            a.touch_or_register(&reg_a, sid, "alpha", &rid, false).await,
             TouchOutcome::Registered
         );
         // B hasn't reconciled yet — its registry shows nothing.
@@ -637,7 +643,7 @@ mod tests {
         // A registers; A owns it, A.len() == 1, B.len() == 0.
         let sid = Uuid::new_v4();
         assert_eq!(
-            a.touch_or_register(&reg_a, sid, "alpha", &rid).await,
+            a.touch_or_register(&reg_a, sid, "alpha", &rid, false).await,
             TouchOutcome::Registered
         );
         assert_eq!(a.len(), 1);
@@ -647,7 +653,7 @@ mod tests {
         // exists, so this is a Touched (not Registered) — but B now
         // owns it and must count it in len() right away (B1 fix).
         assert_eq!(
-            b.touch_or_register(&reg_b, sid, "alpha", &rid).await,
+            b.touch_or_register(&reg_b, sid, "alpha", &rid, false).await,
             TouchOutcome::Touched
         );
         assert_eq!(b.len(), 1, "B counts the failed-over session immediately");
@@ -665,7 +671,7 @@ mod tests {
         // A repeat touch by the new owner is neither insert nor takeover
         // — len() stays 1, no double count.
         assert_eq!(
-            b.touch_or_register(&reg_b, sid, "alpha", &rid).await,
+            b.touch_or_register(&reg_b, sid, "alpha", &rid, false).await,
             TouchOutcome::Touched
         );
         assert_eq!(b.len(), 1);
@@ -706,7 +712,7 @@ mod tests {
 
         let sid = Uuid::new_v4();
         store
-            .touch_or_register(&reg, sid, "alpha", &rid)
+            .touch_or_register(&reg, sid, "alpha", &rid, false)
             .await;
         // Age the row well past any tiny timeout.
         sqlx::query("UPDATE proxy_sessions SET last_seen = now() - interval '1 hour'")

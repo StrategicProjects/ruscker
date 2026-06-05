@@ -73,12 +73,19 @@ pub trait SessionStore: Send + Sync {
     /// Record activity for `session_id`, registering it against
     /// `(spec_id, replica_id)` (and incrementing the replica counter)
     /// on first sight, else refreshing `last_seen`.
+    ///
+    /// `seat_reserved` is `true` when the caller already reserved the
+    /// replica's seat at pick time (the atomic pick+reserve that closes
+    /// the seat over-admission race, #582 part 1). When set, the store
+    /// registers the session but must **not** increment the replica
+    /// counter again.
     async fn touch_or_register(
         &self,
         registry: &RwLock<ReplicaRegistry>,
         session_id: Uuid,
         spec_id: &str,
         replica_id: &ReplicaId,
+        seat_reserved: bool,
     ) -> TouchOutcome;
 
     /// One idle-expiry pass: evict sessions past their (per-spec)
@@ -179,6 +186,7 @@ impl SessionStore for InMemorySessionStore {
         session_id: Uuid,
         spec_id: &str,
         replica_id: &ReplicaId,
+        seat_reserved: bool,
     ) -> TouchOutcome {
         // Fast path: the session already exists. Update
         // last_seen without touching the registry lock at all.
@@ -204,7 +212,11 @@ impl SessionStore for InMemorySessionStore {
             }
         };
         if was_new {
-            registry.write().await.inc_sessions(replica_id);
+            // Skip the increment when the caller already reserved the seat
+            // atomically at pick time (#582 part 1) — else we'd double-count.
+            if !seat_reserved {
+                registry.write().await.inc_sessions(replica_id);
+            }
             TouchOutcome::Registered
         } else {
             TouchOutcome::Touched
@@ -394,7 +406,7 @@ mod tests {
 
         let sid = Uuid::new_v4();
         assert_eq!(
-            store.touch_or_register(&reg, sid, "alpha", &rid).await,
+            store.touch_or_register(&reg, sid, "alpha", &rid, false).await,
             TouchOutcome::Registered
         );
         assert_eq!(store.len(), 1);
@@ -424,7 +436,7 @@ mod tests {
         // Two sessions on A, one on B.
         for spec_rid in [("alpha", &rid_a), ("alpha", &rid_a), ("beta", &rid_b)] {
             store
-                .touch_or_register(&reg, Uuid::new_v4(), spec_rid.0, spec_rid.1)
+                .touch_or_register(&reg, Uuid::new_v4(), spec_rid.0, spec_rid.1, false)
                 .await;
         }
         assert_eq!(store.len(), 3);
@@ -451,8 +463,8 @@ mod tests {
 
         let s1 = Uuid::new_v4();
         let s2 = Uuid::new_v4();
-        store.touch_or_register(&reg, s1, "alpha", &rid).await;
-        store.touch_or_register(&reg, s2, "alpha", &rid).await;
+        store.touch_or_register(&reg, s1, "alpha", &rid, false).await;
+        store.touch_or_register(&reg, s2, "alpha", &rid, false).await;
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 2);
 
         // End s1: removed, counter drops to 1.
@@ -476,7 +488,7 @@ mod tests {
 
         let sid = Uuid::new_v4();
         let outcome = tracker
-            .touch_or_register(&reg, sid, "alpha", &rid)
+            .touch_or_register(&reg, sid, "alpha", &rid, false)
             .await;
         assert_eq!(outcome, TouchOutcome::Registered);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
@@ -491,8 +503,8 @@ mod tests {
         let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
-        let _ = tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
-        let outcome = tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
+        let _ = tracker.touch_or_register(&reg, sid, "alpha", &rid, false).await;
+        let outcome = tracker.touch_or_register(&reg, sid, "alpha", &rid, false).await;
         assert_eq!(outcome, TouchOutcome::Touched);
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
         assert_eq!(tracker.len(), 1);
@@ -507,7 +519,7 @@ mod tests {
         let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
-        tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
+        tracker.touch_or_register(&reg, sid, "alpha", &rid, false).await;
         assert_eq!(reg.read().await.replicas_of("alpha")[0].sessions_active, 1);
 
         // Force the entry's last_seen back in time so it expires
@@ -532,7 +544,7 @@ mod tests {
         let tracker = InMemorySessionStore::new();
 
         let sid = Uuid::new_v4();
-        tracker.touch_or_register(&reg, sid, "alpha", &rid).await;
+        tracker.touch_or_register(&reg, sid, "alpha", &rid, false).await;
         // last_seen is now, sweep with 10s timeout — nothing
         // should evict.
         let no_overrides = std::collections::HashMap::new();
@@ -560,8 +572,8 @@ mod tests {
         let tracker = InMemorySessionStore::new();
         let s_pinned = Uuid::new_v4();
         let s_normal = Uuid::new_v4();
-        tracker.touch_or_register(&reg, s_pinned, "pinned", &pid).await;
-        tracker.touch_or_register(&reg, s_normal, "normal", &nid).await;
+        tracker.touch_or_register(&reg, s_pinned, "pinned", &pid, false).await;
+        tracker.touch_or_register(&reg, s_normal, "normal", &nid, false).await;
         // Age both sessions well past the global timeout.
         for sid in [s_pinned, s_normal] {
             if let Some(mut e) = tracker.sessions.get_mut(&sid) {
@@ -590,7 +602,7 @@ mod tests {
         reg.write().await.add(r);
         let tracker = InMemorySessionStore::new();
         let sid = Uuid::new_v4();
-        tracker.touch_or_register(&reg, sid, "snappy", &rid).await;
+        tracker.touch_or_register(&reg, sid, "snappy", &rid, false).await;
         // 30s old.
         if let Some(mut e) = tracker.sessions.get_mut(&sid) {
             e.last_seen = Instant::now() - Duration::from_secs(30);

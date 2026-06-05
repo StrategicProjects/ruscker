@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.72 — 2026-06-05
+
+Fix a cold-start splash that could hang.
+
+**Fixes**
+- The "container is booting…" page could poll forever on a busy
+  single-seat app even after the container was up and serving, leaving the
+  visitor stuck. The readiness probe now advances as soon as the app is
+  ready, regardless of seat occupancy (regression from v0.1.66; #582).
+
 ## v0.1.71 — 2026-06-05
 
 Dashboard redesign: replicas grouped by app.

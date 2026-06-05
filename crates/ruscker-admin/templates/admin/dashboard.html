@@ -395,6 +395,32 @@
     if (initial && initial.rows !== undefined) apply(initial);
   } catch (_) { /* initial snapshot embedding is best-effort */ }
 
+  // Count-up on the integer KPIs — the design handoff's "números animados"
+  // perceived-speed cue (#623). Runs once on load from the already-settled
+  // value; if an SSE tick lands mid-animation, `metric()` just snaps it to
+  // the real value, so this never fights live updates. Reduced-motion and
+  // non-numeric metrics (memory carries a unit) are skipped.
+  function countUp(name) {
+    var el = document.querySelector('[data-metric="' + name + '"]');
+    if (!el) return;
+    var target = parseInt(el.textContent.replace(/[^0-9-]/g, ''), 10);
+    if (isNaN(target) || target <= 0) return;
+    if (window.matchMedia &&
+        window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var dur = 550, start = null;
+    el.textContent = '0';
+    function step(ts) {
+      if (start === null) start = ts;
+      var p = Math.min((ts - start) / dur, 1);
+      var eased = 1 - Math.pow(1 - p, 3); // easeOutCubic
+      el.textContent = String(Math.round(target * eased));
+      if (p < 1) requestAnimationFrame(step);
+      else el.textContent = String(target);
+    }
+    requestAnimationFrame(step);
+  }
+  ['containers', 'specs', 'sessions', 'tracker'].forEach(countUp);
+
   if (!window.EventSource) return;
   var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/events');
   es.onmessage = function (e) {

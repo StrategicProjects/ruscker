@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.66 — 2026-06-04
+
+Honor seats-per-container under load.
+
+**Fix (from the code audit)**
+- When every replica of a seat-based app is full, the proxy now spawns
+  another replica (up to `max-replicas`) instead of oversubscribing a
+  full one — so `seats-per-container` is honored under concurrent load.
+  Only at the replica cap does it fall back to overloading the
+  least-loaded replica (#582, structural part).
+
 ## v0.1.65 — 2026-06-04
 
 Audit fixes, batch 6 (hot-path cache).

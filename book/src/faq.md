@@ -80,7 +80,7 @@ the **sign-in session** paths to a single upstream — see
 
 ### Is it production-ready?
 
-Yes. The current release is **v0.1.74** — Phases 0–7 are complete and
+Yes. The current release is **v0.1.75** — Phases 0–7 are complete and
 the proxy is production-ready and horizontally scalable.
 Releases are multi-arch and cosign-signed; see the
 [release notes](./news.md) and the [Roadmap](./roadmap.md).

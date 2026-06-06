@@ -71,9 +71,11 @@
      `&quot;` back to `"` before Alpine parses it. #}
   <div x-data="ruscker.mediaGallery({{ self.images_json() }})" x-cloak>
     <div class="mt-6 mb-4 flex flex-wrap items-center gap-2">
-      <input type="search" x-model="q"
-             placeholder="{{ self.t("admin-images-search") }}"
-             class="admin-table-search">
+      {# Search as the handoff pill (#623) — leading icon + rounded field. #}
+      <label class="search-pill" style="max-width:320px;flex:0 1 320px">
+        <i class="ti ti-search" aria-hidden="true"></i>
+        <input type="search" x-model="q" placeholder="{{ self.t("admin-images-search") }}" autocomplete="off">
+      </label>
       {# Type filter — options derived from the images actually present
          (typically SVG + WebP), so it adapts and never offers an empty
          filter. Hidden when there's only one type. #}

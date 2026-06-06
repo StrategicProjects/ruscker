@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.78 — 2026-06-06
+
+Fix a cold-start splash that could loop.
+
+**Fixes**
+- A single-seat interactive app (e.g. RStudio) whose seat was already taken
+  could trap a new visitor in a reloading "Starting…" splash. The readiness
+  probe and the splash gate now use the same check, so the page advances
+  exactly when the app can accept the visitor (#582 follow-up).
+
 ## v0.1.77 — 2026-06-06
 
 The UX redesign reaches every admin screen.

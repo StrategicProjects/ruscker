@@ -745,3 +745,6 @@ admin-import-badge-new-help = Sera créé (absent du panneau)
 admin-import-badge-update = Met à jour
 admin-import-badge-update-help = Écrase une app déjà dans le panneau
 admin-import-confirm = Importer la sélection
+admin-import-load-file = Charger un fichier
+admin-import-editor-placeholder = Collez votre application.yml ici…
+admin-import-editor-empty = L'aperçu apparaît ici au fur et à mesure.

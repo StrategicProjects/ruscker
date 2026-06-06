@@ -749,3 +749,6 @@ admin-import-badge-new-help = Será criado (não existe no painel)
 admin-import-badge-update = Atualiza
 admin-import-badge-update-help = Sobrescreve um app já existente no painel
 admin-import-confirm = Importar selecionados
+admin-import-load-file = Carregar arquivo
+admin-import-editor-placeholder = Cole seu application.yml aqui…
+admin-import-editor-empty = O preview aparece aqui conforme você digita.

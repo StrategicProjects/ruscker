@@ -301,6 +301,27 @@ async fn tick(
     };
     update_idle_ticks(idle_ticks, &registry_snap);
 
+    // Liveness reconcile: a container that exits unexpectedly (crash, OOM,
+    // external stop) leaves its replica behind in the registry as `Ready`
+    // with whatever seats it still "held" — which blocks new spawns
+    // (`spawn_one`'s `live >= max` cap) and traps cold-start visitors on the
+    // splash forever. Prune any snapshot replica whose container the backend
+    // no longer reports as running; removing it also releases its leaked
+    // seats. Only replicas already in the snapshot are touched, so a replica
+    // spawned mid-tick is never collected. Best-effort: a backend error
+    // skips the pass rather than risk wiping the registry on a hiccup.
+    if let Ok(managed) = backend.list_managed_containers().await {
+        let dead = stopped_replica_ids(&registry_snap, &managed);
+        if !dead.is_empty() {
+            let mut reg = state.replicas.write().await;
+            for id in &dead {
+                reg.remove(id);
+            }
+            drop(reg);
+            warn!(reaped = dead.len(), "pruned replicas whose container is no longer running");
+        }
+    }
+
     // GC the in-flight request gauge (#336) for replicas that have left
     // the registry, so the process-global map can't grow unbounded.
     let alive_replicas: std::collections::HashSet<ReplicaId> =
@@ -828,6 +849,25 @@ fn format_image_date(rfc3339: &str) -> Option<String> {
     chrono::DateTime::parse_from_rfc3339(rfc3339)
         .ok()
         .map(|dt| dt.format("%d/%m/%Y").to_string())
+}
+
+/// Replica ids whose container the backend reports as **stopped** — the
+/// liveness-reconcile prune set. Pruning on a reported-stopped container
+/// (not on mere absence) keeps backends that don't enumerate containers
+/// from wiping the registry, and never races a freshly-created container.
+fn stopped_replica_ids(
+    snap: &[ruscker_core::Replica],
+    managed: &[ruscker_core::ManagedContainer],
+) -> Vec<ReplicaId> {
+    let stopped: std::collections::HashSet<&str> = managed
+        .iter()
+        .filter(|c| !c.running)
+        .map(|c| c.id.as_str())
+        .collect();
+    snap.iter()
+        .filter(|r| !r.container_id.is_empty() && stopped.contains(r.container_id.as_str()))
+        .map(|r| r.id.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -2034,5 +2074,41 @@ proxy:
             "grace counter starts fresh after activity"
         );
         assert_eq!(state.replicas.read().await.replicas_of("bouncy").len(), 2);
+    }
+
+    #[test]
+    fn liveness_reconcile_prunes_only_stopped_containers() {
+        use ruscker_core::{ManagedContainer, Replica, ReplicaId, ReplicaState};
+        fn rep(cid: &str) -> Replica {
+            Replica {
+                id: ReplicaId::new(),
+                spec_id: "shiny".into(),
+                container_id: cid.into(),
+                upstream: "127.0.0.1:8000".parse().unwrap(),
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 1,
+                sessions_max: 1,
+                host: None,
+            }
+        }
+        fn mc(id: &str, running: bool) -> ManagedContainer {
+            ManagedContainer {
+                id: id.into(),
+                name: id.into(),
+                image: "img".into(),
+                spec_id: Some("shiny".into()),
+                status: if running { "Up 1s".into() } else { "Exited (0)".into() },
+                running,
+            }
+        }
+        let alive = rep("c-alive");
+        let dead = rep("c-dead");
+        let snap = [alive.clone(), dead.clone()];
+        // c-alive running, c-dead stopped → only c-dead is pruned.
+        let pruned = stopped_replica_ids(&snap, &[mc("c-alive", true), mc("c-dead", false)]);
+        assert_eq!(pruned, vec![dead.id.clone()], "only the stopped container's replica");
+        // Empty backend listing (the test mocks) prunes nothing.
+        assert!(stopped_replica_ids(&snap, &[]).is_empty(), "absence is not stopped");
     }
 }

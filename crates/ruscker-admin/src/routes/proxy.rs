@@ -393,11 +393,16 @@ async fn forward(
     //     navigation, once a replica is `Ready`, proxies normally.
     if route_prefix == APP_PREFIX && ws_upgrade.0.is_none() {
         // Tiny readiness probe the splash polls. Never spawns or blocks.
-        // Advances on *any* Ready replica — not seat-strict — so a busy
-        // `seats: 1` app that's up still releases the visitor from the
-        // splash; the proxy path then places them (seat / scale-out). #582.
+        // MUST use the same readiness test as the splash *gate* below
+        // (`has_ready_replica`) — otherwise a ready-but-full `seats: 1` app
+        // makes the probe say "ready" while the gate keeps re-serving the
+        // splash, and the page reload-loops forever. The probe therefore
+        // advances only when there's a replica that can actually accept the
+        // visitor (Ready + free seat); cold start has a free seat, so it
+        // advances normally, and a full app correctly keeps waiting while
+        // the proxy path scales out (#582 follow-up).
         if upstream_path == COLD_PROBE_PATH {
-            let body = if any_ready_replica(&state, &spec).await {
+            let body = if has_ready_replica(&state, &spec).await {
                 "{\"ready\":true}"
             } else {
                 "{\"ready\":false}"
@@ -934,27 +939,16 @@ const COLD_PROBE_PATH: &str = "/__ruscker_ready";
 /// a full replica returns `false`, so the splash *gate* scales out instead
 /// of routing the visitor onto an over-subscribed `seats-per-container`
 /// replica (#582).
+/// Used by **both** the cold-start splash gate and the readiness probe, so
+/// they always agree on "is the app serveable to this visitor now?" — a
+/// Ready replica with a free seat. They MUST share this: a probe that
+/// advanced on a full replica (an earlier attempt used a seat-agnostic
+/// pick) made the splash reload into the gate, which re-served the splash,
+/// looping forever on a busy `seats: 1` app.
 async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
     let routing = spec.effective_routing();
     let reg = state.replicas.read().await;
     pick_accepting(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
-}
-
-/// Whether `spec` has *any* `Ready` replica — regardless of free seats.
-///
-/// The cold-start splash *probe* polls this: it must advance the moment the
-/// app can serve a page, leaving seat capacity and scale-out to the proxy
-/// path (`pick_or_spawn`, which reserves a seat / scales out / overloads at
-/// max). #582 part 2 briefly pointed the probe at the seat-strict
-/// [`has_ready_replica`], which made the splash hang **forever** on a
-/// `seats: 1` app whose only seat was already taken — the container was up
-/// and serving, but the probe reported "not ready", so the interstitial
-/// never reloaded. `pick_replica` falls back to any `Ready` replica, which
-/// is the right "is it up?" signal here.
-async fn any_ready_replica(state: &AppState, spec: &Spec) -> bool {
-    let routing = spec.effective_routing();
-    let reg = state.replicas.read().await;
-    pick_replica(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
 }
 
 /// True for a top-level document navigation (a GET whose `Accept`
@@ -2446,13 +2440,14 @@ docker-registry-password: hunter2
     }
 
     #[test]
-    fn splash_probe_treats_a_full_ready_replica_as_up() {
-        // Regression for the #582 part-2 splash hang: a `seats: 1` app whose
-        // only seat is taken is still *up*. The seat-strict pick (what the
-        // probe wrongly used) reports None and the interstitial polls
-        // forever; the any-Ready pick the probe now uses reports Some, so the
-        // splash advances and the proxy path places the visitor.
-        let full_ready = Replica {
+    fn splash_probe_and_gate_agree_on_a_full_ready_replica() {
+        // The splash probe and gate share `has_ready_replica` (pick_accepting),
+        // so they never disagree. A `seats: 1` app whose only seat is taken is
+        // NOT accepting — pick_accepting returns None — so the probe reports
+        // "not ready" and the gate keeps the splash up; the visitor doesn't get
+        // reload-looped into a replica that can't take them. (A free seat — the
+        // cold-start case — makes pick_accepting Some and the splash advances.)
+        let full = Replica {
             id: ruscker_core::ReplicaId::new(),
             spec_id: "shiny".into(),
             container_id: "c".into(),
@@ -2460,17 +2455,17 @@ docker-registry-password: hunter2
             state: ReplicaState::Ready,
             started_at: chrono::Utc::now(),
             sessions_active: 1,
-            sessions_max: 1, // full — no free seat
+            sessions_max: 1, // full
             host: None,
         };
-        let reps = [full_ready];
         assert!(
-            pick_accepting(&reps, RoutingStrategy::LeastConnections, false).is_none(),
-            "a full replica has no free seat"
+            pick_accepting(std::slice::from_ref(&full), RoutingStrategy::LeastConnections, false).is_none(),
+            "a full replica is not accepting — probe and gate both say 'not ready'"
         );
+        let free = Replica { sessions_active: 0, ..full };
         assert!(
-            pick_replica(&reps, RoutingStrategy::LeastConnections, false).is_some(),
-            "but it is Ready, so the splash probe must see the app as up"
+            pick_accepting(&[free], RoutingStrategy::LeastConnections, false).is_some(),
+            "a free seat (cold start) is accepting — the splash advances"
         );
     }
 }

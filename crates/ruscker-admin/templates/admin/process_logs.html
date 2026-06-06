@@ -11,6 +11,8 @@
   </div>
   {% if available %}
   <div class="text-xs text-[color:var(--text-muted)] flex items-center gap-3">
+    {# Live-stream badge (#623): the SSE follow keeps this terminal current. #}
+    <span class="live-badge"><span class="live-dot"></span>{{ self.t("admin-dashboard-live") }}</span>
     {% if self.truncated() %}
     <span>{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</span>
     {% endif %}

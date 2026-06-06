@@ -9,6 +9,52 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.81 — 2026-06-06
+
+The hi-fi design system reaches every admin screen, plus a new live YAML
+import editor.
+
+**Interface (#623)**
+- **Disk** — a usage hero (host disk used / total with a stacked bar) over
+  two side-by-side panels for the Ruscker-managed container images and
+  containers, each with inline prune actions and an "in use" cross-check.
+- **Apps** — a sticky filter toolbar (search + kind chips with live counts
+  + a sort cycler). Access-group badges now use a fixed palette so the
+  canonical roles always read the same colour across Apps, Users and
+  Groups; `public` apps show in teal.
+- **App editor** — boolean options became switch toggles; replicas a
+  −/＋ stepper; CPU and memory sliders (with the text field still the
+  source of truth); environment variables an add/remove `KEY = value`
+  repeater; access groups a pill picker (custom names still allowed); and
+  the live card preview gained a resources/scale summary.
+- **Appearance editor** — flatter section headers and live character
+  counters on the SEO title/description.
+- **Dashboard** — a pulsing "Live" badge and a filter band (search +
+  Ready/Starting/Draining/Stopped chips) over the grouped replica view.
+- **Users / Groups** — the user list moved to the shared rounded table;
+  Groups gained a "Public apps" rail listing every app open to everyone.
+- **Media** — the gallery search is now the rounded search pill.
+- **Audit log** — a sortable table with coloured actor avatars and
+  colour-coded actions; the change diff stays available as an expandable
+  row.
+- **Logs** — a "Live" badge on the server log, and the per-replica
+  container tail now shares the terminal styling.
+- **Import YAML** — a live two-pane editor: edit or paste YAML on the
+  left and watch the parsed apps (each marked new or update, selectable)
+  refresh on the right as you type. Parse errors show inline; nothing is
+  written until you confirm.
+
+**Fixes**
+- The Groups "Public apps" rail no longer lists apps that are gated to
+  specific users as public.
+- Restored a few status colours that weren't rendering (the warning/ok
+  accents behind the SEO over-limit counter, the disk high-usage figure,
+  reclaimable-row tints and in-use badges).
+- The app-editor summary now shows the heartbeat timeout in minutes, and
+  the CPU/memory sliders no longer write a spurious zero when dragged
+  fully left.
+- The import editor's empty-state hint no longer breaks under French.
+
 ## v0.1.80 — 2026-06-06
 
 Fix interactive apps getting stuck on the starting splash.

@@ -127,6 +127,7 @@
         <th>{{ self.t("admin-specs-col-id") }}</th>
         <th>{{ self.t("admin-specs-col-name") }}</th>
         <th>{{ self.t("admin-specs-col-kind") }}</th>
+        <th data-nosort>{{ self.t("admin-specs-col-access-groups") }}</th>
         <th>{{ self.t("admin-specs-col-state") }}</th>
         <th>{{ self.t("admin-specs-col-updated") }}</th>
         <th>{{ self.t("admin-specs-col-version") }}</th>
@@ -139,12 +140,22 @@
         <tr>
           <td class="id-cell">{{ spec.id }}</td>
           <td>
-            {% match spec.display_name %}
-              {% when Some with (n) %}{{ n }}
-              {% when None %}<span class="text-[color:var(--text-faint)]">—</span>
-            {% endmatch %}
+            <span class="spec-name-cell">
+              {% match spec.logo %}{% when Some with (l) %}<img class="spec-logo" src="{% if l.starts_with("http") %}{{ l }}{% else %}{{ base }}{{ l }}{% endif %}" alt="" loading="lazy" onerror="this.style.display='none'">{% when None %}<span class="spec-logo spec-logo--blank"><i class="ti ti-app-window" aria-hidden="true"></i></span>{% endmatch %}
+              {% match spec.display_name %}
+                {% when Some with (n) %}<span>{{ n }}</span>
+                {% when None %}<span class="text-[color:var(--text-faint)]">—</span>
+              {% endmatch %}
+            </span>
           </td>
           <td><span class="pill pill-kind-{{ spec.kind }}">{{ spec.kind }}</span></td>
+          <td>
+            {% if spec.access_groups.is_empty() %}
+              <span class="access-public"><i class="ti ti-world" aria-hidden="true"></i> {{ self.t("admin-specs-access-public") }}</span>
+            {% else %}
+              <span class="group-badges-inline">{% for g in spec.access_groups %}<span class="group-badge" data-group="{{ g }}">{{ g }}</span>{% endfor %}</span>
+            {% endif %}
+          </td>
           <td><span class="pill pill-state-{{ spec.state }}">{{ spec.state }}</span></td>
           {% if spec.config_only %}
           <td class="text-[color:var(--text-faint)]">—</td>
@@ -225,6 +236,20 @@
 
 {# Alpine powers the inline featured-star toggle (#521). Without it the
    `x-data`/`:class` button never initializes and the star renders empty. #}
+<script>
+  // Colour the access-group badges from a hash of the group name — same
+  // hue function as the Users/Groups pages, so a group reads the same
+  // colour across the admin (#623).
+  (function () {
+    function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+    document.querySelectorAll('.group-badge[data-group]').forEach(function (el) {
+      var hu = hue(el.getAttribute('data-group'));
+      el.style.background = 'hsl(' + hu + ' 70% 92%)';
+      el.style.color = 'hsl(' + hu + ' 55% 28%)';
+    });
+  })();
+</script>
+
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 
 {% endblock %}

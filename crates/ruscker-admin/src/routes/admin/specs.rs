@@ -105,6 +105,15 @@ pub struct SpecRow {
     /// last days' buckets. Empty when there's no usage to draw.
     #[sqlx(default)]
     pub trend_svg: String,
+    /// Card logo path (`template-properties.logo`), filled by the index from
+    /// the effective catalog so the table shows the framework mark next to
+    /// the name (#623). Not a column — admin page, not a hot path.
+    #[sqlx(skip)]
+    pub logo: Option<String>,
+    /// Access groups gating this spec (`access-groups`), or empty for a
+    /// public app. Rendered as coloured badges (#623).
+    #[sqlx(skip)]
+    pub access_groups: Vec<String>,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -292,10 +301,28 @@ async fn index(
             .unwrap_or_default()
     };
 
+    // Card logo + access-groups per spec for the table (#623). The effective
+    // catalog deserializes each spec once — fine here (admin page, not the
+    // proxy/dashboard hot path the lean SELECT of #588 protects).
+    let meta: std::collections::HashMap<String, (Option<String>, Vec<String>)> =
+        crate::catalog::effective_specs(state.db.as_ref(), &state.config)
+            .await
+            .into_iter()
+            .map(|s| {
+                let logo = s.template_properties.get_str("logo").map(str::to_string);
+                let groups = s.access_groups.clone().unwrap_or_default();
+                (s.id, (logo, groups))
+            })
+            .collect();
+
     // Per-row access total + sparkline (#549). `featured` already came from
     // the lean SELECT (#588), so there's no second config_json deserialize.
     for row in &mut specs {
         row.access_count = access.get(&row.id).copied().unwrap_or(0);
+        if let Some((logo, groups)) = meta.get(&row.id) {
+            row.logo = logo.clone();
+            row.access_groups = groups.clone();
+        }
         row.trend_svg = spark(&row.id);
     }
 
@@ -332,6 +359,8 @@ async fn index(
                 featured: s.is_featured(),
                 access_count: access.get(&s.id).copied().unwrap_or(0),
                 trend_svg: spark(&s.id),
+                logo: s.template_properties.get_str("logo").map(str::to_string),
+                access_groups: s.access_groups.clone().unwrap_or_default(),
             });
         }
     }

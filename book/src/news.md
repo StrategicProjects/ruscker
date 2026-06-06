@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.80 — 2026-06-06
+
+Fix interactive apps getting stuck on the starting splash.
+
+**Fixes**
+- A container that exited unexpectedly could leave a stale replica behind
+  that blocked new launches of that app and trapped visitors on the
+  "Starting…" page — most visibly on single-seat apps like RStudio and
+  Jupyter. The scaler now prunes replicas whose container is no longer
+  running each tick, freeing their seats.
+
 ## v0.1.79 — 2026-06-06
 
 The redesign reaches the Apps table and the dashboard.

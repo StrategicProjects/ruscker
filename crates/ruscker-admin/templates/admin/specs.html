@@ -241,11 +241,20 @@
   // hue function as the Users/Groups pages, so a group reads the same
   // colour across the admin (#623).
   (function () {
-    function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+    // Canonical roles get the design-handoff fixed palette; any other
+    // group falls back to a stable hash hue. Badge style matches the
+    // handoff: a faint colour-mix tint with full-strength text (#623).
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    function groupColor(s) {
+      var k = s.toLowerCase();
+      if (ROLE[k]) return ROLE[k];
+      var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+      return 'hsl(' + h + ' 45% 45%)';
+    }
     document.querySelectorAll('.group-badge[data-group]').forEach(function (el) {
-      var hu = hue(el.getAttribute('data-group'));
-      el.style.background = 'hsl(' + hu + ' 70% 92%)';
-      el.style.color = 'hsl(' + hu + ' 55% 28%)';
+      var c = groupColor(el.getAttribute('data-group'));
+      el.style.background = 'color-mix(in srgb, ' + c + ' 16%, transparent)';
+      el.style.color = c;
     });
   })();
 </script>

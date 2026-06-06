@@ -139,9 +139,23 @@
   // same hue function as the Users-page group badges, so a group reads the
   // same colour everywhere (#623).
   (function () {
-    function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+    // Canonical roles use the design-handoff fixed palette (admin pink /
+    // editor cyan / viewer navy); other groups hash to a stable colour, so
+    // a group reads the same colour everywhere (#623).
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    function groupColor(s) {
+      var k = s.toLowerCase();
+      if (ROLE[k]) return ROLE[k];
+      var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+      return 'hsl(' + h + ' 55% 45%)';
+    }
     document.querySelectorAll('.group-card__bar[data-group]').forEach(function (el) {
-      el.style.background = 'hsl(' + hue(el.getAttribute('data-group')) + ' 55% 45%)';
+      el.style.background = groupColor(el.getAttribute('data-group'));
+    });
+    document.querySelectorAll('.group-badge[data-group]').forEach(function (el) {
+      var c = groupColor(el.getAttribute('data-group'));
+      el.style.background = 'color-mix(in srgb, ' + c + ' 16%, transparent)';
+      el.style.color = c;
     });
   })();
 </script>

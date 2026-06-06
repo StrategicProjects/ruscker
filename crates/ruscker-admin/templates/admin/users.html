@@ -162,24 +162,31 @@
   // Avatars + group badges (#623): deterministic colour from a name hash,
   // so each user/group keeps a stable colour with no backend involvement.
   (function () {
-    function hue(s) {
-      var h = 0;
-      for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
-      return h;
+    // Canonical roles use the design-handoff fixed palette; everything
+    // else hashes to a stable colour. Avatars and group badges both render
+    // as a faint colour-mix tint with full-strength text, per the handoff
+    // (soft pastel circles + coloured initials, not solid dark) (#623).
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    function color(s) {
+      var k = s.toLowerCase();
+      if (ROLE[k]) return ROLE[k];
+      var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+      return 'hsl(' + h + ' 55% 45%)';
     }
     function initials(s) {
       var p = s.replace(/[^A-Za-z0-9]+/g, " ").trim().split(" ");
       return ((p[0] || "").charAt(0) + (p.length > 1 ? (p[1] || "").charAt(0) : "")).toUpperCase() || "?";
     }
     document.querySelectorAll(".rk-avatar[data-avatar]").forEach(function (el) {
-      var name = el.getAttribute("data-avatar"), hu = hue(name);
-      el.style.background = "hsl(" + hu + " 48% 42%)";
+      var name = el.getAttribute("data-avatar"), c = color(name);
+      el.style.background = "color-mix(in srgb, " + c + " 18%, var(--surface))";
+      el.style.color = c;
       if (!el.textContent) el.textContent = initials(name);
     });
     document.querySelectorAll(".group-badge[data-group]").forEach(function (el) {
-      var hu = hue(el.getAttribute("data-group"));
-      el.style.background = "hsl(" + hu + " 70% 92%)";
-      el.style.color = "hsl(" + hu + " 55% 28%)";
+      var c = color(el.getAttribute("data-group"));
+      el.style.background = "color-mix(in srgb, " + c + " 16%, transparent)";
+      el.style.color = c;
     });
   })();
 </script>

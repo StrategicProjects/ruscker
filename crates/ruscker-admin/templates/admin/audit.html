@@ -67,38 +67,49 @@
       {{ self.t("admin-audit-empty") }}
     </div>
   {% else %}
-    <ul class="audit-list mt-4">
-      {% for e in entries %}
-        <li class="audit-row">
-          <button class="audit-row-summary {{ self.action_tone(e.action.as_str()) }}"
-                  type="button"
-                  @click="toggle({{ e.id }})">
-            <i class="ti {{ self.action_icon(e.action.as_str()) }} audit-row-icon" aria-hidden="true"></i>
-            <span class="audit-row-action">{{ e.action }}</span>
-            {% match e.target %}{% when Some with (t) %}
-              <span class="audit-row-target id-cell">{{ t }}</span>
-            {% when None %}
-              <span class="audit-row-target opacity-50">—</span>
-            {% endmatch %}
-            <span class="audit-row-spacer"></span>
-            {% match e.actor %}{% when Some with (a) %}
-              <span class="audit-row-actor">{{ a }}</span>
-            {% when None %}
-              <span class="audit-row-actor opacity-50">system</span>
-            {% endmatch %}
-            <time class="audit-row-time">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</time>
-            {% if e.diff.is_some() %}
-              <i class="ti audit-row-chev" :class="open === {{ e.id }} ? 'ti-chevron-down' : 'ti-chevron-right'" aria-hidden="true"></i>
-            {% else %}
-              <span class="audit-row-chev opacity-30">·</span>
-            {% endif %}
-          </button>
-          {% if e.diff.is_some() %}
-            <pre x-show="open === {{ e.id }}" class="audit-row-diff" x-transition.opacity>{{ self.pretty_diff(e) }}</pre>
-          {% endif %}
-        </li>
-      {% endfor %}
-    </ul>
+    {# Flat table (#623). The diff (when present) lives in a paired
+       detail row that toggles open — so we keep the diff feature the
+       handoff's plain table omits, without a separate accordion widget.
+       No `data-enhance`: sorting would split a row from its detail. #}
+    <table class="admin-table mt-4">
+      <thead>
+        <tr>
+          <th style="width:150px">{{ self.t("admin-audit-col-when") }}</th>
+          <th style="width:180px">{{ self.t("admin-audit-actor") }}</th>
+          <th style="width:200px">{{ self.t("admin-audit-col-action") }}</th>
+          <th>{{ self.t("admin-audit-col-target") }}</th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in entries %}
+        <tr{% if e.diff.is_some() %} @click="toggle({{ e.id }})" style="cursor:pointer"{% endif %}>
+          <td class="dash-mono text-[color:var(--text-faint)]" style="white-space:nowrap">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</td>
+          <td>
+            <span class="user-cell">
+              <span class="rk-avatar" data-avatar="{% match e.actor %}{% when Some with (a) %}{{ a }}{% when None %}system{% endmatch %}" aria-hidden="true"></span>
+              {% match e.actor %}{% when Some with (a) %}<span>{{ a }}</span>{% when None %}<span class="text-[color:var(--text-faint)]">system</span>{% endmatch %}
+            </span>
+          </td>
+          <td>
+            <span class="{{ self.action_tone(e.action.as_str()) }}" style="display:inline-flex;align-items:center;gap:6px">
+              <i class="ti {{ self.action_icon(e.action.as_str()) }} audit-row-icon" aria-hidden="true"></i>
+              <span class="audit-row-action">{{ e.action }}</span>
+            </span>
+          </td>
+          <td class="dash-mono text-[color:var(--text-muted)]">{% match e.target %}{% when Some with (t) %}{{ t }}{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
+          <td style="text-align:right">
+            {% if e.diff.is_some() %}<i class="ti audit-row-chev" :class="open === {{ e.id }} ? 'ti-chevron-down' : 'ti-chevron-right'" aria-hidden="true"></i>{% endif %}
+          </td>
+        </tr>
+        {% if e.diff.is_some() %}
+        <tr x-show="open === {{ e.id }}" x-cloak x-transition.opacity>
+          <td colspan="5" style="padding:0;background:var(--surface-soft)"><pre class="audit-row-diff" style="margin:0;border-radius:0">{{ self.pretty_diff(e) }}</pre></td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
     {% if entries.len() >= 100 %}
       <p class="text-[11px] text-[color:var(--text-faint)] text-center mt-3">
         {{ self.t("admin-audit-limit-hint") }}
@@ -115,6 +126,25 @@ window.ruscker.audit = () => ({
   open: null,
   toggle(id) { this.open = this.open === id ? null : id; },
 });
+
+// Colour the actor avatars from a hash of the name, with coloured initials
+// on a faint tint — same model as the Users page (#658/#623).
+(function () {
+  function color(s) {
+    var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ' 55% 45%)';
+  }
+  function initials(s) {
+    var p = s.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
+    return ((p[0] || '').charAt(0) + (p.length > 1 ? (p[1] || '').charAt(0) : '')).toUpperCase() || '?';
+  }
+  document.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
+    var name = el.getAttribute('data-avatar'), c = color(name);
+    el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
+    el.style.color = c;
+    if (!el.textContent) el.textContent = initials(name);
+  });
+})();
 </script>
 
 {% endblock %}

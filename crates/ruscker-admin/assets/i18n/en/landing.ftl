@@ -187,6 +187,8 @@ admin-specs-access-public = public
 admin-specs-col-access-help = Total accesses (app visits + external-card clicks)
 admin-specs-col-actions = Actions
 admin-specs-filter-search = Search by id or name…
+admin-specs-kind-interactive = Interactive
+admin-specs-kind-external = External
 admin-specs-filter-kind-all = All kinds
 admin-specs-filter-state-all = Active and inactive
 admin-specs-edit = Edit
@@ -519,6 +521,10 @@ spec-help-stop-on-logout = Stop the user's container when they log out. Off by d
 spec-form-env-section = Environment + command
 spec-form-container-env = Environment variables
 spec-form-container-env-help = One NAME=value per line. For secrets, reference an environment variable instead of pasting the value.
+spec-form-env-add = Add
+spec-form-env-value = value
+spec-form-env-remove = Remove
+spec-form-env-empty = No environment variables.
 spec-help-container-env = Injected into the container (container-env). Blank = none. For secrets, use environment-variable interpolation.
 spec-form-container-cmd = Command (override)
 spec-form-container-cmd-help = One argument per line. Blank = use the image's CMD.
@@ -544,6 +550,11 @@ spec-help-access-groups = Groups that may see and reach the app (comma-separated
 spec-form-access-users = Allowed users
 spec-help-access-users = Usernames that may see and reach the app (comma-separated).
 spec-form-access-help = Both blank = card is open to everyone (including anonymous). With any value, only matching logged-in users — and admins always.
+spec-form-access-public = Public
+spec-form-access-add-group = + add group
+spec-form-access-public-hint = empty = visible to everyone
+spec-form-summary-replicas = replicas
+spec-form-summary-sessions = sessions per replica
 spec-form-cpu-request = CPU reservation
 spec-help-cpu-request = Soft CPU reservation in cores (container-cpu-request). Blank = no reservation.
 spec-form-memory-request = Memory reservation
@@ -656,6 +667,10 @@ admin-disk-prune-images = Remove unused
 admin-disk-prune-images-confirm = Remove all unused images?
 admin-disk-flash-images-pruned = Unused images removed.
 admin-disk-cleaning = Cleaning…
+admin-disk-word-images = images
+admin-disk-word-containers = containers
+admin-disk-word-stopped = stopped
+admin-disk-badge-inuse = in use
 admin-dashboard-metric-sessions-help = Sessions the replicas report currently serving.
 admin-dashboard-metric-tracker-help = Sticky sessions the proxy is tracking in the heartbeat.
 admin-landing-header = Header

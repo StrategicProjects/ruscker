@@ -329,9 +329,9 @@ body {
 .group-badges-inline { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .access-public {
   display: inline-flex; align-items: center; gap: 5px;
-  font-size: 11.5px; color: var(--text-muted);
+  font-size: 11.5px; color: var(--color-teal-600);
 }
-.access-public .ti { font-size: 14px; color: var(--text-faint); }
+.access-public .ti { font-size: 14px; color: var(--color-teal-600); }
 
 /* ─── Form controls: range / switch / checkbox (design handoff #623) ──
  * All CSS-only and driven by the native input's checked state, so the
@@ -371,12 +371,86 @@ input[type="range"]::-moz-range-thumb {
   outline: 2px solid var(--color-teal-400); outline-offset: 2px;
 }
 
-/* Flat uppercase section title (design handoff #623) — replaces the
- * editor-card icon-chip header on the form-style admin screens. */
+/* Spec-form handoff widgets (#623): a full-width toggle row (label + hint
+ * left, switch right), an uppercase section title, and a −/value/+ stepper
+ * for small integer counts. The .switch above provides the toggle visual. */
 .form-section__title {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--text-faint); font-weight: 600; margin-bottom: 14px;
 }
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 0; cursor: pointer; border-bottom: 0.5px solid var(--border-soft);
+}
+.toggle-row:first-of-type { padding-top: 0; }
+.toggle-row:last-of-type { border-bottom: 0; }
+.toggle-row__label { font-size: 13px; font-weight: 500; }
+.toggle-row__hint { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.stepper {
+  display: inline-flex; align-items: center; border: 0.5px solid var(--border);
+  border-radius: 8px; overflow: hidden; align-self: flex-start;
+}
+.stepper button {
+  width: 34px; height: 34px; border: 0; background: var(--surface-soft);
+  color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.stepper button:hover { background: var(--surface); }
+.stepper span { min-width: 44px; text-align: center; font-size: 14px; font-weight: 500; }
+/* Hybrid stepper: the middle stays a real, clearable number input so an
+ * empty value (= "use the default") is preserved — the −/+ buttons only
+ * nudge it. The native spinners are hidden so it reads as the design's
+ * −[n]+ pill. */
+.stepper__input {
+  width: 48px; text-align: center; border: 0; background: transparent;
+  color: var(--text); font-size: 14px; font-weight: 500; font-family: inherit;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.stepper__input:focus { outline: 0; }
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Resource slider row (#623): icon+label · range slider · value/field. */
+.res-row {
+  display: grid; grid-template-columns: 130px 1fr 110px;
+  align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.res-row__k { font-size: 12.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.res-row__k .ti { font-size: 15px; color: var(--text-faint); }
+.res-row__v { font-size: 12.5px; font-weight: 500; text-align: right; }
+.rk-range {
+  -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: var(--surface-soft); outline: 0; cursor: pointer;
+}
+.rk-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+.rk-range::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface); cursor: pointer;
+}
+
+/* Access-group pill toggle (design handoff #623). The `.on` colour is set
+ * inline per group (fixed role palette / hash) so it matches the badges. */
+.group-toggle {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px;
+  font-size: 12px; border: 0.5px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+  font-family: inherit; transition: all 0.12s;
+}
+.group-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+.group-toggle.on { font-weight: 500; }
+.group-toggle .ti { font-size: 13px; }
+
+/* Resource/scale summary under the live preview card (design handoff #623). */
+.spec-summary {
+  display: flex; flex-direction: column; gap: 7px;
+  margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--border-soft);
+}
+.spec-summary__row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+.spec-summary__row .ti { font-size: 14px; color: var(--text-faint); width: 16px; }
+
 /* Live character counter under the SEO fields (design handoff #623). */
 .char-count { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; text-align: right; }
 .char-count.over { color: var(--warn); }
@@ -460,6 +534,42 @@ input[type="range"]::-moz-range-thumb {
 .disk-legend__item .ti { font-size: 14px; color: var(--text-faint); }
 .disk-legend__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .disk-legend__val { margin-left: 4px; color: var(--text); font-weight: 500; }
+
+/* Two side-by-side panels under the hero (design handoff #623): the
+ * Ruscker-managed container images and containers, each its own bordered
+ * card with a header (icon + title + count subtitle) and an inline prune
+ * button. Collapses to one column on narrow viewports. */
+.disk-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+@media (max-width: 1000px) { .disk-cols { grid-template-columns: 1fr; } }
+.disk-panel {
+  border: 0.5px solid var(--border); border-radius: 12px;
+  background: var(--surface); overflow: hidden;
+}
+.disk-panel__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 15px 16px; border-bottom: 0.5px solid var(--border);
+}
+.disk-panel__title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.disk-panel__title .ti { font-size: 17px; }
+.disk-panel__sub { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+/* The panel hosts an .admin-table flush with its borders (no double frame). */
+.disk-panel .admin-table { border: 0; border-radius: 0; }
+.disk-panel .admin-table th { background: var(--surface); }
+/* Tinted rows flag reclaimable items (unused images / stopped containers). */
+.admin-table tr.is-unused td { background: color-mix(in srgb, var(--warn) 5%, transparent); }
+.admin-table tr.is-unused:hover td { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+/* In-use badges: green "N apps" when referenced, amber "unused" otherwise. */
+.use-badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.use-badge--on { background: color-mix(in srgb, var(--ok) 14%, transparent); color: #047857; }
+.use-badge--off { background: color-mix(in srgb, var(--warn) 16%, transparent); color: #92600a; }
+[data-theme="dark"] .use-badge--on { color: #34d399; }
+[data-theme="dark"] .use-badge--off { color: #fbbf24; }
+.pill-unused {
+  background: var(--surface-soft); color: var(--text-faint);
+  font-family: var(--font-mono); text-transform: none; letter-spacing: 0;
+}
+/* The teal/green running state dot (the design's .dot-ready alias). */
+.dot-ready { background: var(--ok, #10b981); }
 
 /* Live server-log terminal (design handoff #623): the existing SSE feed,
  * rendered as level-coloured lines with level/text filters. Content is
@@ -581,6 +691,31 @@ input[type="range"]::-moz-range-thumb {
   transition: border-color 0.15s, color 0.15s;
 }
 .sort-btn:hover { border-color: var(--border-strong); color: var(--text); }
+
+/* Sticky filter band under an admin page header (design handoff #623):
+ * search-pill + chips + sort-btn. The admin navbar isn't sticky, so this
+ * pins to the viewport top (cf. .portal-sticky), not the handoff's 53px. */
+.admin-sticky {
+  position: sticky; top: 0; z-index: 30;
+  background: var(--bg); padding: 10px 0; margin-bottom: 4px;
+  border-bottom: 0.5px solid var(--border);
+}
+
+/* Handoff action buttons: outlined default, solid teal primary. Used in
+ * page headers (Import / Add app, etc.) alongside the existing
+ * admin-login-btn family. */
+.btn {
+  display: inline-flex; align-items: center; gap: 7px; padding: 9px 15px;
+  border-radius: 8px; font-size: 13px; cursor: pointer;
+  border: 0.5px solid var(--border); background: var(--surface);
+  color: var(--text); transition: all 0.15s;
+}
+.btn:hover { border-color: var(--border-strong); }
+.btn .ti { font-size: 15px; }
+.btn--primary { background: var(--color-teal-600); color: #fff; border-color: var(--color-teal-600); }
+.btn--primary:hover { background: var(--color-teal-800); border-color: var(--color-teal-800); }
+.btn--danger { color: var(--color-lock); border-color: color-mix(in srgb, var(--color-lock) 35%, var(--border)); }
+.btn--danger:hover { background: color-mix(in srgb, var(--color-lock) 10%, transparent); border-color: var(--color-lock); }
 
 .kbd-hint {
   font-size: 10px; color: var(--text-faint);
@@ -1693,7 +1828,7 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
  * the group-name hash (set inline by the page script), matching the group
  * badges on the Users page so the same group reads the same colour. */
 .group-card { position: relative; overflow: hidden; }
-.group-card__bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--color-teal-600); }
+.group-card__bar { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--color-teal-600); }
 .group-card > .editor-card__head, .group-card > .group-col { padding-left: 6px; }
 
 /* Credential name tile (design handoff #623): a small teal key icon next

@@ -187,6 +187,8 @@ admin-specs-access-public = public
 admin-specs-col-access-help = Total des accès (visites d'apps + clics sur cartes externes)
 admin-specs-col-actions = Actions
 admin-specs-filter-search = Rechercher par id ou nom…
+admin-specs-kind-interactive = Interactif
+admin-specs-kind-external = Externe
 admin-specs-filter-kind-all = Tous les types
 admin-specs-filter-state-all = Actifs et inactifs
 admin-specs-edit = Modifier
@@ -519,6 +521,10 @@ spec-help-stop-on-logout = Arrête le conteneur de l'utilisateur à sa déconnex
 spec-form-env-section = Environnement + commande
 spec-form-container-env = Variables d'environnement
 spec-form-container-env-help = Une par ligne, NOM=valeur. Pour les secrets, référencez une variable d'environnement au lieu de coller la valeur.
+spec-form-env-add = Ajouter
+spec-form-env-value = valeur
+spec-form-env-remove = Supprimer
+spec-form-env-empty = Aucune variable d'environnement.
 spec-help-container-env = Injectées dans le conteneur (container-env). Vide = aucune. Pour les secrets, utilisez l'interpolation de variable d'environnement.
 spec-form-container-cmd = Commande (remplacer)
 spec-form-container-cmd-help = Un argument par ligne. Vide = utilise le CMD de l'image.
@@ -544,6 +550,11 @@ spec-help-access-groups = Groupes qui peuvent voir et atteindre l'app (séparés
 spec-form-access-users = Utilisateurs autorisés
 spec-help-access-users = Utilisateurs qui peuvent voir et atteindre l'app (séparés par des virgules).
 spec-form-access-help = Les deux vides = carte ouverte à tous (y compris anonyme). Avec une valeur, seuls les utilisateurs connectés correspondants — et toujours les admins.
+spec-form-access-public = Public
+spec-form-access-add-group = + ajouter
+spec-form-access-public-hint = vide = visible par tous
+spec-form-summary-replicas = répliques
+spec-form-summary-sessions = sessions par réplique
 spec-form-cpu-request = Réservation CPU
 spec-help-cpu-request = Réservation souple de CPU en cœurs (container-cpu-request). Vide = pas de réservation.
 spec-form-memory-request = Réservation mémoire
@@ -656,6 +667,10 @@ admin-disk-prune-images = Supprimer les inutilisées
 admin-disk-prune-images-confirm = Supprimer toutes les images inutilisées ?
 admin-disk-flash-images-pruned = Images inutilisées supprimées.
 admin-disk-cleaning = Nettoyage…
+admin-disk-word-images = images
+admin-disk-word-containers = conteneurs
+admin-disk-word-stopped = arrêtés
+admin-disk-badge-inuse = utilisée
 admin-dashboard-metric-sessions-help = Sessions que les réplicas déclarent servir actuellement.
 admin-dashboard-metric-tracker-help = Sessions persistantes (sticky) suivies par le proxy dans le heartbeat.
 admin-landing-header = En-tête

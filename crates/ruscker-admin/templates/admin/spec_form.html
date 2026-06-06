@@ -17,7 +17,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
+<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }}, {{ available_groups_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="editor-topbar">
@@ -61,12 +61,7 @@
 
       {# Type picker — 6 cards #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-category" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
         <div class="kind-picker">
           {% for k in display_type_options() %}
             <label class="kind-picker-card" :class="form.display_type === '{{ k.0 }}' ? 'is-active' : ''">
@@ -80,10 +75,7 @@
 
       {# ── Card: Identity ─────────────────────────────────────── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-id-badge-2" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-identity") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-identity") }}</div>
 
       <div class="spec-form-field">
         <div class="spec-form-label-row">
@@ -128,10 +120,7 @@
 
       {# ── Card: Visual ───────────────────────────────────────── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-photo" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-visual") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-visual") }}</div>
 
       {# ── Card logo (#213) — pick from the library, upload inline, or
          (advanced) paste a path/URL. Picker-first: no path typing in the
@@ -301,10 +290,7 @@
       {# ── Card: Container (only for container-backed kinds) ───── #}
       <template x-if="needsContainer()">
         <section class="editor-card">
-          <div class="editor-card__head">
-            <span class="editor-card__icon"><i class="ti ti-box" aria-hidden="true"></i></span>
-            <div><div class="editor-card__title">{{ self.t("spec-form-container") }}</div></div>
-          </div>
+          <div class="form-section__title">{{ self.t("spec-form-container") }}</div>
 
           <div class="spec-form-field">
             <div class="spec-form-label-row">
@@ -354,10 +340,7 @@
       {# ── Card: External link (only for external kinds) ──────── #}
       <template x-if="needsLink()">
         <section class="editor-card">
-          <div class="editor-card__head">
-            <span class="editor-card__icon"><i class="ti ti-external-link" aria-hidden="true"></i></span>
-            <div><div class="editor-card__title">{{ self.t("spec-form-link-section") }}</div></div>
-          </div>
+          <div class="form-section__title">{{ self.t("spec-form-link-section") }}</div>
           <div class="spec-form-field">
             <div class="spec-form-label-row">
               <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
@@ -374,42 +357,67 @@
 
       {# ── Card: Advanced (metadata + all the runtime knobs) ──── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-adjustments" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-meta") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-meta") }}</div>
 
       {# Featured carousel flag (#506) — plain checkbox; native submit sends
          `featured=on` only when checked. Lives here (visible metadata band,
          #523) instead of buried under the runtime "Advanced" collapse. #}
-      <div class="spec-form-field">
-        <label class="spec-form-check">
+      <label class="toggle-row">
+        <div>
+          <div class="toggle-row__label">{{ self.t("spec-form-featured") }}</div>
+          <div class="toggle-row__hint">{{ self.t("spec-form-featured-help") }}</div>
+        </div>
+        <span class="switch">
           <input type="checkbox" name="featured" value="on" {% if !form.featured.is_empty() %}checked{% endif %}>
-          <span>{{ self.t("spec-form-featured") }}</span>
-        </label>
-        <div class="spec-form-help">{{ self.t("spec-form-featured-help") }}</div>
-      </div>
+          <span class="switch__track"><span class="switch__dot"></span></span>
+        </span>
+      </label>
 
       {# Access — who may see + reach this app (#155). Promoted out of the
          runtime "Advanced" collapse (#523): visibility is governance/metadata,
          not a runtime knob. #}
-      <div class="grid grid-cols-2 gap-3">
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-acl-groups" class="spec-form-label">{{ self.t("spec-form-access-groups") }}</label>
-            {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
-          </div>
-          <input id="f-acl-groups" type="text" name="access_groups"
-                 value="{{ form.access_groups }}" placeholder="staff, ops" class="spec-form-input">
+      {# Access groups as toggle pills (#623). The submitted value is the
+         hidden comma-joined `access_groups`; pills + the "add group" input
+         toggle entries in it. A known group not yet in `availableGroups`
+         (e.g. a freshly added custom one) still renders via customGroups(). #}
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label class="spec-form-label">{{ self.t("spec-form-access-groups") }}
+            <span class="text-[color:var(--text-faint)]" style="font-weight:400">— {{ self.t("spec-form-access-public-hint") }}</span>
+          </label>
+          {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
         </div>
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
-            {% call help(self.t("spec-help-access-users")) %}{% endcall %}
-          </div>
-          <input id="f-acl-users" type="text" name="access_users"
-                 value="{{ form.access_users }}" placeholder="alice, bob" class="spec-form-input">
+        <input type="hidden" name="access_groups" :value="form.access_groups">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="group-toggle" :class="!groupArr().length ? 'on' : ''"
+                  @click="form.access_groups = ''"
+                  :style="!groupArr().length ? 'border-color:var(--color-teal-600);background:color-mix(in srgb,var(--color-teal-600) 14%,transparent);color:var(--color-teal-600)' : ''">
+            <i class="ti" :class="!groupArr().length ? 'ti-check' : 'ti-world'"></i>{{ self.t("spec-form-access-public") }}
+          </button>
+          <template x-for="g in availableGroups" :key="g">
+            <button type="button" class="group-toggle" :class="hasGroup(g) ? 'on' : ''" @click="toggleGroup(g)"
+                    :style="hasGroup(g) ? grpStyle(g) : ''">
+              <i class="ti" :class="hasGroup(g) ? 'ti-check' : 'ti-plus'"></i><span x-text="g"></span>
+            </button>
+          </template>
+          <template x-for="g in customGroups()" :key="g">
+            <button type="button" class="group-toggle on" @click="toggleGroup(g)" :style="grpStyle(g)">
+              <i class="ti ti-check"></i><span x-text="g"></span>
+            </button>
+          </template>
+          <input type="text" class="spec-form-input" style="width:140px;padding:6px 10px"
+                 placeholder="{{ self.t("spec-form-access-add-group") }}"
+                 @keydown.enter.prevent="addGroup($event.target.value); $event.target.value = ''">
         </div>
+      </div>
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
+          {% call help(self.t("spec-help-access-users")) %}{% endcall %}
+        </div>
+        <input id="f-acl-users" type="text" name="access_users"
+               value="{{ form.access_users }}" x-model="form.access_users"
+               placeholder="alice, bob" class="spec-form-input">
       </div>
       <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
 
@@ -489,14 +497,17 @@
                 </div>
               </div>
 
-              <div class="spec-form-field">
-                <label class="spec-form-check">
+              <label class="toggle-row">
+                <div>
+                  <div class="toggle-row__label">{{ self.t("spec-form-api-cors") }}</div>
+                  <div class="toggle-row__hint">{{ self.t("spec-help-api-cors") }}</div>
+                </div>
+                <span class="switch">
                   <input type="checkbox" name="api_cors" value="on"
                          {% if !form.api_cors.is_empty() %}checked{% endif %}>
-                  {{ self.t("spec-form-api-cors") }}
-                  {% call help(self.t("spec-help-api-cors")) %}{% endcall %}
-                </label>
-              </div>
+                  <span class="switch__track"><span class="switch__dot"></span></span>
+                </span>
+              </label>
             </div>
           </template>
 
@@ -562,26 +573,47 @@
               <input id="f-clife" type="number" name="container_lifetime" min="0"
                      value="{{ form.container_lifetime }}" placeholder="360" class="spec-form-input">
             </div>
-            <div class="spec-form-field" style="align-self:end">
-              <label class="spec-form-check">
+            <label class="toggle-row" style="align-self:end">
+              <div>
+                <div class="toggle-row__label">{{ self.t("spec-form-stop-on-logout") }}</div>
+                <div class="toggle-row__hint">{{ self.t("spec-help-stop-on-logout") }}</div>
+              </div>
+              <span class="switch">
                 <input type="checkbox" name="stop_on_logout" value="on"
                        {% if !form.stop_on_logout.is_empty() %}checked{% endif %}>
-                {{ self.t("spec-form-stop-on-logout") }}
-                {% call help(self.t("spec-help-stop-on-logout")) %}{% endcall %}
-              </label>
-            </div>
+                <span class="switch__track"><span class="switch__dot"></span></span>
+              </span>
+            </label>
           </div>
 
           {# Environment + command #}
           <div class="spec-form-subsection">{{ self.t("spec-form-env-section") }}</div>
-          <div class="spec-form-field">
-            <div class="spec-form-label-row">
-              <label for="f-env" class="spec-form-label">{{ self.t("spec-form-container-env") }}</label>
-              {% call help(self.t("spec-help-container-env")) %}{% endcall %}
+          <div class="spec-form-field" x-init="envInit()">
+            <div class="spec-form-label-row" style="justify-content:space-between">
+              <span style="display:inline-flex;align-items:center">
+                <label class="spec-form-label">{{ self.t("spec-form-container-env") }}</label>
+                {% call help(self.t("spec-help-container-env")) %}{% endcall %}
+              </span>
+              <button type="button" class="mini-add" @click="envAdd()">
+                <i class="ti ti-plus" aria-hidden="true"></i>{{ self.t("spec-form-env-add") }}
+              </button>
             </div>
-            <textarea id="f-env" name="container_env" rows="3"
-                      placeholder="JUPYTER_TOKEN=&#10;DB_PASSWORD=${DB_PASSWORD}"
-                      class="spec-form-input spec-form-input--mono">{{ form.container_env }}</textarea>
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <template x-for="(row, i) in envRows" :key="i">
+                <div class="env-row">
+                  <input type="text" class="spec-form-input spec-form-input--mono" placeholder="CHAVE"
+                         x-model="row.key" @input="row.key = row.key.toUpperCase().replace(/[^A-Z0-9_]/g, '_'); envSync()">
+                  <span class="env-eq">=</span>
+                  <input type="text" class="spec-form-input spec-form-input--mono" placeholder="{{ self.t("spec-form-env-value") }}"
+                         x-model="row.value" @input="envSync()">
+                  <button type="button" class="star-toggle" style="width:30px;height:30px" @click="envRemove(i)"
+                          title="{{ self.t("spec-form-env-remove") }}"><i class="ti ti-x" style="font-size:14px"></i></button>
+                </div>
+              </template>
+              <p x-show="!envRows.length" class="spec-form-help" style="margin:0">{{ self.t("spec-form-env-empty") }}</p>
+            </div>
+            {# Hidden field actually submitted — kept in sync from the rows. #}
+            <textarea name="container_env" x-model="form.container_env" class="sr-only" tabindex="-1" aria-hidden="true">{{ form.container_env }}</textarea>
             <div class="spec-form-help">{{ self.t("spec-form-container-env-help") }}</div>
           </div>
           <div class="spec-form-field">
@@ -657,16 +689,24 @@
                 <label for="f-min-rep" class="spec-form-label">{{ self.t("spec-form-min-replicas") }}</label>
                 {% call help(self.t("spec-help-min-replicas")) %}{% endcall %}
               </div>
-              <input id="f-min-rep" type="number" name="min_replicas" min="0"
-                     value="{{ form.min_replicas }}" placeholder="0" class="spec-form-input">
+              <div class="stepper">
+                <button type="button" tabindex="-1" @click="form.min_replicas = String(Math.max(0, (parseInt(form.min_replicas, 10) || 0) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
+                <input id="f-min-rep" type="number" name="min_replicas" min="0" placeholder="0"
+                       x-model="form.min_replicas" class="stepper__input">
+                <button type="button" tabindex="-1" @click="form.min_replicas = String((parseInt(form.min_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
+              </div>
             </div>
             <div class="spec-form-field">
               <div class="spec-form-label-row">
                 <label for="f-max-rep" class="spec-form-label">{{ self.t("spec-form-max-replicas") }}</label>
                 {% call help(self.t("spec-help-max-replicas")) %}{% endcall %}
               </div>
-              <input id="f-max-rep" type="number" name="max_replicas" min="1"
-                     value="{{ form.max_replicas }}" placeholder="3" class="spec-form-input">
+              <div class="stepper">
+                <button type="button" tabindex="-1" @click="form.max_replicas = String(Math.max(1, (parseInt(form.max_replicas, 10) || 1) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
+                <input id="f-max-rep" type="number" name="max_replicas" min="1" placeholder="3"
+                       x-model="form.max_replicas" class="stepper__input">
+                <button type="button" tabindex="-1" @click="form.max_replicas = String((parseInt(form.max_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
+              </div>
             </div>
             <div class="spec-form-field">
               <div class="spec-form-label-row">
@@ -714,24 +754,35 @@
 
           {# Resources — per-container limits #}
           <div class="spec-form-subsection">{{ self.t("spec-form-resources-section") }}</div>
+          {# CPU + memory limits as handoff slider rows (#623). The text
+             input stays the submitted source of truth (free-text, units,
+             empty = no limit); the slider is a bound convenience that reads
+             via memMb()/parseFloat and writes a plain value back. #}
+          <div class="res-row">
+            <span class="res-row__k">
+              <i class="ti ti-cpu" aria-hidden="true"></i> {{ self.t("spec-form-cpu-limit") }}
+              {% call help(self.t("spec-help-cpu-limit")) %}{% endcall %}
+            </span>
+            <input type="range" class="rk-range" min="0" max="8" step="0.25"
+                   :value="parseFloat(form.container_cpu_limit) || 0"
+                   @input="form.container_cpu_limit = $event.target.value">
+            <input id="f-cpu" type="text" name="container_cpu_limit" placeholder="0.5"
+                   x-model="form.container_cpu_limit"
+                   class="spec-form-input spec-form-input--mono" style="text-align:right;padding:7px 10px">
+          </div>
+          <div class="res-row">
+            <span class="res-row__k">
+              <i class="ti ti-database" aria-hidden="true"></i> {{ self.t("spec-form-memory-limit") }}
+              {% call help(self.t("spec-help-memory-limit")) %}{% endcall %}
+            </span>
+            <input type="range" class="rk-range" min="0" max="8192" step="256"
+                   :value="memMb(form.container_memory_limit)"
+                   @input="form.container_memory_limit = $event.target.value + 'm'">
+            <input id="f-mem" type="text" name="container_memory_limit" placeholder="512m"
+                   x-model="form.container_memory_limit"
+                   class="spec-form-input spec-form-input--mono" style="text-align:right;padding:7px 10px">
+          </div>
           <div class="grid grid-cols-2 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-cpu" class="spec-form-label">{{ self.t("spec-form-cpu-limit") }}</label>
-                {% call help(self.t("spec-help-cpu-limit")) %}{% endcall %}
-              </div>
-              <input id="f-cpu" type="text" name="container_cpu_limit"
-                     value="{{ form.container_cpu_limit }}" placeholder="0.5" class="spec-form-input">
-            </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-mem" class="spec-form-label">{{ self.t("spec-form-memory-limit") }}</label>
-                {% call help(self.t("spec-help-memory-limit")) %}{% endcall %}
-              </div>
-              <input id="f-mem" type="text" name="container_memory_limit"
-                     value="{{ form.container_memory_limit }}" placeholder="512m"
-                     class="spec-form-input spec-form-input--mono">
-            </div>
             <div class="spec-form-field">
               <div class="spec-form-label-row">
                 <label for="f-cpu-req" class="spec-form-label">{{ self.t("spec-form-cpu-request") }}</label>
@@ -780,15 +831,17 @@
 
           {# Routing — how requests reach the upstream app #}
           <div class="spec-form-subsection">{{ self.t("spec-form-routing-section") }}</div>
-          <div class="spec-form-field">
-            <label class="spec-form-check">
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-row__label">{{ self.t("spec-form-inject-base-href") }}</div>
+              <div class="toggle-row__hint">{{ self.t("spec-form-inject-base-href-help") }}</div>
+            </div>
+            <span class="switch">
               <input type="checkbox" name="inject_base_href" value="on"
                      {% if !form.inject_base_href.is_empty() %}checked{% endif %}>
-              {{ self.t("spec-form-inject-base-href") }}
-              {% call help(self.t("spec-help-inject-base-href")) %}{% endcall %}
-            </label>
-            <div class="spec-form-help">{{ self.t("spec-form-inject-base-href-help") }}</div>
-          </div>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+          </label>
           <div class="grid grid-cols-2 gap-3">
             <div class="spec-form-field">
               <div class="spec-form-label-row">
@@ -815,14 +868,17 @@
               </select>
             </div>
           </div>
-          <div class="spec-form-field">
-            <label class="spec-form-check">
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-row__label">{{ self.t("spec-form-anti-affinity") }}</div>
+              <div class="toggle-row__hint">{{ self.t("spec-help-anti-affinity") }}</div>
+            </div>
+            <span class="switch">
               <input type="checkbox" name="anti_affinity" value="on"
                      {% if !form.anti_affinity.is_empty() %}checked{% endif %}>
-              {{ self.t("spec-form-anti-affinity") }}
-              {% call help(self.t("spec-help-anti-affinity")) %}{% endcall %}
-            </label>
-          </div>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+          </label>
 
           {# Lifecycle #}
           <div class="spec-form-subsection">{{ self.t("spec-form-lifecycle-section") }}</div>
@@ -843,10 +899,7 @@
     {# ── RIGHT: live preview + actions ─────────────────────── #}
     <aside class="spec-form-preview" style="top:96px">
       <div class="editor-card editor-card--preview">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-eye" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-preview") }}</div></div>
-        </div>
+        <div class="form-section__title"><i class="ti ti-eye" style="font-size:14px;margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("spec-form-preview") }}</div>
 
       <div class="rcard" style="margin:0">
         <div class="rcover">
@@ -885,6 +938,22 @@
             </span>
             <i class="ti ti-arrow-right arrow-go"></i>
           </div>
+        </div>
+      </div>
+
+      {# Resource/scale summary (#623): reflects the Advanced fields live. #}
+      <div class="spec-summary">
+        <div class="spec-summary__row">
+          <i class="ti ti-cpu" aria-hidden="true"></i>
+          <span x-text="(form.container_cpu_limit || '—') + ' · ' + (form.container_memory_limit || '—')"></span>
+        </div>
+        <div class="spec-summary__row">
+          <i class="ti ti-stack-2" aria-hidden="true"></i>
+          <span x-text="((form.max_replicas || form.min_replicas) ? ((form.min_replicas || '1') + '–' + (form.max_replicas || form.min_replicas)) : '1') + ' {{ self.t("spec-form-summary-replicas") }}'"></span>
+        </div>
+        <div class="spec-summary__row">
+          <i class="ti ti-clock" aria-hidden="true"></i>
+          <span x-text="((form.heartbeat_timeout && form.heartbeat_timeout != '-1') ? (form.heartbeat_timeout + ' min · ') : '') + (form.seats_per_container || '1') + ' {{ self.t("spec-form-summary-sessions") }}'"></span>
         </div>
       </div>
 
@@ -947,8 +1016,75 @@
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
-window.ruscker.specForm = (initial, logoImages) => ({
+window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   form: initial,
+  // Known group names for the access-group pill picker (#623). The text
+  // value still lives in `form.access_groups` (comma-joined) for submit;
+  // the pills + the "add group" input toggle entries in it. Arbitrary
+  // names are supported — a set group not in this list still renders.
+  availableGroups: Array.isArray(availableGroups) ? availableGroups : [],
+  groupArr() {
+    return (this.form.access_groups || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  },
+  hasGroup(g) { return this.groupArr().indexOf(g) >= 0; },
+  toggleGroup(g) {
+    var arr = this.groupArr();
+    var i = arr.indexOf(g);
+    if (i >= 0) { arr.splice(i, 1); } else { arr.push(g); }
+    this.form.access_groups = arr.join(', ');
+  },
+  addGroup(name) {
+    var g = (name || '').trim();
+    if (g && !this.hasGroup(g)) { this.form.access_groups = this.groupArr().concat([g]).join(', '); }
+  },
+  customGroups() {
+    var avail = this.availableGroups;
+    return this.groupArr().filter(function (g) { return avail.indexOf(g) < 0; });
+  },
+  // Same fixed-role palette as the Apps/Users/Groups badges (#658): admin
+  // pink / editor cyan / viewer navy, else a stable hash hue.
+  grpColor(s) {
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    var k = (s || '').toLowerCase();
+    if (ROLE[k]) return ROLE[k];
+    var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ' 45% 45%)';
+  },
+  grpStyle(g) {
+    var c = this.grpColor(g);
+    return 'border-color:' + c + ';background:color-mix(in srgb,' + c + ' 14%,transparent);color:' + c;
+  },
+  // Environment variables as editable KEY=value rows (#623). The repeater
+  // is the editable source; `form.container_env` (a hidden textarea, one
+  // `KEY=value` per line, `${VAR}` preserved verbatim) is rebuilt from it
+  // for submit so the backend contract is unchanged.
+  envRows: [],
+  envInit() {
+    var txt = (this.form.container_env || '').replace(/\r/g, '').trim();
+    this.envRows = txt ? txt.split('\n').map(function (l) {
+      var i = l.indexOf('=');
+      return i < 0 ? { key: l.trim(), value: '' } : { key: l.slice(0, i).trim(), value: l.slice(i + 1) };
+    }) : [];
+  },
+  envSync() {
+    this.form.container_env = this.envRows
+      .filter(function (r) { return (r.key || '').trim(); })
+      .map(function (r) { return r.key.trim() + '=' + (r.value || ''); })
+      .join('\n');
+  },
+  envAdd() { this.envRows.push({ key: '', value: '' }); },
+  envRemove(i) { this.envRows.splice(i, 1); this.envSync(); },
+  // Parse a memory string ("512m" / "2g" / "1024") to MB for the resource
+  // slider (#623). The text field stays the source of truth — the slider
+  // only reads this and writes back "<n>m"; an empty/unparseable value
+  // (= no limit) reads as 0 so the thumb rests at the start.
+  memMb(v) {
+    v = (v || '').toString().trim();
+    var m = v.match(/^(\d+(?:\.\d+)?)\s*([gGmM]?)/);
+    if (!m) return 0;
+    var n = parseFloat(m[1]);
+    return m[2].toLowerCase() === 'g' ? Math.round(n * 1024) : Math.round(n);
+  },
   // Media-library filenames for the logo/cover pickers (#213). Inline
   // uploads unshift new names here so a fresh thumbnail appears at once.
   // Includes the built-in logos, which are seeded into the library (#433).

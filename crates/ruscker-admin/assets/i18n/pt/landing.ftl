@@ -191,6 +191,8 @@ admin-specs-access-public = público
 admin-specs-col-access-help = Total de acessos (visitas a apps + cliques em cards externos)
 admin-specs-col-actions = Ações
 admin-specs-filter-search = Buscar por id ou nome…
+admin-specs-kind-interactive = Interativo
+admin-specs-kind-external = Externo
 admin-specs-filter-kind-all = Todos os tipos
 admin-specs-filter-state-all = Ativos e inativos
 admin-specs-edit = Editar
@@ -523,6 +525,10 @@ spec-help-stop-on-logout = Para o container do usuário quando ele faz logout. D
 spec-form-env-section = Ambiente + comando
 spec-form-container-env = Variáveis de ambiente
 spec-form-container-env-help = Uma por linha, NOME=valor. Para segredos, referencie uma variável de ambiente em vez de colar o valor.
+spec-form-env-add = Adicionar
+spec-form-env-value = valor
+spec-form-env-remove = Remover
+spec-form-env-empty = Nenhuma variável de ambiente.
 spec-help-container-env = Injetadas no container (container-env). Em branco = nenhuma. Para segredos, use interpolação de variável de ambiente.
 spec-form-container-cmd = Comando (sobrescrever)
 spec-form-container-cmd-help = Um argumento por linha. Em branco = usa o CMD da imagem.
@@ -548,6 +554,11 @@ spec-help-access-groups = Grupos que podem ver e acessar o app (separados por v�
 spec-form-access-users = Usuários permitidos
 spec-help-access-users = Usuários que podem ver e acessar o app (separados por vírgula).
 spec-form-access-help = Ambos em branco = card aberto a todos (inclusive anônimos). Com algum valor, só usuários logados que combinam — e admins sempre.
+spec-form-access-public = Público
+spec-form-access-add-group = + add. grupo
+spec-form-access-public-hint = vazio = visível a todos
+spec-form-summary-replicas = réplicas
+spec-form-summary-sessions = sessões por réplica
 spec-form-cpu-request = Reserva de CPU
 spec-help-cpu-request = Reserva suave de CPU em núcleos (container-cpu-request). Em branco = sem reserva.
 spec-form-memory-request = Reserva de memória
@@ -660,6 +671,10 @@ admin-disk-prune-images = Remover não usadas
 admin-disk-prune-images-confirm = Remover todas as imagens não usadas?
 admin-disk-flash-images-pruned = Imagens não usadas removidas.
 admin-disk-cleaning = Limpando…
+admin-disk-word-images = imagens
+admin-disk-word-containers = containers
+admin-disk-word-stopped = parados
+admin-disk-badge-inuse = em uso
 admin-dashboard-metric-sessions-help = Sessões que as réplicas reportam atendendo agora.
 admin-dashboard-metric-tracker-help = Sessões fixas (sticky) rastreadas pelo proxy no heartbeat.
 admin-landing-header = Cabeçalho

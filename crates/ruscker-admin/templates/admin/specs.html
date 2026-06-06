@@ -10,14 +10,13 @@
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-specs-subtitle") }}</p>
   </div>
   <div class="flex items-center gap-2">
-    <span class="text-xs text-[color:var(--text-faint)]">{{ specs.len() }}</span>
-    <button type="button" class="admin-nav-link" style="padding:6px 10px;font-size:12px"
+    <button type="button" class="btn"
             title="{{ self.t("admin-import-title") }}"
             onclick="document.getElementById('import-modal').showModal()">
       <i class="ti ti-file-upload" aria-hidden="true"></i>
       {{ self.t("admin-import-button") }}
     </button>
-    <a href="{{ base }}/admin/specs/new" class="admin-login-btn" style="padding:6px 10px;font-size:12px">
+    <a href="{{ base }}/admin/specs/new" class="btn btn--primary">
       <i class="ti ti-plus" aria-hidden="true"></i>
       {{ self.t("admin-specs-add") }}
     </a>
@@ -121,6 +120,30 @@
     <pre class="mt-3 inline-block text-[11px] text-left bg-[color:var(--surface-soft)] px-3 py-2 rounded">ruscker import application.yml --db &lt;path&gt;</pre>
   </div>
 {% else %}
+  {# Filter toolbar (design handoff #623): search + kind chips with live
+     counts + a sort cycler. Framework-free vanilla JS at the foot of the
+     page filters/sorts the rows; it coexists with the data-enhance header
+     sorter. #}
+  <div class="admin-sticky" id="apps-toolbar">
+    <div class="flex items-center gap-2 flex-wrap">
+      <label class="search-pill" style="max-width:280px;flex:0 1 280px">
+        <i class="ti ti-search" aria-hidden="true"></i>
+        <input type="search" id="apps-search" autocomplete="off"
+               placeholder="{{ self.t("admin-specs-filter-search") }}">
+      </label>
+      <button type="button" class="chip on-all" data-kind="all">{{ self.t("type-all") }} <span class="chip-count" data-count="all"></span></button>
+      <button type="button" class="chip" data-kind="shiny">Shiny <span class="chip-count" data-count="shiny"></span></button>
+      <button type="button" class="chip" data-kind="interactive">{{ self.t("admin-specs-kind-interactive") }} <span class="chip-count" data-count="interactive"></span></button>
+      <button type="button" class="chip" data-kind="api">API <span class="chip-count" data-count="api"></span></button>
+      <button type="button" class="chip" data-kind="external">{{ self.t("admin-specs-kind-external") }} <span class="chip-count" data-count="external"></span></button>
+      <span class="flex-1"></span>
+      <button type="button" class="sort-btn" id="apps-sort"
+              data-l-recent="{{ self.t("sort-recent") }}" data-l-name="{{ self.t("sort-name") }}" data-l-id="ID">
+        <i class="ti ti-arrows-sort" aria-hidden="true"></i>
+        <span id="apps-sort-label">{{ self.t("sort-recent") }}</span>
+      </button>
+    </div>
+  </div>
   <table class="admin-table" data-enhance>
     <thead>
       <tr>
@@ -137,7 +160,8 @@
     </thead>
     <tbody>
       {% for spec in specs %}
-        <tr>
+        <tr data-kind="{{ spec.kind }}" data-id="{{ spec.id }}" data-idx="{{ loop.index0 }}"
+            data-name="{% match spec.display_name %}{% when Some with (n) %}{{ n }}{% when None %}{{ spec.id }}{% endmatch %}">
           <td class="id-cell">{{ spec.id }}</td>
           <td>
             <span class="spec-name-cell">
@@ -234,6 +258,65 @@
   </table>
 {% endif %}
 
+<script>
+  // Apps filter toolbar (#623): live search + kind chips with counts + a
+  // sort cycler, over the server-rendered rows. Framework-free; coexists
+  // with the data-enhance header sorter (filter hides rows, sort reorders).
+  (function () {
+    var toolbar = document.getElementById('apps-toolbar');
+    if (!toolbar) return;
+    var table = document.querySelector('table.admin-table');
+    var tbody = table && table.tBodies[0];
+    if (!tbody) return;
+    var rows = Array.prototype.slice.call(tbody.rows);
+    var search = document.getElementById('apps-search');
+    var chips = toolbar.querySelectorAll('.chip[data-kind]');
+    var sortBtn = document.getElementById('apps-sort');
+    var sortLabel = document.getElementById('apps-sort-label');
+    var kind = 'all';
+
+    // Fill the per-kind counts on the chips.
+    var counts = { all: rows.length, shiny: 0, interactive: 0, api: 0, external: 0 };
+    rows.forEach(function (r) { var k = r.dataset.kind; if (counts[k] != null) counts[k]++; });
+    toolbar.querySelectorAll('.chip-count[data-count]').forEach(function (el) {
+      el.textContent = counts[el.getAttribute('data-count')] || 0;
+    });
+
+    function apply() {
+      var q = (search.value || '').trim().toLowerCase();
+      rows.forEach(function (r) {
+        var okKind = kind === 'all' || r.dataset.kind === kind;
+        var okText = !q || r.textContent.toLowerCase().indexOf(q) >= 0;
+        r.hidden = !(okKind && okText);
+      });
+    }
+
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        kind = chip.getAttribute('data-kind');
+        chips.forEach(function (c) { c.classList.toggle('on-all', c === chip); });
+        apply();
+      });
+    });
+    if (search) search.addEventListener('input', apply);
+
+    // Sort cycler: recent (original order) → name → id, reordering rows.
+    var MODES = ['recent', 'name', 'id'];
+    var mi = 0;
+    function sortRows() {
+      var mode = MODES[mi];
+      var sorted = rows.slice().sort(function (a, b) {
+        if (mode === 'recent') return (+a.dataset.idx) - (+b.dataset.idx);
+        var av = (a.dataset[mode] || '').toLowerCase(), bv = (b.dataset[mode] || '').toLowerCase();
+        return av < bv ? -1 : av > bv ? 1 : 0;
+      });
+      sorted.forEach(function (r) { tbody.appendChild(r); });
+      sortLabel.textContent = sortBtn.getAttribute('data-l-' + mode) || mode;
+    }
+    if (sortBtn) sortBtn.addEventListener('click', function () { mi = (mi + 1) % MODES.length; sortRows(); });
+  })();
+</script>
+
 {# Alpine powers the inline featured-star toggle (#521). Without it the
    `x-data`/`:class` button never initializes and the star renders empty. #}
 <script>
@@ -241,11 +324,20 @@
   // hue function as the Users/Groups pages, so a group reads the same
   // colour across the admin (#623).
   (function () {
-    function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+    // Canonical roles get the design-handoff fixed palette; any other
+    // group falls back to a stable hash hue. Badge style matches the
+    // handoff: a faint colour-mix tint with full-strength text (#623).
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    function groupColor(s) {
+      var k = s.toLowerCase();
+      if (ROLE[k]) return ROLE[k];
+      var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+      return 'hsl(' + h + ' 45% 45%)';
+    }
     document.querySelectorAll('.group-badge[data-group]').forEach(function (el) {
-      var hu = hue(el.getAttribute('data-group'));
-      el.style.background = 'hsl(' + hu + ' 70% 92%)';
-      el.style.color = 'hsl(' + hu + ' 55% 28%)';
+      var c = groupColor(el.getAttribute('data-group'));
+      el.style.background = 'color-mix(in srgb, ' + c + ' 16%, transparent)';
+      el.style.color = c;
     });
   })();
 </script>

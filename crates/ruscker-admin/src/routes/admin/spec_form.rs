@@ -847,6 +847,10 @@ struct SpecFormPage<'a> {
     /// `docker-registry-credential` datalist (#351). Empty when no DB
     /// is wired or the listing fails — the field stays free-text.
     credential_names: Vec<String>,
+    /// Known group names (from every spec's `access-groups` + every user's
+    /// memberships), for the access-group pill picker (#623). The field
+    /// still accepts arbitrary names via the "add group" input.
+    available_groups: Vec<String>,
 }
 
 impl<'a> SpecFormPage<'a> {
@@ -879,6 +883,12 @@ impl<'a> SpecFormPage<'a> {
     /// picker so an inline upload can push new thumbnails reactively.
     fn logo_images_json(&self) -> String {
         serde_json::to_string(&self.logo_images).unwrap_or_else(|_| "[]".into())
+    }
+
+    /// Known group names as a JSON array, seeding the access-group pill
+    /// picker (#623).
+    fn available_groups_json(&self) -> String {
+        serde_json::to_string(&self.available_groups).unwrap_or_else(|_| "[]".into())
     }
 
 
@@ -925,6 +935,27 @@ async fn credential_names(state: &AppState) -> Vec<String> {
     }
 }
 
+/// Known group names for the access-group pill picker (#623): the union of
+/// every effective spec's `access-groups` and every user's memberships,
+/// sorted and de-duplicated. Empty when no DB is wired — the picker then
+/// just offers the "add group" input.
+async fn group_names(state: &AppState) -> Vec<String> {
+    let mut set = std::collections::BTreeSet::new();
+    for s in crate::catalog::effective_specs(state.db.as_ref(), &state.config).await {
+        if let Some(groups) = s.access_groups.as_ref() {
+            set.extend(groups.iter().cloned());
+        }
+    }
+    if let Some(db) = state.db.as_ref() {
+        if let Ok(users) = db::users::list_all(db).await {
+            for u in users {
+                set.extend(u.groups);
+            }
+        }
+    }
+    set.into_iter().collect()
+}
+
 async fn new_form(
     editor: RequireEditor,
     State(state): State<AppState>,
@@ -950,6 +981,7 @@ async fn new_form(
         },
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
@@ -985,6 +1017,7 @@ async fn edit_form(
         form: SpecForm::from_spec(&spec),
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
@@ -1051,6 +1084,7 @@ async fn duplicate_form(
         form,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
@@ -1222,6 +1256,7 @@ async fn render_form_with_errors(
         form,
         errors,
         logo_images: logo_filenames(state).await,
+        available_groups: group_names(state).await,
         credential_names: credential_names(state).await,
     };
     let body = match page.render() {

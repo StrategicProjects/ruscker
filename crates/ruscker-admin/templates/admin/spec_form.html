@@ -61,12 +61,7 @@
 
       {# Type picker — 6 cards #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-category" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
         <div class="kind-picker">
           {% for k in display_type_options() %}
             <label class="kind-picker-card" :class="form.display_type === '{{ k.0 }}' ? 'is-active' : ''">
@@ -80,10 +75,7 @@
 
       {# ── Card: Identity ─────────────────────────────────────── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-id-badge-2" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-identity") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-identity") }}</div>
 
       <div class="spec-form-field">
         <div class="spec-form-label-row">
@@ -128,10 +120,7 @@
 
       {# ── Card: Visual ───────────────────────────────────────── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-photo" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-visual") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-visual") }}</div>
 
       {# ── Card logo (#213) — pick from the library, upload inline, or
          (advanced) paste a path/URL. Picker-first: no path typing in the
@@ -301,10 +290,7 @@
       {# ── Card: Container (only for container-backed kinds) ───── #}
       <template x-if="needsContainer()">
         <section class="editor-card">
-          <div class="editor-card__head">
-            <span class="editor-card__icon"><i class="ti ti-box" aria-hidden="true"></i></span>
-            <div><div class="editor-card__title">{{ self.t("spec-form-container") }}</div></div>
-          </div>
+          <div class="form-section__title">{{ self.t("spec-form-container") }}</div>
 
           <div class="spec-form-field">
             <div class="spec-form-label-row">
@@ -354,10 +340,7 @@
       {# ── Card: External link (only for external kinds) ──────── #}
       <template x-if="needsLink()">
         <section class="editor-card">
-          <div class="editor-card__head">
-            <span class="editor-card__icon"><i class="ti ti-external-link" aria-hidden="true"></i></span>
-            <div><div class="editor-card__title">{{ self.t("spec-form-link-section") }}</div></div>
-          </div>
+          <div class="form-section__title">{{ self.t("spec-form-link-section") }}</div>
           <div class="spec-form-field">
             <div class="spec-form-label-row">
               <label for="f-link" class="spec-form-label">{{ self.t("spec-form-link") }}</label>
@@ -374,21 +357,21 @@
 
       {# ── Card: Advanced (metadata + all the runtime knobs) ──── #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-adjustments" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-meta") }}</div></div>
-        </div>
+        <div class="form-section__title">{{ self.t("spec-form-meta") }}</div>
 
       {# Featured carousel flag (#506) — plain checkbox; native submit sends
          `featured=on` only when checked. Lives here (visible metadata band,
          #523) instead of buried under the runtime "Advanced" collapse. #}
-      <div class="spec-form-field">
-        <label class="spec-form-check">
+      <label class="toggle-row">
+        <div>
+          <div class="toggle-row__label">{{ self.t("spec-form-featured") }}</div>
+          <div class="toggle-row__hint">{{ self.t("spec-form-featured-help") }}</div>
+        </div>
+        <span class="switch">
           <input type="checkbox" name="featured" value="on" {% if !form.featured.is_empty() %}checked{% endif %}>
-          <span>{{ self.t("spec-form-featured") }}</span>
-        </label>
-        <div class="spec-form-help">{{ self.t("spec-form-featured-help") }}</div>
-      </div>
+          <span class="switch__track"><span class="switch__dot"></span></span>
+        </span>
+      </label>
 
       {# Access — who may see + reach this app (#155). Promoted out of the
          runtime "Advanced" collapse (#523): visibility is governance/metadata,
@@ -489,14 +472,17 @@
                 </div>
               </div>
 
-              <div class="spec-form-field">
-                <label class="spec-form-check">
+              <label class="toggle-row">
+                <div>
+                  <div class="toggle-row__label">{{ self.t("spec-form-api-cors") }}</div>
+                  <div class="toggle-row__hint">{{ self.t("spec-help-api-cors") }}</div>
+                </div>
+                <span class="switch">
                   <input type="checkbox" name="api_cors" value="on"
                          {% if !form.api_cors.is_empty() %}checked{% endif %}>
-                  {{ self.t("spec-form-api-cors") }}
-                  {% call help(self.t("spec-help-api-cors")) %}{% endcall %}
-                </label>
-              </div>
+                  <span class="switch__track"><span class="switch__dot"></span></span>
+                </span>
+              </label>
             </div>
           </template>
 
@@ -562,14 +548,17 @@
               <input id="f-clife" type="number" name="container_lifetime" min="0"
                      value="{{ form.container_lifetime }}" placeholder="360" class="spec-form-input">
             </div>
-            <div class="spec-form-field" style="align-self:end">
-              <label class="spec-form-check">
+            <label class="toggle-row" style="align-self:end">
+              <div>
+                <div class="toggle-row__label">{{ self.t("spec-form-stop-on-logout") }}</div>
+                <div class="toggle-row__hint">{{ self.t("spec-help-stop-on-logout") }}</div>
+              </div>
+              <span class="switch">
                 <input type="checkbox" name="stop_on_logout" value="on"
                        {% if !form.stop_on_logout.is_empty() %}checked{% endif %}>
-                {{ self.t("spec-form-stop-on-logout") }}
-                {% call help(self.t("spec-help-stop-on-logout")) %}{% endcall %}
-              </label>
-            </div>
+                <span class="switch__track"><span class="switch__dot"></span></span>
+              </span>
+            </label>
           </div>
 
           {# Environment + command #}
@@ -780,15 +769,17 @@
 
           {# Routing — how requests reach the upstream app #}
           <div class="spec-form-subsection">{{ self.t("spec-form-routing-section") }}</div>
-          <div class="spec-form-field">
-            <label class="spec-form-check">
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-row__label">{{ self.t("spec-form-inject-base-href") }}</div>
+              <div class="toggle-row__hint">{{ self.t("spec-form-inject-base-href-help") }}</div>
+            </div>
+            <span class="switch">
               <input type="checkbox" name="inject_base_href" value="on"
                      {% if !form.inject_base_href.is_empty() %}checked{% endif %}>
-              {{ self.t("spec-form-inject-base-href") }}
-              {% call help(self.t("spec-help-inject-base-href")) %}{% endcall %}
-            </label>
-            <div class="spec-form-help">{{ self.t("spec-form-inject-base-href-help") }}</div>
-          </div>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+          </label>
           <div class="grid grid-cols-2 gap-3">
             <div class="spec-form-field">
               <div class="spec-form-label-row">
@@ -815,14 +806,17 @@
               </select>
             </div>
           </div>
-          <div class="spec-form-field">
-            <label class="spec-form-check">
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-row__label">{{ self.t("spec-form-anti-affinity") }}</div>
+              <div class="toggle-row__hint">{{ self.t("spec-help-anti-affinity") }}</div>
+            </div>
+            <span class="switch">
               <input type="checkbox" name="anti_affinity" value="on"
                      {% if !form.anti_affinity.is_empty() %}checked{% endif %}>
-              {{ self.t("spec-form-anti-affinity") }}
-              {% call help(self.t("spec-help-anti-affinity")) %}{% endcall %}
-            </label>
-          </div>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+          </label>
 
           {# Lifecycle #}
           <div class="spec-form-subsection">{{ self.t("spec-form-lifecycle-section") }}</div>
@@ -843,10 +837,7 @@
     {# ── RIGHT: live preview + actions ─────────────────────── #}
     <aside class="spec-form-preview" style="top:96px">
       <div class="editor-card editor-card--preview">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-eye" aria-hidden="true"></i></span>
-          <div><div class="editor-card__title">{{ self.t("spec-form-preview") }}</div></div>
-        </div>
+        <div class="form-section__title"><i class="ti ti-eye" style="font-size:14px;margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("spec-form-preview") }}</div>
 
       <div class="rcard" style="margin:0">
         <div class="rcover">

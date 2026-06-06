@@ -40,13 +40,13 @@
       </div>
     </div>
     <div class="disk-stack">
-      <div class="disk-stack__seg" style="width:{{ seg_images_pct }}%;background:var(--color-teal-600)" title="{{ self.t("admin-disk-seg-images") }}"></div>
-      <div class="disk-stack__seg" style="width:{{ seg_other_pct }}%;background:var(--color-teal-200)" title="{{ self.t("admin-disk-seg-other") }}"></div>
+      <div class="disk-stack__seg" style="width:{{ seg_images_pct }}%;background:#06b6d4" title="{{ self.t("admin-disk-seg-images") }}"></div>
+      <div class="disk-stack__seg" style="width:{{ seg_other_pct }}%;background:#06d6a0" title="{{ self.t("admin-disk-seg-other") }}"></div>
       <div class="disk-stack__seg" style="width:{{ seg_free_pct }}%;background:var(--surface-soft)" title="{{ self.t("admin-disk-seg-free") }}"></div>
     </div>
     <div class="disk-legend">
-      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--color-teal-600)"></span><i class="ti ti-photo" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-images") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_images_bytes) }}</span></div>
-      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--color-teal-200)"></span><i class="ti ti-database" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-other") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_other_bytes) }}</span></div>
+      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:#06b6d4"></span><i class="ti ti-stack-2" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-images") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_images_bytes) }}</span></div>
+      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:#06d6a0"></span><i class="ti ti-database" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-other") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_other_bytes) }}</span></div>
       <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--border-strong)"></span><i class="ti ti-circle-dashed" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-free") }}</span><span class="disk-legend__val tnum">{{ self.human(disk_free) }}</span></div>
     </div>
   </div>

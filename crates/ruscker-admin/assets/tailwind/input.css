@@ -371,6 +371,86 @@ input[type="range"]::-moz-range-thumb {
   outline: 2px solid var(--color-teal-400); outline-offset: 2px;
 }
 
+/* Spec-form handoff widgets (#623): a full-width toggle row (label + hint
+ * left, switch right), an uppercase section title, and a −/value/+ stepper
+ * for small integer counts. The .switch above provides the toggle visual. */
+.form-section__title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); font-weight: 600; margin-bottom: 14px;
+}
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  padding: 11px 0; cursor: pointer; border-bottom: 0.5px solid var(--border-soft);
+}
+.toggle-row:first-of-type { padding-top: 0; }
+.toggle-row:last-of-type { border-bottom: 0; }
+.toggle-row__label { font-size: 13px; font-weight: 500; }
+.toggle-row__hint { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
+.stepper {
+  display: inline-flex; align-items: center; border: 0.5px solid var(--border);
+  border-radius: 8px; overflow: hidden; align-self: flex-start;
+}
+.stepper button {
+  width: 34px; height: 34px; border: 0; background: var(--surface-soft);
+  color: var(--text); cursor: pointer; display: flex; align-items: center; justify-content: center;
+}
+.stepper button:hover { background: var(--surface); }
+.stepper span { min-width: 44px; text-align: center; font-size: 14px; font-weight: 500; }
+/* Hybrid stepper: the middle stays a real, clearable number input so an
+ * empty value (= "use the default") is preserved — the −/+ buttons only
+ * nudge it. The native spinners are hidden so it reads as the design's
+ * −[n]+ pill. */
+.stepper__input {
+  width: 48px; text-align: center; border: 0; background: transparent;
+  color: var(--text); font-size: 14px; font-weight: 500; font-family: inherit;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.stepper__input:focus { outline: 0; }
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Resource slider row (#623): icon+label · range slider · value/field. */
+.res-row {
+  display: grid; grid-template-columns: 130px 1fr 110px;
+  align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.res-row__k { font-size: 12.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.res-row__k .ti { font-size: 15px; color: var(--text-faint); }
+.res-row__v { font-size: 12.5px; font-weight: 500; text-align: right; }
+.rk-range {
+  -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: var(--surface-soft); outline: 0; cursor: pointer;
+}
+.rk-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+.rk-range::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface); cursor: pointer;
+}
+
+/* Access-group pill toggle (design handoff #623). The `.on` colour is set
+ * inline per group (fixed role palette / hash) so it matches the badges. */
+.group-toggle {
+  display: inline-flex; align-items: center; gap: 5px; padding: 5px 11px;
+  font-size: 12px; border: 0.5px solid var(--border); border-radius: 999px;
+  background: var(--surface); color: var(--text-muted); cursor: pointer;
+  font-family: inherit; transition: all 0.12s;
+}
+.group-toggle:hover { border-color: var(--border-strong); color: var(--text); }
+.group-toggle.on { font-weight: 500; }
+.group-toggle .ti { font-size: 13px; }
+
+/* Resource/scale summary under the live preview card (design handoff #623). */
+.spec-summary {
+  display: flex; flex-direction: column; gap: 7px;
+  margin-top: 14px; padding-top: 14px; border-top: 0.5px solid var(--border-soft);
+}
+.spec-summary__row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
+.spec-summary__row .ti { font-size: 14px; color: var(--text-faint); width: 16px; }
+
 /* Styled checkbox — teal box with a check when ticked. */
 .rk-check-wrap { display: inline-flex; align-items: center; cursor: pointer; }
 .rk-check-wrap > input { position: absolute; opacity: 0; width: 0; height: 0; }

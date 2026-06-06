@@ -13,7 +13,7 @@ use axum::{
     Json, Router,
 };
 use chrono::{DateTime, Utc};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
 use crate::auth::{RequireEditor, Role};
@@ -29,7 +29,8 @@ const IMPORT_BODY_LIMIT: usize = 2 * 1024 * 1024;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/specs", get(index))
-        .route("/admin/specs/import", post(import))
+        .route("/admin/specs/import", get(import_editor).post(import))
+        .route("/admin/specs/import/preview", post(import_preview))
         .route("/admin/specs/import/confirm", post(import_confirm))
         .route(
             "/admin/specs/{id}/featured/toggle",
@@ -173,7 +174,9 @@ impl<'a> SpecsPage<'a> {
     }
 }
 
-/// One row in the import preview (#557).
+/// One row in the import preview (#557). `Serialize` feeds the live
+/// 2-pane editor's JSON preview endpoint (#623).
+#[derive(Serialize)]
 struct ImportRow {
     id: String,
     display_name: String,
@@ -181,6 +184,53 @@ struct ImportRow {
     /// `true` ⇒ the import would **update** a spec already in the DB;
     /// `false` ⇒ it's **new**.
     exists: bool,
+}
+
+/// Parse `raw` YAML and diff it against the DB — the shared core behind
+/// both the upload preview and the live-editor reparse (#623). Returns the
+/// per-app rows + the total warning count, or a human error string.
+async fn build_import_rows(
+    pool: &crate::db::ConfigDb,
+    raw: &str,
+) -> Result<(Vec<ImportRow>, usize), String> {
+    let config = ruscker_config::Config::from_yaml(raw).map_err(|e| format!("{e}"))?;
+    let report = ruscker_config::validate::run(&config);
+    let warning_count = report.warnings.len() + config.raw_warnings.len();
+    let existing: std::collections::HashSet<String> = crate::db::specs::list_all(pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    let rows = config
+        .proxy
+        .specs
+        .iter()
+        .map(|s| ImportRow {
+            exists: existing.contains(&s.id),
+            kind: match s.kind() {
+                ruscker_config::SpecKind::Shiny => "shiny",
+                ruscker_config::SpecKind::InteractiveApp => "interactive",
+                ruscker_config::SpecKind::Api => "api",
+                ruscker_config::SpecKind::External => "external",
+            },
+            display_name: s.display_name.clone().unwrap_or_default(),
+            id: s.id.clone(),
+        })
+        .collect();
+    Ok((rows, warning_count))
+}
+
+/// JSON shape returned by `POST /admin/specs/import/preview` for the live
+/// editor: either an error (parse failure) or the parsed rows + warnings.
+#[derive(Serialize)]
+struct ImportPreviewJson {
+    ok: bool,
+    error: Option<String>,
+    warning_count: usize,
+    rows: Vec<ImportRow>,
+    new_count: usize,
+    update_count: usize,
 }
 
 #[derive(Template)]
@@ -203,6 +253,27 @@ struct ImportPreviewPage<'a> {
 }
 
 impl<'a> ImportPreviewPage<'a> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
+/// The live 2-pane import editor page (#623): an editable YAML pane on the
+/// left, a preview rebuilt over fetch on the right. Seeded empty; the
+/// reparse + confirm reuse the same handlers as the upload flow.
+#[derive(Template)]
+#[template(path = "admin/import_editor.html")]
+struct ImportEditorPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    base: std::sync::Arc<str>,
+    nav_section: &'static str,
+    role: Role,
+}
+
+impl<'a> ImportEditorPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
@@ -428,39 +499,11 @@ async fn import(
         return redirect_err("no file selected");
     };
 
-    // Parse (env-interpolation + raw-text credential scan happen inside
-    // from_yaml; parse failure → error flash).
-    let config = match ruscker_config::Config::from_yaml(&raw) {
-        Ok(c) => c,
+    // Parse + diff via the shared core (#623). Parse failure → error flash.
+    let (rows, warning_count) = match build_import_rows(pool, &raw).await {
+        Ok(v) => v,
         Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
     };
-    let report = ruscker_config::validate::run(&config);
-    let warning_count = report.warnings.len() + config.raw_warnings.len();
-
-    // Which ids already exist in the DB (→ "updates", vs "new").
-    let existing: std::collections::HashSet<String> = crate::db::specs::list_all(pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|s| s.id)
-        .collect();
-
-    let rows: Vec<ImportRow> = config
-        .proxy
-        .specs
-        .iter()
-        .map(|s| ImportRow {
-            exists: existing.contains(&s.id),
-            kind: match s.kind() {
-                ruscker_config::SpecKind::Shiny => "shiny",
-                ruscker_config::SpecKind::InteractiveApp => "interactive",
-                ruscker_config::SpecKind::Api => "api",
-                ruscker_config::SpecKind::External => "external",
-            },
-            display_name: s.display_name.clone().unwrap_or_default(),
-            id: s.id.clone(),
-        })
-        .collect();
 
     let page = ImportPreviewPage {
         locale: loc,
@@ -475,6 +518,79 @@ async fn import(
         warning_count,
     };
     super::render(&page)
+}
+
+/// `GET /admin/specs/import` — the live 2-pane import editor (#623).
+async fn import_editor(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+) -> Response {
+    let page = ImportEditorPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "specs",
+        role: editor.role,
+    };
+    super::render(&page)
+}
+
+/// `POST /admin/specs/import/preview` — reparse the YAML in the editor's
+/// left pane and return the preview as JSON (#623). Read-only: nothing is
+/// written to the DB. A parse failure is a 200 with `ok:false` + `error`
+/// so the editor can show it inline without a transport error.
+#[derive(Deserialize)]
+struct PreviewForm {
+    yaml: String,
+}
+
+async fn import_preview(
+    _: RequireEditor,
+    State(state): State<AppState>,
+    axum::Form(form): axum::Form<PreviewForm>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    if form.yaml.trim().is_empty() {
+        return Json(ImportPreviewJson {
+            ok: true,
+            error: None,
+            warning_count: 0,
+            rows: Vec::new(),
+            new_count: 0,
+            update_count: 0,
+        })
+        .into_response();
+    }
+    match build_import_rows(pool, &form.yaml).await {
+        Ok((rows, warning_count)) => {
+            let update_count = rows.iter().filter(|r| r.exists).count();
+            let new_count = rows.len() - update_count;
+            Json(ImportPreviewJson {
+                ok: true,
+                error: None,
+                warning_count,
+                rows,
+                new_count,
+                update_count,
+            })
+            .into_response()
+        }
+        Err(e) => Json(ImportPreviewJson {
+            ok: false,
+            error: Some(e),
+            warning_count: 0,
+            rows: Vec::new(),
+            new_count: 0,
+            update_count: 0,
+        })
+        .into_response(),
+    }
 }
 
 /// Step 2 of the import (#557): import only the **checked** specs. The

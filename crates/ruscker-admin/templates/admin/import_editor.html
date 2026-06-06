@@ -1,0 +1,183 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-import-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div x-data="ruscker.importEditor()" x-cloak>
+
+  {# ── Crumb + header ───────────────────────────────────────── #}
+  <div class="text-[11px] text-[color:var(--text-faint)] uppercase tracking-wide mb-1">
+    <a href="{{ base }}/admin/specs" class="hover:underline">{{ self.t("admin-nav-apps") }}</a>
+    · {{ self.t("admin-import-button") }}
+  </div>
+  <div class="flex items-end justify-between mb-4 gap-3 flex-wrap">
+    <div>
+      <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-import-title") }}</h1>
+      <p class="text-xs text-[color:var(--text-muted)] mt-1" style="max-width:46rem">{{ self.t("admin-import-help") }}</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <label class="btn" style="cursor:pointer">
+        <i class="ti ti-file-upload" aria-hidden="true"></i> {{ self.t("admin-import-load-file") }}
+        <input type="file" accept=".yml,.yaml" class="hidden" @change="loadFile($event)">
+      </label>
+      <a href="{{ base }}/admin/specs" class="btn">{{ self.t("admin-import-cancel") }}</a>
+      {# Confirm reuses the existing multipart handler: hidden yaml + one
+         `ids` per selected row (disabled ones don't submit). #}
+      <form method="post" enctype="multipart/form-data" action="{{ base }}/admin/specs/import/confirm" style="display:inline">
+        <textarea name="yaml" x-model="yaml" class="hidden" aria-hidden="true"></textarea>
+        <template x-for="row in rows" :key="'sel-' + row.id">
+          <input type="hidden" name="ids" :value="row.id" :disabled="!selected[row.id]">
+        </template>
+        <button type="submit" class="btn btn--primary" :disabled="!selectedCount()">
+          <i class="ti ti-check" aria-hidden="true"></i>
+          {{ self.t("admin-import-confirm") }}<span x-show="selectedCount()" x-text="' · ' + selectedCount()"></span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="spec-form-layout">
+    {# ── LEFT: editable YAML ────────────────────────────────── #}
+    <div>
+      <div class="yaml-head">
+        <span><i class="ti ti-file-code" aria-hidden="true"></i> application.yml</span>
+        <span class="text-[color:var(--text-faint)]" x-show="loading">…</span>
+      </div>
+      <textarea class="yaml-editor" x-model="yaml" @input="reparse()" spellcheck="false"
+                placeholder="{{ self.t("admin-import-editor-placeholder") }}"></textarea>
+    </div>
+
+    {# ── RIGHT: live preview ────────────────────────────────── #}
+    <aside class="spec-form-preview" style="top:80px">
+      <div class="form-section__title">{{ self.t("admin-import-preview-title") }}</div>
+
+      {# Parse error #}
+      <template x-if="error">
+        <div class="admin-login-error" role="alert" style="margin-bottom:10px">
+          <i class="ti ti-alert-circle" aria-hidden="true"></i>
+          <span class="dash-mono" style="font-size:11px" x-text="error"></span>
+        </div>
+      </template>
+
+      {# Select-all + count #}
+      <template x-if="rows.length">
+        <div class="flex items-center justify-between mb-2" style="font-size:11.5px;color:var(--text-faint)">
+          <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+            <input type="checkbox" :checked="selectedCount() === rows.length" @change="toggleAll($event.target.checked)">
+            {{ self.t("admin-import-select-all") }}
+          </label>
+          <span><span class="tnum" x-text="selectedCount()"></span>/<span class="tnum" x-text="rows.length"></span></span>
+        </div>
+      </template>
+
+      {# Parsed rows #}
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <template x-for="row in rows" :key="row.id">
+          <label class="parsed-row" :class="!selected[row.id] ? 'is-off' : ''">
+            <input type="checkbox" x-model="selected[row.id]">
+            <span class="parsed-row__ico" :style="'background:color-mix(in srgb,' + kindColor(row.kind) + ' 14%,var(--surface));color:' + kindColor(row.kind)">
+              <i class="ti" :class="kindIcon(row.kind)" aria-hidden="true"></i>
+            </span>
+            <span style="min-width:0;flex:1">
+              <span style="display:flex;align-items:center;gap:6px">
+                <code class="dash-mono" style="font-size:12px;font-weight:500" x-text="row.display_name || row.id"></code>
+                <span class="import-tag" :class="row.exists ? 'import-tag--update' : 'import-tag--new'"
+                      x-text="row.exists ? '{{ self.t("admin-import-badge-update") }}' : '{{ self.t("admin-import-badge-new") }}'"></span>
+              </span>
+              <span class="dash-mono text-[color:var(--text-faint)]" style="font-size:11px" x-text="row.id" x-show="row.display_name"></span>
+            </span>
+          </label>
+        </template>
+      </div>
+
+      {# Empty state #}
+      <template x-if="!rows.length && !error">
+        <p class="text-xs text-[color:var(--text-faint)] py-6 text-center"
+           x-text="yaml.trim() ? '{{ self.t("admin-import-preview-none") }}' : '{{ self.t("admin-import-editor-empty") }}'"></p>
+      </template>
+
+      {# Summary footer #}
+      <template x-if="rows.length">
+        <div class="import-summary" style="margin-top:12px;padding-top:12px;border-top:0.5px solid var(--border)">
+          <span><b class="tnum" x-text="newCount"></b> {{ self.t("admin-import-badge-new") }}</span>
+          <span>· <b class="tnum" x-text="updateCount"></b> {{ self.t("admin-import-badge-update") }}</span>
+          <template x-if="warnings">
+            <span>· <b class="tnum" x-text="warnings"></b> {{ self.t("admin-import-warnings-label") }}</span>
+          </template>
+        </div>
+      </template>
+    </aside>
+  </div>
+</div>
+
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+<script>
+window.ruscker = window.ruscker || {};
+window.ruscker.importEditor = () => ({
+  yaml: '',
+  rows: [],
+  selected: {},
+  warnings: 0,
+  newCount: 0,
+  updateCount: 0,
+  error: '',
+  loading: false,
+  _timer: null,
+
+  // Debounced reparse — POSTs the YAML to the read-only preview endpoint.
+  reparse() {
+    clearTimeout(this._timer);
+    this._timer = setTimeout(() => this.fetchPreview(), 400);
+  },
+  async fetchPreview() {
+    var text = (this.yaml || '').trim();
+    if (!text) { this.rows = []; this.error = ''; this.warnings = 0; this.newCount = 0; this.updateCount = 0; return; }
+    this.loading = true;
+    try {
+      var body = new URLSearchParams();
+      body.set('yaml', this.yaml);
+      var r = await fetch((window.RUSCKER_BASE || '') + '/admin/specs/import/preview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+      });
+      var d = await r.json();
+      if (d.ok) {
+        this.error = '';
+        this.rows = d.rows;
+        this.warnings = d.warning_count;
+        this.newCount = d.new_count;
+        this.updateCount = d.update_count;
+        // Default every freshly-seen app to selected.
+        var sel = this.selected;
+        d.rows.forEach(function (row) { if (!(row.id in sel)) sel[row.id] = true; });
+      } else {
+        this.error = d.error || 'parse error';
+        this.rows = [];
+      }
+    } catch (e) {
+      this.error = String(e);
+    } finally {
+      this.loading = false;
+    }
+  },
+  loadFile(ev) {
+    var f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    var self = this, rd = new FileReader();
+    rd.onload = function () { self.yaml = rd.result; self.fetchPreview(); };
+    rd.readAsText(f);
+  },
+  selectedCount() { var s = this.selected; return this.rows.filter(function (r) { return s[r.id]; }).length; },
+  toggleAll(v) { var s = this.selected; this.rows.forEach(function (r) { s[r.id] = v; }); },
+  kindIcon(k) {
+    return { shiny: 'ti-brand-r', interactive: 'ti-app-window', api: 'ti-api', external: 'ti-external-link' }[k] || 'ti-package';
+  },
+  kindColor(k) {
+    return { shiny: '#06d6a0', interactive: '#06d6a0', api: '#06b6d4', external: '#26547c' }[k] || '#26547c';
+  },
+});
+</script>
+
+{% endblock %}

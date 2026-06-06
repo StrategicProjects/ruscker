@@ -10,12 +10,11 @@
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-specs-subtitle") }}</p>
   </div>
   <div class="flex items-center gap-2">
-    <button type="button" class="btn"
-            title="{{ self.t("admin-import-title") }}"
-            onclick="document.getElementById('import-modal').showModal()">
+    <a href="{{ base }}/admin/specs/import" class="btn"
+       title="{{ self.t("admin-import-title") }}">
       <i class="ti ti-file-upload" aria-hidden="true"></i>
       {{ self.t("admin-import-button") }}
-    </button>
+    </a>
     <a href="{{ base }}/admin/specs/new" class="btn btn--primary">
       <i class="ti ti-plus" aria-hidden="true"></i>
       {{ self.t("admin-specs-add") }}
@@ -29,42 +28,10 @@
   {% when None %}
 {% endmatch %}
 
-<dialog id="import-modal" class="import-dialog">
-  <form method="post" action="{{ base }}/admin/specs/import" enctype="multipart/form-data" class="import-form"
-        x-data="{ name: '', drag: false }">
-    <h2 class="import-h2">{{ self.t("admin-import-title") }}</h2>
-    <p class="import-sub">{{ self.t("admin-import-help") }}</p>
-
-    {# Custom dropzone: hides the native file input (whose "Choose file"
-       button can't be localized — it follows the browser UI language) and
-       renders our own PT/EN/ES/FR prompt. Clicking the <label> opens the
-       picker natively; a drop sets the hidden input's `files`. #}
-    <label class="import-dropzone" :class="{ 'is-drag': drag }"
-           @dragover.prevent="drag = true" @dragleave.prevent="drag = false"
-           @drop.prevent="drag = false; if ($event.dataTransfer.files.length) { $refs.file.files = $event.dataTransfer.files; name = $refs.file.files[0].name }">
-      <input type="file" name="file" accept=".yml,.yaml" required x-ref="file" class="import-dz-input"
-             @change="name = $refs.file.files.length ? $refs.file.files[0].name : ''" />
-      <svg class="import-dz-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-           stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-        <path d="M7 10l5-5 5 5"/><path d="M12 5v12"/>
-      </svg>
-      <p class="import-dz-prompt" x-show="!name">{{ self.t("admin-import-drop") }}</p>
-      <p class="import-dz-file" x-show="name" x-text="name" x-cloak></p>
-      <p class="import-dz-hint">{{ self.t("admin-import-file") }}</p>
-    </label>
-    <div class="flex justify-end gap-2 mt-4">
-      <button type="button" class="admin-nav-link" style="font-size:12px"
-              onclick="document.getElementById('import-modal').close()">
-        {{ self.t("admin-import-cancel") }}
-      </button>
-      <button type="submit" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
-        <i class="ti ti-file-upload" aria-hidden="true"></i>
-        {{ self.t("admin-import-submit") }}
-      </button>
-    </div>
-  </form>
-</dialog>
+{# The "Import YAML" button now opens the live 2-pane editor at
+   /admin/specs/import (#623); the old upload modal was retired. The
+   multipart upload route stays for back-compat (the editor's "Load file"
+   reads into the textarea instead). #}
 
 <style>
   .import-flash {

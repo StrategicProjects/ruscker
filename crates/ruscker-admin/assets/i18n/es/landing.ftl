@@ -748,3 +748,6 @@ admin-import-badge-new-help = Se creará (no está en el panel)
 admin-import-badge-update = Actualiza
 admin-import-badge-update-help = Sobrescribe una app ya existente en el panel
 admin-import-confirm = Importar seleccionados
+admin-import-load-file = Cargar archivo
+admin-import-editor-placeholder = Pega tu application.yml aquí…
+admin-import-editor-empty = La vista previa aparece aquí mientras escribes.

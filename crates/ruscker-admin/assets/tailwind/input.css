@@ -363,6 +363,23 @@ input[type="range"]::-moz-range-thumb {
   outline: 2px solid var(--color-teal-400); outline-offset: 2px;
 }
 
+/* Floating action toasts (design handoff #623). Server-rendered flash
+ * banners are promoted into these by a small script in admin/_layout.html
+ * and auto-dismiss — no change to how flashes are produced. */
+.toast-wrap {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  z-index: 600; display: flex; flex-direction: column; gap: 8px; align-items: center;
+  pointer-events: none;
+}
+.toast {
+  display: flex; align-items: center; gap: 9px;
+  background: var(--text); color: var(--bg);
+  padding: 10px 16px; border-radius: 10px; font-size: 13px;
+  box-shadow: var(--shadow-lg); animation: fade-in 0.25s ease both;
+  transition: opacity 0.3s ease; pointer-events: auto; max-width: 90vw;
+}
+.toast .ti { font-size: 16px; }
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

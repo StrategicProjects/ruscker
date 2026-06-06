@@ -2871,6 +2871,7 @@ dependencies = [
  "include_dir",
  "infer",
  "insta",
+ "libc",
  "lol_html",
  "pretty_assertions",
  "regex",

@@ -398,6 +398,33 @@ input[type="range"]::-moz-range-thumb {
   :root:not([data-theme="light"]) .serp__url { color: #6cc18a; }
 }
 
+/* Disk-usage hero (design handoff #623): big used/total + a stacked bar
+ * (Ruscker images / other used / free) and a legend. Real data from
+ * statvfs on the host (see routes/admin/disk.rs). */
+.disk-hero {
+  background: var(--surface); border: 0.5px solid var(--border);
+  border-radius: 12px; padding: 20px; margin-bottom: 8px;
+}
+.disk-hero__head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 16px; }
+.disk-hero__label { font-size: 13px; color: var(--text-muted); margin-bottom: 4px; }
+.disk-hero__num { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.disk-hero__total { font-size: 15px; color: var(--text-faint); font-weight: 400; }
+.disk-hero__pct {
+  font-size: 30px; font-weight: 600; letter-spacing: -0.02em; color: var(--color-teal-600);
+}
+.disk-hero__pct.is-high { color: var(--warn); }
+.disk-hero__free { font-size: 11.5px; color: var(--text-faint); }
+.disk-stack {
+  display: flex; height: 14px; border-radius: 7px; overflow: hidden;
+  background: var(--surface-soft); gap: 1.5px;
+}
+.disk-stack__seg { height: 100%; transition: width 0.5s ease; }
+.disk-legend { display: flex; flex-wrap: wrap; gap: 14px 22px; margin-top: 16px; }
+.disk-legend__item { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted); }
+.disk-legend__item .ti { font-size: 14px; color: var(--text-faint); }
+.disk-legend__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.disk-legend__val { margin-left: 4px; color: var(--text); font-weight: 500; }
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

@@ -232,6 +232,13 @@ body {
   grid-template-columns: 22px 1.6fr 84px 96px 1fr 1fr 96px 64px;
   align-items: center; gap: 10px;
 }
+/* Replicas toolbar (#623): heading + "grouped by" hint + expand-all. */
+.dash-toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap; margin-bottom: 8px;
+}
+.dash-toolbar__title { font-size: 14px; font-weight: 500; }
+.dash-toolbar__sub { font-size: 11px; color: var(--text-faint); font-weight: 400; margin-left: 8px; }
 .dash-cols { padding: 4px 16px 8px; }
 .col-h {
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);

@@ -325,6 +325,7 @@ admin-landing-preview-help = Approximate look of the header and intro. Cards and
 admin-landing-preview-empty = (no intro text)
 admin-landing-seo = SEO & sharing
 admin-landing-seo-title = Page title (SEO)
+admin-landing-seo-preview = Search preview
 admin-landing-seo-title-placeholder = Default: portal title
 admin-landing-seo-title-help = Sets the browser tab title and og:title. Empty uses the portal's default title.
 admin-landing-seo-description = Description (meta description)

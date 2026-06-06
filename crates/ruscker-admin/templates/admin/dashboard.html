@@ -102,9 +102,9 @@
       </span>
       <span class="app-group__replicas"><i class="ti ti-stack-2" aria-hidden="true"></i>{{ g.n }}</span>
       <span class="app-group__state"><span class="dot {{ g.state_dot }}"></span>{{ g.state_label }}</span>
-      <span class="metric-cell tnum">{{ g.sessions_active }}<span class="faint">/{{ g.sessions_max }}</span></span>
-      <span></span>
-      <span></span>
+      <span class="metric-cell"><span class="v tnum">{{ g.sessions_active }}<span class="faint">/{{ g.sessions_max }}</span></span><span class="bar-track"><span class="bar-fill" style="background:var(--info);{% if g.sessions_max > 0 %}width:{{ g.sessions_active * 100 / g.sessions_max }}%{% else %}width:0{% endif %}"></span></span></span>
+      <span class="metric-cell">{% if !g.cpu_display.is_empty() %}<span class="v tnum">{{ g.cpu_display }}</span><span class="bar-track"><span class="bar-fill" style="background:var(--color-teal-600);width:{{ g.cpu_pct }}%"></span></span>{% endif %}</span>
+      <span class="metric-cell tnum">{{ g.memory_display }}</span>
     </div>
     <div class="replica-list">
       {% for row in g.replicas %}
@@ -213,19 +213,34 @@
       buckets[r.spec_id].push(r);
     });
     return order.map(function (id) {
-      var reps = buckets[id], worst = reps[0], sa = 0, sm = 0;
+      var reps = buckets[id], worst = reps[0], sa = 0, sm = 0, cpu = 0, mem = 0, hasM = false;
       reps.forEach(function (r) {
         if (severity(r.state) > severity(worst.state)) worst = r;
         sa += r.sessions_active; sm += r.sessions_max;
+        if (r.cpu_history && r.cpu_history.length) cpu += r.cpu_history[r.cpu_history.length - 1];
+        if (r.mem_history && r.mem_history.length) mem += r.mem_history[r.mem_history.length - 1];
+        if (r.cpu_display != null) hasM = true;
       });
       var name = reps[0].display_name || id;
       return {
         spec_id: id, display_name: name,
         initial: (name.charAt(0) || '').toUpperCase(),
         n: reps.length, state_dot: worst.state_dot, state_label: worst.state_label,
-        sessions_active: sa, sessions_max: sm, replicas: reps
+        sessions_active: sa, sessions_max: sm,
+        cpu_display: hasM ? Math.round(cpu) + '%' : '', cpu_pct: Math.max(0, Math.min(100, cpu)),
+        memory_display: mem > 0 ? fmtBytes(mem) : '',
+        replicas: reps
       };
     });
+  }
+
+  // Binary-unit byte formatter, matching the server's format_bytes.
+  function fmtBytes(b) {
+    var KIB = 1024, MIB = 1024 * KIB, GIB = 1024 * MIB;
+    if (b < KIB) return b + ' B';
+    if (b < MIB) return Math.floor(b / KIB) + ' KB';
+    if (b < GIB) return Math.floor(b / MIB) + ' MB';
+    return (b / GIB).toFixed(1) + ' GB';
   }
 
   function replicaRowHtml(row) {
@@ -252,8 +267,11 @@
           + '<span class="app-group__id">' + escapeHtml(g.spec_id) + '</span></span></span>'
         + '<span class="app-group__replicas"><i class="ti ti-stack-2"></i>' + g.n + '</span>'
         + '<span class="app-group__state"><span class="dot ' + escapeHtml(g.state_dot) + '"></span>' + escapeHtml(g.state_label) + '</span>'
-        + '<span class="metric-cell tnum">' + g.sessions_active + '<span class="faint">/' + g.sessions_max + '</span></span>'
-        + '<span></span><span></span>'
+        + '<span class="metric-cell"><span class="v tnum">' + g.sessions_active + '<span class="faint">/' + g.sessions_max + '</span></span>'
+          + '<span class="bar-track"><span class="bar-fill" style="background:var(--info);width:' + (g.sessions_max > 0 ? Math.round(g.sessions_active * 100 / g.sessions_max) : 0) + '%"></span></span></span>'
+        + '<span class="metric-cell">' + (g.cpu_display ? '<span class="v tnum">' + g.cpu_display + '</span>'
+          + '<span class="bar-track"><span class="bar-fill" style="background:var(--color-teal-600);width:' + g.cpu_pct + '%"></span></span>' : '') + '</span>'
+        + '<span class="metric-cell tnum">' + escapeHtml(g.memory_display) + '</span>'
       + '</div>'
       + '<div class="replica-list">' + reps + '</div>'
       + '</div>';

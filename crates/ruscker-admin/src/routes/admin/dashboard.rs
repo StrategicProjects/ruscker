@@ -166,6 +166,11 @@ struct AppGroup {
     /// Summed across the app's replicas.
     sessions_active: u32,
     sessions_max: u32,
+    /// Aggregate CPU% (sum of the replicas' latest sample) + memory, for the
+    /// collapsed head — empty when no metrics yet. `cpu_pct` drives the bar.
+    cpu_display: String,
+    cpu_pct: f64,
+    memory_display: String,
     replicas: Vec<ReplicaRow>,
 }
 
@@ -207,6 +212,10 @@ fn group_rows(rows: &[ReplicaRow]) -> Vec<AppGroup> {
             let worst = reps.iter().max_by_key(|r| severity(r.state));
             let state_dot = worst.map(|r| r.state_dot).unwrap_or("dot-off");
             let state_label = worst.map(|r| r.state_label.clone()).unwrap_or_default();
+            // Aggregate metrics from each replica's latest sample.
+            let has_metrics = reps.iter().any(|r| r.cpu_display.is_some());
+            let cpu_sum: f64 = reps.iter().filter_map(|r| r.cpu_history.last().copied()).sum();
+            let mem_sum: u64 = reps.iter().filter_map(|r| r.mem_history.last().copied()).sum();
             AppGroup {
                 spec_id: spec_id.to_string(),
                 display_name,
@@ -216,6 +225,9 @@ fn group_rows(rows: &[ReplicaRow]) -> Vec<AppGroup> {
                 state_label,
                 sessions_active: reps.iter().map(|r| r.sessions_active).sum(),
                 sessions_max: reps.iter().map(|r| r.sessions_max).sum(),
+                cpu_display: if has_metrics { format!("{cpu_sum:.0}%") } else { String::new() },
+                cpu_pct: cpu_sum.clamp(0.0, 100.0),
+                memory_display: if mem_sum > 0 { format_bytes(mem_sum) } else { String::new() },
                 replicas: reps,
             }
         })

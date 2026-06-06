@@ -49,6 +49,7 @@
   <div class="groups-grid">
     {% for g in groups %}
     <section class="editor-card group-card">
+      <span class="group-card__bar" data-group="{{ g.name }}"></span>
       <div class="editor-card__head">
         <span class="editor-card__icon"><i class="ti ti-users-group" aria-hidden="true"></i></span>
         <div class="flex-1"><div class="editor-card__title">{{ g.name }}</div></div>
@@ -132,5 +133,17 @@
   .group-pill-x:hover { color: var(--color-lock); }
   .group-add-member { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 </style>
+
+<script>
+  // Colour each group card's accent bar from a hash of the group name —
+  // same hue function as the Users-page group badges, so a group reads the
+  // same colour everywhere (#623).
+  (function () {
+    function hue(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360; return h; }
+    document.querySelectorAll('.group-card__bar[data-group]').forEach(function (el) {
+      el.style.background = 'hsl(' + hue(el.getAttribute('data-group')) + ' 55% 45%)';
+    });
+  })();
+</script>
 
 {% endblock %}

@@ -1653,6 +1653,23 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 14px;
 }
+/* Coloured left accent bar per group card (design handoff #623) — hue from
+ * the group-name hash (set inline by the page script), matching the group
+ * badges on the Users page so the same group reads the same colour. */
+.group-card { position: relative; overflow: hidden; }
+.group-card__bar { position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--color-teal-600); }
+.group-card > .editor-card__head, .group-card > .group-col { padding-left: 6px; }
+
+/* Credential name tile (design handoff #623): a small teal key icon next
+ * to the credential name. */
+.cred-cell { display: inline-flex; align-items: center; gap: 9px; }
+.cred-ico {
+  width: 28px; height: 28px; border-radius: 7px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: color-mix(in srgb, var(--color-teal-400) 14%, var(--surface));
+  color: var(--color-teal-600);
+}
+.cred-ico .ti { font-size: 15px; }
 .group-col { margin-top: 12px; }
 .group-col-title {
   font-size: 11px; font-weight: 600; color: var(--text-muted);

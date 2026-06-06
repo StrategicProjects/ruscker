@@ -361,6 +361,9 @@ admin-audit-actor = Actor
 admin-audit-actor-all = All actors
 admin-audit-target-placeholder = Search target (e.g. spec:sales-dashboard)
 admin-audit-apply = Apply
+admin-audit-col-when = When
+admin-audit-col-action = Action
+admin-audit-col-target = Target
 admin-audit-empty = No changes yet — or the filter matches nothing.
 admin-audit-limit-hint = Showing the 100 most recent matches. Tighten the filter to refine.
 

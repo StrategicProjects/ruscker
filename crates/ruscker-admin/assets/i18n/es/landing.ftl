@@ -361,6 +361,9 @@ admin-audit-actor = Autor
 admin-audit-actor-all = Todos los autores
 admin-audit-target-placeholder = Buscar destino (ej: spec:sales-dashboard)
 admin-audit-apply = Aplicar
+admin-audit-col-when = Cuándo
+admin-audit-col-action = Acción
+admin-audit-col-target = Objetivo
 admin-audit-empty = Aún no hay cambios — o el filtro no coincide con nada.
 admin-audit-limit-hint = Mostrando los 100 más recientes. Afine el filtro para reducir.
 

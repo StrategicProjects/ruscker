@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.75 — 2026-06-06
+
+More UX-redesign polish.
+
+**Interface**
+- Admin action confirmations now appear as floating toasts that dismiss
+  themselves (#623).
+- The SEO editor shows a live Google-style search-result preview that
+  updates as you edit the title and description (#623).
+
 ## v0.1.74 — 2026-06-06
 
 More of the UX redesign.

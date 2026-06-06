@@ -451,6 +451,42 @@ input[type="range"]::-moz-range-thumb {
 .disk-legend__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .disk-legend__val { margin-left: 4px; color: var(--text); font-weight: 500; }
 
+/* Two side-by-side panels under the hero (design handoff #623): the
+ * Ruscker-managed container images and containers, each its own bordered
+ * card with a header (icon + title + count subtitle) and an inline prune
+ * button. Collapses to one column on narrow viewports. */
+.disk-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+@media (max-width: 1000px) { .disk-cols { grid-template-columns: 1fr; } }
+.disk-panel {
+  border: 0.5px solid var(--border); border-radius: 12px;
+  background: var(--surface); overflow: hidden;
+}
+.disk-panel__head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px; padding: 15px 16px; border-bottom: 0.5px solid var(--border);
+}
+.disk-panel__title { font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.disk-panel__title .ti { font-size: 17px; }
+.disk-panel__sub { font-size: 11.5px; color: var(--text-faint); margin-top: 3px; }
+/* The panel hosts an .admin-table flush with its borders (no double frame). */
+.disk-panel .admin-table { border: 0; border-radius: 0; }
+.disk-panel .admin-table th { background: var(--surface); }
+/* Tinted rows flag reclaimable items (unused images / stopped containers). */
+.admin-table tr.is-unused td { background: color-mix(in srgb, var(--warn) 5%, transparent); }
+.admin-table tr.is-unused:hover td { background: color-mix(in srgb, var(--warn) 9%, transparent); }
+/* In-use badges: green "N apps" when referenced, amber "unused" otherwise. */
+.use-badge { font-size: 10px; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.use-badge--on { background: color-mix(in srgb, var(--ok) 14%, transparent); color: #047857; }
+.use-badge--off { background: color-mix(in srgb, var(--warn) 16%, transparent); color: #92600a; }
+[data-theme="dark"] .use-badge--on { color: #34d399; }
+[data-theme="dark"] .use-badge--off { color: #fbbf24; }
+.pill-unused {
+  background: var(--surface-soft); color: var(--text-faint);
+  font-family: var(--font-mono); text-transform: none; letter-spacing: 0;
+}
+/* The teal/green running state dot (the design's .dot-ready alias). */
+.dot-ready { background: var(--ok, #10b981); }
+
 /* Live server-log terminal (design handoff #623): the existing SSE feed,
  * rendered as level-coloured lines with level/text filters. Content is
  * set via textContent only — never parsed as HTML. */

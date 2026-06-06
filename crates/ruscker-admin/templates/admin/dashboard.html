@@ -29,6 +29,9 @@
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-dashboard-title") }}</h1>
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-dashboard-subtitle") }}</p>
   </div>
+  {# Live-stream badge (#623): the pulsing ring shows while the SSE feed
+     is connected; the JS flips `.is-down` on error. #}
+  <span class="live-badge" id="dash-live"><span class="live-dot"></span>{{ self.t("admin-dashboard-live") }}</span>
 </div>
 
 {% if !backend_connected %}
@@ -66,6 +69,21 @@
 
 <div class="dash-toolbar">
   <h2 class="dash-toolbar__title">{{ self.t("admin-dashboard-replicas-heading") }}<span class="dash-toolbar__sub">{{ self.t("admin-dashboard-grouped-by") }}</span></h2>
+  {# Filter band (#623): live search + state chips over the grouped cards.
+     A MutationObserver re-applies it after every SSE rebuild (the JS at
+     the foot), so it survives live updates. #}
+  <label class="search-pill" style="max-width:240px;flex:0 1 240px">
+    <i class="ti ti-search" aria-hidden="true"></i>
+    <input type="search" id="dash-search" autocomplete="off" placeholder="{{ self.t("admin-dashboard-filter-search") }}">
+  </label>
+  <div class="flex items-center gap-2 flex-wrap" id="dash-state-chips">
+    <button type="button" class="chip on-all" data-state="all">{{ self.t("type-all") }}</button>
+    <button type="button" class="chip" data-state="dot-on"><span class="dot dot-on"></span>{{ self.t("admin-dashboard-state-ready") }}</button>
+    <button type="button" class="chip" data-state="dot-pulse"><span class="dot dot-pulse"></span>{{ self.t("admin-dashboard-state-starting") }}</button>
+    <button type="button" class="chip" data-state="dot-off"><span class="dot dot-off"></span>{{ self.t("admin-dashboard-state-stopped") }}</button>
+  </div>
+  <span class="flex-1"></span>
+  <span class="text-xs text-[color:var(--text-faint)] tnum" id="dash-count"></span>
   <button type="button" id="dash-expand-all" class="admin-nav-link"
           data-expand="{{ self.t("admin-dashboard-expand-all") }}" data-collapse="{{ self.t("admin-dashboard-collapse-all") }}">
     <i class="ti ti-chevrons-down" aria-hidden="true"></i> <span>{{ self.t("admin-dashboard-expand-all") }}</span>
@@ -388,12 +406,59 @@
   ['containers', 'specs', 'sessions', 'tracker'].forEach(countUp);
 
   if (!window.EventSource) return;
+  var live = document.getElementById('dash-live');
   var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/events');
+  es.onopen = function () { if (live) live.classList.remove('is-down'); };
   es.onmessage = function (e) {
+    if (live) live.classList.remove('is-down');
     try { apply(JSON.parse(e.data)); } catch (_) { /* ignore */ }
   };
-  // No retry handling needed — EventSource auto-reconnects
-  // on network errors. We just let it.
+  // EventSource auto-reconnects on network errors; we just dim the Live
+  // badge while it's down.
+  es.onerror = function () { if (live) live.classList.add('is-down'); };
+})();
+
+// Dashboard filter band (#623): live search + state chips over the
+// grouped cards. Decoupled from the SSE patcher via a MutationObserver,
+// so it re-applies after every innerHTML rebuild without touching it.
+(function () {
+  var container = document.getElementById('dash-groups');
+  var search = document.getElementById('dash-search');
+  var chips = document.querySelectorAll('#dash-state-chips .chip[data-state]');
+  var countEl = document.getElementById('dash-count');
+  if (!container) return;
+  var state = 'all';
+
+  function applyFilter() {
+    var q = (search && search.value || '').trim().toLowerCase();
+    var shown = 0, total = 0;
+    container.querySelectorAll('.app-group').forEach(function (g) {
+      total++;
+      var id = (g.getAttribute('data-spec-id') || '').toLowerCase();
+      var nameEl = g.querySelector('.app-group__name');
+      var name = (nameEl ? nameEl.textContent : '').toLowerCase();
+      var okText = !q || id.indexOf(q) >= 0 || name.indexOf(q) >= 0;
+      var dot = g.querySelector('.app-group__state .dot');
+      var okState = state === 'all' || (dot && dot.classList.contains(state));
+      var ok = okText && okState;
+      g.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    if (countEl) countEl.textContent = shown + '/' + total;
+  }
+
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      state = chip.getAttribute('data-state');
+      chips.forEach(function (c) { c.classList.toggle('on-all', c === chip); });
+      applyFilter();
+    });
+  });
+  if (search) search.addEventListener('input', applyFilter);
+  // Re-apply after every SSE rebuild (childList changes), not on the style
+  // toggles applyFilter itself makes (those are attribute mutations).
+  new MutationObserver(applyFilter).observe(container, { childList: true });
+  applyFilter();
 })();
 </script>
 

@@ -135,6 +135,8 @@ admin-users-flash-exists = A user with that name already exists.
 # Admin dashboard
 admin-dashboard-title = Monitoring dashboard
 admin-dashboard-subtitle = Live container and session state
+admin-dashboard-live = Live
+admin-dashboard-filter-search = Filter app…
 admin-dashboard-metric-containers = Containers
 admin-dashboard-metric-sessions = Active sessions
 admin-dashboard-metric-specs = Apps with replicas

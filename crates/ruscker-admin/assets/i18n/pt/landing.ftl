@@ -139,6 +139,8 @@ admin-users-flash-exists = Já existe um usuário com esse nome.
 # Admin dashboard
 admin-dashboard-title = Painel de monitoramento
 admin-dashboard-subtitle = Estado dos containers e sessões em tempo real
+admin-dashboard-live = Ao vivo
+admin-dashboard-filter-search = Filtrar app…
 admin-dashboard-metric-containers = Containers
 admin-dashboard-metric-sessions = Sessões ativas
 admin-dashboard-metric-specs = Aplicações com réplica

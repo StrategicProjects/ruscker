@@ -220,6 +220,24 @@ body {
 @keyframes dash-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 @media (prefers-reduced-motion: reduce) { .dot-pulse { animation: none; } }
 
+/* Live-stream badge (design handoff #623): a green dot with an expanding
+ * ring, shown next to the dashboard title while the SSE feed is open. */
+.live-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--ok, #10b981);
+  display: inline-block; position: relative;
+}
+.live-dot::after {
+  content: ""; position: absolute; inset: -4px; border-radius: 50%;
+  border: 1.5px solid var(--ok, #10b981); opacity: 0.6; animation: live-ring 1.8s ease-out infinite;
+}
+@keyframes live-ring { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.6); opacity: 0; } }
+.live-badge {
+  display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-muted);
+}
+.live-badge.is-down .live-dot { background: var(--text-faint); }
+.live-badge.is-down .live-dot::after { animation: none; border-color: var(--text-faint); }
+@media (prefers-reduced-motion: reduce) { .live-dot::after { animation: none; } }
+
 .bar-track {
   height: 4px; background: var(--surface-soft); border-radius: 2px; overflow: hidden;
   width: 100%; margin-top: 4px;

@@ -64,7 +64,13 @@
   </div>
 </div>
 
-<h2 class="text-sm font-medium mb-2">{{ self.t("admin-dashboard-replicas-heading") }}</h2>
+<div class="dash-toolbar">
+  <h2 class="dash-toolbar__title">{{ self.t("admin-dashboard-replicas-heading") }}<span class="dash-toolbar__sub">{{ self.t("admin-dashboard-grouped-by") }}</span></h2>
+  <button type="button" id="dash-expand-all" class="admin-nav-link"
+          data-expand="{{ self.t("admin-dashboard-expand-all") }}" data-collapse="{{ self.t("admin-dashboard-collapse-all") }}">
+    <i class="ti ti-chevrons-down" aria-hidden="true"></i> <span>{{ self.t("admin-dashboard-expand-all") }}</span>
+  </button>
+</div>
 
 {# Column header for the grouped accordion (shares the .replica-row grid). #}
 <div class="dash-cols">
@@ -322,6 +328,26 @@
   if (container) {
     container.addEventListener('click', toggleFromEvent);
     container.addEventListener('keydown', toggleFromEvent);
+  }
+
+  // Expand/collapse every group at once. Drives the `closed` set (so the
+  // choice survives the SSE rebuild) and updates the visible groups + the
+  // button label in one shot.
+  var expandBtn = document.getElementById('dash-expand-all');
+  if (expandBtn && container) {
+    expandBtn.addEventListener('click', function () {
+      var groups = container.querySelectorAll('.app-group');
+      var anyClosed = Array.prototype.some.call(groups, function (g) { return !g.classList.contains('is-open'); });
+      Array.prototype.forEach.call(groups, function (g) {
+        var id = g.getAttribute('data-spec-id');
+        if (anyClosed) { g.classList.add('is-open'); delete closed[id]; }
+        else { g.classList.remove('is-open'); closed[id] = true; }
+        var head = g.querySelector('.app-group__head');
+        if (head) head.setAttribute('aria-expanded', anyClosed ? 'true' : 'false');
+      });
+      var label = expandBtn.querySelector('span');
+      if (label) label.textContent = anyClosed ? expandBtn.dataset.collapse : expandBtn.dataset.expand;
+    });
   }
 
   // The initial render already populated the DOM, but parsing

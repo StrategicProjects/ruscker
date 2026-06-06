@@ -74,6 +74,13 @@
   --border: #e8e6df;
   --border-soft: #f0eee8;
   --border-strong: #c0c0bb;
+  /* Status accents (#623 audit): several design-pass rules used
+     `var(--ok)`/`var(--warn)` bare, but the tokens were never defined — so
+     those `color-mix`/`color` declarations were silently dropped. Define
+     them once, matching the fallbacks used elsewhere. (`--font-mono` is
+     already provided by Tailwind's default theme, so it needs no def.) */
+  --ok: #10b981;
+  --warn: #f59e0b;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-md: 0 4px 24px rgba(0, 0, 0, 0.06);
   --shadow-lg: 0 10px 40px rgba(0, 0, 0, 0.16);

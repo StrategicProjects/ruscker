@@ -525,6 +525,7 @@
                 </div>
                 <input id="f-seats" type="number" name="seats_per_container"
                        value="{{ form.seats_per_container }}"
+                       x-model="form.seats_per_container"
                        min="1"
                        placeholder="10"
                        class="spec-form-input">
@@ -765,7 +766,7 @@
             </span>
             <input type="range" class="rk-range" min="0" max="8" step="0.25"
                    :value="parseFloat(form.container_cpu_limit) || 0"
-                   @input="form.container_cpu_limit = $event.target.value">
+                   @input="form.container_cpu_limit = $event.target.value === '0' ? '' : $event.target.value">
             <input id="f-cpu" type="text" name="container_cpu_limit" placeholder="0.5"
                    x-model="form.container_cpu_limit"
                    class="spec-form-input spec-form-input--mono" style="text-align:right;padding:7px 10px">
@@ -777,7 +778,7 @@
             </span>
             <input type="range" class="rk-range" min="0" max="8192" step="256"
                    :value="memMb(form.container_memory_limit)"
-                   @input="form.container_memory_limit = $event.target.value + 'm'">
+                   @input="form.container_memory_limit = $event.target.value === '0' ? '' : ($event.target.value + 'm')">
             <input id="f-mem" type="text" name="container_memory_limit" placeholder="512m"
                    x-model="form.container_memory_limit"
                    class="spec-form-input spec-form-input--mono" style="text-align:right;padding:7px 10px">
@@ -888,7 +889,8 @@
               {% call help(self.t("spec-help-heartbeat")) %}{% endcall %}
             </div>
             <input id="f-heartbeat" type="number" name="heartbeat_timeout" min="-1"
-                   value="{{ form.heartbeat_timeout }}" placeholder="3600000" class="spec-form-input">
+                   value="{{ form.heartbeat_timeout }}" x-model="form.heartbeat_timeout"
+                   placeholder="3600000" class="spec-form-input">
           </div>
         </div>
       </div>
@@ -953,7 +955,7 @@
         </div>
         <div class="spec-summary__row">
           <i class="ti ti-clock" aria-hidden="true"></i>
-          <span x-text="((form.heartbeat_timeout && form.heartbeat_timeout != '-1') ? (form.heartbeat_timeout + ' min · ') : '') + (form.seats_per_container || '1') + ' {{ self.t("spec-form-summary-sessions") }}'"></span>
+          <span x-text="((form.heartbeat_timeout && form.heartbeat_timeout != '-1') ? (Math.round(parseInt(form.heartbeat_timeout, 10) / 60000) + ' min · ') : '') + (form.seats_per_container || '1') + ' {{ self.t("spec-form-summary-sessions") }}'"></span>
         </div>
       </div>
 

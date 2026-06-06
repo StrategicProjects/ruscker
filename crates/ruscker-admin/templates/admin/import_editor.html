@@ -91,10 +91,15 @@
         </template>
       </div>
 
-      {# Empty state #}
-      <template x-if="!rows.length && !error">
-        <p class="text-xs text-[color:var(--text-faint)] py-6 text-center"
-           x-text="yaml.trim() ? '{{ self.t("admin-import-preview-none") }}' : '{{ self.t("admin-import-editor-empty") }}'"></p>
+      {# Empty state. Two plain-text branches rather than an `x-text`
+         ternary — inlining a translation into a single-quoted JS string
+         breaks on locales whose value contains an apostrophe (e.g. fr
+         "L'aperçu…"). #}
+      <template x-if="!rows.length && !error && yaml.trim()">
+        <p class="text-xs text-[color:var(--text-faint)] py-6 text-center">{{ self.t("admin-import-preview-none") }}</p>
+      </template>
+      <template x-if="!rows.length && !error && !yaml.trim()">
+        <p class="text-xs text-[color:var(--text-faint)] py-6 text-center">{{ self.t("admin-import-editor-empty") }}</p>
       </template>
 
       {# Summary footer #}

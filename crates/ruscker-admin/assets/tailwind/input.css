@@ -1849,23 +1849,27 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   color: var(--text-muted);
   margin: 0;
 }
+/* Preview search pill + accent-tinted mock cards (design handoff #623):
+ * makes the live portal preview read like the real catalogue instead of
+ * empty boxes, and reacts to the configured accent colour. */
 .landing-preview-mockfilter {
-  height: 22px;
-  background: var(--surface);
-  border: 0.5px solid var(--border);
-  border-radius: 999px;
+  height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 9px;
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: 999px;
+  color: var(--text-faint);
 }
+.landing-preview-mockfilter .ti { font-size: 11px; }
+.lp-search-ph { height: 4px; width: 46%; border-radius: 2px; background: var(--border); }
 .landing-preview-mockgrid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 4px;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px;
 }
-.landing-preview-mockgrid > div {
-  height: 36px;
+.lp-card {
+  border: 0.5px solid var(--border); border-radius: 5px; overflow: hidden;
   background: var(--surface);
-  border: 0.5px solid var(--border);
-  border-radius: 4px;
 }
+.lp-card-cover { height: 24px; }
+.lp-card-meta { padding: 4px 5px; display: flex; flex-direction: column; gap: 3px; }
+.lp-card-name { height: 4px; width: 72%; border-radius: 2px; background: var(--border-strong); }
+.lp-card-tag { height: 4px; width: 26%; border-radius: 2px; opacity: 0.85; }
 /* Live preview: logos in the header/footer chrome + a faithful footer. */
 .lp-head-side { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .lp-logo { display: block; width: auto; object-fit: contain; }

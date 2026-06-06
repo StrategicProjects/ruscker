@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.76 — 2026-06-06
+
+Disk usage at a glance; a proper log viewer.
+
+**Interface**
+- The disk panel opens with a usage hero — total used / capacity, a
+  percentage, and a stacked bar split into Ruscker images, other used and
+  free (real host figures) (#623).
+- The server-logs tab is now a colour-coded live terminal: lines are tinted
+  by level, with level and free-text filters and a pause/resume control
+  (#623).
+
 ## v0.1.75 — 2026-06-06
 
 More UX-redesign polish.

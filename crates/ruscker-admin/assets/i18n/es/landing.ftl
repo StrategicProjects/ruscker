@@ -519,6 +519,10 @@ spec-help-stop-on-logout = Detiene el contenedor del usuario cuando cierra sesi�
 spec-form-env-section = Entorno + comando
 spec-form-container-env = Variables de entorno
 spec-form-container-env-help = Una por línea, NOMBRE=valor. Para secretos, referencia una variable de entorno en vez de pegar el valor.
+spec-form-env-add = Añadir
+spec-form-env-value = valor
+spec-form-env-remove = Eliminar
+spec-form-env-empty = Sin variables de entorno.
 spec-help-container-env = Inyectadas en el contenedor (container-env). Vacío = ninguna. Para secretos, usa interpolación de variable de entorno.
 spec-form-container-cmd = Comando (sobrescribir)
 spec-form-container-cmd-help = Un argumento por línea. Vacío = usa el CMD de la imagen.

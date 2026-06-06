@@ -519,6 +519,10 @@ spec-help-stop-on-logout = Stop the user's container when they log out. Off by d
 spec-form-env-section = Environment + command
 spec-form-container-env = Environment variables
 spec-form-container-env-help = One NAME=value per line. For secrets, reference an environment variable instead of pasting the value.
+spec-form-env-add = Add
+spec-form-env-value = value
+spec-form-env-remove = Remove
+spec-form-env-empty = No environment variables.
 spec-help-container-env = Injected into the container (container-env). Blank = none. For secrets, use environment-variable interpolation.
 spec-form-container-cmd = Command (override)
 spec-form-container-cmd-help = One argument per line. Blank = use the image's CMD.

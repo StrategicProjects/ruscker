@@ -396,6 +396,40 @@ input[type="range"]::-moz-range-thumb {
 }
 .stepper button:hover { background: var(--surface); }
 .stepper span { min-width: 44px; text-align: center; font-size: 14px; font-weight: 500; }
+/* Hybrid stepper: the middle stays a real, clearable number input so an
+ * empty value (= "use the default") is preserved — the −/+ buttons only
+ * nudge it. The native spinners are hidden so it reads as the design's
+ * −[n]+ pill. */
+.stepper__input {
+  width: 48px; text-align: center; border: 0; background: transparent;
+  color: var(--text); font-size: 14px; font-weight: 500; font-family: inherit;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.stepper__input:focus { outline: 0; }
+.stepper__input::-webkit-outer-spin-button,
+.stepper__input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Resource slider row (#623): icon+label · range slider · value/field. */
+.res-row {
+  display: grid; grid-template-columns: 130px 1fr 110px;
+  align-items: center; gap: 12px; margin-bottom: 12px;
+}
+.res-row__k { font-size: 12.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.res-row__k .ti { font-size: 15px; color: var(--text-faint); }
+.res-row__v { font-size: 12.5px; font-weight: 500; text-align: right; }
+.rk-range {
+  -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px;
+  background: var(--surface-soft); outline: 0; cursor: pointer;
+}
+.rk-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+.rk-range::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface); cursor: pointer;
+}
 
 /* Styled checkbox — teal box with a check when ticked. */
 .rk-check-wrap { display: inline-flex; align-items: center; cursor: pointer; }

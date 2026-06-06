@@ -519,6 +519,10 @@ spec-help-stop-on-logout = Arrête le conteneur de l'utilisateur à sa déconnex
 spec-form-env-section = Environnement + commande
 spec-form-container-env = Variables d'environnement
 spec-form-container-env-help = Une par ligne, NOM=valeur. Pour les secrets, référencez une variable d'environnement au lieu de coller la valeur.
+spec-form-env-add = Ajouter
+spec-form-env-value = valeur
+spec-form-env-remove = Supprimer
+spec-form-env-empty = Aucune variable d'environnement.
 spec-help-container-env = Injectées dans le conteneur (container-env). Vide = aucune. Pour les secrets, utilisez l'interpolation de variable d'environnement.
 spec-form-container-cmd = Commande (remplacer)
 spec-form-container-cmd-help = Un argument par ligne. Vide = utilise le CMD de l'image.

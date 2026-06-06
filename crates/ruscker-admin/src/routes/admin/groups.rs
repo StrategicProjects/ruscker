@@ -135,10 +135,11 @@ async fn index(
         })
         .collect();
 
-    // Specs with no (or empty) access-groups are public — visible to all.
+    // Truly public specs — open to everyone — need BOTH access-groups and
+    // access-users empty (#623 audit: a users-only-gated spec is not public).
     let mut public_apps: Vec<AppRef> = specs
         .iter()
-        .filter(|s| s.access_groups.as_ref().is_none_or(|g| g.is_empty()))
+        .filter(|s| s.is_open())
         .map(|s| AppRef {
             id: s.id.clone(),
             name: s.display_name.clone().unwrap_or_else(|| s.id.clone()),

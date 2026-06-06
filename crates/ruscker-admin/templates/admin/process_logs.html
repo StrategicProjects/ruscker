@@ -4,24 +4,6 @@
 
 {% block content %}
 
-<style>
-  .proclog-pre {
-    background: var(--surface-soft, #1113);
-    border: 0.5px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-top: 12px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    color: var(--text);
-    height: 70vh;
-    overflow: auto;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-</style>
-
 <div class="flex items-end justify-between mb-1">
   <div>
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-proclog-title") }}</h1>
@@ -48,22 +30,93 @@
   {% if lines.is_empty() %}
   <p class="text-sm text-[color:var(--text-faint)] py-6 text-center">{{ self.t("admin-proclog-empty") }}</p>
   {% endif %}
-  <pre id="proclog" class="proclog-pre">{% for line in lines %}{{ line }}
+  <div class="log-toolbar">
+    <select id="log-level" class="log-select" aria-label="{{ self.t("admin-proclog-filter-level") }}">
+      <option value="">{{ self.t("admin-proclog-filter-all") }}</option>
+      <option value="ERROR">ERROR</option>
+      <option value="WARN">WARN</option>
+      <option value="INFO">INFO</option>
+      <option value="DEBUG">DEBUG</option>
+    </select>
+    <input type="search" id="log-search" class="log-search" placeholder="{{ self.t("admin-proclog-search") }}">
+    <button type="button" id="log-pause" class="admin-nav-link" aria-pressed="false"
+            data-pause="{{ self.t("admin-proclog-pause") }}" data-resume="{{ self.t("admin-proclog-resume") }}">
+      <i class="ti ti-player-pause" aria-hidden="true"></i> <span>{{ self.t("admin-proclog-pause") }}</span>
+    </button>
+  </div>
+
+  {# Raw lines for the JS to colour/parse on load; the <pre> is replaced by
+     the terminal below. Hidden — never shown directly. #}
+  <pre id="proclog-seed" hidden>{% for line in lines %}{{ line }}
 {% endfor %}</pre>
+  <div id="proclog" class="log-body"></div>
 
   <script>
   (function () {
-    const box = document.getElementById('proclog');
-    const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 48;
-    box.scrollTop = box.scrollHeight; // start pinned to the newest line
-    const es = new EventSource((window.RUSCKER_BASE || '') + '/admin/logs/stream');
-    es.onmessage = (e) => {
-      const stick = nearBottom();
-      // Append as text nodes — never parse log content as HTML.
-      box.appendChild(document.createTextNode(e.data + '\n'));
-      if (stick) box.scrollTop = box.scrollHeight;
-    };
-    es.onerror = () => { /* EventSource auto-reconnects */ };
+    var box = document.getElementById('proclog');
+    var seed = document.getElementById('proclog-seed');
+    var levelSel = document.getElementById('log-level');
+    var searchIn = document.getElementById('log-search');
+    var pauseBtn = document.getElementById('log-pause');
+    var paused = false;
+
+    function cell(cls, text) { var s = document.createElement('span'); s.className = cls; s.textContent = text; return s; }
+    function matches(el) {
+      var lv = levelSel.value, q = searchIn.value.toLowerCase();
+      return (!lv || el.dataset.level === lv) && (!q || (el.dataset.text || '').indexOf(q) >= 0);
+    }
+    function append(raw) {
+      // Strip ANSI colour codes, then split into ts / level / target / msg.
+      var clean = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+$/, '');
+      if (!clean) return;
+      var m = clean.match(/^(\S+)\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+([\w:._-]+):\s?([\s\S]*)$/);
+      var div = document.createElement('div');
+      div.className = 'log-line';
+      div.dataset.level = m ? m[2] : '';
+      div.dataset.text = clean.toLowerCase();
+      if (m) {
+        div.appendChild(cell('log-ts', m[1].replace(/^.*T/, '').replace(/\..*$/, '')));
+        div.appendChild(cell('log-lvl log-lvl-' + m[2].toLowerCase(), m[2]));
+        div.appendChild(cell('log-app', m[3]));
+        div.appendChild(cell('log-msg', m[4]));
+      } else {
+        div.style.gridTemplateColumns = '1fr';
+        div.appendChild(cell('log-msg', clean));
+      }
+      div.style.display = matches(div) ? '' : 'none';
+      box.appendChild(div);
+    }
+    function refilter() {
+      var rows = box.children;
+      for (var i = 0; i < rows.length; i++) rows[i].style.display = matches(rows[i]) ? '' : 'none';
+    }
+    var nearBottom = function () { return box.scrollHeight - box.scrollTop - box.clientHeight < 48; };
+
+    // Render the server-rendered seed lines, then drop the raw <pre>.
+    (seed.textContent || '').split('\n').forEach(append);
+    seed.remove();
+    box.scrollTop = box.scrollHeight;
+
+    levelSel.addEventListener('change', refilter);
+    searchIn.addEventListener('input', refilter);
+    pauseBtn.addEventListener('click', function () {
+      paused = !paused;
+      pauseBtn.setAttribute('aria-pressed', paused ? 'true' : 'false');
+      var icon = pauseBtn.querySelector('i'), label = pauseBtn.querySelector('span');
+      if (icon) icon.className = 'ti ' + (paused ? 'ti-player-play' : 'ti-player-pause');
+      if (label) label.textContent = paused ? pauseBtn.dataset.resume : pauseBtn.dataset.pause;
+    });
+
+    if (window.EventSource) {
+      var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/logs/stream');
+      es.onmessage = function (e) {
+        if (paused) return;
+        var stick = nearBottom();
+        append(e.data);
+        if (stick) box.scrollTop = box.scrollHeight;
+      };
+      es.onerror = function () { /* EventSource auto-reconnects */ };
+    }
   })();
   </script>
 {% endif %}

@@ -425,6 +425,46 @@ input[type="range"]::-moz-range-thumb {
 .disk-legend__dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
 .disk-legend__val { margin-left: 4px; color: var(--text); font-weight: 500; }
 
+/* Live server-log terminal (design handoff #623): the existing SSE feed,
+ * rendered as level-coloured lines with level/text filters. Content is
+ * set via textContent only — never parsed as HTML. */
+.log-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 0; }
+.log-select {
+  font-family: inherit; font-size: 12px; color: var(--text-muted);
+  background: var(--surface); border: 0.5px solid var(--border);
+  border-radius: 999px; padding: 6px 12px; cursor: pointer; outline: 0;
+}
+.log-search {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text);
+  background: var(--surface); border: 0.5px solid var(--border);
+  border-radius: 999px; padding: 6px 12px; outline: 0; flex: 1; min-width: 140px;
+}
+.log-search:focus { border-color: var(--text); }
+.log-body {
+  height: 64vh; overflow-y: auto; margin-top: 10px;
+  background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px;
+  padding: 10px 4px; font-family: var(--font-mono); font-size: 12px; line-height: 1.7;
+}
+:root[data-theme="dark"] .log-body { background: #121212; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .log-body { background: #121212; }
+}
+.log-line {
+  display: grid; grid-template-columns: 78px 48px 150px 1fr; gap: 10px;
+  padding: 1px 14px; white-space: nowrap; animation: log-in 0.25s ease;
+}
+.log-line:hover { background: var(--surface-soft); }
+@keyframes log-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .log-line { animation: none; } }
+.log-ts { color: var(--text-faint); }
+.log-lvl { font-weight: 600; font-size: 10px; letter-spacing: 0.04em; align-self: center; }
+.log-lvl-info { color: #3b82f6; }
+.log-lvl-warn { color: #d97706; }
+.log-lvl-error { color: #ef4444; }
+.log-lvl-debug, .log-lvl-trace { color: var(--text-faint); }
+.log-app { color: var(--color-teal-600); overflow: hidden; text-overflow: ellipsis; }
+.log-msg { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

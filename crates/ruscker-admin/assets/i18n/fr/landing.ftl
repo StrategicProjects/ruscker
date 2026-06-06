@@ -575,6 +575,11 @@ spec-form-cover-image = Image
 spec-form-cover-image-help = Choisissez une image de la bibliothèque (ou téléversez-en une) comme fond de la carte.
 admin-proclog-tail-note = Affichage des lignes les plus récentes
 admin-proclog-download = Télécharger le journal complet
+admin-proclog-filter-level = Filtrer par niveau
+admin-proclog-filter-all = Tous les niveaux
+admin-proclog-search = Rechercher dans les journaux…
+admin-proclog-pause = Pause
+admin-proclog-resume = Reprendre
 
 landing-empty = Rien ici pour l'instant.
 

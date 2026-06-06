@@ -59,6 +59,10 @@ struct GroupsPage<'a> {
     /// Current session role (always Admin here) — drives nav gating.
     role: Role,
     groups: Vec<GroupView>,
+    /// Apps with no `access-groups` — visible to everyone (#623). Shown in
+    /// a dedicated "Public apps" rail so the page accounts for every spec,
+    /// not only the gated ones.
+    public_apps: Vec<AppRef>,
     /// All usernames, for the "add member" picker.
     all_users: Vec<String>,
     flash: Option<String>,
@@ -131,6 +135,17 @@ async fn index(
         })
         .collect();
 
+    // Specs with no (or empty) access-groups are public — visible to all.
+    let mut public_apps: Vec<AppRef> = specs
+        .iter()
+        .filter(|s| s.access_groups.as_ref().is_none_or(|g| g.is_empty()))
+        .map(|s| AppRef {
+            id: s.id.clone(),
+            name: s.display_name.clone().unwrap_or_else(|| s.id.clone()),
+        })
+        .collect();
+    public_apps.sort_by(|a, b| a.name.cmp(&b.name));
+
     let page = GroupsPage {
         locale: loc,
         theme,
@@ -140,6 +155,7 @@ async fn index(
         nav_section: "groups",
         role: Role::Admin,
         groups,
+        public_apps,
         all_users,
         flash: q.flash,
     };

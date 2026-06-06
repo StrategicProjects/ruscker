@@ -75,8 +75,53 @@ struct DiskPage<'a> {
     /// Sum of image sizes (may over-count shared layers — labelled as
     /// such in the UI).
     images_total_bytes: i64,
+    /// Host disk usage for the hero (#623). `disk_available` is false when
+    /// the statvfs call failed; the template then hides the hero.
+    disk_available: bool,
+    disk_total: i64,
+    disk_used: i64,
+    disk_free: i64,
+    disk_pct: u32,
+    /// Stacked-bar segments (bytes + width%). Ruscker images, everything
+    /// else used, then free — they sum to the total.
+    seg_images_bytes: i64,
+    seg_other_bytes: i64,
+    seg_images_pct: f64,
+    seg_other_pct: f64,
+    seg_free_pct: f64,
     flash: Option<&'static str>,
     flash_error: bool,
+}
+
+/// Host filesystem totals from `statvfs`. `used + free == total`.
+struct DiskUsage {
+    total: i64,
+    used: i64,
+    free: i64,
+}
+
+/// Best-effort host disk usage for the filesystem holding `path`. `None`
+/// if the POSIX `statvfs(3)` call fails or reports a zero-size filesystem.
+fn disk_usage(path: &str) -> Option<DiskUsage> {
+    let c = std::ffi::CString::new(path).ok()?;
+    // SAFETY: `s` is a zeroed, properly-aligned `statvfs`. `statvfs` only
+    // writes its scalar fields and returns 0 on success / -1 on error; we
+    // read the integer fields afterwards. `c` outlives the call.
+    let mut s: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut s) } != 0 {
+        return None;
+    }
+    let frsize = s.f_frsize as i64;
+    let total = frsize.saturating_mul(s.f_blocks as i64);
+    let free = frsize.saturating_mul(s.f_bfree as i64);
+    if total <= 0 {
+        return None;
+    }
+    Some(DiskUsage {
+        total,
+        used: total.saturating_sub(free),
+        free,
+    })
 }
 
 impl DiskPage<'_> {
@@ -144,6 +189,16 @@ async fn index(
             stopped_count: 0,
             unused_images_count: 0,
             images_total_bytes: 0,
+            disk_available: false,
+            disk_total: 0,
+            disk_used: 0,
+            disk_free: 0,
+            disk_pct: 0,
+            seg_images_bytes: 0,
+            seg_other_bytes: 0,
+            seg_images_pct: 0.0,
+            seg_other_pct: 0.0,
+            seg_free_pct: 0.0,
             flash,
             flash_error,
         });
@@ -162,12 +217,54 @@ async fn index(
     let container_images = container_image_refs(&containers);
 
     let stopped_count = containers.iter().filter(|c| !c.running).count();
-    let images_total_bytes = images.iter().map(|i| i.size_bytes).sum();
+    let images_total_bytes: i64 = images.iter().map(|i| i.size_bytes).sum();
     let images: Vec<ImageRow> = images
         .into_iter()
         .map(|i| image_row(i, &spec_images, &container_images))
         .collect();
     let unused_images_count = images.iter().filter(|r| !r.in_use()).count();
+
+    // Host disk usage for the hero. statvfs the filesystem holding the
+    // uploaded-images dir when known, else the root — the host disk on a
+    // typical single-volume deploy. Best-effort: hidden if it fails.
+    let disk_path = state
+        .images_dir
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "/".to_string());
+    let usage = disk_usage(&disk_path);
+    let (
+        disk_available,
+        disk_total,
+        disk_used,
+        disk_free,
+        disk_pct,
+        seg_images_bytes,
+        seg_other_bytes,
+        seg_images_pct,
+        seg_other_pct,
+        seg_free_pct,
+    ) = match usage {
+        Some(u) => {
+            let imgs = images_total_bytes.clamp(0, u.used);
+            let other = (u.used - imgs).max(0);
+            // One-decimal width % so the inline style stays tidy.
+            let pct = |b: i64| ((b as f64 / u.total as f64 * 1000.0).round() / 10.0).max(0.0);
+            (
+                true,
+                u.total,
+                u.used,
+                u.free,
+                ((u.used as f64 / u.total as f64) * 100.0).round() as u32,
+                imgs,
+                other,
+                pct(imgs),
+                pct(other),
+                pct(u.free),
+            )
+        }
+        None => (false, 0, 0, 0, 0, 0, 0, 0.0, 0.0, 0.0),
+    };
 
     super::render(&DiskPage {
         locale: loc,
@@ -183,6 +280,16 @@ async fn index(
         stopped_count,
         unused_images_count,
         images_total_bytes,
+        disk_available,
+        disk_total,
+        disk_used,
+        disk_free,
+        disk_pct,
+        seg_images_bytes,
+        seg_other_bytes,
+        seg_images_pct,
+        seg_other_pct,
+        seg_free_pct,
         flash,
         flash_error,
     })
@@ -366,6 +473,21 @@ fn redirect(flash: &str) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_usage_reads_the_root_filesystem() {
+        // statvfs on "/" should succeed on any POSIX host and report a
+        // non-empty filesystem whose used + free accounts for the total.
+        let u = disk_usage("/").expect("statvfs / should succeed");
+        assert!(u.total > 0, "total > 0");
+        assert!(u.used >= 0 && u.free >= 0, "non-negative");
+        assert_eq!(u.used + u.free, u.total, "used + free == total");
+    }
+
+    #[test]
+    fn disk_usage_is_none_for_a_bad_path() {
+        assert!(disk_usage("/no/such/path/should/exist/here").is_none());
+    }
 
     fn img(tags: &[&str], containers: i64) -> ImageInfo {
         ImageInfo {

@@ -44,6 +44,10 @@ unic-langid = { workspace = true }
 # Embedded assets
 include_dir = { workspace = true }
 
+# Host disk usage for the admin disk panel (statvfs) — already compiled
+# transitively, no new build cost (#623).
+libc = "0.2"
+
 # Precompress the bundled CSS/JS once at startup (#593) instead of letting
 # the CompressionLayer re-encode these immutable bytes on every request.
 # Both already compile transitively (tower-http → async-compression).

@@ -33,6 +33,33 @@
   </div>
 {% else %}
 
+  {# ── Storage hero (#623): host disk usage + a stacked bar split into
+     Ruscker images / other used / free. Hidden if statvfs failed. ── #}
+  {% if disk_available %}
+  <div class="disk-hero">
+    <div class="disk-hero__head">
+      <div>
+        <div class="disk-hero__label">{{ self.t("admin-disk-used") }}</div>
+        <div class="disk-hero__num">{{ self.human(disk_used) }} <span class="disk-hero__total">/ {{ self.human(disk_total) }}</span></div>
+      </div>
+      <div style="text-align:right">
+        <div class="disk-hero__pct{% if disk_pct > 80 %} is-high{% endif %}">{{ disk_pct }}%</div>
+        <div class="disk-hero__free">{{ self.human(disk_free) }} {{ self.t("admin-disk-free") }}</div>
+      </div>
+    </div>
+    <div class="disk-stack">
+      <div class="disk-stack__seg" style="width:{{ seg_images_pct }}%;background:var(--color-teal-600)" title="{{ self.t("admin-disk-seg-images") }}"></div>
+      <div class="disk-stack__seg" style="width:{{ seg_other_pct }}%;background:var(--color-teal-200)" title="{{ self.t("admin-disk-seg-other") }}"></div>
+      <div class="disk-stack__seg" style="width:{{ seg_free_pct }}%;background:var(--surface-soft)" title="{{ self.t("admin-disk-seg-free") }}"></div>
+    </div>
+    <div class="disk-legend">
+      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--color-teal-600)"></span><i class="ti ti-photo" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-images") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_images_bytes) }}</span></div>
+      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--color-teal-200)"></span><i class="ti ti-database" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-other") }}</span><span class="disk-legend__val tnum">{{ self.human(seg_other_bytes) }}</span></div>
+      <div class="disk-legend__item"><span class="disk-legend__dot" style="background:var(--border-strong)"></span><i class="ti ti-circle-dashed" aria-hidden="true"></i><span>{{ self.t("admin-disk-seg-free") }}</span><span class="disk-legend__val tnum">{{ self.human(disk_free) }}</span></div>
+    </div>
+  </div>
+  {% endif %}
+
   {# ── Containers ─────────────────────────────────────────────── #}
   <div class="flex items-end justify-between mb-2 mt-4">
     <h2 class="text-sm font-medium">{{ self.t("admin-disk-containers-heading") }}</h2>

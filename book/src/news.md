@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.77 — 2026-06-06
+
+The UX redesign reaches every admin screen.
+
+**Interface**
+- The Appearance live preview now shows a search bar and mock cards tinted
+  with the configured accent colour, not empty boxes (#623).
+- Each Groups card has a colour-coded accent bar (matching its badge colour
+  elsewhere), and each Credentials row shows a key-icon tile (#623).
+
 ## v0.1.76 — 2026-06-06
 
 Disk usage at a glance; a proper log viewer.

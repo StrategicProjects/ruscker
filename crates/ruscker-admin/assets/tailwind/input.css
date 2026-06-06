@@ -451,6 +451,10 @@ input[type="range"]::-moz-range-thumb {
 .spec-summary__row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-muted); }
 .spec-summary__row .ti { font-size: 14px; color: var(--text-faint); width: 16px; }
 
+/* Live character counter under the SEO fields (design handoff #623). */
+.char-count { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; text-align: right; }
+.char-count.over { color: var(--warn); }
+
 /* Styled checkbox — teal box with a check when ticked. */
 .rk-check-wrap { display: inline-flex; align-items: center; cursor: pointer; }
 .rk-check-wrap > input { position: absolute; opacity: 0; width: 0; height: 0; }

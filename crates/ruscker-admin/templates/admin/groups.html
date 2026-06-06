@@ -112,6 +112,20 @@
   </div>
 {% endif %}
 
+{# Public apps (#623): specs with no access-group — visible to everyone.
+   Accounts for every spec on the page, not just the gated ones. #}
+{% if !public_apps.is_empty() %}
+<div class="text-sm font-medium mt-6 mb-1" style="display:flex;align-items:center;gap:6px">
+  <i class="ti ti-world" style="color:var(--color-teal-600)" aria-hidden="true"></i>
+  {{ self.t("admin-groups-public-title") }}
+  <span class="text-xs text-[color:var(--text-faint)] font-normal">· {{ public_apps.len() }}</span>
+</div>
+<p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-groups-public-help") }}</p>
+<div class="group-pills">
+  {% for a in public_apps %}<a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="group-pill"><i class="ti ti-app-window" aria-hidden="true"></i> {{ a.name }}</a>{% endfor %}
+</div>
+{% endif %}
+
 <style>
   .group-create {
     display: flex; flex-wrap: wrap; align-items: center; gap: 8px;

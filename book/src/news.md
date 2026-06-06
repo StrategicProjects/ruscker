@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.74 — 2026-06-06
+
+More of the UX redesign.
+
+**Interface**
+- Users page: each account shows a coloured avatar with its initials, and
+  its groups render as coloured badges (#623).
+- Restyled form controls — range sliders (teal thumb), the featured-carousel
+  toggle (an on/off switch) and the YAML-import checkboxes (#623).
+
 ## v0.1.73 — 2026-06-05
 
 Cold-start apps spawn again; syntax-highlighted code editors.

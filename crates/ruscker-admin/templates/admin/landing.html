@@ -56,13 +56,7 @@
       {# ── Card: Header title + subtitle (#468). Blank ⇒ falls back to the
          config proxy.title / default subtitle. #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-heading" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-header") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-card-header-desc") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("admin-landing-header") }}</div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-portal-title") }}</label>
         <input type="text" name="title" x-model="form.title" maxlength="120"
@@ -92,13 +86,7 @@
 
       {# ── Card: Appearance — header colours + per-theme palettes. #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-palette" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-card-appearance") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-card-appearance-desc") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("admin-landing-card-appearance") }}</div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
 
@@ -249,13 +237,7 @@
 
       {# ── Card: Header / footer logos (#468). #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-photo" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-logos") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-logos-help") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("admin-landing-logos") }}</div>
       <div class="spec-form-field">
         {# Submitted as one hidden JSON field; the rows below edit the array. #}
         <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
@@ -326,13 +308,7 @@
 
       {# ── Card: Content — intro text (default + per-locale). #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-align-left" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-card-content") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-card-content-desc") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title">{{ self.t("admin-landing-card-content") }}</div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-intro") }}</div>
 
@@ -378,13 +354,7 @@
 
       {# ── Card: SEO & analytics. #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-search" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-card-meta") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-card-meta-desc") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title"><i class="ti ti-search" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-card-meta") }}</div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-seo") }}</div>
       <div class="spec-form-field">
@@ -392,6 +362,8 @@
         <input type="text" name="seo_title" x-model="form.seo_title"
                placeholder="{{ self.t("admin-landing-seo-title-placeholder") }}"
                class="spec-form-input" value="{{ form.seo_title }}">
+        <div class="char-count" :class="(form.seo_title || '').length > 60 ? 'over' : ''"
+             x-text="(form.seo_title || '').length + '/60'"></div>
         <div class="spec-form-help">{{ self.t("admin-landing-seo-title-help") }}</div>
       </div>
       <div class="spec-form-field">
@@ -399,6 +371,8 @@
         <textarea name="seo_description" rows="2" x-model="form.seo_description"
                   placeholder="{{ self.t("admin-landing-seo-description-placeholder") }}"
                   class="spec-form-input">{{ form.seo_description }}</textarea>
+        <div class="char-count" :class="(form.seo_description || '').length > 160 ? 'over' : ''"
+             x-text="(form.seo_description || '').length + '/160'"></div>
         <div class="spec-form-help">{{ self.t("admin-landing-seo-description-help") }}</div>
       </div>
       {# Live Google-style search-result preview (#623), reacting to the
@@ -454,13 +428,7 @@
 
       {# ── Card: Advanced — custom CSS. #}
       <section class="editor-card">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-code" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-style") }}</div>
-            <div class="editor-card__desc">{{ self.t("admin-landing-card-style-desc") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title"><i class="ti ti-code" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-style") }}</div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-custom-css") }}</label>
         <div class="code-editor-wrap" data-mode="css">
@@ -478,12 +446,7 @@
     {# ── RIGHT: live preview ──────────────────────────────── #}
     <aside class="spec-form-preview" style="top:96px">
       <div class="editor-card editor-card--preview">
-        <div class="editor-card__head">
-          <span class="editor-card__icon"><i class="ti ti-eye" aria-hidden="true"></i></span>
-          <div>
-            <div class="editor-card__title">{{ self.t("admin-landing-preview") }}</div>
-          </div>
-        </div>
+        <div class="form-section__title"><i class="ti ti-eye" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-preview") }}</div>
 
       <div class="landing-preview-frame">
         <div class="landing-preview-header"

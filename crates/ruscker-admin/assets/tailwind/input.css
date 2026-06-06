@@ -371,6 +371,16 @@ input[type="range"]::-moz-range-thumb {
   outline: 2px solid var(--color-teal-400); outline-offset: 2px;
 }
 
+/* Flat uppercase section title (design handoff #623) — replaces the
+ * editor-card icon-chip header on the form-style admin screens. */
+.form-section__title {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-faint); font-weight: 600; margin-bottom: 14px;
+}
+/* Live character counter under the SEO fields (design handoff #623). */
+.char-count { font-size: 10.5px; color: var(--text-faint); margin-top: 4px; text-align: right; }
+.char-count.over { color: var(--warn); }
+
 /* Styled checkbox — teal box with a check when ticked. */
 .rk-check-wrap { display: inline-flex; align-items: center; cursor: pointer; }
 .rk-check-wrap > input { position: absolute; opacity: 0; width: 0; height: 0; }

@@ -241,6 +241,30 @@ window.ruscker.imagePicker = (filenames) => ({
   {% block content %}{% endblock %}
 </main>
 
+{# Floating toasts (#623): promote any server-rendered flash banner into a
+   bottom-centre toast that auto-dismisses. The banner markup is unchanged
+   (still produced server-side from `?flash=…`); this only re-homes it, so
+   pages without JS still show the flash inline. #}
+<div class="toast-wrap" id="ruscker-toasts" aria-live="polite"></div>
+<script>
+  (function () {
+    var wrap = document.getElementById("ruscker-toasts");
+    if (!wrap) return;
+    document.querySelectorAll(".admin-flash-ok").forEach(function (flash) {
+      var toast = document.createElement("div");
+      toast.className = "toast";
+      toast.setAttribute("role", "status");
+      toast.innerHTML = flash.innerHTML;
+      flash.remove();
+      wrap.appendChild(toast);
+      setTimeout(function () {
+        toast.style.opacity = "0";
+        setTimeout(function () { toast.remove(); }, 320);
+      }, 4000);
+    });
+  })();
+</script>
+
 {# Footer trimmed — theme + language pickers moved into the top-right
    chrome cluster in the navbar (#182 + #183). #}
 <footer class="mt-auto border-t border-[color:var(--border)] py-3 px-6 text-xs text-[color:var(--text-muted)] flex items-center justify-end gap-3">

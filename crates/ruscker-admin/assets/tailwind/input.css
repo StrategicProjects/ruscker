@@ -307,6 +307,25 @@ body {
 .user-cell { display: inline-flex; align-items: center; gap: 10px; }
 .group-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 
+/* Apps table: framework logo next to the name + inline access badges /
+ * public marker (design handoff #623). */
+.spec-name-cell { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.spec-logo {
+  width: 26px; height: 26px; border-radius: 7px; flex: none; object-fit: contain;
+  border: 0.5px solid var(--border); background: var(--surface-soft); padding: 3px;
+}
+.spec-logo--blank {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-faint); padding: 0;
+}
+.spec-logo--blank .ti { font-size: 14px; }
+.group-badges-inline { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.access-public {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11.5px; color: var(--text-muted);
+}
+.access-public .ti { font-size: 14px; color: var(--text-faint); }
+
 /* ─── Form controls: range / switch / checkbox (design handoff #623) ──
  * All CSS-only and driven by the native input's checked state, so the
  * field name/value and form submission are unchanged — pure restyle. */

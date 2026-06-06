@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.79 — 2026-06-06
+
+The redesign reaches the Apps table and the dashboard.
+
+**Interface**
+- The admin Apps table now shows each app's framework logo next to its
+  name and an Access column with colour-coded group badges (or "public")
+  (#623).
+- The monitoring dashboard's collapsed app rows now summarise sessions, CPU
+  and memory with little meters, and a toolbar adds an expand/collapse-all
+  control (#623).
+
 ## v0.1.78 — 2026-06-06
 
 Fix a cold-start splash that could loop.

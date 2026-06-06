@@ -531,9 +531,19 @@
           <p class="landing-preview-intro"
              x-text="previewIntro()"
              :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
-          <div class="landing-preview-mockfilter"></div>
+          <div class="landing-preview-mockfilter"><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
+          {# Mock cards: cover tinted with the configured accent, name/tag
+             placeholders. Reacts live to the accent colour. #}
           <div class="landing-preview-mockgrid">
-            <div></div><div></div><div></div><div></div>
+            <template x-for="i in [1, 2, 3, 4]" :key="i">
+              <div class="lp-card">
+                <div class="lp-card-cover" :style="'background:color-mix(in srgb, ' + (form.theme_light_accent || '#0f6e56') + ' 14%, var(--surface))'"></div>
+                <div class="lp-card-meta">
+                  <div class="lp-card-name"></div>
+                  <div class="lp-card-tag" :style="'background:' + (form.theme_light_accent || '#0f6e56')"></div>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
 

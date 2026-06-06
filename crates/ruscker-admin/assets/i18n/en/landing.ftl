@@ -548,6 +548,11 @@ spec-help-access-groups = Groups that may see and reach the app (comma-separated
 spec-form-access-users = Allowed users
 spec-help-access-users = Usernames that may see and reach the app (comma-separated).
 spec-form-access-help = Both blank = card is open to everyone (including anonymous). With any value, only matching logged-in users — and admins always.
+spec-form-access-public = Public
+spec-form-access-add-group = + add group
+spec-form-access-public-hint = empty = visible to everyone
+spec-form-summary-replicas = replicas
+spec-form-summary-sessions = sessions per replica
 spec-form-cpu-request = CPU reservation
 spec-help-cpu-request = Soft CPU reservation in cores (container-cpu-request). Blank = no reservation.
 spec-form-memory-request = Memory reservation

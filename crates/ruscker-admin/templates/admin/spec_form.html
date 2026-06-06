@@ -17,7 +17,7 @@
 
 {% block content %}
 
-<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
+<div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }}, {{ available_groups_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}
   <div class="editor-topbar">
@@ -376,23 +376,48 @@
       {# Access — who may see + reach this app (#155). Promoted out of the
          runtime "Advanced" collapse (#523): visibility is governance/metadata,
          not a runtime knob. #}
-      <div class="grid grid-cols-2 gap-3">
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-acl-groups" class="spec-form-label">{{ self.t("spec-form-access-groups") }}</label>
-            {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
-          </div>
-          <input id="f-acl-groups" type="text" name="access_groups"
-                 value="{{ form.access_groups }}" placeholder="staff, ops" class="spec-form-input">
+      {# Access groups as toggle pills (#623). The submitted value is the
+         hidden comma-joined `access_groups`; pills + the "add group" input
+         toggle entries in it. A known group not yet in `availableGroups`
+         (e.g. a freshly added custom one) still renders via customGroups(). #}
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label class="spec-form-label">{{ self.t("spec-form-access-groups") }}
+            <span class="text-[color:var(--text-faint)]" style="font-weight:400">— {{ self.t("spec-form-access-public-hint") }}</span>
+          </label>
+          {% call help(self.t("spec-help-access-groups")) %}{% endcall %}
         </div>
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
-            {% call help(self.t("spec-help-access-users")) %}{% endcall %}
-          </div>
-          <input id="f-acl-users" type="text" name="access_users"
-                 value="{{ form.access_users }}" placeholder="alice, bob" class="spec-form-input">
+        <input type="hidden" name="access_groups" :value="form.access_groups">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button type="button" class="group-toggle" :class="!groupArr().length ? 'on' : ''"
+                  @click="form.access_groups = ''"
+                  :style="!groupArr().length ? 'border-color:var(--color-teal-600);background:color-mix(in srgb,var(--color-teal-600) 14%,transparent);color:var(--color-teal-600)' : ''">
+            <i class="ti" :class="!groupArr().length ? 'ti-check' : 'ti-world'"></i>{{ self.t("spec-form-access-public") }}
+          </button>
+          <template x-for="g in availableGroups" :key="g">
+            <button type="button" class="group-toggle" :class="hasGroup(g) ? 'on' : ''" @click="toggleGroup(g)"
+                    :style="hasGroup(g) ? grpStyle(g) : ''">
+              <i class="ti" :class="hasGroup(g) ? 'ti-check' : 'ti-plus'"></i><span x-text="g"></span>
+            </button>
+          </template>
+          <template x-for="g in customGroups()" :key="g">
+            <button type="button" class="group-toggle on" @click="toggleGroup(g)" :style="grpStyle(g)">
+              <i class="ti ti-check"></i><span x-text="g"></span>
+            </button>
+          </template>
+          <input type="text" class="spec-form-input" style="width:140px;padding:6px 10px"
+                 placeholder="{{ self.t("spec-form-access-add-group") }}"
+                 @keydown.enter.prevent="addGroup($event.target.value); $event.target.value = ''">
         </div>
+      </div>
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label for="f-acl-users" class="spec-form-label">{{ self.t("spec-form-access-users") }}</label>
+          {% call help(self.t("spec-help-access-users")) %}{% endcall %}
+        </div>
+        <input id="f-acl-users" type="text" name="access_users"
+               value="{{ form.access_users }}" x-model="form.access_users"
+               placeholder="alice, bob" class="spec-form-input">
       </div>
       <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
 
@@ -916,6 +941,22 @@
         </div>
       </div>
 
+      {# Resource/scale summary (#623): reflects the Advanced fields live. #}
+      <div class="spec-summary">
+        <div class="spec-summary__row">
+          <i class="ti ti-cpu" aria-hidden="true"></i>
+          <span x-text="(form.container_cpu_limit || '—') + ' · ' + (form.container_memory_limit || '—')"></span>
+        </div>
+        <div class="spec-summary__row">
+          <i class="ti ti-stack-2" aria-hidden="true"></i>
+          <span x-text="((form.max_replicas || form.min_replicas) ? ((form.min_replicas || '1') + '–' + (form.max_replicas || form.min_replicas)) : '1') + ' {{ self.t("spec-form-summary-replicas") }}'"></span>
+        </div>
+        <div class="spec-summary__row">
+          <i class="ti ti-clock" aria-hidden="true"></i>
+          <span x-text="((form.heartbeat_timeout && form.heartbeat_timeout != '-1') ? (form.heartbeat_timeout + ' min · ') : '') + (form.seats_per_container || '1') + ' {{ self.t("spec-form-summary-sessions") }}'"></span>
+        </div>
+      </div>
+
       <div class="spec-form-help" style="margin-top:8px">
         {{ self.t("spec-form-preview-help") }}
       </div>
@@ -975,8 +1016,44 @@
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
-window.ruscker.specForm = (initial, logoImages) => ({
+window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   form: initial,
+  // Known group names for the access-group pill picker (#623). The text
+  // value still lives in `form.access_groups` (comma-joined) for submit;
+  // the pills + the "add group" input toggle entries in it. Arbitrary
+  // names are supported — a set group not in this list still renders.
+  availableGroups: Array.isArray(availableGroups) ? availableGroups : [],
+  groupArr() {
+    return (this.form.access_groups || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  },
+  hasGroup(g) { return this.groupArr().indexOf(g) >= 0; },
+  toggleGroup(g) {
+    var arr = this.groupArr();
+    var i = arr.indexOf(g);
+    if (i >= 0) { arr.splice(i, 1); } else { arr.push(g); }
+    this.form.access_groups = arr.join(', ');
+  },
+  addGroup(name) {
+    var g = (name || '').trim();
+    if (g && !this.hasGroup(g)) { this.form.access_groups = this.groupArr().concat([g]).join(', '); }
+  },
+  customGroups() {
+    var avail = this.availableGroups;
+    return this.groupArr().filter(function (g) { return avail.indexOf(g) < 0; });
+  },
+  // Same fixed-role palette as the Apps/Users/Groups badges (#658): admin
+  // pink / editor cyan / viewer navy, else a stable hash hue.
+  grpColor(s) {
+    var ROLE = { admin: '#ef476f', administrator: '#ef476f', editor: '#06b6d4', viewer: '#26547c' };
+    var k = (s || '').toLowerCase();
+    if (ROLE[k]) return ROLE[k];
+    var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ' 45% 45%)';
+  },
+  grpStyle(g) {
+    var c = this.grpColor(g);
+    return 'border-color:' + c + ';background:color-mix(in srgb,' + c + ' 14%,transparent);color:' + c;
+  },
   // Environment variables as editable KEY=value rows (#623). The repeater
   // is the editable source; `form.container_env` (a hidden textarea, one
   // `KEY=value` per line, `${VAR}` preserved verbatim) is rebuilt from it

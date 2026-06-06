@@ -552,6 +552,11 @@ spec-help-access-groups = Grupos que podem ver e acessar o app (separados por v�
 spec-form-access-users = Usuários permitidos
 spec-help-access-users = Usuários que podem ver e acessar o app (separados por vírgula).
 spec-form-access-help = Ambos em branco = card aberto a todos (inclusive anônimos). Com algum valor, só usuários logados que combinam — e admins sempre.
+spec-form-access-public = Público
+spec-form-access-add-group = + add. grupo
+spec-form-access-public-hint = vazio = visível a todos
+spec-form-summary-replicas = réplicas
+spec-form-summary-sessions = sessões por réplica
 spec-form-cpu-request = Reserva de CPU
 spec-help-cpu-request = Reserva suave de CPU em núcleos (container-cpu-request). Em branco = sem reserva.
 spec-form-memory-request = Reserva de memória

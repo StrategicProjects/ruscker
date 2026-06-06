@@ -329,6 +329,7 @@ admin-landing-preview-help = Aproximação visual do cabeçalho e texto. Cards e
 admin-landing-preview-empty = (sem texto introdutório)
 admin-landing-seo = SEO e compartilhamento
 admin-landing-seo-title = Título da página (SEO)
+admin-landing-seo-preview = Prévia de busca
 admin-landing-seo-title-placeholder = Padrão: título do portal
 admin-landing-seo-title-help = Define o título da aba e o og:title. Vazio usa o título padrão do portal.
 admin-landing-seo-description = Descrição (meta description)

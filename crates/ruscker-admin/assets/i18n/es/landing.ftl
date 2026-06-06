@@ -325,6 +325,7 @@ admin-landing-preview-help = Aproximación visual del encabezado y la introducci
 admin-landing-preview-empty = (sin texto de introducción)
 admin-landing-seo = SEO y compartir
 admin-landing-seo-title = Título de la página (SEO)
+admin-landing-seo-preview = Vista previa de búsqueda
 admin-landing-seo-title-placeholder = Predeterminado: título del portal
 admin-landing-seo-title-help = Define el título de la pestaña y el og:title. Vacío usa el título por defecto del portal.
 admin-landing-seo-description = Descripción (meta description)

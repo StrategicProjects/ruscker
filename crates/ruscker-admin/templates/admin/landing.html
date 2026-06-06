@@ -401,6 +401,16 @@
                   class="spec-form-input">{{ form.seo_description }}</textarea>
         <div class="spec-form-help">{{ self.t("admin-landing-seo-description-help") }}</div>
       </div>
+      {# Live Google-style search-result preview (#623), reacting to the
+         SEO fields above. Presentation only. #}
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-seo-preview") }}</label>
+        <div class="serp">
+          <div class="serp__url"><i class="ti ti-world" aria-hidden="true"></i> <span x-text="location.host"></span></div>
+          <div class="serp__title" data-default="{{ portal_title }}" x-text="(form.seo_title || form.title || '').trim() || $el.dataset.default"></div>
+          <div class="serp__desc" x-text="form.seo_description || ''"></div>
+        </div>
+      </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-og-image") }}</label>
         {# Gallery picker (#451 mixin) writes the chosen asset path into

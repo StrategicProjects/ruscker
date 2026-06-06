@@ -325,6 +325,7 @@ admin-landing-preview-help = Approximation visuelle de l'en-tête et de l'intro.
 admin-landing-preview-empty = (pas de texte d'introduction)
 admin-landing-seo = SEO et partage
 admin-landing-seo-title = Titre de la page (SEO)
+admin-landing-seo-preview = Aperçu de recherche
 admin-landing-seo-title-placeholder = Par défaut : titre du portail
 admin-landing-seo-title-help = Définit le titre de l'onglet et og:title. Vide utilise le titre par défaut du portail.
 admin-landing-seo-description = Description (meta description)

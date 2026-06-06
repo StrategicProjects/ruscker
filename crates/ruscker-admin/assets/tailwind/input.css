@@ -380,6 +380,24 @@ input[type="range"]::-moz-range-thumb {
 }
 .toast .ti { font-size: 16px; }
 
+/* Live search-result (SERP) preview in the SEO editor (design handoff
+ * #623). Reads the SEO fields via Alpine — pure presentation. Google's
+ * result colours, with dark-mode variants. */
+.serp {
+  background: var(--surface); border: 0.5px solid var(--border);
+  border-radius: 9px; padding: 12px 14px; margin-top: 4px;
+}
+.serp__url { font-size: 11px; color: #3b7a45; display: flex; align-items: center; gap: 5px; }
+.serp__url .ti { font-size: 12px; }
+.serp__title { font-size: 15px; color: #1a0dab; margin: 3px 0 2px; letter-spacing: -0.01em; }
+.serp__desc { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; word-break: break-word; }
+:root[data-theme="dark"] .serp__title { color: #8ab4f8; }
+:root[data-theme="dark"] .serp__url { color: #6cc18a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .serp__title { color: #8ab4f8; }
+  :root:not([data-theme="light"]) .serp__url { color: #6cc18a; }
+}
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

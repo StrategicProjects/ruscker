@@ -307,6 +307,62 @@ body {
 .user-cell { display: inline-flex; align-items: center; gap: 10px; }
 .group-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
 
+/* ─── Form controls: range / switch / checkbox (design handoff #623) ──
+ * All CSS-only and driven by the native input's checked state, so the
+ * field name/value and form submission are unchanged — pure restyle. */
+
+/* Range sliders — teal thumb on a thin track (applies to every range). */
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  height: 4px; border-radius: 2px; background: var(--surface-soft);
+  outline: 0; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-teal-600); border: 2px solid var(--surface); cursor: pointer;
+}
+
+/* Toggle switch — wraps a hidden checkbox; the track + dot react to it. */
+.switch { display: inline-flex; align-items: center; flex: none; }
+.switch > input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch__track {
+  width: 40px; height: 23px; border-radius: 999px; flex: none; position: relative;
+  background: var(--border-strong); transition: background 0.15s;
+}
+.switch > input:checked + .switch__track { background: var(--color-teal-600); }
+.switch__dot {
+  position: absolute; top: 2.5px; left: 2.5px; width: 18px; height: 18px;
+  border-radius: 50%; background: #fff; transition: transform 0.15s;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.switch > input:checked + .switch__track .switch__dot { transform: translateX(17px); }
+.switch > input:focus-visible + .switch__track {
+  outline: 2px solid var(--color-teal-400); outline-offset: 2px;
+}
+
+/* Styled checkbox — teal box with a check when ticked. */
+.rk-check-wrap { display: inline-flex; align-items: center; cursor: pointer; }
+.rk-check-wrap > input { position: absolute; opacity: 0; width: 0; height: 0; }
+.rk-check {
+  width: 18px; height: 18px; flex: none; border-radius: 5px;
+  border: 1.5px solid var(--border-strong); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: background 0.12s, border-color 0.12s;
+}
+.rk-check .ti { font-size: 13px; opacity: 0; }
+.rk-check-wrap > input:checked + .rk-check {
+  background: var(--color-teal-600); border-color: var(--color-teal-600);
+}
+.rk-check-wrap > input:checked + .rk-check .ti { opacity: 1; }
+.rk-check-wrap > input:focus-visible + .rk-check {
+  outline: 2px solid var(--color-teal-400); outline-offset: 2px;
+}
+
 /* ─── Syntax-highlighted code editor (design handoff #623) ─────────
  * A transparent <textarea> over a highlighted <pre>; the tokenizers run
  * client-side (see admin/_code_editor.html). The textarea keeps its name

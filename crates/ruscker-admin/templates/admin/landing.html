@@ -78,8 +78,11 @@
       {# "Featured" carousel toggle (#506) — plain checkbox; the carousel
          only shows when this is on AND at least one app is featured. #}
       <div class="spec-form-field">
-        <label class="spec-form-check">
-          <input type="checkbox" name="show_highlights" value="on" {% if !form.show_highlights.is_empty() %}checked{% endif %}>
+        <label class="spec-form-check" style="cursor:pointer;gap:10px">
+          <span class="switch">
+            <input type="checkbox" name="show_highlights" value="on" {% if !form.show_highlights.is_empty() %}checked{% endif %}>
+            <span class="switch__track"><span class="switch__dot"></span></span>
+          </span>
           <span>{{ self.t("admin-landing-show-highlights") }}</span>
         </label>
         <div class="spec-form-help">{{ self.t("admin-landing-show-highlights-help") }}</div>

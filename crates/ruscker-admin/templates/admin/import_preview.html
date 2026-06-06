@@ -30,9 +30,11 @@
     <thead>
       <tr>
         <th class="import-check-cell">
-          <input type="checkbox" checked
-                 title="{{ self.t("admin-import-select-all") }}"
-                 onclick="document.querySelectorAll('input[name=ids]').forEach(function(c){c.checked=this.checked}.bind(this))">
+          <label class="rk-check-wrap" title="{{ self.t("admin-import-select-all") }}">
+            <input type="checkbox" checked
+                   onclick="document.querySelectorAll('input[name=ids]').forEach(function(c){c.checked=this.checked}.bind(this))">
+            <span class="rk-check"><i class="ti ti-check" aria-hidden="true"></i></span>
+          </label>
         </th>
         <th>{{ self.t("admin-specs-col-id") }}</th>
         <th>{{ self.t("admin-specs-col-name") }}</th>
@@ -44,7 +46,10 @@
       {% for row in rows %}
       <tr>
         <td class="import-check-cell">
-          <input type="checkbox" name="ids" value="{{ row.id }}" checked>
+          <label class="rk-check-wrap">
+            <input type="checkbox" name="ids" value="{{ row.id }}" checked>
+            <span class="rk-check"><i class="ti ti-check" aria-hidden="true"></i></span>
+          </label>
         </td>
         <td class="id-cell">{{ row.id }}</td>
         <td>{% if row.display_name.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ row.display_name }}{% endif %}</td>

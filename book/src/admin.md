@@ -28,10 +28,12 @@ top-right corner shows your current **access level**.
 
 Each person gets their own account (username + password). Admins manage
 accounts under **Users** (`/admin/users`): create one, assign a role,
-reset a password, or remove it. A new user gets an initial password you
-choose and is asked — once, on first login — whether to change it.
-**Password fields are masked** (type `password`) throughout the panel, so a
-shoulder-surfer can't read a password as you type it.
+reset a password, or remove it. Each row shows a coloured avatar with the
+user's initials and their groups as coloured badges (a group keeps the
+same colour on the Groups and Apps pages). A new user gets an initial
+password you choose and is asked — once, on first login — whether to
+change it. **Password fields are masked** (type `password`) throughout the
+panel, so a shoulder-surfer can't read a password as you type it.
 
 | Role | Can do |
 |---|---|
@@ -49,18 +51,26 @@ the only remaining admin (so the portal can't be locked out); the
 ## Screens
 
 ### Dashboard
-A live view of running replicas: per-container state, uptime, sessions,
-CPU and memory (refreshed over Server-Sent Events). Stop or restart a
-replica; open its logs. Shows a banner when started without
-`--docker`.
+A live view of running replicas, refreshed over Server-Sent Events. The
+headline KPI cards (containers, apps with replicas, sessions, memory)
+count up on load. Below them, replicas are **grouped by app** in
+expandable cards: each card's header summarises the app — replica count,
+worst replica state, and aggregate sessions / CPU / memory with little
+meters — and expands to the per-replica detail (state, container id,
+uptime, sessions, CPU, memory) with stop / restart / logs actions.
+A toolbar offers an **expand/collapse-all** control. Shows a banner when
+started without `--docker`.
 
 ![Monitoring dashboard: aggregate cards (containers, apps with replicas, active sessions, memory) above a per-replica table with live CPU sparklines and memory, and per-row stop/restart/logs actions.](images/admin-dashboard.png)
 
 ### Apps
 The list of specs — apps, APIs and external links — with create, edit
-and delete. Each row has a **featured star** next to the actions: click
-it to toggle whether the app appears in the landing page's *Featured*
-carousel, inline, without opening the editor (solid = featured).
+and delete. Each row shows the app's **framework logo** next to its name,
+a colour-coded **kind** pill, and an **Access** column with the spec's
+access-group badges (or a globe + "public" when ungated). Each row also
+has a **featured star** next to the actions: click it to toggle whether
+the app appears in the landing page's *Featured* carousel, inline,
+without opening the editor (solid = featured).
 
 ![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star (solid amber when featured) next to the edit and duplicate buttons.](images/admin-apps.png)
 
@@ -141,11 +151,13 @@ Customise the public landing without a custom template:
 
 - **Colours + intro** — header background/foreground, a per-locale
   intro paragraph.
-- **SEO & sharing** — page title, meta description, `og:image`. The
-  landing `<head>` emits `description` + `og:*` + `twitter:card`.
-- **Analytics** — paste a provider snippet (Plausible, Matomo, GA…)
-  and list its origins; Ruscker widens **only the landing's** CSP so
-  the script can load.
+- **SEO & sharing** — page title, meta description, `og:image`, with a
+  live Google-style **search-result preview** that updates as you type.
+  The landing `<head>` emits `description` + `og:*` + `twitter:card`.
+- **Analytics & custom code** — paste a provider snippet (Plausible,
+  Matomo, GA…) and list its origins; Ruscker widens **only the landing's**
+  CSP so the script can load. The custom-CSS and analytics/HTML fields are
+  **syntax-highlighted code editors** (the custom HTML blocks editor too).
 - **Logos** — add logos to the landing **header** or **footer** slot.
   Each logo has its own **alignment** (left / center / right), an optional
   **click-through link**, and a **height** in pixels. Multiple logos
@@ -162,6 +174,20 @@ declare CSP origins for any third-party content it embeds.
 > Block and analytics HTML is rendered **verbatim** on the public
 > landing. It's admin-only input — the intentional escape hatch — so
 > only paste HTML you trust.
+
+### Disk
+Storage at a glance (Admin-only). A usage hero shows host disk used /
+total with a percentage and a stacked bar split into Ruscker images,
+other used, and free. Below it, two panels list the Ruscker-managed
+containers and images — each removable, with an "in use" cross-reference
+so you don't delete something a running app or the effective catalog
+needs, plus bulk "prune stopped containers" and "remove unused images".
+
+### Logs
+The server log stream, live over Server-Sent Events. Lines are colour-
+coded by level (error / warn / info / debug), with a level dropdown, a
+free-text filter, and a pause/resume control. A download link grabs the
+current buffer.
 
 ### Audit log
 Every admin mutation (spec/image/credential/landing/block changes,

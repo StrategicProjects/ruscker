@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.88 — 2026-06-07
+
+A spurious "upstream error" on the first open of an interactive app is
+fixed (#683).
+
+**Fixes**
+- Opening RStudio Server (or any interactive app) could show a bare
+  **"upstream error"** on the first navigation, then work on a retry.
+  Cause was a hyper connection-pool race: app servers close idle
+  keep-alive connections quickly, and the proxy could dispatch a request
+  onto a socket the app had already closed. The proxy now evicts idle
+  pooled connections promptly and retries an idempotent (GET/HEAD)
+  forward once on a fresh connection, so the first open just works.
+
+---
+
 ## v0.1.87 — 2026-06-07
 
 The redesign's perceived-speed primitives are now live (#623).

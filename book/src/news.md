@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.82 — 2026-06-07
+
+Fix single-seat apps (RStudio, Jupyter) getting stuck on the starting
+splash.
+
+**Fixes**
+- A `seats: 1` interactive app could trap the visitor on the "Starting…"
+  splash forever, even with the container up: the first request reserved
+  the app's only seat for that session, so the app's own follow-up
+  navigation (RStudio → its sign-in page, Jupyter → its lab) re-entered
+  the splash gate, found no *free* seat, and was shown the splash again —
+  waiting on the seat it already held. The splash now lets a session that
+  already holds a seat on a ready replica proxy straight through.
+
 ## v0.1.81 — 2026-06-06
 
 The hi-fi design system reaches every admin screen, plus a new live YAML

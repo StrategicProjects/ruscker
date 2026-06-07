@@ -266,7 +266,7 @@
   </div>{# /portal-sticky #}
 
   {# ── Card grid (fixed-width cards, columns auto-fill) ──────── #}
-  <section class="cards-grid" x-ref="grid">
+  <section class="cards-grid stagger" x-ref="grid">
     {% for card in cards %}
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"

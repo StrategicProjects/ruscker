@@ -22,6 +22,11 @@
   }
   /* Inline CPU/memory trend sparkline in a replica row. */
   .dash-spark { vertical-align: middle; margin-left: 6px; opacity: 0.75; }
+  /* Shimmer placeholder for a CPU/mem cell whose first reading hasn't
+     arrived yet (#623 perceived-speed). Replaces the bare "—": a loading
+     reading reads as loading, not as a zero/empty value. `.sk` (the
+     shimmer) lives in the global stylesheet. */
+  .metric-sk { display: inline-block; width: 34px; height: 11px; vertical-align: middle; }
 </style>
 
 <div class="flex items-end justify-between mb-5">
@@ -139,8 +144,8 @@
         <span class="mono faint">{{ row.uptime }}</span>
         <span class="muted">{{ row.state_label }}</span>
         <span class="metric-cell tnum">{{ row.sessions_active }}<span class="faint">/{{ row.sessions_max }}</span></span>
-        <span class="metric-cell tnum">{% match row.cpu_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="faint" title="{{ self.t("admin-dashboard-metrics-pending") }}">—</span>{% endmatch %}</span>
-        <span class="metric-cell tnum">{% match row.memory_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="faint">—</span>{% endmatch %}</span>
+        <span class="metric-cell tnum">{% match row.cpu_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="sk sk-line metric-sk" title="{{ self.t("admin-dashboard-metrics-pending") }}"></span>{% endmatch %}</span>
+        <span class="metric-cell tnum">{% match row.memory_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="sk sk-line metric-sk"></span>{% endmatch %}</span>
         <span class="replica-actions">
           {% if role.can_manage() %}
           <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"><i class="ti ti-file-text" aria-hidden="true"></i></a>
@@ -195,12 +200,12 @@
     if (el && el.textContent !== String(value)) el.textContent = value;
   }
 
-  // A metric cell's text, or a faint "—" placeholder when the reading
-  // hasn't arrived yet.
+  // A metric cell's text, or a shimmer skeleton when the reading hasn't
+  // arrived yet (#623). Mirrors the server-rendered pending placeholder.
   function cell(display) {
     return display !== null && display !== undefined
       ? escapeHtml(display)
-      : '<span class="faint" title="' + escapeHtml(pendingLabel) + '">—</span>';
+      : '<span class="sk sk-line metric-sk" title="' + escapeHtml(pendingLabel) + '"></span>';
   }
 
   function actionsHtml(row) {

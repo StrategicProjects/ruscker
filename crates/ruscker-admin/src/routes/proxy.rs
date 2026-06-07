@@ -423,8 +423,12 @@ async fn forward(
             )
                 .into_response();
         }
-        // Cold navigation → kick the spawn off in the background and show
-        // the splash. (Saturated-but-warm specs still serve immediately.)
+        // Cold navigation → show the interstitial. If the spec can still
+        // scale, kick the spawn off in the background ("Starting…"); if it's
+        // already at its replica ceiling with no free seat, a spawn won't
+        // help, so show the "full — waiting for a slot" copy instead and
+        // don't spawn. Both poll readiness and open the app once a seat is
+        // free. (Saturated-but-warm specs still serve immediately.)
         if *req.method() == Method::GET
             && wants_html(req.headers())
             && !has_ready_replica(&state, &spec).await
@@ -432,13 +436,16 @@ async fn forward(
             // proxying — never bounce it back to the splash (#623 cast fix).
             && !has_sticky_seat(&state, &spec, &cookies).await
         {
-            let (st, sp) = (state.clone(), spec.clone());
-            tokio::spawn(async move {
-                if let Err(e) = crate::scaler::spawn_replica(&st, &sp).await {
-                    tracing::warn!(spec = %sp.id, error = ?e, "background spawn (splash) failed");
-                }
-            });
-            return cold_start_splash(&spec, &state.base_path);
+            let full = at_capacity(&state, &spec).await;
+            if !full {
+                let (st, sp) = (state.clone(), spec.clone());
+                tokio::spawn(async move {
+                    if let Err(e) = crate::scaler::spawn_replica(&st, &sp).await {
+                        tracing::warn!(spec = %sp.id, error = ?e, "background spawn (splash) failed");
+                    }
+                });
+            }
+            return cold_start_splash(&spec, &state.base_path, full);
         }
     }
 
@@ -1011,6 +1018,17 @@ async fn has_sticky_seat(state: &AppState, spec: &Spec, cookies: &Cookies) -> bo
     sticky_replica_is_live(&reg, &spec.id, &session)
 }
 
+/// True when the spec is already at its replica ceiling — a spawn can't add
+/// capacity (mirrors `spawn_one`'s `live >= max` cap). Combined with "no
+/// accepting replica", it means every seat is taken and the visitor is
+/// waiting for one to *free*, not for a container to boot — so the
+/// interstitial says "full" instead of "starting" (#623).
+async fn at_capacity(state: &AppState, spec: &Spec) -> bool {
+    let max = spec.effective_max_replicas() as usize;
+    let reg = state.replicas.read().await;
+    reg.replicas_of(&spec.id).len() >= max
+}
+
 /// The post-decode core of [`has_sticky_seat`]: does this sticky session
 /// still point at a live (`Ready`/`Draining`) replica of `spec_id`? Split
 /// out so it's unit-testable without a `Cookies` jar / `AppState`.
@@ -1071,9 +1089,8 @@ const SPLASH_TEMPLATE: &str = r##"<!doctype html>
 <body><div class="box">
   <img class="logo" src="{{LOGO}}" alt="" onerror="this.style.display='none'">
   <div class="ring" role="status" aria-label="loading"></div>
-  <h1>Starting <span class="app">{{NAME}}</span>…</h1>
-  <p>The container is booting — this can take a few seconds the first time.
-     This page opens it automatically when it's ready.</p>
+  {{HEADING}}
+  {{NOTE}}
 </div>
 <script>
 (function(){
@@ -1090,11 +1107,33 @@ const SPLASH_TEMPLATE: &str = r##"<!doctype html>
 /// Render the cold-start interstitial for `spec`. `base` is the portal
 /// base path (`""` or e.g. `/box`), used to build same-origin asset and
 /// probe URLs that survive sub-path mounting.
-fn cold_start_splash(spec: &Spec, base: &str) -> Response {
+///
+/// `at_capacity` switches the copy: `false` = a container is booting
+/// ("Starting…"); `true` = the spec is at its replica ceiling with every
+/// seat taken, so the visitor is waiting for a *slot to free*, not for a
+/// boot. Both poll the same readiness probe and open the app the moment a
+/// seat becomes available (#623).
+fn cold_start_splash(spec: &Spec, base: &str, at_capacity: bool) -> Response {
     let name = html_escape(spec.display_name.as_deref().unwrap_or(&spec.id));
+    let (heading, note) = if at_capacity {
+        (
+            format!("<h1><span class=\"app\">{name}</span> is full right now</h1>"),
+            "<p>Every slot for this app is in use. This page opens \
+             automatically as soon as one frees up — you can keep it open.</p>"
+                .to_string(),
+        )
+    } else {
+        (
+            format!("<h1>Starting <span class=\"app\">{name}</span>…</h1>"),
+            "<p>The container is booting — this can take a few seconds the \
+             first time. This page opens it automatically when it's ready.</p>"
+                .to_string(),
+        )
+    };
     let html = SPLASH_TEMPLATE
         .replace("{{LOGO}}", &format!("{base}/assets/brand/mark.svg"))
-        .replace("{{NAME}}", &name)
+        .replace("{{HEADING}}", &heading)
+        .replace("{{NOTE}}", &note)
         .replace("{{PROBE}}", &format!("{base}/app/{}{COLD_PROBE_PATH}", spec.id));
     (
         [
@@ -2260,7 +2299,8 @@ container-cpu-limit: -1.0
     #[tokio::test]
     async fn cold_start_splash_renders_name_probe_and_logo_under_base() {
         let s = spec_yaml("id: nb\ndisplay-name: Jupyter\ncontainer-image: x");
-        let resp = cold_start_splash(&s, "/box");
+        // Scaling up → "Starting…" copy.
+        let resp = cold_start_splash(&s, "/box", false);
         assert_eq!(resp.status(), StatusCode::OK);
         let ct = resp.headers().get(header::CONTENT_TYPE).unwrap().to_str().unwrap();
         assert!(ct.starts_with("text/html"));
@@ -2270,6 +2310,15 @@ container-cpu-limit: -1.0
         assert!(html.contains("\"/box/app/nb/__ruscker_ready\""), "base-prefixed probe");
         assert!(html.contains("src=\"/box/assets/brand/mark.svg\""), "base-prefixed logo");
         assert!(!html.contains("{{"), "all template slots filled");
+
+        // At capacity → "full" copy, same probe, no "Starting".
+        let full = cold_start_splash(&s, "/box", true);
+        let fbody = axum::body::to_bytes(full.into_body(), 1 << 20).await.unwrap();
+        let fhtml = String::from_utf8(fbody.to_vec()).unwrap();
+        assert!(fhtml.contains("is full right now"), "capacity copy");
+        assert!(!fhtml.contains("Starting <span"), "no 'Starting' when full");
+        assert!(fhtml.contains("\"/box/app/nb/__ruscker_ready\""), "still polls readiness");
+        assert!(!fhtml.contains("{{"), "all slots filled");
     }
 
     #[test]

@@ -683,6 +683,9 @@ admin-landing-portal-title = Titre du portail
 admin-landing-portal-title-help = Affiché en haut de la landing. Vide : utilise le titre de la config (proxy.title).
 admin-landing-portal-subtitle = Sous-titre
 admin-landing-portal-subtitle-help = La ligne sous le titre. Laissez vide pour le masquer.
+admin-landing-footer = Pied de page
+admin-landing-footer-help = Texte du pied de page du portail. Vide affiche la version et la marque.
+
 admin-landing-theme-colors = Couleurs par thème
 admin-landing-theme-colors-help = Recolorez les thèmes clair et sombre du portail public. Vide : garde la valeur par défaut.
 admin-landing-theme-light = Thème clair

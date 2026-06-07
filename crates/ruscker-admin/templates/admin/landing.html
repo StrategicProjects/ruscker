@@ -69,6 +69,12 @@
                placeholder="{{ self.t("landing-subtitle") }}" class="spec-form-input">
         <div class="spec-form-help">{{ self.t("admin-landing-portal-subtitle-help") }}</div>
       </div>
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-footer") }}</label>
+        <input type="text" name="footer" x-model="form.footer" maxlength="200"
+               placeholder="v{{ crate::APP_VERSION }} · Ruscker" class="spec-form-input">
+        <div class="spec-form-help">{{ self.t("admin-landing-footer-help") }}</div>
+      </div>
       {# "Featured" carousel toggle (#506) — plain checkbox; the carousel
          only shows when this is on AND at least one app is featured. #}
       <div class="spec-form-field">

@@ -90,6 +90,7 @@ impl<'a> LandingPage<'a> {
 pub struct LandingForm {
     pub title: String,
     pub subtitle: String,
+    pub footer: String,
     // Per-theme color overrides (#475); blank ⇒ keep the theme default.
     pub theme_light_bg: String,
     pub theme_light_text: String,
@@ -129,6 +130,7 @@ impl LandingForm {
         Self {
             title: lc.title.clone().unwrap_or_default(),
             subtitle: lc.subtitle.clone().unwrap_or_default(),
+            footer: lc.footer.clone().unwrap_or_default(),
             theme_light_bg: s(&tc.light.bg),
             theme_light_text: s(&tc.light.text),
             theme_light_accent: s(&tc.light.accent),
@@ -186,6 +188,7 @@ impl LandingForm {
         LandingCustomization {
             title: empty_to_none(self.title),
             subtitle: empty_to_none(self.subtitle),
+            footer: empty_to_none(self.footer),
             theme_colors,
             header_bg: empty_to_none(self.header_bg),
             header_fg: empty_to_none(self.header_fg),

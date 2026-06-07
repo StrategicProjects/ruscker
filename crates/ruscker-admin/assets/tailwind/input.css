@@ -564,7 +564,10 @@ input[type="range"]::-moz-range-thumb {
  * Ruscker-managed container images and containers, each its own bordered
  * card with a header (icon + title + count subtitle) and an inline prune
  * button. Collapses to one column on narrow viewports. */
-.disk-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+/* `align-items: start` so each panel is only as tall as its own content:
+   the images and containers tables have independent row counts, and a
+   stretched grid would pad the shorter one with blank space below it. */
+.disk-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; align-items: start; }
 @media (max-width: 1000px) { .disk-cols { grid-template-columns: 1fr; } }
 .disk-panel {
   border: 0.5px solid var(--border); border-radius: 12px;
@@ -580,6 +583,25 @@ input[type="range"]::-moz-range-thumb {
 /* The panel hosts an .admin-table flush with its borders (no double frame). */
 .disk-panel .admin-table { border: 0; border-radius: 0; }
 .disk-panel .admin-table th { background: var(--surface); }
+/* The shared table enhancer injects its search toolbar between the panel
+   head and the table. The panel itself has no padding, so without this the
+   search box sits flush against the panel edges and tight under the head.
+   Give the toolbar a matching inset (and a divider) and let the input span
+   the panel width with a leading search glyph — a proper search bar. */
+.disk-panel .admin-table-toolbar {
+  margin: 0;
+  padding: 11px 16px;
+  border-bottom: 0.5px solid var(--border);
+  background: color-mix(in srgb, var(--text) 2%, var(--surface));
+}
+.disk-panel .admin-table-search {
+  max-width: 100%;
+  padding: 7px 11px 7px 32px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='7'/><path d='M21 21l-4.3-4.3'/></svg>");
+  background-repeat: no-repeat;
+  background-position: left 10px center;
+  background-size: 14px;
+}
 /* Tinted rows flag reclaimable items (unused images / stopped containers). */
 .admin-table tr.is-unused td { background: color-mix(in srgb, var(--warn) 5%, transparent); }
 .admin-table tr.is-unused:hover td { background: color-mix(in srgb, var(--warn) 9%, transparent); }

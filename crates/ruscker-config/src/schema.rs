@@ -898,6 +898,15 @@ pub enum SpecKind {
 /// the first. Override per spec with `max-replicas`.
 pub const DEFAULT_MAX_REPLICAS: u32 = 5;
 
+/// Default `seats-per-container` for web-framework specs (Shiny, Streamlit,
+/// Dash, Voilà — `SpecKind::Shiny`/`InteractiveApp`). These frameworks
+/// serve many concurrent sessions from one process, so packing ~10 per
+/// container is far cheaper than one container per user. A **single-user
+/// IDE** (RStudio, Jupyter) is the exception — set `seats-per-container: 1`
+/// on those so each visitor gets an isolated container (concurrency then
+/// comes from `max-replicas`). APIs keep 100.
+pub const DEFAULT_SEATS_PER_APP: u32 = 10;
+
 impl Spec {
     /// Container environment as Docker `NAME=value` strings, sorted for
     /// determinism (the field is a `BTreeMap`). Empty when no
@@ -966,7 +975,7 @@ impl Spec {
     pub fn effective_seats(&self) -> u32 {
         self.seats_per_container.unwrap_or_else(|| match self.kind() {
             SpecKind::Api => 100,
-            SpecKind::Shiny | SpecKind::InteractiveApp => 1,
+            SpecKind::Shiny | SpecKind::InteractiveApp => DEFAULT_SEATS_PER_APP,
             SpecKind::External => 0,
         })
     }

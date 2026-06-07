@@ -692,7 +692,7 @@
               </div>
               <div class="stepper">
                 <button type="button" tabindex="-1" @click="form.min_replicas = String(Math.max(0, (parseInt(form.min_replicas, 10) || 0) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
-                <input id="f-min-rep" type="number" name="min_replicas" min="0" placeholder="0"
+                <input id="f-min-rep" type="number" name="min_replicas" min="0" placeholder="1"
                        x-model="form.min_replicas" class="stepper__input">
                 <button type="button" tabindex="-1" @click="form.min_replicas = String((parseInt(form.min_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
               </div>
@@ -704,7 +704,7 @@
               </div>
               <div class="stepper">
                 <button type="button" tabindex="-1" @click="form.max_replicas = String(Math.max(1, (parseInt(form.max_replicas, 10) || 1) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
-                <input id="f-max-rep" type="number" name="max_replicas" min="1" placeholder="3"
+                <input id="f-max-rep" type="number" name="max_replicas" min="1" placeholder="5"
                        x-model="form.max_replicas" class="stepper__input">
                 <button type="button" tabindex="-1" @click="form.max_replicas = String((parseInt(form.max_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
               </div>

@@ -571,8 +571,10 @@ The kind controls:
 - Whether sticky session cookies are issued (`shiny`, `streamlit`,
   `dash`, `voila` — yes; `api`, `external` — no)
 - Default routing strategy
-- Default `seats-per-container` (1 for interactive, 100 for API,
-  0 for external)
+- Default `seats-per-container` (10 for web-framework apps — Shiny,
+  Streamlit, Dash, Voilà — which serve many sessions per process; 100 for
+  API; 0 for external). A single-user IDE (RStudio, Jupyter) should set
+  `seats-per-container: 1` so each visitor gets an isolated container.
 - Whether WebSocket forwarding is attempted
 
 ## Environment variable interpolation

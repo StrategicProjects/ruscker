@@ -770,4 +770,33 @@ mod tests {
             "setup must link /favicon-32.png"
         );
     }
+
+    // The perceived-speed partial (#623) — the top navigation progress bar
+    // and its MPA driver script — is included by both admin layouts and the
+    // standalone login/setup pages, so every navigable admin page gets it.
+    // Login is standalone (own <body>); render it and assert the bar is
+    // wired (the `.topbar-progress` primitive itself lives in input.css).
+    #[test]
+    fn admin_layout_mounts_nav_progress_bar() {
+        let locales = Locales::load().expect("load locales");
+        let html = LoginPage {
+            locale: Locale::En,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
+            error: "",
+            bootstrap: false,
+        }
+        .render()
+        .expect("render login");
+        assert!(
+            html.contains(r#"id="ruscker-progress""#),
+            "admin layout must mount the nav progress bar"
+        );
+        assert!(
+            html.contains("topbar-progress"),
+            "nav progress bar must carry the .topbar-progress class"
+        );
+    }
 }

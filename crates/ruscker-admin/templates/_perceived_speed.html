@@ -1,0 +1,88 @@
+{# Perceived-speed: top navigation progress bar (#623).
+
+   The redesign's stated focus is *perceived* speed. The `.topbar-progress`
+   primitive lives in input.css; this partial mounts the element and drives
+   it. Included once near <body> in both layouts (admin + portal).
+
+   We're a server-rendered MPA, so a full-page navigation tears down the
+   DOM: the bar grows on the OLD page while the next page is fetched (that
+   in-flight growth *is* the cue), then the fresh page paints with the bar
+   reset by the CSS default. We complete-and-fade only on bfcache restore
+   (`pageshow.persisted`) so a back/forward feels instant too. HTMX/Alpine
+   AJAX swaps (no page tear-down) are driven by the htmx:* hooks, which are
+   harmless no-ops when HTMX isn't on the page. A safety timeout finishes a
+   stuck bar if a click ends up not navigating (download, prevented). All
+   motion honors prefers-reduced-motion via the CSS. #}
+<div class="topbar-progress" id="ruscker-progress" aria-hidden="true"></div>
+<script>
+(function () {
+  var bar = document.getElementById("ruscker-progress");
+  if (!bar) return;
+  var timer = null, safety = null, width = 0;
+
+  function start() {
+    if (timer) return;            // already running for this navigation
+    width = 8;
+    bar.classList.add("is-active");
+    bar.style.width = width + "%";
+    timer = setInterval(function () {
+      // Ease toward 90% and hold there; the page load (or done()) finishes it.
+      width += Math.max(0.5, (90 - width) * 0.08);
+      if (width >= 90) { width = 90; clearInterval(timer); timer = null; }
+      bar.style.width = width + "%";
+    }, 120);
+    // If the "navigation" never happens (prevented click, download), don't
+    // leave the bar hanging.
+    clearTimeout(safety);
+    safety = setTimeout(done, 8000);
+  }
+
+  function done() {
+    clearTimeout(safety);
+    if (timer) { clearInterval(timer); timer = null; }
+    bar.style.width = "100%";
+    setTimeout(function () {
+      bar.classList.remove("is-active");
+      setTimeout(function () { bar.style.width = "0"; }, 250);
+    }, 150);
+  }
+
+  // A plain left-click on a same-origin, same-tab link is a full-page nav.
+  // Bubble phase (not capture) so an onclick that returns false / prevents
+  // default has already marked the event — we won't start a bar that never
+  // navigates. stopPropagation on a link is rare; the cost there is just no
+  // bar, which beats a stuck one.
+  document.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0 ||
+        e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest ? e.target.closest("a[href]") : null;
+    if (!a || a.hasAttribute("download")) return;
+    if (a.target && a.target !== "_self") return;
+    var href = a.getAttribute("href");
+    if (!href || href.charAt(0) === "#" ||
+        /^(mailto:|tel:|javascript:)/i.test(href)) return;
+    if (a.origin && a.origin !== location.origin) return;   // external
+    // Same-page anchor (only the hash changes) → no navigation.
+    if (a.pathname === location.pathname && a.search === location.search && a.hash) return;
+    start();
+  });
+
+  // A form submit that navigates. Bubble phase so a cancelled
+  // `onsubmit="return confirm(...)"` (defaultPrevented) is skipped. Opt out
+  // with data-no-progress for an Alpine/fetch-hijacked form that stays put.
+  document.addEventListener("submit", function (e) {
+    if (e.defaultPrevented) return;
+    var f = e.target;
+    if (f && f.hasAttribute("data-no-progress")) return;
+    start();
+  });
+
+  // bfcache restore: the old bar comes back mid-animation — finish it.
+  window.addEventListener("pageshow", function (e) { if (e.persisted) done(); });
+  window.addEventListener("pagehide", function () { clearTimeout(safety); });
+
+  // HTMX AJAX swaps (no page tear-down) — no-ops if HTMX isn't present.
+  document.addEventListener("htmx:beforeRequest", start);
+  document.addEventListener("htmx:afterRequest", done);
+})();
+</script>

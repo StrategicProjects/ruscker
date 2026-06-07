@@ -21,6 +21,7 @@
 <script>window.RUSCKER_BASE = "{{ base }}";</script>
 </head>
 <body class="min-h-screen flex flex-col">
+{% include "_perceived_speed.html" %}
 
 {% block navbar %}
 <nav class="admin-navbar">
@@ -237,7 +238,7 @@ window.ruscker.imagePicker = (filenames) => ({
 });
 </script>
 
-<main class="flex-1 px-6 py-6 max-w-7xl mx-auto w-full">
+<main class="flex-1 px-6 py-6 max-w-7xl mx-auto w-full fade-in">
   {% block content %}{% endblock %}
 </main>
 

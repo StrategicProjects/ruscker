@@ -11,6 +11,7 @@
 <link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
+{% include "_perceived_speed.html" %}
 
 {# Top-right chrome cluster (#182 + #183). Lives outside the login form
    so its POSTs to /__set/{theme,locale} aren't shadowed by the outer

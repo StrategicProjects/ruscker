@@ -446,8 +446,12 @@ async fn forward(
     //    pick/spawn. Also pin down the session_id we'll track
     //    this visitor under so the cookie and the tracker share
     //    the same identity.
-    let (replica, session_id, cookie_used, seat_reserved) =
-        match resolve_replica(&state, &spec, &cookies).await {
+    // A "visit" is a top-level document navigation (Accept: text/html).
+    // Only a visit opens a session; subresources/XHR/WS without a sticky
+    // cookie ride an existing replica without counting (#623 cast leak).
+    let is_visit = wants_html(req.headers());
+    let (replica, session_id, cookie_used, seat_reserved, track_session) =
+        match resolve_replica(&state, &spec, &cookies, is_visit).await {
             Ok(quad) => quad,
             Err(err) => {
                 tracing::error!(spec = %spec.id, error = ?err, "resolve replica failed");
@@ -462,8 +466,9 @@ async fn forward(
     // 4b. Heartbeat: record activity on the visitor's session.
     //     Only matters for sticky-needed specs — API requests are
     //     per-request, not per-session, so inflating
-    //     `sessions_active` for them would mislead the scaler.
-    if spec_kind_needs_sticky(spec.kind()) {
+    //     `sessions_active` for them would mislead the scaler. Skip
+    //     untracked subresource forwards (`track_session == false`).
+    if track_session && spec_kind_needs_sticky(spec.kind()) {
         let outcome = state
             .sessions
             .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id, seat_reserved)
@@ -874,7 +879,8 @@ async fn resolve_replica(
     state: &AppState,
     spec: &Spec,
     cookies: &Cookies,
-) -> anyhow::Result<(Replica, uuid::Uuid, bool, bool)> {
+    is_visit: bool,
+) -> anyhow::Result<(Replica, uuid::Uuid, bool, bool, bool)> {
     if let Some(raw) = cookies.get(COOKIE_NAME) {
         if let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) {
             // Defense in depth: a cookie for spec A must not
@@ -894,17 +900,37 @@ async fn resolve_replica(
                 if let Some(r) = alive {
                     if matches!(r.state, ReplicaState::Ready | ReplicaState::Draining) {
                         // Existing session — its seat is already counted, so
-                        // nothing is reserved here (4th = false).
-                        return Ok((r, session.session_id, true, false));
+                        // nothing is reserved here (4th = false); track=true
+                        // keeps it alive (touch).
+                        return Ok((r, session.session_id, true, false, true));
                     }
                 }
             }
         }
     }
-    // New session: `pick_or_spawn` already reserved its seat (when it
+    // No usable sticky cookie. A request that is NOT a top-level document
+    // navigation (a subresource / XHR / WebSocket / asset — e.g. a
+    // `crossorigin` JS bundle that drops the cookie) is part of some
+    // existing visit, not a new one. Forward it to an existing replica
+    // WITHOUT minting a session or reserving a seat, so those requests
+    // don't inflate `sessions_active` (the cast RStudio/Jupyter "7/1, 9/1
+    // climbing" leak). Only a real visit (the document) opens a session.
+    if !is_visit {
+        let routing = spec.effective_routing();
+        let api = matches!(spec.kind(), SpecKind::Api);
+        let reg = state.replicas.read().await;
+        if let Some(r) = pick_replica(reg.replicas_of(&spec.id), routing, api) {
+            // cookie_used=true → don't issue a Set-Cookie; track=false →
+            // don't register/count a session.
+            return Ok((r, uuid::Uuid::new_v4(), true, false, false));
+        }
+        // No replica yet (an asset somehow raced ahead of the document):
+        // fall through and spawn, treating it as a visit.
+    }
+    // New visit: `pick_or_spawn` already reserved its seat (when it
     // returns `reserved = true`), so the session tracker must not re-count.
     let (r, reserved) = pick_or_spawn(state, spec).await?;
-    Ok((r, uuid::Uuid::new_v4(), false, reserved))
+    Ok((r, uuid::Uuid::new_v4(), false, reserved, true))
 }
 
 /// Build + set the sticky cookie from an explicit `StickySession`

@@ -184,7 +184,7 @@
       <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-theme-colors-help") }}</div>
       <div class="grid grid-cols-2 gap-4">
         <div>
-          <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("admin-landing-theme-light") }}</div>
+          <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("theme-light") }}</div>
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
@@ -211,7 +211,7 @@
           </div>
         </div>
         <div>
-          <div class="spec-form-label" style="margin-bottom:6px">🌙 {{ self.t("admin-landing-theme-dark") }}</div>
+          <div class="spec-form-label" style="margin-bottom:6px">🌙 {{ self.t("theme-dark") }}</div>
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-theme-bg") }}</label>
             <div class="color-input">
@@ -239,6 +239,27 @@
         </div>
       </div>
 
+      </section>
+
+      {# ── Card: Default theme — the portal theme a cookieless visitor
+         gets first (their own toggle still overrides it). #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-default-theme") }}</div>
+        <input type="hidden" name="default_theme" :value="form.default_theme">
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': form.default_theme === 'light' }" @click="form.default_theme = 'light'">
+              <i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}
+            </button>
+            <button type="button" :class="{ 'is-active': form.default_theme === 'dark' }" @click="form.default_theme = 'dark'">
+              <i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}
+            </button>
+            <button type="button" :class="{ 'is-active': form.default_theme !== 'light' && form.default_theme !== 'dark' }" @click="form.default_theme = 'auto'">
+              <i class="ti ti-device-desktop" aria-hidden="true"></i> {{ self.t("theme-auto") }}
+            </button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-default-theme-help") }}</div>
+        </div>
       </section>
 
       {# ── Card: Header / footer logos (#468). #}

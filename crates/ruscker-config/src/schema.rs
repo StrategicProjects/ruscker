@@ -359,6 +359,13 @@ pub struct LandingCustomization {
     #[serde(default)]
     pub footer: Option<String>,
 
+    /// Default portal theme for a visitor with no theme cookie:
+    /// `"light"`, `"dark"`, or `"auto"` (let the OS decide). Blank/`auto`
+    /// ⇒ OS `prefers-color-scheme`. Admin-managed via the appearance
+    /// editor; the visitor's own toggle still overrides it.
+    #[serde(default, rename = "default-theme")]
+    pub default_theme: Option<String>,
+
     /// Free-form intro paragraph rendered between the header and
     /// the filter section. Operator-authored, plain text (no HTML).
     ///

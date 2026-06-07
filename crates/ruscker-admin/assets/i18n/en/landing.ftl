@@ -685,6 +685,9 @@ admin-landing-portal-subtitle = Subtitle
 admin-landing-portal-subtitle-help = The line under the title. Leave blank to hide it.
 admin-landing-footer = Footer
 admin-landing-footer-help = Text in the portal footer. Blank shows the version and wordmark.
+admin-landing-default-theme = Default theme
+admin-landing-default-theme-help = The initial theme for a first-time visitor. They can still switch.
+
 
 admin-landing-theme-colors = Theme colors
 admin-landing-theme-colors-help = Recolor the public portal's light and dark themes. Blank keeps the default.

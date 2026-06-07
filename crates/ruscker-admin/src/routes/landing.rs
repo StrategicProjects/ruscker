@@ -324,6 +324,19 @@ async fn index(
     // theme CSS variables for light / dark / OS-auto.
     let theme_style = build_theme_style(&lc.theme_colors);
 
+    // Operator default theme for a cookieless visitor: when the request
+    // carries no explicit light/dark choice (Auto), honor the configured
+    // `default-theme`. The visitor's own toggle still overrides it (it sets
+    // the cookie, which makes `theme` non-Auto here).
+    let theme = if theme.is_auto() {
+        match lc.default_theme.as_deref() {
+            Some("light") => Theme::Light,
+            Some("dark") => Theme::Dark,
+            _ => theme,
+        }
+    } else {
+        theme
+    };
     let page = LandingPage {
         locale: loc,
         theme,

@@ -689,6 +689,9 @@ admin-landing-portal-subtitle = Subtítulo
 admin-landing-portal-subtitle-help = A linha abaixo do título. Em branco, o subtítulo fica oculto.
 admin-landing-footer = Rodapé
 admin-landing-footer-help = Texto no rodapé do portal. Em branco, mostra a versão e a marca.
+admin-landing-default-theme = Tema padrão
+admin-landing-default-theme-help = O tema inicial para quem nunca escolheu. O visitante ainda pode trocar.
+
 
 admin-landing-theme-colors = Cores por tema
 admin-landing-theme-colors-help = Recolore o tema claro e escuro do portal público. Em branco, mantém o padrão.

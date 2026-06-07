@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.86 — 2026-06-07
+
+Web apps pack more sessions per container by default.
+
+**Behaviour**
+- `seats-per-container` now defaults to **10** for web-framework apps
+  (Shiny, Streamlit, Dash, Voilà) — they serve many concurrent sessions
+  from one process, so a container per visitor was wasteful (the demo
+  Shiny showed "1/1"). APIs keep 100. **Single-user IDEs** (RStudio,
+  Jupyter) are the exception: set `seats-per-container: 1` on those so each
+  visitor gets an isolated container, with concurrency from `max-replicas`.
+- The app-editor's greyed hints now match the real defaults
+  (sessions/container 10, min-replicas 1, max-replicas 5).
+
 ## v0.1.85 — 2026-06-07
 
 Apps auto-scale to a few independent containers by default.

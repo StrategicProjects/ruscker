@@ -9,6 +9,25 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.87 — 2026-06-07
+
+The redesign's perceived-speed primitives are now live (#623).
+
+**UI**
+- **Top navigation progress bar** — a thin teal bar grows while a page
+  navigation (or form submit) is in flight, across the admin and the
+  public portal. Honors `prefers-reduced-motion`.
+- **Content reveal** — admin pages fade in as they load, and the portal
+  card grid cascades in with a small per-card delay.
+- **Shimmer skeletons** — a replica's CPU/memory cell shows a shimmer
+  while its first live reading is pending, instead of a bare dash, so a
+  loading value reads as loading rather than empty.
+
+These wire up the perceived-speed primitives the #623 handoff defined,
+completing the Design System pass.
+
+---
+
 ## v0.1.86 — 2026-06-07
 
 Web apps pack more sessions per container by default.

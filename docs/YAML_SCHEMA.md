@@ -527,7 +527,7 @@ applied) and flagged by `ruscker validate`.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `min-replicas` | u32 | `1` | Always running |
-| `max-replicas` | u32 | = `min-replicas` | Set higher to enable auto-scale |
+| `max-replicas` | u32 | `5` (≥ `min-replicas`) | Per-container apps auto-scale to up to 5 independent replicas by default; set explicitly to raise/lower |
 | `scale-up-threshold` | float | `0.8` | scale up when pool utilization exceeds this (enforced, #333) |
 | `scale-down-threshold` | float | `0.3` | only retire idle replicas while utilization is below this (enforced, #333) |
 | `scale-down-grace` | s | `300` | idle-grace before retiring a replica (enforced, #333) |

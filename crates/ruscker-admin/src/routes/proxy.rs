@@ -2348,7 +2348,11 @@ docker-registry-password: hunter2
             delay: StdDuration::from_millis(80),
         });
         let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
-        let spec = fake_spec("coalesced");
+        // Pin max-replicas:1 so this exercises pure coalescing — one spawn
+        // for a burst of first-requests — independent of the global default
+        // ceiling. Scale-out beyond one replica is covered by the
+        // scaleout/capped tests.
+        let spec = spec_yaml("id: coalesced\ncontainer-image: test:latest\nmax-replicas: 1\n");
 
         // Fan out 8 concurrent callers for the SAME spec.
         let mut tasks = Vec::new();

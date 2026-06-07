@@ -891,6 +891,13 @@ pub enum SpecKind {
     External,
 }
 
+/// Global default ceiling for auto-scaling a containerized spec when it
+/// doesn't set `max-replicas`. Picked so single-seat interactive apps
+/// (RStudio/Jupyter/Shiny) serve a handful of concurrent visitors — one
+/// container each — out of the box, rather than locking everyone out after
+/// the first. Override per spec with `max-replicas`.
+pub const DEFAULT_MAX_REPLICAS: u32 = 5;
+
 impl Spec {
     /// Container environment as Docker `NAME=value` strings, sorted for
     /// determinism (the field is a `BTreeMap`). Empty when no
@@ -1014,18 +1021,20 @@ impl Spec {
         })
     }
 
-    /// Effective maximum replicas. Defaults to `min-replicas`, so there's
-    /// no auto-scaling unless the operator opts in — **but never below 1
-    /// for a containerized spec.** A cold-start app sets `min-replicas: 0`
-    /// (don't pre-spawn) and usually leaves `max-replicas` unset; without
-    /// this floor that resolves to `max = 0`, and the on-demand spawn path
-    /// (`spawn_one`'s `live >= max` cap) would refuse to ever start a
-    /// container — the cold-start splash then polls forever. `External`
-    /// specs have no container, so they stay at 0.
+    /// Effective maximum replicas. When unset, a containerized spec
+    /// defaults to [`DEFAULT_MAX_REPLICAS`] (but never below `min-replicas`),
+    /// so apps auto-scale to a few independent containers out of the box —
+    /// e.g. a single-seat RStudio/Jupyter then serves up to that many
+    /// concurrent visitors, one container each, instead of locking everyone
+    /// after the first. The floor also keeps a cold-start app
+    /// (`min-replicas: 0`, `max-replicas` unset) from resolving to `max = 0`,
+    /// which would make `spawn_one`'s `live >= max` cap refuse to ever start
+    /// a container. `External` specs have no container, so they stay at 0.
+    /// Set `max-replicas` explicitly to raise or lower this per spec.
     pub fn effective_max_replicas(&self) -> u32 {
         self.max_replicas.unwrap_or_else(|| match self.kind() {
             SpecKind::External => 0,
-            _ => self.effective_min_replicas().max(1),
+            _ => self.effective_min_replicas().max(DEFAULT_MAX_REPLICAS),
         })
     }
 
@@ -1615,17 +1624,21 @@ proxy:
         // usually leaves `max-replicas` unset. effective-max must NOT
         // resolve to 0 — that would make the on-demand spawn a no-op
         // (`spawn_one`'s `live >= max` cap) and hang the cold-start splash
-        // forever. A containerized spec floors at 1.
+        // forever. A containerized spec floors at the global default.
         let yaml = "proxy:\n  specs:\n    - id: cold\n      container-image: nginx:alpine\n      min-replicas: 0\n";
         let spec = &serde_yaml_ng::from_str::<Config>(yaml).unwrap().proxy.specs[0];
         assert_eq!(spec.effective_min_replicas(), 0, "cold start: no pre-spawn");
-        assert_eq!(spec.effective_max_replicas(), 1, "but can scale to one on demand");
+        assert_eq!(
+            spec.effective_max_replicas(),
+            DEFAULT_MAX_REPLICAS,
+            "but can scale on demand up to the global default"
+        );
 
-        // Defaults unchanged when nothing is set (min 1 ⇒ max 1) and an
-        // explicit max is still honoured.
+        // Default ceiling when nothing is set, and an explicit max is still
+        // honoured.
         let dflt = "proxy:\n  specs:\n    - id: d\n      container-image: nginx\n";
         let s = &serde_yaml_ng::from_str::<Config>(dflt).unwrap().proxy.specs[0];
-        assert_eq!(s.effective_max_replicas(), 1);
+        assert_eq!(s.effective_max_replicas(), DEFAULT_MAX_REPLICAS);
         let cap = "proxy:\n  specs:\n    - id: c\n      container-image: nginx\n      min-replicas: 0\n      max-replicas: 4\n";
         let s = &serde_yaml_ng::from_str::<Config>(cap).unwrap().proxy.specs[0];
         assert_eq!(s.effective_max_replicas(), 4, "explicit max is honoured");

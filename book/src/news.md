@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.85 — 2026-06-07
+
+Apps auto-scale to a few independent containers by default.
+
+**Behaviour**
+- A container app that doesn't set `max-replicas` now defaults to **5**
+  (was effectively 1). So a single-seat interactive app (RStudio, Jupyter,
+  Shiny) serves up to 5 concurrent visitors — one isolated container each,
+  started on demand — instead of locking everyone out after the first.
+  Set `max-replicas` per app to raise it (busier app) or lower it
+  (constrained host); `External` apps are unaffected.
+
 ## v0.1.84 — 2026-06-07
 
 Tell visitors when an app is full instead of an endless "Starting…".

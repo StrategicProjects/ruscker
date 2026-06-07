@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.89 — 2026-06-07
+
+Reliable cold starts for scale-to-zero interactive apps (#686).
+
+**Fixes**
+- A `min-replicas: 0` interactive app (e.g. an IDE with
+  `seats-per-container: 1`) could fail to open: the scaler reaped the
+  replica it had just spawned for the arriving visitor before they
+  finished the cold-start splash and claimed a seat, leaving them on a
+  dead/again-cold app. A freshly-ready replica is now exempt from idle
+  scale-down for a short grace, so the visitor reliably lands on it.
+  Single-user IDEs can still pin `min-replicas: 1` to stay warm.
+
+---
+
 ## v0.1.88 — 2026-06-07
 
 A spurious "upstream error" on the first open of an interactive app is

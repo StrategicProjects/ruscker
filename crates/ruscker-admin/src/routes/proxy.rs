@@ -402,7 +402,14 @@ async fn forward(
         // advances normally, and a full app correctly keeps waiting while
         // the proxy path scales out (#582 follow-up).
         if upstream_path == COLD_PROBE_PATH {
-            let body = if has_ready_replica(&state, &spec).await {
+            // Advance when a fresh visitor could be admitted (Ready + free
+            // seat) OR when *this* session already holds a seat on a live
+            // replica — otherwise a single-seat app that already reserved
+            // its seat for this session would report "not ready" to its own
+            // splash forever (see `has_sticky_seat`).
+            let ready = has_ready_replica(&state, &spec).await
+                || has_sticky_seat(&state, &spec, &cookies).await;
+            let body = if ready {
                 "{\"ready\":true}"
             } else {
                 "{\"ready\":false}"
@@ -421,6 +428,9 @@ async fn forward(
         if *req.method() == Method::GET
             && wants_html(req.headers())
             && !has_ready_replica(&state, &spec).await
+            // A returning session whose replica is already serving it keeps
+            // proxying — never bounce it back to the splash (#623 cast fix).
+            && !has_sticky_seat(&state, &spec, &cookies).await
         {
             let (st, sp) = (state.clone(), spec.clone());
             tokio::spawn(async move {
@@ -949,6 +959,46 @@ async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
     let routing = spec.effective_routing();
     let reg = state.replicas.read().await;
     pick_accepting(reg.replicas_of(&spec.id), routing, matches!(spec.kind(), SpecKind::Api)).is_some()
+}
+
+/// True when the visitor already holds a sticky session pinned to a live
+/// (`Ready`/`Draining`) replica for this spec — i.e. the app is already up
+/// and serving *them*.
+///
+/// The cold-start splash must NOT fire for such a request. `has_ready_replica`
+/// requires a *free* seat, so once a single-seat app (`seats: 1`, the default
+/// for RStudio/Shiny/Jupyter) reserves its only seat for this very session,
+/// the app's own follow-up navigations — RStudio's redirect to
+/// `/auth-sign-in`, Jupyter's to `/lab` — would hit the gate, find no free
+/// seat, be handed the splash again, and loop forever even though the
+/// session's replica is ready. Bypassing the splash when the session already
+/// has its seat fixes that (mirrors the sticky-first branch of
+/// `resolve_replica`; read-only, reserves nothing).
+async fn has_sticky_seat(state: &AppState, spec: &Spec, cookies: &Cookies) -> bool {
+    let Some(raw) = cookies.get(COOKIE_NAME) else {
+        return false;
+    };
+    let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) else {
+        return false;
+    };
+    let reg = state.replicas.read().await;
+    sticky_replica_is_live(&reg, &spec.id, &session)
+}
+
+/// The post-decode core of [`has_sticky_seat`]: does this sticky session
+/// still point at a live (`Ready`/`Draining`) replica of `spec_id`? Split
+/// out so it's unit-testable without a `Cookies` jar / `AppState`.
+fn sticky_replica_is_live(
+    reg: &ruscker_core::ReplicaRegistry,
+    spec_id: &str,
+    session: &StickySession,
+) -> bool {
+    // Defense in depth: a cookie for spec A must not satisfy spec B.
+    session.spec_id == spec_id
+        && reg.replicas_of(spec_id).iter().any(|r| {
+            r.id == session.replica_id
+                && matches!(r.state, ReplicaState::Ready | ReplicaState::Draining)
+        })
 }
 
 /// True for a top-level document navigation (a GET whose `Accept`
@@ -2466,6 +2516,53 @@ docker-registry-password: hunter2
         assert!(
             pick_accepting(&[free], RoutingStrategy::LeastConnections, false).is_some(),
             "a free seat (cold start) is accepting — the splash advances"
+        );
+    }
+
+    #[test]
+    fn splash_lets_the_seat_owner_through() {
+        // A *full* single-seat replica is "not accepting", so a fresh
+        // visitor waits on the splash (the test above). But the session that
+        // already OWNS that seat must be let straight through — otherwise the
+        // app's own follow-up navigation (RStudio → /auth-sign-in, Jupyter →
+        // /lab) is bounced back to a splash that can never clear, because the
+        // seat it's waiting for is the one it already holds. This is the cast
+        // RStudio/Jupyter "stuck on Starting…" bug.
+        use ruscker_core::{Replica, ReplicaId, ReplicaRegistry, ReplicaState};
+        let rid = ReplicaId::new();
+        let mk = |state: ReplicaState| Replica {
+            id: rid.clone(),
+            spec_id: "rstudio".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:8787".parse().unwrap(),
+            state,
+            started_at: chrono::Utc::now(),
+            sessions_active: 1,
+            sessions_max: 1, // full — its only seat is this session's
+            host: None,
+        };
+        let mut ready = ReplicaRegistry::new();
+        ready.add(mk(ReplicaState::Ready));
+        let owner = StickySession::new("rstudio", rid.clone());
+
+        assert!(
+            sticky_replica_is_live(&ready, "rstudio", &owner),
+            "the session holding the full single seat must bypass the splash"
+        );
+        assert!(
+            !sticky_replica_is_live(&ready, "rstudio", &StickySession::new("rstudio", ReplicaId::new())),
+            "a cookie pointing at an unknown replica falls through to a fresh pick"
+        );
+        assert!(
+            !sticky_replica_is_live(&ready, "jupyter", &owner),
+            "spec guard: a cookie for spec A must not satisfy spec B"
+        );
+
+        let mut starting = ReplicaRegistry::new();
+        starting.add(mk(ReplicaState::Starting));
+        assert!(
+            !sticky_replica_is_live(&starting, "rstudio", &owner),
+            "a Starting (not-yet-Ready) replica is not a usable seat yet"
         );
     }
 }

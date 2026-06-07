@@ -19,28 +19,35 @@ use ruscker_config::LandingCustomization;
 /// SELECT carries no placeholders and reads only TEXT columns, so the
 /// SQL is identical on both backends — only the pool differs.
 pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
-    type Row = (
-        Option<String>, // header_bg
-        Option<String>, // header_fg
-        Option<String>, // intro
-        String,         // intro_locales_json
-        Option<String>, // seo_title
-        Option<String>, // seo_description
-        Option<String>, // og_image
-        Option<String>, // analytics_html
-        Option<String>, // analytics_origins
-        Option<String>, // custom_css
-        Option<String>, // logos_json
-        Option<String>, // title
-        Option<String>, // subtitle
-        Option<String>, // theme_colors_json
-        Option<bool>,   // show_highlights
-        Option<String>, // footer
-    );
+    // A named FromRow struct rather than a tuple: sqlx only implements
+    // FromRow for tuples up to 16 columns, and this row has outgrown that.
+    // Field names must match the SELECT's column names. The derive is
+    // generic over the backend, so one struct serves sqlite + postgres.
+    #[derive(sqlx::FromRow)]
+    struct Row {
+        header_bg: Option<String>,
+        header_fg: Option<String>,
+        intro: Option<String>,
+        intro_locales_json: String,
+        seo_title: Option<String>,
+        seo_description: Option<String>,
+        og_image: Option<String>,
+        analytics_html: Option<String>,
+        analytics_origins: Option<String>,
+        custom_css: Option<String>,
+        logos_json: Option<String>,
+        title: Option<String>,
+        subtitle: Option<String>,
+        theme_colors_json: Option<String>,
+        show_highlights: Option<bool>,
+        footer: Option<String>,
+        default_theme: Option<String>,
+    }
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins, custom_css, logos_json,
-                title, subtitle, theme_colors_json, show_highlights, footer
+                title, subtitle, theme_colors_json, show_highlights, footer,
+                default_theme
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -49,51 +56,34 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
     .context("load landing_customization")?;
     match row {
         None => Ok(LandingCustomization::default()),
-        Some((
-            bg,
-            fg,
-            intro,
-            locales_json,
-            seo_title,
-            seo_description,
-            og_image,
-            analytics_html,
-            analytics_origins,
-            custom_css,
-            logos_json,
-            title,
-            subtitle,
-            theme_colors_json,
-            show_highlights,
-            footer,
-        )) => {
+        Some(r) => {
             let intro_locales =
-                serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
+                serde_json::from_str(&r.intro_locales_json).context("parse intro_locales_json")?;
             // `logos_json` is NULL on rows created before migration 0010.
-            let logos = match logos_json {
+            let logos = match r.logos_json {
                 Some(j) if !j.trim().is_empty() => {
                     serde_json::from_str(&j).context("parse logos_json")?
                 }
                 _ => Vec::new(),
             };
             // `theme_colors_json` is NULL before migration 0012.
-            let theme_colors = match theme_colors_json {
+            let theme_colors = match r.theme_colors_json {
                 Some(j) if !j.trim().is_empty() => {
                     serde_json::from_str(&j).context("parse theme_colors_json")?
                 }
                 _ => Default::default(),
             };
             Ok(LandingCustomization {
-                header_bg: bg,
-                header_fg: fg,
-                intro,
+                header_bg: r.header_bg,
+                header_fg: r.header_fg,
+                intro: r.intro,
                 intro_locales,
-                seo_title,
-                seo_description,
-                og_image,
-                analytics_html,
-                analytics_origins,
-                custom_css,
+                seo_title: r.seo_title,
+                seo_description: r.seo_description,
+                og_image: r.og_image,
+                analytics_html: r.analytics_html,
+                analytics_origins: r.analytics_origins,
+                custom_css: r.custom_css,
                 // Blocks live in their own table; callers that render
                 // or export them load via `landing_blocks`.
                 blocks: Vec::new(),
@@ -101,11 +91,12 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 // DB-backed editable customization.
                 show_admin_link: None,
                 logos,
-                title,
-                subtitle,
+                title: r.title,
+                subtitle: r.subtitle,
                 theme_colors,
-                show_highlights,
-                footer,
+                show_highlights: r.show_highlights,
+                footer: r.footer,
+                default_theme: r.default_theme,
             })
         }
     }
@@ -174,7 +165,7 @@ pub(crate) async fn update_in_tx(
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
                 custom_css = ?, logos_json = ?, title = ?, subtitle = ?,
                 theme_colors_json = ?, show_highlights = ?, footer = ?,
-                updated_at = ?
+                default_theme = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -193,6 +184,7 @@ pub(crate) async fn update_in_tx(
     .bind(&theme_colors_json)
     .bind(lc.show_highlights)
     .bind(none_if_empty(&lc.footer))
+    .bind(none_if_empty(&lc.default_theme))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -231,7 +223,8 @@ pub(crate) async fn update_in_tx_pg(
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
                 custom_css = $10, logos_json = $11, title = $12,
                 subtitle = $13, theme_colors_json = $14,
-                show_highlights = $15, footer = $16, updated_at = $17
+                show_highlights = $15, footer = $16, default_theme = $17,
+                updated_at = $18
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -250,6 +243,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(&theme_colors_json)
     .bind(lc.show_highlights)
     .bind(none_if_empty(&lc.footer))
+    .bind(none_if_empty(&lc.default_theme))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -354,6 +348,18 @@ mod tests {
         update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.footer.as_deref(), Some("© 2026 Acme"));
+    }
+
+    #[tokio::test]
+    async fn default_theme_roundtrips() {
+        let pool = open_memory().await.unwrap();
+        let lc = LandingCustomization {
+            default_theme: Some("dark".into()),
+            ..Default::default()
+        };
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
+        assert_eq!(got.default_theme.as_deref(), Some("dark"));
     }
 
     #[tokio::test]

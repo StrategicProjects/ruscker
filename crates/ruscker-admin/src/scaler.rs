@@ -89,6 +89,22 @@ pub const DEFAULT_SATURATION_GRACE_TICKS: u32 = 2;
 /// cooldown only gates the *saturation* scale-up path.
 pub const DEFAULT_SCALE_DOWN_COOLDOWN_TICKS: u32 = 6;
 
+/// A freshly-Ready replica is exempt from the idle counter (and so from
+/// idle scale-down) for this long, measured from `started_at` — which the
+/// backend stamps the moment the replica became Ready.
+///
+/// Why this exists: a cold-start visitor sits on the cold-start splash
+/// without holding a session until their reload actually forwards and
+/// registers one. So a replica just spawned *for that visitor* reads as
+/// idle (0 sessions) and, with `min-replicas: 0` + `seats-per-container:
+/// 1`, the scaler would reap it within `idle_grace` (~30s) — out from under
+/// the arriving visitor, who then hits a dead/again-cold app (the
+/// scale-to-zero flap; observed on cast as a phantom replica → connection
+/// reset). The grace gives the visitor a window to claim the seat; after
+/// it, a still-idle replica counts and reaps normally, so genuine idleness
+/// is unaffected.
+pub const YOUNG_REPLICA_GRACE_SECS: i64 = 60;
+
 /// Spawn the scaler loop as a detached tokio task. The returned
 /// handle is dropped at shutdown — there's no graceful stop
 /// because the loop only does idempotent work; an abrupt drop
@@ -299,7 +315,7 @@ async fn tick(
             .flat_map(|s| reg.replicas_of(&s.id).to_vec())
             .collect()
     };
-    update_idle_ticks(idle_ticks, &registry_snap);
+    update_idle_ticks(idle_ticks, &registry_snap, chrono::Utc::now());
 
     // Liveness reconcile: a container that exits unexpectedly (crash, OOM,
     // external stop) leaves its replica behind in the registry as `Ready`
@@ -550,12 +566,22 @@ async fn tick(
 fn update_idle_ticks(
     idle_ticks: &mut HashMap<ReplicaId, u32>,
     registry_snap: &[ruscker_core::Replica],
+    now: chrono::DateTime<chrono::Utc>,
 ) {
     use std::collections::HashSet;
     let alive: HashSet<&ReplicaId> = registry_snap.iter().map(|r| &r.id).collect();
     idle_ticks.retain(|id, _| alive.contains(id));
+    let grace = chrono::Duration::seconds(YOUNG_REPLICA_GRACE_SECS);
     for r in registry_snap {
-        if r.sessions_active == 0 {
+        // Exempt a just-Ready replica from the idle counter for a short
+        // grace (see `YOUNG_REPLICA_GRACE_SECS`): the cold-start visitor it
+        // was spawned for hasn't claimed a seat yet (they're on the splash),
+        // so it reads as idle and would otherwise be reaped out from under
+        // them. A young idle replica falls to the `else` branch — its
+        // counter stays cleared, so it gets a *full* idle_grace once it ages
+        // past the window.
+        let young = now.signed_duration_since(r.started_at) < grace;
+        if r.sessions_active == 0 && !young {
             *idle_ticks.entry(r.id.clone()).or_insert(0) += 1;
         } else {
             idle_ticks.remove(&r.id);
@@ -1290,7 +1316,12 @@ proxy:
             container_id: "x".into(),
             upstream: "127.0.0.1:1".parse().unwrap(),
             state: ReplicaState::Ready,
-            started_at: chrono::Utc::now(),
+            // Established replica: born well before the young-replica grace
+            // (`YOUNG_REPLICA_GRACE_SECS`), so idle-reaping tests exercise
+            // steady-state behaviour. The cold-start exemption is covered by
+            // `update_idle_ticks_exempts_young_replicas`, which overrides
+            // `started_at` to "just now".
+            started_at: chrono::Utc::now() - chrono::Duration::seconds(YOUNG_REPLICA_GRACE_SECS + 60),
             sessions_active: active,
             sessions_max: max,
             host: None,
@@ -1806,12 +1837,16 @@ proxy:
         let idle = replica_with_sessions("x", 0, 1);
         let busy = replica_with_sessions("x", 1, 1);
         let snap = vec![idle.clone(), busy.clone()];
+        // Evaluate well past the young-replica grace so the idle counter
+        // actually advances (a just-Ready replica is exempt — covered
+        // separately in `update_idle_ticks_exempts_young_replicas`).
+        let later = chrono::Utc::now() + chrono::Duration::seconds(YOUNG_REPLICA_GRACE_SECS + 60);
 
-        update_idle_ticks(&mut counts, &snap);
+        update_idle_ticks(&mut counts, &snap, later);
         assert_eq!(counts.get(&idle.id), Some(&1));
         assert!(!counts.contains_key(&busy.id), "active replicas have no entry");
 
-        update_idle_ticks(&mut counts, &snap);
+        update_idle_ticks(&mut counts, &snap, later);
         assert_eq!(counts.get(&idle.id), Some(&2));
 
         // Idle replica goes active → counter resets (removed).
@@ -1819,8 +1854,37 @@ proxy:
             sessions_active: 1,
             ..idle.clone()
         };
-        update_idle_ticks(&mut counts, &[now_active]);
+        update_idle_ticks(&mut counts, &[now_active], later);
         assert!(!counts.contains_key(&idle.id), "active replicas drop the counter");
+    }
+
+    #[test]
+    fn update_idle_ticks_exempts_young_replicas() {
+        // A just-Ready replica (started_at ≈ now) is idle (0 sessions) but
+        // must NOT accrue idle ticks — the cold-start visitor it was spawned
+        // for hasn't claimed its seat yet. An otherwise-identical replica
+        // that's already past the grace does accrue.
+        let mut counts: HashMap<ReplicaId, u32> = HashMap::new();
+        let now = chrono::Utc::now();
+        let young = ruscker_core::Replica {
+            started_at: now,
+            ..replica_with_sessions("x", 0, 1)
+        };
+        let old = ruscker_core::Replica {
+            started_at: now - chrono::Duration::seconds(YOUNG_REPLICA_GRACE_SECS + 30),
+            ..replica_with_sessions("x", 0, 1)
+        };
+
+        update_idle_ticks(&mut counts, &[young.clone(), old.clone()], now);
+        assert!(
+            !counts.contains_key(&young.id),
+            "a young idle replica is exempt from the idle counter"
+        );
+        assert_eq!(
+            counts.get(&old.id),
+            Some(&1),
+            "an idle replica past the grace counts normally"
+        );
     }
 
     #[test]
@@ -1830,7 +1894,7 @@ proxy:
         counts.insert(gone.id.clone(), 42);
         // The new snapshot doesn't include `gone` → it must be
         // garbage-collected so we don't leak counters.
-        update_idle_ticks(&mut counts, &[]);
+        update_idle_ticks(&mut counts, &[], chrono::Utc::now());
         assert!(counts.is_empty());
     }
 

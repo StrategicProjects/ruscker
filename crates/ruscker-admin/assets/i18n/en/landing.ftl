@@ -683,6 +683,9 @@ admin-landing-portal-title = Portal title
 admin-landing-portal-title-help = Shown at the top of the landing. Blank uses the config title (proxy.title).
 admin-landing-portal-subtitle = Subtitle
 admin-landing-portal-subtitle-help = The line under the title. Leave blank to hide it.
+admin-landing-footer = Footer
+admin-landing-footer-help = Text in the portal footer. Blank shows the version and wordmark.
+
 admin-landing-theme-colors = Theme colors
 admin-landing-theme-colors-help = Recolor the public portal's light and dark themes. Blank keeps the default.
 admin-landing-theme-light = Light theme

@@ -35,11 +35,12 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         Option<String>, // subtitle
         Option<String>, // theme_colors_json
         Option<bool>,   // show_highlights
+        Option<String>, // footer
     );
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins, custom_css, logos_json,
-                title, subtitle, theme_colors_json, show_highlights
+                title, subtitle, theme_colors_json, show_highlights, footer
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -64,6 +65,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             subtitle,
             theme_colors_json,
             show_highlights,
+            footer,
         )) => {
             let intro_locales =
                 serde_json::from_str(&locales_json).context("parse intro_locales_json")?;
@@ -103,6 +105,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 subtitle,
                 theme_colors,
                 show_highlights,
+                footer,
             })
         }
     }
@@ -170,7 +173,8 @@ pub(crate) async fn update_in_tx(
                 intro_locales_json = ?, seo_title = ?, seo_description = ?,
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
                 custom_css = ?, logos_json = ?, title = ?, subtitle = ?,
-                theme_colors_json = ?, show_highlights = ?, updated_at = ?
+                theme_colors_json = ?, show_highlights = ?, footer = ?,
+                updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -188,6 +192,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.subtitle))
     .bind(&theme_colors_json)
     .bind(lc.show_highlights)
+    .bind(none_if_empty(&lc.footer))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -226,7 +231,7 @@ pub(crate) async fn update_in_tx_pg(
                 og_image = $7, analytics_html = $8, analytics_origins = $9,
                 custom_css = $10, logos_json = $11, title = $12,
                 subtitle = $13, theme_colors_json = $14,
-                show_highlights = $15, updated_at = $16
+                show_highlights = $15, footer = $16, updated_at = $17
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -244,6 +249,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.subtitle))
     .bind(&theme_colors_json)
     .bind(lc.show_highlights)
+    .bind(none_if_empty(&lc.footer))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -336,6 +342,18 @@ mod tests {
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.analytics_html.as_deref(), Some(snippet));
         assert_eq!(got.analytics_origins.as_deref(), Some(origins));
+    }
+
+    #[tokio::test]
+    async fn footer_roundtrips() {
+        let pool = open_memory().await.unwrap();
+        let lc = LandingCustomization {
+            footer: Some("© 2026 Acme".into()),
+            ..Default::default()
+        };
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
+        assert_eq!(got.footer.as_deref(), Some("© 2026 Acme"));
     }
 
     #[tokio::test]

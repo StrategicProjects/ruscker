@@ -36,9 +36,15 @@
   {# Footer-center logos: absolutely centred over the footer (#468). #}
   {% block footer_logos_center %}{% endblock %}
   <div class="flex items-center gap-3">
+    {# Footer text: the operator's `landing-customization.footer` override
+       when set, else the built-in release-notes version link. #}
+    {% if !footer.is_empty() %}
+    <span class="opacity-70">{{ footer }}</span>
+    {% else %}
     <a class="opacity-60 hover:opacity-100 transition-opacity"
        href="https://github.com/StrategicProjects/ruscker/releases/tag/v{{ crate::APP_VERSION }}"
        title="Release notes">v{{ crate::APP_VERSION }}</a>
+    {% endif %}
     <a class="inline-flex items-center gap-2 opacity-70 hover:opacity-100 transition-opacity"
        href="https://github.com/StrategicProjects/ruscker"
        aria-label="Ruscker">

@@ -353,6 +353,12 @@ pub struct LandingCustomization {
     #[serde(default)]
     pub subtitle: Option<String>,
 
+    /// Footer text shown in the public portal footer. Blank ⇒ the
+    /// built-in version + "ruscker" lockup. Admin-managed via the
+    /// appearance editor; survives import/export.
+    #[serde(default)]
+    pub footer: Option<String>,
+
     /// Free-form intro paragraph rendered between the header and
     /// the filter section. Operator-authored, plain text (no HTML).
     ///

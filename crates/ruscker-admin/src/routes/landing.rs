@@ -51,6 +51,9 @@ struct LandingPage<'a> {
     /// Header subtitle — `landing-customization.subtitle` override, else
     /// the localized `landing-subtitle` (#468).
     header_subtitle: String,
+    /// Footer text — `landing-customization.footer` override. Empty ⇒ the
+    /// built-in version + wordmark lockup renders unchanged.
+    footer: String,
     /// `<style>` body setting the theme CSS variables from the operator's
     /// per-theme color overrides (#475). Empty ⇒ no `<style>` emitted.
     theme_style: String,
@@ -334,6 +337,8 @@ async fn index(
         intro,
         header_title,
         header_subtitle,
+        // Footer override (blank ⇒ the default version+wordmark lockup).
+        footer: lc.footer.clone().unwrap_or_default(),
         theme_style,
         header_style,
         page_title,

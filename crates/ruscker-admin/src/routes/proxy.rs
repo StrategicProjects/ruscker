@@ -37,7 +37,7 @@ use axum::Router;
 use http_body_util::BodyExt;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
-use hyper_util::rt::TokioExecutor;
+use hyper_util::rt::{TokioExecutor, TokioTimer};
 use ruscker_config::{RoutingStrategy, Spec, SpecKind};
 use ruscker_core::{Replica, ReplicaState};
 use ruscker_proxy::sticky::{self, CookieKey, StickySession, COOKIE_NAME};
@@ -101,7 +101,21 @@ pub fn routes() -> Router<AppState> {
 
 fn http_client() -> &'static Client<HttpConnector, Body> {
     static CLIENT: OnceLock<Client<HttpConnector, Body>> = OnceLock::new();
-    CLIENT.get_or_init(|| Client::builder(TokioExecutor::new()).build_http())
+    CLIENT.get_or_init(|| {
+        Client::builder(TokioExecutor::new())
+            // Interactive app servers (RStudio Server, Shiny) close idle
+            // keep-alive connections aggressively — often within a few
+            // seconds. hyper's default 90 s pool idle timeout keeps those
+            // dead sockets and then dispatches the next request onto one,
+            // which surfaces as `client error (SendRequest)` → a spurious
+            // "upstream error" on the visitor's first navigation (it works
+            // on retry, since that opens a fresh connection). Evicting
+            // pooled idle connections quickly keeps the pool fresh; the
+            // per-request retry in `do_forward` covers the residual race.
+            .pool_idle_timeout(std::time::Duration::from_secs(10))
+            .pool_timer(TokioTimer::new())
+            .build_http()
+    })
 }
 
 // ── Path-strip handlers ───────────────────────────────────────────
@@ -1587,8 +1601,46 @@ async fn do_forward(
         req = Request::from_parts(parts, Body::new(limited));
     }
 
-    let client = http_client().clone();
-    let upstream_resp = client.request(req).await?;
+    let client = http_client();
+
+    // For an idempotent, body-less request — GET/HEAD, which is the bulk of
+    // interactive-app traffic (navigations, assets, readiness polls) — we
+    // can safely replay it on a fresh connection if the first attempt fails
+    // to send. This rescues the hyper pool race where the app closed an idle
+    // pooled connection just as we dispatched onto it (`client error
+    // (SendRequest)`): the visitor's first navigation would otherwise get a
+    // bare "upstream error" and only work on a manual retry. We capture the
+    // request head only for retryable methods, so the success path and any
+    // request with a body (POST/PUT — can't be replayed without buffering)
+    // are unaffected.
+    let retry_head = matches!(*req.method(), Method::GET | Method::HEAD).then(|| {
+        (
+            req.method().clone(),
+            req.uri().clone(),
+            req.version(),
+            req.headers().clone(),
+        )
+    });
+    let upstream_resp = match client.request(req).await {
+        Ok(resp) => resp,
+        Err(first) => {
+            let Some((method, uri, version, headers)) = retry_head else {
+                return Err(first.into());
+            };
+            tracing::warn!(
+                upstream = %replica.upstream, error = ?first,
+                "upstream send failed; retrying once on a fresh connection"
+            );
+            let mut retry = Request::builder()
+                .method(method)
+                .uri(uri)
+                .version(version)
+                .body(Body::empty())
+                .map_err(|e| anyhow::anyhow!("rebuild retry request: {e}"))?;
+            *retry.headers_mut() = headers;
+            client.request(retry).await?
+        }
+    };
 
     let (parts, body) = upstream_resp.into_parts();
     let body = Body::new(body.map_err(std::io::Error::other));
@@ -2455,6 +2507,55 @@ docker-registry-password: hunter2
         // A missing id is not cached (map stays bounded by the catalog).
         assert!(find_spec(&state, "ghost").await.is_none());
         assert!(state.spec_cache.get("ghost").is_none());
+    }
+
+    // A GET whose first upstream connection dies before responding — the
+    // hyper pool race that surfaced on cast as `client error (SendRequest)`
+    // → a spurious "upstream error" on the visitor's first RStudio open —
+    // must be rescued by the one-shot retry in do_forward, not 502'd. The
+    // fake upstream drops the first connection without a reply and answers
+    // 200 on the second; reaching the 200 proves a second connection (the
+    // retry) was made, since otherwise the second accept never completes.
+    #[tokio::test]
+    async fn do_forward_retries_a_get_when_the_upstream_connection_dies() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            // 1st connection: accept, then close with no response.
+            let (conn1, _) = listener.accept().await.unwrap();
+            drop(conn1);
+            // 2nd connection (the retry): answer a real 200.
+            let (mut conn2, _) = listener.accept().await.unwrap();
+            let resp = "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok";
+            conn2.write_all(resp.as_bytes()).await.unwrap();
+            conn2.flush().await.unwrap();
+        });
+
+        let replica = Replica {
+            id: ruscker_core::ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "rstudio".into(),
+            container_id: "c".into(),
+            upstream: addr,
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+            host: None,
+        };
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri("http://placeholder/")
+            .body(Body::empty())
+            .unwrap();
+
+        let resp = do_forward(&replica, "/".to_string(), "/app/rstudio", false, req, None)
+            .await
+            .expect("the dead-connection GET should be retried, not surfaced as an error");
+        assert_eq!(resp.status(), StatusCode::OK);
+        server.await.unwrap();
     }
 
     /// A full Ready replica (seats=1, 1 session) for `spec_id`.

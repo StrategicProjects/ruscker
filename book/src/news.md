@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.84 — 2026-06-07
+
+Tell visitors when an app is full instead of an endless "Starting…".
+
+**Interface**
+- When an app is at its replica ceiling with every seat taken, a new
+  visitor used to see the same "Starting…" page and wait forever, as if
+  the container were perpetually booting. The waiting page now detects
+  this: while the app can still scale it shows "Starting…" as before, but
+  at capacity it says "<app> is full right now — this page opens
+  automatically as soon as one frees up." Both keep polling, so the visitor
+  is let in the moment a seat frees.
+
 ## v0.1.83 — 2026-06-07
 
 Fix runaway session counts on single-seat interactive apps.

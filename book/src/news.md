@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.83 — 2026-06-07
+
+Fix runaway session counts on single-seat interactive apps.
+
+**Fixes**
+- A single browser visit to a `seats: 1` app (RStudio, Jupyter) could
+  inflate `sessions_active` to 7–9 and climbing, filling the seat and
+  trapping the visitor (and any second visitor) on the starting splash.
+  An app's `crossorigin` script bundles and credential-less requests
+  arrive without the sticky cookie, and each was being counted as a new
+  session. Now only a real visit — a top-level page navigation — opens a
+  session and takes a seat; subresources ride the existing replica without
+  counting. This also makes `max-replicas` scale-out behave: N concurrent
+  visitors now map to N containers instead of one visit spawning several.
+
 ## v0.1.82 — 2026-06-07
 
 Fix single-seat apps (RStudio, Jupyter) getting stuck on the starting

@@ -107,6 +107,29 @@
         </div>
       </section>
 
+      {# ── Card: Logo — header brand presentation + size/margin. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-logo-card") }}</div>
+        <input type="hidden" name="logo_mode" :value="form.logo_mode">
+        <input type="hidden" name="logo_size" :value="form.logo_size">
+        <input type="hidden" name="logo_margin" :value="form.logo_margin">
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.logo_mode || 'mark') === 'mark' }" @click="form.logo_mode = 'mark'">{{ self.t("admin-landing-logo-mode-mark") }}</button>
+            <button type="button" :class="{ 'is-active': form.logo_mode === 'symbol' }" @click="form.logo_mode = 'symbol'">{{ self.t("admin-landing-logo-mode-symbol") }}</button>
+            <button type="button" :class="{ 'is-active': form.logo_mode === 'custom' }" @click="form.logo_mode = 'custom'">{{ self.t("admin-landing-logo-mode-custom") }}</button>
+          </div>
+        </div>
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-logo-size") }} · <span x-text="(form.logo_size || '28') + 'px'"></span></label>
+          <input type="range" min="12" max="64" step="1" x-model="form.logo_size" style="width:100%">
+        </div>
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-logo-margin") }} · <span x-text="(form.logo_margin || '8') + 'px'"></span></label>
+          <input type="range" min="0" max="40" step="1" x-model="form.logo_margin" style="width:100%">
+        </div>
+      </section>
+
       {# ── Card: Appearance — header colours + per-theme palettes. #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-card-appearance") }}</div>

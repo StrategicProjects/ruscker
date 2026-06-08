@@ -692,6 +692,13 @@ admin-landing-show-search = Barre de recherche
 admin-landing-show-filters = Filtres d'accès (public/restreint)
 admin-landing-brand-color = Couleur de marque
 admin-landing-brand-color-help = Un raccourci pour l'accent (clair et sombre). Réglage fin dans Apparence.
+admin-landing-logo-card = Logo
+admin-landing-logo-mode-mark = Marque + nom
+admin-landing-logo-mode-symbol = Symbole seul
+admin-landing-logo-mode-custom = Personnalisé
+admin-landing-logo-size = Taille du logo
+admin-landing-logo-margin = Marge du logo
+
 
 
 

@@ -43,27 +43,33 @@
          surface, or a monochrome `currentColor` mark when a custom header
          background is in play (a brand polygon can collide with the chosen
          background — e.g. teal on teal disappears). #}
+      {# Brand mark: operator header-left logos win; otherwise the built-in
+         mark, unless logo-mode is `custom` (operator logos only). Size and
+         right margin come from the appearance editor (#623). #}
       {% if self.has_logos_at("header", "left") %}
         {% call logos(self.logo_view("header", "left", 28)) %}{% endcall %}
-      {% else %}
+      {% else if logo_mode != "custom" %}
         {% if header_style.is_empty() %}
-        <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
+        <svg viewBox="0 0 80 80" width="{{ logo_size }}" height="{{ logo_size }}" style="margin-right:{{ logo_margin }}px" aria-hidden="true" class="flex-none">
           <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
           <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
           <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
         </svg>
         {% else %}
-        <svg viewBox="0 0 80 80" width="28" height="28" aria-hidden="true" class="flex-none">
+        <svg viewBox="0 0 80 80" width="{{ logo_size }}" height="{{ logo_size }}" style="margin-right:{{ logo_margin }}px" aria-hidden="true" class="flex-none">
           <polygon points="14,52 40,40 66,52 40,64" fill="currentColor" opacity="0.45"/>
           <polygon points="14,40 40,28 66,40 40,52" fill="currentColor" opacity="0.7"/>
           <polygon points="14,28 40,16 66,28 40,40" fill="currentColor" opacity="1"/>
         </svg>
         {% endif %}
       {% endif %}
+      {# Name + subtitle, hidden in `symbol` (mark-only) mode. #}
+      {% if logo_mode != "symbol" %}
       <div>
         <h1 class="text-xl font-medium tracking-tight">{{ header_title }}</h1>
         {% if !header_subtitle.is_empty() %}<p class="text-xs opacity-70 mt-1">{{ header_subtitle }}</p>{% endif %}
       </div>
+      {% endif %}
     </div>
     {# Header-center logo(s) (#468): absolutely centred within the header
        bar (the empty middle between the title and the chrome), so they read

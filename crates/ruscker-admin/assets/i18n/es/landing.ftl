@@ -690,6 +690,9 @@ admin-landing-default-theme-help = El tema inicial para un visitante nuevo. Aún
 admin-landing-visible-sections = Secciones visibles
 admin-landing-show-search = Barra de búsqueda
 admin-landing-show-filters = Filtros de acceso (público/restringido)
+admin-landing-brand-color = Color de marca
+admin-landing-brand-color-help = Atajo para el acento (claro y oscuro). Ajuste fino en Apariencia.
+
 
 
 

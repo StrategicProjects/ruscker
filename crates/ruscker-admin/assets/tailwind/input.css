@@ -192,6 +192,20 @@ body {
   .topbar-progress { transition: opacity 0.25s ease; }
 }
 
+/* Brand-color swatch row (appearance editor, ruscker-06): quick-pick
+   accent presets. The active swatch gets a ring; clicking sets the
+   light/dark accent. */
+.brand-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.brand-swatch {
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  padding: 0; transition: transform 0.1s ease, box-shadow 0.15s ease;
+}
+.brand-swatch:hover { transform: translateY(-1px); }
+.brand-swatch.is-active {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor;
+}
+
 /* ─── Dashboard: KPI cards + app-grouped replicas (handoff #623) ───
  * Replaces the flat replica table with metric cards on top and one
  * expandable card per app. Dot classes reuse the server-emitted names

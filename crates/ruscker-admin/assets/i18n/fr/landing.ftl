@@ -242,7 +242,12 @@ spec-form-lifetime = Durée max. (min)
 spec-form-lifetime-help = 360 = 6 heures
 spec-form-link-section = Lien externe
 spec-form-link = URL cible
-spec-form-meta = Métadonnées
+spec-form-meta = Accès et échelle
+spec-form-restricted = Accès restreint
+spec-form-restricted-hint = Nécessite une connexion pour ouvrir
+spec-form-initial-replicas = Répliques initiales
+spec-form-autoscaling = Mise à l'échelle automatique
+spec-form-autoscaling-hint = Adapte les répliques à la demande
 spec-form-updated = Mis à jour le
 spec-form-updated-help = Vide pour utiliser la date d'aujourd'hui.
 spec-form-preview = Aperçu de la carte

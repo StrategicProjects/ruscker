@@ -374,9 +374,22 @@
         </span>
       </label>
 
-      {# Access — who may see + reach this app (#155). Promoted out of the
-         runtime "Advanced" collapse (#523): visibility is governance/metadata,
-         not a runtime knob. #}
+      {# Restricted access (#701) — a toggle over the access lists. Off ⇒
+         public (lists cleared); on ⇒ reveal the group/user pickers. #}
+      <label class="toggle-row">
+        <div>
+          <div class="toggle-row__label">{{ self.t("spec-form-restricted") }}</div>
+          <div class="toggle-row__hint">{{ self.t("spec-form-restricted-hint") }}</div>
+        </div>
+        <span class="switch">
+          <input type="checkbox" x-model="restricted"
+                 @change="if (!restricted) { form.access_groups = ''; form.access_users = ''; }">
+          <span class="switch__track"><span class="switch__dot"></span></span>
+        </span>
+      </label>
+
+      <div x-show="restricted" x-cloak>
+      {# Access — who may see + reach this app (#155). #}
       {# Access groups as toggle pills (#623). The submitted value is the
          hidden comma-joined `access_groups`; pills + the "add group" input
          toggle entries in it. A known group not yet in `availableGroups`
@@ -421,6 +434,25 @@
                placeholder="alice, bob" class="spec-form-input">
       </div>
       <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
+      </div>{# /x-show restricted #}
+
+      {# Initial replicas (#701) — the always-on pool floor (min_replicas),
+         surfaced here as part of "scale". Container-backed kinds only; the
+         autoscaling ceiling + thresholds stay in Advanced. #}
+      <template x-if="needsContainer()">
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label for="f-init-rep" class="spec-form-label">{{ self.t("spec-form-initial-replicas") }}</label>
+          {% call help(self.t("spec-help-min-replicas")) %}{% endcall %}
+        </div>
+        <div class="stepper">
+          <button type="button" tabindex="-1" @click="form.min_replicas = String(Math.max(0, (parseInt(form.min_replicas, 10) || 0) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
+          <input id="f-init-rep" type="number" name="min_replicas" min="0" placeholder="1"
+                 x-model="form.min_replicas" class="stepper__input">
+          <button type="button" tabindex="-1" @click="form.min_replicas = String((parseInt(form.min_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      </template>
 
       <div class="spec-form-field">
         <div class="spec-form-label-row">
@@ -683,21 +715,22 @@
           <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-registry-inline-note") }}</div>
           {% endif %}
 
-          {# Scaling — replica pool #}
+          {# Scaling — autoscaling ceiling + thresholds. The floor is the
+             "Initial replicas" stepper up in Access & scale (#701). #}
           <div class="spec-form-subsection">{{ self.t("spec-form-scaling-section") }}</div>
-          <div class="grid grid-cols-3 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-min-rep" class="spec-form-label">{{ self.t("spec-form-min-replicas") }}</label>
-                {% call help(self.t("spec-help-min-replicas")) %}{% endcall %}
-              </div>
-              <div class="stepper">
-                <button type="button" tabindex="-1" @click="form.min_replicas = String(Math.max(0, (parseInt(form.min_replicas, 10) || 0) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
-                <input id="f-min-rep" type="number" name="min_replicas" min="0" placeholder="1"
-                       x-model="form.min_replicas" class="stepper__input">
-                <button type="button" tabindex="-1" @click="form.min_replicas = String((parseInt(form.min_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
-              </div>
+          <label class="toggle-row">
+            <div>
+              <div class="toggle-row__label">{{ self.t("spec-form-autoscaling") }}</div>
+              <div class="toggle-row__hint">{{ self.t("spec-form-autoscaling-hint") }}</div>
             </div>
+            <span class="switch">
+              <input type="checkbox" x-model="autoscaling"
+                     @change="if (!autoscaling) { form.max_replicas = ''; form.scale_up_threshold = ''; form.scale_down_threshold = ''; form.scale_down_grace = ''; }">
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+          </label>
+          <div x-show="autoscaling" x-cloak>
+          <div class="grid grid-cols-2 gap-3">
             <div class="spec-form-field">
               <div class="spec-form-label-row">
                 <label for="f-max-rep" class="spec-form-label">{{ self.t("spec-form-max-replicas") }}</label>
@@ -753,6 +786,7 @@
                      value="{{ form.drain_timeout }}" placeholder="30" class="spec-form-input">
             </div>
           </div>
+          </div>{# /x-show autoscaling #}
 
           {# Resources — per-container limits #}
           <div class="spec-form-subsection">{{ self.t("spec-form-resources-section") }}</div>
@@ -1184,6 +1218,12 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // has advanced config set — so the form opens clean and uncluttered
   // (operator request). Click the toggle to reveal it.
   advancedOpen: false,
+  // Restricted-access toggle (#701): on when the spec already has any
+  // group/user access list; off ⇒ public. Toggling off clears the lists.
+  restricted: !((initial.access_groups || '').trim() === '' && (initial.access_users || '').trim() === ''),
+  // Autoscaling toggle (#701): on when a max-replicas ceiling above 1 is
+  // set. Off ⇒ the ceiling + thresholds are cleared (run at the floor).
+  autoscaling: (parseInt(initial.max_replicas, 10) || 0) > 1,
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder). Seeded from any
   // existing `cover` value.

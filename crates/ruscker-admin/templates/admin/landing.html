@@ -537,6 +537,23 @@
       </div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-analytics") }}</div>
+      <input type="hidden" name="analytics_provider" :value="form.analytics_provider">
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-analytics-provider") }}</label>
+        <div class="seg-control" role="group">
+          <button type="button" :class="{ 'is-active': (form.analytics_provider || 'none') === 'none' }" @click="form.analytics_provider = 'none'">{{ self.t("admin-landing-provider-none") }}</button>
+          <button type="button" :class="{ 'is-active': form.analytics_provider === 'ga' }" @click="form.analytics_provider = 'ga'">Google Analytics</button>
+          <button type="button" :class="{ 'is-active': form.analytics_provider === 'plausible' }" @click="form.analytics_provider = 'plausible'">Plausible</button>
+          <button type="button" :class="{ 'is-active': form.analytics_provider === 'matomo' }" @click="form.analytics_provider = 'matomo'">Matomo</button>
+        </div>
+      </div>
+      <div class="spec-form-field" x-show="form.analytics_provider && form.analytics_provider !== 'none'" x-cloak>
+        <label class="spec-form-label">{{ self.t("admin-landing-analytics-key") }}</label>
+        <input type="text" name="analytics_key" x-model="form.analytics_key"
+               :placeholder="form.analytics_provider === 'ga' ? 'G-XXXXXXX' : (form.analytics_provider === 'plausible' ? 'example.com' : 'https://matomo.host|1')"
+               class="spec-form-input spec-form-input--mono" value="{{ form.analytics_key }}">
+        <div class="spec-form-help">{{ self.t("admin-landing-analytics-key-help") }}</div>
+      </div>
       <div class="spec-form-field">
         <label class="spec-form-label">{{ self.t("admin-landing-analytics-html") }}</label>
         <div class="code-editor-wrap" data-mode="html">

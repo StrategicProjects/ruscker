@@ -697,7 +697,13 @@
   {# ── Image picker modal (shared mixin, #451) ───────────────────
      Opened by a logo row's "Choose image" button via openImagePicker.
      Same markup + `image-picker-*` styles as the spec form; the mixin
-     in _layout.html supplies the state/behaviour. #}
+     in _layout.html supplies the state/behaviour. The overlay is
+     teleported to <body> so its `position: fixed` resolves against the
+     viewport — the admin shell's `<main class="fade-in">` animates a
+     transform, which makes it a containing block for fixed descendants,
+     and without the teleport the modal renders centered in the (tall)
+     page instead of the screen. #}
+  <template x-teleport="body">
   <div x-show="picker.open" x-cloak class="image-picker-overlay"
        @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
     <div class="image-picker-modal">
@@ -727,6 +733,7 @@
       <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
     </div>
   </div>
+  </template>
 </div>
 
 {# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}

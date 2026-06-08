@@ -36,32 +36,24 @@
         {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
   <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6 relative">
     <div class="flex items-center gap-3">
-      {# Header-left identity. When the operator configured header-left
-         logo(s) (#468) they REPLACE the Ruscker mark — the title/subtitle
-         text stays (operators customise those via #468 slice A). Otherwise
-         the built-in Ruscker mark renders (#182): brand teal on the default
-         surface, or a monochrome `currentColor` mark when a custom header
-         background is in play (a brand polygon can collide with the chosen
-         background — e.g. teal on teal disappears). #}
-      {# Brand mark: operator header-left logos win; otherwise the built-in
-         mark, unless logo-mode is `custom` (operator logos only). Size and
-         right margin come from the appearance editor (#623). #}
+      {# Header-left identity (#468, revised #701 follow-up). The brand
+         slot resolves to ONE of:
+           - operator header-left logo(s) — REPLACE the mark, and are now
+             sized by the appearance editor's logo-size/-margin (so the
+             size slider controls the operator's logo, not just the mark);
+           - otherwise the built-in Ruscker mark, but ONLY when there's no
+             operator header logo anywhere and logo-mode isn't `custom`
+             (so a center/right logo no longer shows the mark too).
+         The mark is always rendered in brand colours — a custom header
+         background no longer forces a monochrome (grey) mark. #}
       {% if self.has_logos_at("header", "left") %}
-        {% call logos(self.logo_view("header", "left", 28)) %}{% endcall %}
-      {% else if logo_mode != "custom" %}
-        {% if header_style.is_empty() %}
+        {% call logos(self.brand_logo_view()) %}{% endcall %}
+      {% else if logo_mode != "custom" && !self.has_any_header_logo() %}
         <svg viewBox="0 0 80 80" width="{{ logo_size }}" height="{{ logo_size }}" style="margin-right:{{ logo_margin }}px" aria-hidden="true" class="flex-none">
           <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
           <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
           <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
         </svg>
-        {% else %}
-        <svg viewBox="0 0 80 80" width="{{ logo_size }}" height="{{ logo_size }}" style="margin-right:{{ logo_margin }}px" aria-hidden="true" class="flex-none">
-          <polygon points="14,52 40,40 66,52 40,64" fill="currentColor" opacity="0.45"/>
-          <polygon points="14,40 40,28 66,40 40,52" fill="currentColor" opacity="0.7"/>
-          <polygon points="14,28 40,16 66,28 40,40" fill="currentColor" opacity="1"/>
-        </svg>
-        {% endif %}
       {% endif %}
       {# Name + subtitle, hidden in `symbol` (mark-only) mode. #}
       {% if logo_mode != "symbol" %}

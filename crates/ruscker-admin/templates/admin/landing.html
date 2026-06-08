@@ -226,6 +226,7 @@
             <button type="button" :class="{ 'is-active': (form.header_preset || 'soft') === 'soft' }" @click="form.header_preset = 'soft'">{{ self.t("admin-landing-preset-soft") }}</button>
             <button type="button" :class="{ 'is-active': form.header_preset === 'bold' }" @click="form.header_preset = 'bold'">{{ self.t("admin-landing-preset-bold") }}</button>
           </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-header-bg-preset-help") }}</div>
         </div>
         <div class="spec-form-field">
           <label class="spec-form-label">{{ self.t("admin-landing-card-covers") }}</label>

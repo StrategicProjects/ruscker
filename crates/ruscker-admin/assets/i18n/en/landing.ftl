@@ -692,6 +692,13 @@ admin-landing-show-search = Search bar
 admin-landing-show-filters = Access filters (public/restricted)
 admin-landing-brand-color = Brand color
 admin-landing-brand-color-help = A shortcut for the accent (light and dark). Fine-tune in Appearance.
+admin-landing-logo-card = Logo
+admin-landing-logo-mode-mark = Mark + name
+admin-landing-logo-mode-symbol = Symbol only
+admin-landing-logo-mode-custom = Custom
+admin-landing-logo-size = Logo size
+admin-landing-logo-margin = Logo margin
+
 
 
 

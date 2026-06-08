@@ -148,9 +148,10 @@ impl LandingForm {
             // Checkboxes: default-on, so a missing stored value pre-checks.
             show_search: if lc.show_search.unwrap_or(true) { "on".into() } else { String::new() },
             show_filters: if lc.show_filters.unwrap_or(true) { "on".into() } else { String::new() },
-            logo_mode: lc.logo_mode.clone().unwrap_or_default(),
-            logo_size: lc.logo_size.map(|n| n.to_string()).unwrap_or_default(),
-            logo_margin: lc.logo_margin.map(|n| n.to_string()).unwrap_or_default(),
+            logo_mode: lc.logo_mode.clone().unwrap_or_else(|| "mark".into()),
+            // Defaulted so the editor sliders show the effective value.
+            logo_size: lc.logo_size.unwrap_or(28).to_string(),
+            logo_margin: lc.logo_margin.unwrap_or(8).to_string(),
             header_preset: lc.header_preset.clone().unwrap_or_default(),
             card_cover: lc.card_cover.clone().unwrap_or_default(),
             catalog_layout: lc.catalog_layout.clone().unwrap_or_default(),

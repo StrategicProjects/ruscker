@@ -90,6 +90,23 @@
 
       </section>
 
+      {# ── Card: Brand color — quick-pick accent presets (sets the
+         light + dark accent; fine-tune in Appearance below). #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-brand-color") }}</div>
+        <div class="spec-form-field">
+          <div class="brand-swatches">
+            {% for c in ["#0f6e56", "#2563eb", "#1e3a5f", "#10b981", "#ec4899", "#8b5cf6"] %}
+            <button type="button" class="brand-swatch" style="background:{{ c }};color:{{ c }}"
+                    :class="{ 'is-active': (form.theme_light_accent || '').toLowerCase() === '{{ c }}' }"
+                    @click="form.theme_light_accent = '{{ c }}'; form.theme_dark_accent = '{{ c }}'"
+                    aria-label="{{ c }}"></button>
+            {% endfor %}
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-brand-color-help") }}</div>
+        </div>
+      </section>
+
       {# ── Card: Appearance — header colours + per-theme palettes. #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-card-appearance") }}</div>

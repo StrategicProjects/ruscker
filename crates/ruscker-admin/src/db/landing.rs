@@ -52,6 +52,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         catalog_layout: Option<String>,
         catalog_density: Option<String>,
         analytics_provider: Option<String>,
+        analytics_key: Option<String>,
     }
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
@@ -59,7 +60,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 title, subtitle, theme_colors_json, show_highlights, footer,
                 default_theme, show_search, show_filters, logo_mode,
                 logo_size, logo_margin, header_preset, card_cover,
-                catalog_layout, catalog_density, analytics_provider
+                catalog_layout, catalog_density, analytics_provider,
+                analytics_key
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -119,6 +121,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 catalog_layout: r.catalog_layout,
                 catalog_density: r.catalog_density,
                 analytics_provider: r.analytics_provider,
+                analytics_key: r.analytics_key,
             })
         }
     }
@@ -190,7 +193,8 @@ pub(crate) async fn update_in_tx(
                 default_theme = ?, show_search = ?, show_filters = ?,
                 logo_mode = ?, logo_size = ?, logo_margin = ?,
                 header_preset = ?, card_cover = ?, catalog_layout = ?,
-                catalog_density = ?, analytics_provider = ?, updated_at = ?
+                catalog_density = ?, analytics_provider = ?,
+                analytics_key = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -220,6 +224,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.catalog_layout))
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))
+    .bind(none_if_empty(&lc.analytics_key))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -262,7 +267,8 @@ pub(crate) async fn update_in_tx_pg(
                 show_search = $18, show_filters = $19, logo_mode = $20,
                 logo_size = $21, logo_margin = $22, header_preset = $23,
                 card_cover = $24, catalog_layout = $25, catalog_density = $26,
-                analytics_provider = $27, updated_at = $28
+                analytics_provider = $27, analytics_key = $28,
+                updated_at = $29
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -292,6 +298,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.catalog_layout))
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))
+    .bind(none_if_empty(&lc.analytics_key))
     .bind(now)
     .execute(&mut **tx)
     .await

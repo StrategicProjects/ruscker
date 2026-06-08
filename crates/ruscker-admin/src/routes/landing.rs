@@ -293,7 +293,24 @@ async fn index(
     } else {
         og_raw
     };
-    let analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
+    // Analytics: a provider snippet (GA/Plausible/Matomo) built from the
+    // picker, prepended to any raw `analytics-html` escape hatch. The
+    // provider's CSP origins are folded into `origins` below.
+    let mut analytics_html = not_blank(&lc.analytics_html).unwrap_or_default();
+    let provider_origins = match analytics_provider_snippet(
+        lc.effective_analytics_provider(),
+        lc.analytics_key.as_deref().unwrap_or_default(),
+    ) {
+        Some((snippet, origins)) => {
+            analytics_html = if analytics_html.is_empty() {
+                snippet
+            } else {
+                format!("{snippet}\n{analytics_html}")
+            };
+            origins
+        }
+        None => String::new(),
+    };
     let custom_css = not_blank(&lc.custom_css).unwrap_or_default();
 
     // Custom HTML blocks (DB-only). Split into the two slots; collect
@@ -301,6 +318,12 @@ async fn index(
     // content can load.
     let (mut blocks_top, mut blocks_bottom) = (Vec::new(), Vec::new());
     let mut origins = not_blank(&lc.analytics_origins).unwrap_or_default();
+    if !provider_origins.is_empty() {
+        if !origins.is_empty() {
+            origins.push(' ');
+        }
+        origins.push_str(&provider_origins);
+    }
     if let Some(db) = state.db.as_ref() {
         match crate::db::landing_blocks::list_enabled(db).await {
             Ok(blocks) => {
@@ -423,6 +446,107 @@ fn render<T: Template>(t: &T) -> Response {
             tracing::error!(error = ?err, "template render failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "template error").into_response()
         }
+    }
+}
+
+/// Build the standard analytics snippet + CSP origins for a provider + site
+/// key (appearance editor, ruscker-06). Returns `None` for `none`/blank or
+/// a key that fails the provider's charset — the key is admin-trusted but
+/// still lands in a `<script>`, so we keep it to the strict shape each
+/// provider expects. The raw `analytics-html` escape hatch is unaffected.
+fn analytics_provider_snippet(provider: &str, key: &str) -> Option<(String, String)> {
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    match provider {
+        // GA4 measurement id, e.g. G-XXXXXXX.
+        "ga" => {
+            if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                return None;
+            }
+            let html = format!(
+                "<script async src=\"https://www.googletagmanager.com/gtag/js?id={id}\"></script>\
+                 <script>window.dataLayer=window.dataLayer||[];function gtag(){{dataLayer.push(arguments);}}\
+                 gtag('js',new Date());gtag('config','{id}');</script>",
+                id = key
+            );
+            Some((
+                html,
+                "https://www.googletagmanager.com https://www.google-analytics.com".into(),
+            ))
+        }
+        // Plausible domain, e.g. example.com.
+        "plausible" => {
+            if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') {
+                return None;
+            }
+            let html = format!(
+                "<script defer data-domain=\"{d}\" src=\"https://plausible.io/js/script.js\"></script>",
+                d = key
+            );
+            Some((html, "https://plausible.io".into()))
+        }
+        // Matomo: key is "https://matomo.host|siteId".
+        "matomo" => {
+            let (url, site) = key.split_once('|')?;
+            let url = url.trim().trim_end_matches('/');
+            let site = site.trim();
+            let clean_url = url.starts_with("https://")
+                && !url
+                    .chars()
+                    .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>'));
+            if !clean_url || site.is_empty() || !site.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            let html = format!(
+                "<script>var _paq=window._paq=window._paq||[];_paq.push(['trackPageView']);\
+                 _paq.push(['enableLinkTracking']);(function(){{var u=\"{url}/\";\
+                 _paq.push(['setTrackerUrl',u+'matomo.php']);_paq.push(['setSiteId','{site}']);\
+                 var d=document,g=d.createElement('script'),s=d.getElementsByTagName('script')[0];\
+                 g.async=true;g.src=u+'matomo.js';s.parentNode.insertBefore(g,s);}})();</script>",
+                url = url, site = site
+            );
+            Some((html, url.to_string()))
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod analytics_tests {
+    use super::analytics_provider_snippet;
+
+    #[test]
+    fn ga_snippet_built_from_measurement_id() {
+        let (html, origins) = analytics_provider_snippet("ga", "G-ABC123").unwrap();
+        assert!(html.contains("gtag/js?id=G-ABC123"));
+        assert!(origins.contains("googletagmanager.com"));
+    }
+
+    #[test]
+    fn plausible_snippet_built_from_domain() {
+        let (html, origins) = analytics_provider_snippet("plausible", "example.com").unwrap();
+        assert!(html.contains("data-domain=\"example.com\""));
+        assert_eq!(origins, "https://plausible.io");
+    }
+
+    #[test]
+    fn matomo_needs_url_and_numeric_site() {
+        let (html, origins) =
+            analytics_provider_snippet("matomo", "https://m.example.com|7").unwrap();
+        assert!(html.contains("setSiteId','7'"));
+        assert_eq!(origins, "https://m.example.com");
+        // Bad shapes are rejected.
+        assert!(analytics_provider_snippet("matomo", "https://m.example.com|abc").is_none());
+        assert!(analytics_provider_snippet("matomo", "ftp://x|1").is_none());
+    }
+
+    #[test]
+    fn rejects_blank_and_injection_chars() {
+        assert!(analytics_provider_snippet("ga", "").is_none());
+        assert!(analytics_provider_snippet("ga", "G-X\"><script>").is_none());
+        assert!(analytics_provider_snippet("none", "x").is_none());
     }
 }
 

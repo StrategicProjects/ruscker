@@ -415,6 +415,14 @@ pub struct LandingCustomization {
     #[serde(default, rename = "analytics-provider")]
     pub analytics_provider: Option<String>,
 
+    /// Site key for the chosen [`Self::analytics_provider`]: a GA4
+    /// measurement id (`G-XXXX`), a Plausible domain (`example.com`), or
+    /// a Matomo `https://matomo.host|siteId`. The portal builds the
+    /// standard snippet from provider + key (raw `analytics-html` still
+    /// works for anything else). Admin-managed.
+    #[serde(default, rename = "analytics-key")]
+    pub analytics_key: Option<String>,
+
     /// Free-form intro paragraph rendered between the header and
     /// the filter section. Operator-authored, plain text (no HTML).
     ///

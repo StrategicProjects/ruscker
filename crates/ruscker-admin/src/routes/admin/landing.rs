@@ -104,6 +104,7 @@ pub struct LandingForm {
     pub catalog_layout: String,
     pub catalog_density: String,
     pub analytics_provider: String,
+    pub analytics_key: String,
     // Per-theme color overrides (#475); blank ⇒ keep the theme default.
     pub theme_light_bg: String,
     pub theme_light_text: String,
@@ -157,6 +158,7 @@ impl LandingForm {
             catalog_layout: lc.catalog_layout.clone().unwrap_or_default(),
             catalog_density: lc.catalog_density.clone().unwrap_or_default(),
             analytics_provider: lc.analytics_provider.clone().unwrap_or_default(),
+            analytics_key: lc.analytics_key.clone().unwrap_or_default(),
             theme_light_bg: s(&tc.light.bg),
             theme_light_text: s(&tc.light.text),
             theme_light_accent: s(&tc.light.accent),
@@ -234,6 +236,7 @@ impl LandingForm {
             catalog_layout: empty_to_none(self.catalog_layout),
             catalog_density: empty_to_none(self.catalog_density),
             analytics_provider: empty_to_none(self.analytics_provider),
+            analytics_key: empty_to_none(self.analytics_key),
             theme_colors,
             header_bg: empty_to_none(self.header_bg),
             header_fg: empty_to_none(self.header_fg),

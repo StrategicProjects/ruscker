@@ -347,6 +347,11 @@ admin-landing-analytics-html = Analytics snippet
 admin-landing-analytics-html-help = HTML injected into the landing <head> (e.g. a Plausible/Matomo/GA <script> tag). Rendered unescaped — only use trusted sources.
 admin-landing-analytics-origins = Allowed origins (CSP)
 admin-landing-analytics-origins-help = Space-separated domains (e.g. https://plausible.io) allowed in the landing CSP so the script can load and report.
+admin-landing-analytics-provider = Provider
+admin-landing-provider-none = None
+admin-landing-analytics-key = Site key
+admin-landing-analytics-key-help = GA4 measurement id (G-XXXX), Plausible domain, or Matomo URL|siteId.
+
 
 # Admin audit log
 admin-audit-title = Audit log

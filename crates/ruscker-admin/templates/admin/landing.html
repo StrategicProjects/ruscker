@@ -130,6 +130,77 @@
         </div>
       </section>
 
+      {# ── Card: Header / footer logos (#468). #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-logos") }}</div>
+      <div class="spec-form-field">
+        {# Submitted as one hidden JSON field; the rows below edit the array. #}
+        <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
+        <template x-for="(logo, i) in logos" :key="i">
+          <div class="landing-logo-card">
+            <div class="landing-logo-card__head">
+              {# Preview thumbnail, or a placeholder icon when no URL yet. #}
+              <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
+              <span class="landing-logo-thumb landing-logo-thumb--empty" x-show="!logo.url"><i class="ti ti-photo" aria-hidden="true"></i></span>
+              {# Image field: shared gallery picker (#451) writes only `url`,
+                 leaving the other fields intact; the input stays editable
+                 for an external/manual URL. #}
+              <div class="landing-logo-field" style="flex:1;min-width:0">
+                <label>{{ self.t("admin-landing-logo-image") }}</label>
+                <div class="landing-logo-image-row">
+                  <button type="button" class="admin-login-btn landing-logo-pick"
+                          @click="openImagePicker((v) => { logo.url = v }, logo.url)">
+                    <i class="ti ti-photo" aria-hidden="true"></i>
+                    {{ self.t("spec-form-choose-image") }}
+                  </button>
+                  <input type="text" x-model="logo.url" placeholder="/assets/img/logo.png"
+                         class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+                </div>
+              </div>
+              <button type="button" class="landing-logo-card__remove admin-nav-link" @click="logos.splice(i, 1)"
+                      title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
+            </div>
+            <div class="landing-logo-card__grid">
+              {# Slot — segmented pill (header / footer). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-slot-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'">{{ self.t("admin-landing-logo-header") }}</button>
+                  <button type="button" :class="{ 'is-active': logo.slot === 'footer' }" @click="logo.slot = 'footer'">{{ self.t("admin-landing-logo-footer") }}</button>
+                </div>
+              </div>
+              {# Alignment — segmented icon pill (left / center / right). #}
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-align-label") }}</label>
+                <div class="seg-control" role="group">
+                  <button type="button" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'center' }" @click="logo.align = 'center'" title="{{ self.t("admin-landing-logo-center") }}"><i class="ti ti-align-center" aria-hidden="true"></i></button>
+                  <button type="button" :class="{ 'is-active': logo.align === 'right' }" @click="logo.align = 'right'" title="{{ self.t("admin-landing-logo-right") }}"><i class="ti ti-align-right" aria-hidden="true"></i></button>
+                </div>
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-link") }}</label>
+                <input type="url" x-model="logo.link" placeholder="https://…" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-height") }}</label>
+                <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32" class="spec-form-input">
+              </div>
+              <div class="landing-logo-field">
+                <label>{{ self.t("admin-landing-logo-margin") }}</label>
+                <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0" class="spec-form-input">
+              </div>
+            </div>
+          </div>
+        </template>
+        <button type="button" class="admin-nav-link mt-2"
+                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32, margin: null })">
+          <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
+        </button>
+      </div>
+
+      </section>
+
       {# ── Card: Background — header preset + card cover style. #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-background") }}</div>
@@ -148,26 +219,6 @@
           <div class="seg-control" role="group">
             <button type="button" :class="{ 'is-active': (form.card_cover || 'tinted') === 'tinted' }" @click="form.card_cover = 'tinted'">{{ self.t("admin-landing-cover-tinted") }}</button>
             <button type="button" :class="{ 'is-active': form.card_cover === 'gradient' }" @click="form.card_cover = 'gradient'">{{ self.t("admin-landing-cover-gradient") }}</button>
-          </div>
-        </div>
-      </section>
-
-      {# ── Card: Catalog layout — grid/list + density. #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
-        <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
-        <input type="hidden" name="catalog_density" :value="form.catalog_density">
-        <div class="spec-form-field">
-          <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">{{ self.t("admin-landing-layout-grid") }}</button>
-            <button type="button" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">{{ self.t("admin-landing-layout-list") }}</button>
-            <button type="button" :class="{ 'is-active': form.catalog_layout === 'sections' }" @click="form.catalog_layout = 'sections'">{{ self.t("admin-landing-layout-sections") }}</button>
-          </div>
-        </div>
-        <div class="spec-form-field">
-          <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': (form.catalog_density || 'comfortable') === 'comfortable' }" @click="form.catalog_density = 'comfortable'">{{ self.t("admin-landing-density-comfortable") }}</button>
-            <button type="button" :class="{ 'is-active': form.catalog_density === 'compact' }" @click="form.catalog_density = 'compact'">{{ self.t("admin-landing-density-compact") }}</button>
           </div>
         </div>
       </section>
@@ -344,6 +395,26 @@
         </div>
       </section>
 
+      {# ── Card: Catalog layout — grid/list + density. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
+        <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
+        <input type="hidden" name="catalog_density" :value="form.catalog_density">
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">{{ self.t("admin-landing-layout-grid") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">{{ self.t("admin-landing-layout-list") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_layout === 'sections' }" @click="form.catalog_layout = 'sections'">{{ self.t("admin-landing-layout-sections") }}</button>
+          </div>
+        </div>
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.catalog_density || 'comfortable') === 'comfortable' }" @click="form.catalog_density = 'comfortable'">{{ self.t("admin-landing-density-comfortable") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_density === 'compact' }" @click="form.catalog_density = 'compact'">{{ self.t("admin-landing-density-compact") }}</button>
+          </div>
+        </div>
+      </section>
+
       {# ── Card: Visible sections — toggle portal chrome on/off. #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-visible-sections") }}</div>
@@ -365,77 +436,6 @@
             <span>{{ self.t("admin-landing-show-filters") }}</span>
           </label>
         </div>
-      </section>
-
-      {# ── Card: Header / footer logos (#468). #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-logos") }}</div>
-      <div class="spec-form-field">
-        {# Submitted as one hidden JSON field; the rows below edit the array. #}
-        <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
-        <template x-for="(logo, i) in logos" :key="i">
-          <div class="landing-logo-card">
-            <div class="landing-logo-card__head">
-              {# Preview thumbnail, or a placeholder icon when no URL yet. #}
-              <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
-              <span class="landing-logo-thumb landing-logo-thumb--empty" x-show="!logo.url"><i class="ti ti-photo" aria-hidden="true"></i></span>
-              {# Image field: shared gallery picker (#451) writes only `url`,
-                 leaving the other fields intact; the input stays editable
-                 for an external/manual URL. #}
-              <div class="landing-logo-field" style="flex:1;min-width:0">
-                <label>{{ self.t("admin-landing-logo-image") }}</label>
-                <div class="landing-logo-image-row">
-                  <button type="button" class="admin-login-btn landing-logo-pick"
-                          @click="openImagePicker((v) => { logo.url = v }, logo.url)">
-                    <i class="ti ti-photo" aria-hidden="true"></i>
-                    {{ self.t("spec-form-choose-image") }}
-                  </button>
-                  <input type="text" x-model="logo.url" placeholder="/assets/img/logo.png"
-                         class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
-                </div>
-              </div>
-              <button type="button" class="landing-logo-card__remove admin-nav-link" @click="logos.splice(i, 1)"
-                      title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
-            </div>
-            <div class="landing-logo-card__grid">
-              {# Slot — segmented pill (header / footer). #}
-              <div class="landing-logo-field">
-                <label>{{ self.t("admin-landing-logo-slot-label") }}</label>
-                <div class="seg-control" role="group">
-                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'">{{ self.t("admin-landing-logo-header") }}</button>
-                  <button type="button" :class="{ 'is-active': logo.slot === 'footer' }" @click="logo.slot = 'footer'">{{ self.t("admin-landing-logo-footer") }}</button>
-                </div>
-              </div>
-              {# Alignment — segmented icon pill (left / center / right). #}
-              <div class="landing-logo-field">
-                <label>{{ self.t("admin-landing-logo-align-label") }}</label>
-                <div class="seg-control" role="group">
-                  <button type="button" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
-                  <button type="button" :class="{ 'is-active': logo.align === 'center' }" @click="logo.align = 'center'" title="{{ self.t("admin-landing-logo-center") }}"><i class="ti ti-align-center" aria-hidden="true"></i></button>
-                  <button type="button" :class="{ 'is-active': logo.align === 'right' }" @click="logo.align = 'right'" title="{{ self.t("admin-landing-logo-right") }}"><i class="ti ti-align-right" aria-hidden="true"></i></button>
-                </div>
-              </div>
-              <div class="landing-logo-field">
-                <label>{{ self.t("admin-landing-logo-link") }}</label>
-                <input type="url" x-model="logo.link" placeholder="https://…" class="spec-form-input">
-              </div>
-              <div class="landing-logo-field">
-                <label>{{ self.t("admin-landing-logo-height") }}</label>
-                <input type="number" x-model.number="logo.height" min="8" max="240" placeholder="32" class="spec-form-input">
-              </div>
-              <div class="landing-logo-field">
-                <label>{{ self.t("admin-landing-logo-margin") }}</label>
-                <input type="number" x-model.number="logo.margin" min="0" max="120" placeholder="0" class="spec-form-input">
-              </div>
-            </div>
-          </div>
-        </template>
-        <button type="button" class="admin-nav-link mt-2"
-                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32, margin: null })">
-          <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
-        </button>
-      </div>
-
       </section>
 
       {# ── Card: Content — intro text (default + per-locale). #}

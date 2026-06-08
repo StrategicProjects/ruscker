@@ -514,7 +514,7 @@ spec-help-inject-base-href = Ruscker transmet toujours X-Forwarded-Prefix / X-Sc
 spec-form-error-volume = Chaque volume doit être /hôte:/conteneur (optionnel :ro).
 admin-nav-logs = Journaux
 admin-proclog-title = Journaux
-admin-proclog-subtitle = Journal récent du processus Ruscker (en direct).
+admin-proclog-subtitle = Flux d'événements de l'équilibreur et des répliques
 admin-proclog-unavailable = Tampon de journal indisponible (le serveur a démarré sans la couche de journalisation).
 admin-proclog-empty = Aucun journal capturé pour l'instant à ce niveau. Les nouveaux événements apparaissent ici au fur et à mesure ; lancez le serveur avec -v pour inclure les journaux de niveau info.
 
@@ -606,6 +606,9 @@ admin-proclog-filter-all = Tous les niveaux
 admin-proclog-search = Rechercher dans les journaux…
 admin-proclog-pause = Pause
 admin-proclog-resume = Reprendre
+admin-proclog-clear = Effacer
+admin-proclog-lines = lignes
+admin-proclog-filter-app-all = Toutes les apps
 
 landing-empty = Rien ici pour l'instant.
 

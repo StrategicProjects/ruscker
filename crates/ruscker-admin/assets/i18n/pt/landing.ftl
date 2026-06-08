@@ -246,7 +246,12 @@ spec-form-lifetime = Vida máx. (min)
 spec-form-lifetime-help = 360 = 6 horas
 spec-form-link-section = Link externo
 spec-form-link = URL de destino
-spec-form-meta = Metadados
+spec-form-meta = Acesso & escala
+spec-form-restricted = Acesso restrito
+spec-form-restricted-hint = Exige login para abrir
+spec-form-initial-replicas = Réplicas iniciais
+spec-form-autoscaling = Autoescalonamento
+spec-form-autoscaling-hint = Escala réplicas conforme a demanda
 spec-form-updated = Atualizado em
 spec-form-updated-help = Vazio para usar a data de hoje.
 spec-form-preview = Prévia do card

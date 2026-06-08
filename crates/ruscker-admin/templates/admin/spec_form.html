@@ -59,7 +59,58 @@
           class="spec-form-fields"
           autocomplete="off">
 
-      {# Type picker — 6 cards #}
+      {# ── Card: Identity — id + name + subject ───────────────── #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("spec-form-identity") }}</div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-id" class="spec-form-label">{{ self.t("spec-form-id") }}</label>
+              {% call help(self.t("spec-help-id")) %}{% endcall %}
+            </div>
+            <input id="f-id" type="text" name="id"
+                   value="{{ form.id }}"
+                   x-model="form.id"
+                   required pattern="[A-Za-z][A-Za-z0-9_\-]*"
+                   {% if mode.is_edit() %}readonly{% endif %}
+                   class="spec-form-input spec-form-input--mono">
+            <div class="spec-form-help">
+              {% if mode.is_new() %}{{ self.t("spec-form-id-help-new") }}{% else %}{{ self.t("spec-form-id-help-edit") }}{% endif %}
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-name" class="spec-form-label">{{ self.t("spec-form-name") }}</label>
+              {% call help(self.t("spec-help-name")) %}{% endcall %}
+            </div>
+            <input id="f-name" type="text" name="display_name"
+                   value="{{ form.display_name }}"
+                   x-model="form.display_name"
+                   required
+                   class="spec-form-input">
+          </div>
+        </div>
+        <div class="spec-form-field">
+          <div class="spec-form-label-row">
+            <label for="f-subject" class="spec-form-label">{{ self.t("spec-form-subject") }}</label>
+            {% call help(self.t("spec-help-subject")) %}{% endcall %}
+          </div>
+          <input id="f-subject" type="text" name="subject"
+                 value="{{ form.subject }}"
+                 x-model="form.subject"
+                 list="subject-suggestions"
+                 class="spec-form-input">
+          <datalist id="subject-suggestions">
+            <option value="Gestão"></option>
+            <option value="Infraestrutura e Mobilidade"></option>
+            <option value="Políticas Públicas"></option>
+            <option value="Saúde Pública"></option>
+            <option value="Segurança Pública"></option>
+          </datalist>
+        </div>
+      </section>
+
+      {# ── Card: Kind — type picker ───────────────────────────── #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("spec-form-kind") }} {% call help(self.t("spec-help-kind")) %}{% endcall %}</div>
         <div class="kind-picker">
@@ -73,49 +124,15 @@
         </div>
       </section>
 
-      {# ── Card: Identity ─────────────────────────────────────── #}
+      {# ── Card: Description ──────────────────────────────────── #}
       <section class="editor-card">
-        <div class="form-section__title">{{ self.t("spec-form-identity") }}</div>
-
-      <div class="spec-form-field">
-        <div class="spec-form-label-row">
-          <label for="f-id" class="spec-form-label">{{ self.t("spec-form-id") }}</label>
-          {% call help(self.t("spec-help-id")) %}{% endcall %}
+        <div class="form-section__title">{{ self.t("spec-form-desc") }}</div>
+        <div class="spec-form-field">
+          <textarea id="f-desc" name="description"
+                    x-model="form.description"
+                    rows="3"
+                    class="spec-form-input">{{ form.description }}</textarea>
         </div>
-        <input id="f-id" type="text" name="id"
-               value="{{ form.id }}"
-               x-model="form.id"
-               required pattern="[A-Za-z][A-Za-z0-9_\-]*"
-               {% if mode.is_edit() %}readonly{% endif %}
-               class="spec-form-input spec-form-input--mono">
-        <div class="spec-form-help">
-          {% if mode.is_new() %}{{ self.t("spec-form-id-help-new") }}{% else %}{{ self.t("spec-form-id-help-edit") }}{% endif %}
-        </div>
-      </div>
-
-      <div class="spec-form-field">
-        <div class="spec-form-label-row">
-          <label for="f-name" class="spec-form-label">{{ self.t("spec-form-name") }}</label>
-          {% call help(self.t("spec-help-name")) %}{% endcall %}
-        </div>
-        <input id="f-name" type="text" name="display_name"
-               value="{{ form.display_name }}"
-               x-model="form.display_name"
-               required
-               class="spec-form-input">
-      </div>
-
-      <div class="spec-form-field">
-        <div class="spec-form-label-row">
-          <label for="f-desc" class="spec-form-label">{{ self.t("spec-form-desc") }}</label>
-          {% call help(self.t("spec-help-desc")) %}{% endcall %}
-        </div>
-        <textarea id="f-desc" name="description"
-                  x-model="form.description"
-                  rows="3"
-                  class="spec-form-input">{{ form.description }}</textarea>
-      </div>
-
       </section>
 
       {# ── Card: Visual ───────────────────────────────────────── #}
@@ -254,35 +271,15 @@
       {# Access lock is derived from the real access lists below
          (`access-groups`/`access-users`), shown live in the preview
          card — there's no separate decorative lock control (#346). #}
-      <div class="grid grid-cols-2 gap-3">
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
-            {% call help(self.t("spec-help-state")) %}{% endcall %}
-          </div>
-          <select id="f-state" name="state" x-model="form.state" class="spec-form-input">
-            <option value="active">{{ self.t("spec-form-state-active") }}</option>
-            <option value="inactive">{{ self.t("spec-form-state-inactive") }}</option>
-          </select>
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label for="f-state" class="spec-form-label">{{ self.t("spec-form-state") }}</label>
+          {% call help(self.t("spec-help-state")) %}{% endcall %}
         </div>
-        <div class="spec-form-field">
-          <div class="spec-form-label-row">
-            <label for="f-subject" class="spec-form-label">{{ self.t("spec-form-subject") }}</label>
-            {% call help(self.t("spec-help-subject")) %}{% endcall %}
-          </div>
-          <input id="f-subject" type="text" name="subject"
-                 value="{{ form.subject }}"
-                 x-model="form.subject"
-                 list="subject-suggestions"
-                 class="spec-form-input">
-          <datalist id="subject-suggestions">
-            <option value="Gestão"></option>
-            <option value="Infraestrutura e Mobilidade"></option>
-            <option value="Políticas Públicas"></option>
-            <option value="Saúde Pública"></option>
-            <option value="Segurança Pública"></option>
-          </datalist>
-        </div>
+        <select id="f-state" name="state" x-model="form.state" class="spec-form-input">
+          <option value="active">{{ self.t("spec-form-state-active") }}</option>
+          <option value="inactive">{{ self.t("spec-form-state-inactive") }}</option>
+        </select>
       </div>
 
       </section>

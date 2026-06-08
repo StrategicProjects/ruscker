@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.93 — 2026-06-08
+
+**Appearance editor fixes.** Two follow-ups from testing the editor:
+
+- **Image picker on screen.** The "Choose image" modal could open
+  centered in the (tall) editor page instead of the viewport — often
+  below the fold, hidden. It now teleports to `<body>` so it always
+  centers on screen.
+- **Live preview reflects every control.** The editor's portal preview
+  used to mirror only a few fields; it now reacts to the per-theme
+  palette and default theme (the whole frame repaints light/dark), logo
+  mode/size, header preset, card-cover style, catalog layout
+  (grid/list/sections) and density, and the visible-section toggles.
+
+---
+
 ## v0.1.92 — 2026-06-08
 
 **Appearance — catalog "Sections" layout + editor card order.** The

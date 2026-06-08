@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.98 — 2026-06-08
+
+**Apps editor — closer to the design.** The Edit-application form now
+follows the handoff structure: **Identity** (ID + Name side-by-side,
+Subject) → **Kind** → **Description** (its own section) → **Appearance**
+→ Container → Metadata. The Appearance section gets an inline **logo
+gallery** — pick an app logo straight from the media library (or upload
+via the last tile) instead of opening a modal. (More of the editor —
+access/scale toggles, accent colour, monogram — lands next.)
+
+---
+
 ## v0.1.97 — 2026-06-08
 
 **Logs spacing fix.** The log lines gave the app column a fixed width, so

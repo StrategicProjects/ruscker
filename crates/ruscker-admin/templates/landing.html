@@ -275,9 +275,23 @@
   </div>
   </div>{# /portal-sticky #}
 
-  {# ── Card grid (fixed-width cards, columns auto-fill) ──────── #}
-  <section class="cards-grid stagger{% if catalog_layout == "list" %} is-list{% endif %}{% if catalog_density == "compact" %} is-compact{% endif %}" x-ref="grid">
-    {% for card in cards %}
+  {# ── Card area (#701): one or more groups. `grid`/`list` renders a
+     single unlabeled group with every card; `sections` renders one
+     labeled group per app type, each heading hidden via x-show when the
+     live filters empty it (`sections[type]` count, kept by recount()).
+     The fixed-width card markup is emitted once inside the inner loop,
+     shared by every layout (see `LandingPage::catalog_groups`). #}
+  <div class="catalog{% if catalog_layout == "sections" %} catalog--sections{% endif %}" x-ref="grid">
+    {% for sec in self.catalog_groups() %}
+    <section class="catalog-group"{% if !sec.key.is_empty() %} x-show="(sections['{{ sec.key }}'] || 0) > 0" x-cloak{% endif %}>
+      {% if !sec.label_key.is_empty() %}
+      <h2 class="catalog-group__head">
+        <span>{{ self.t(sec.label_key) }}</span>
+        <span class="catalog-group__count" x-text="sections['{{ sec.key }}'] || 0"></span>
+      </h2>
+      {% endif %}
+      <div class="cards-grid stagger{% if catalog_layout == "list" %} is-list{% endif %}{% if catalog_density == "compact" %} is-compact{% endif %}">
+        {% for card in sec.cards %}
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
          data-type="{{ card.display_type.key() }}"
@@ -348,8 +362,11 @@
           </div>
         </div>
       </a>
+        {% endfor %}
+      </div>
+    </section>
     {% endfor %}
-  </section>
+  </div>
 
   {# ── Empty state ───────────────────────────────────────────── #}
   {# `x-cloak` so it stays hidden until Alpine has computed `visible`
@@ -386,6 +403,10 @@ window.ruscker.landing = () => ({
   sort: 'recent',
   visible: 0,
   counts: { all: 0 },
+  // Per-type count of cards passing ALL filters (incl. the type chip),
+  // keyed by DisplayType::key(). Drives the `sections` layout (#701):
+  // a section's heading hides via x-show when its count drops to 0.
+  sections: {},
 
   init() {
     this.$watch('search', () => this.recount());
@@ -406,8 +427,12 @@ window.ruscker.landing = () => ({
 
   recount() {
     const counts = { all: 0 };
+    const sections = {};
     let visible = 0;
-    for (const el of this.$refs.grid.children) {
+    // Query `.rcard` (not `.children`) so this works whether the cards
+    // sit directly in the grid (grid/list layout) or nested one level
+    // down inside per-type sections (#701).
+    for (const el of this._cards()) {
       const passesType = this.matchType(el);
       const passesRest = this.matchExceptType(el);
       if (passesRest) {
@@ -415,10 +440,20 @@ window.ruscker.landing = () => ({
         const t = el.dataset.type;
         counts[t] = (counts[t] || 0) + 1;
       }
-      if (passesType && passesRest) visible += 1;
+      if (passesType && passesRest) {
+        visible += 1;
+        const t = el.dataset.type;
+        sections[t] = (sections[t] || 0) + 1;
+      }
     }
     this.counts = counts;
+    this.sections = sections;
     this.visible = visible;
+  },
+
+  // All catalog cards under the grid wrapper, across every layout.
+  _cards() {
+    return this.$refs.grid.querySelectorAll('.rcard');
   },
 
   match(el) {
@@ -469,7 +504,7 @@ window.ruscker.landing = () => ({
   },
 
   _computeNameRanks() {
-    const list = Array.from(this.$refs.grid.children);
+    const list = Array.from(this._cards());
     list.sort((a, b) =>
       (a.dataset.name || '').localeCompare(b.dataset.name || ''));
     this._nameRanks = new Map(list.map((el, i) => [el, i]));

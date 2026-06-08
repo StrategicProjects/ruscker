@@ -18,7 +18,7 @@ use crate::auth::{MaybeSession, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::view_model::{
-    build_type_chips, sort_by_recent, unique_subjects, CardCounts, CardCtx, TypeChip,
+    build_type_chips, sort_by_recent, unique_subjects, CardCounts, CardCtx, DisplayType, TypeChip,
 };
 use crate::AppState;
 
@@ -127,6 +127,27 @@ struct LogoView {
     margin: Option<u32>,
 }
 
+/// One group of catalog cards for the landing's card area (#701).
+///
+/// The template renders the card markup exactly once, inside a group;
+/// the two catalog layouts differ only in how many groups there are:
+///   - `grid`/`list` ⇒ a single, unlabeled group with every card;
+///   - `sections`     ⇒ one labeled group per [`DisplayType`], in the
+///     canonical type order, with empty types omitted.
+///
+/// `key`/`label_key` are empty for the single grid/list group, which is
+/// how the template decides whether to draw a heading and the per-section
+/// `x-show` count binding. Cards keep their original recent-first order
+/// within each group (the parent `cards` vec is already sorted).
+struct CatalogGroup<'r, 'a> {
+    /// Stable `DisplayType::key()` used by the Alpine per-section count
+    /// lookup (`sections['app']`). Empty ⇒ the single grid/list group.
+    key: &'static str,
+    /// Fluent key for the section heading. Empty ⇒ no heading rendered.
+    label_key: &'static str,
+    cards: Vec<&'r CardCtx<'a>>,
+}
+
 impl<'a> LandingPage<'a> {
     /// Translation helper used by the template as `self.t("key")`.
     /// Centralizing here keeps templates clean of explicit
@@ -147,6 +168,43 @@ impl<'a> LandingPage<'a> {
 
     fn has_logos_at(&self, slot: &str, align: &str) -> bool {
         self.logos.iter().any(|l| l.slot == slot && l.align == align)
+    }
+
+    /// Group the cards for the catalog area (#701). See [`CatalogGroup`].
+    /// In `grid`/`list` layout this is a single unlabeled group holding
+    /// every card; in `sections` layout it's one labeled group per
+    /// [`DisplayType`] (canonical order, empty types dropped). The card
+    /// markup in the template is shared across both via this one seam.
+    fn catalog_groups(&self) -> Vec<CatalogGroup<'_, 'a>> {
+        if self.catalog_layout != "sections" {
+            return vec![CatalogGroup {
+                key: "",
+                label_key: "",
+                cards: self.cards.iter().collect(),
+            }];
+        }
+        // Same canonical order as the filter chips (`build_type_chips`)
+        // so the sections read top-to-bottom in the same sequence the
+        // chip bar reads left-to-right.
+        [
+            DisplayType::App,
+            DisplayType::Talk,
+            DisplayType::Report,
+            DisplayType::Package,
+            DisplayType::Api,
+            DisplayType::Link,
+        ]
+        .into_iter()
+        .filter_map(|dt| {
+            let cards: Vec<&CardCtx<'a>> =
+                self.cards.iter().filter(|c| c.display_type == dt).collect();
+            (!cards.is_empty()).then_some(CatalogGroup {
+                key: dt.key(),
+                label_key: dt.label_key(),
+                cards,
+            })
+        })
+        .collect()
     }
 
     /// Resolve a logo's `<img src>`: an absolute/protocol-relative URL is
@@ -513,43 +571,6 @@ fn analytics_provider_snippet(provider: &str, key: &str) -> Option<(String, Stri
     }
 }
 
-#[cfg(test)]
-mod analytics_tests {
-    use super::analytics_provider_snippet;
-
-    #[test]
-    fn ga_snippet_built_from_measurement_id() {
-        let (html, origins) = analytics_provider_snippet("ga", "G-ABC123").unwrap();
-        assert!(html.contains("gtag/js?id=G-ABC123"));
-        assert!(origins.contains("googletagmanager.com"));
-    }
-
-    #[test]
-    fn plausible_snippet_built_from_domain() {
-        let (html, origins) = analytics_provider_snippet("plausible", "example.com").unwrap();
-        assert!(html.contains("data-domain=\"example.com\""));
-        assert_eq!(origins, "https://plausible.io");
-    }
-
-    #[test]
-    fn matomo_needs_url_and_numeric_site() {
-        let (html, origins) =
-            analytics_provider_snippet("matomo", "https://m.example.com|7").unwrap();
-        assert!(html.contains("setSiteId','7'"));
-        assert_eq!(origins, "https://m.example.com");
-        // Bad shapes are rejected.
-        assert!(analytics_provider_snippet("matomo", "https://m.example.com|abc").is_none());
-        assert!(analytics_provider_snippet("matomo", "ftp://x|1").is_none());
-    }
-
-    #[test]
-    fn rejects_blank_and_injection_chars() {
-        assert!(analytics_provider_snippet("ga", "").is_none());
-        assert!(analytics_provider_snippet("ga", "G-X\"><script>").is_none());
-        assert!(analytics_provider_snippet("none", "x").is_none());
-    }
-}
-
 /// Accept a CSS color value only if it's plausibly a color and can't
 /// break out of a `{ }` declaration block — even though the editor is
 /// Admin-only, a stray `}`/`;`/`<` would corrupt the whole `<style>`.
@@ -593,4 +614,41 @@ fn build_theme_style(tc: &ruscker_config::ThemeColors) -> String {
         css.push_str(&format!(":root[data-theme=\"dark\"]{{{dark}}}"));
     }
     css
+}
+
+#[cfg(test)]
+mod analytics_tests {
+    use super::analytics_provider_snippet;
+
+    #[test]
+    fn ga_snippet_built_from_measurement_id() {
+        let (html, origins) = analytics_provider_snippet("ga", "G-ABC123").unwrap();
+        assert!(html.contains("gtag/js?id=G-ABC123"));
+        assert!(origins.contains("googletagmanager.com"));
+    }
+
+    #[test]
+    fn plausible_snippet_built_from_domain() {
+        let (html, origins) = analytics_provider_snippet("plausible", "example.com").unwrap();
+        assert!(html.contains("data-domain=\"example.com\""));
+        assert_eq!(origins, "https://plausible.io");
+    }
+
+    #[test]
+    fn matomo_needs_url_and_numeric_site() {
+        let (html, origins) =
+            analytics_provider_snippet("matomo", "https://m.example.com|7").unwrap();
+        assert!(html.contains("setSiteId','7'"));
+        assert_eq!(origins, "https://m.example.com");
+        // Bad shapes are rejected.
+        assert!(analytics_provider_snippet("matomo", "https://m.example.com|abc").is_none());
+        assert!(analytics_provider_snippet("matomo", "ftp://x|1").is_none());
+    }
+
+    #[test]
+    fn rejects_blank_and_injection_chars() {
+        assert!(analytics_provider_snippet("ga", "").is_none());
+        assert!(analytics_provider_snippet("ga", "G-X\"><script>").is_none());
+        assert!(analytics_provider_snippet("none", "x").is_none());
+    }
 }

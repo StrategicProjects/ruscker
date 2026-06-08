@@ -19,7 +19,14 @@ fn app_state() -> AppState {
     // The fixture references ${DOCKER_REGISTRY_PASSWORD}; provide a
     // dummy so parsing succeeds.
     std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
-    let config = Config::from_yaml(&yaml).expect("parse config");
+    state_from_yaml(&yaml)
+}
+
+/// Build an `AppState` (no DB, so the YAML `landing-customization` is the
+/// source of truth) from an inline config. Used by the sections-layout
+/// test, which needs a config that sets `catalog-layout: sections`.
+fn state_from_yaml(yaml: &str) -> AppState {
+    let config = Config::from_yaml(yaml).expect("parse config");
     let locales = Locales::load().expect("load locales");
     AppState {
         config: Arc::new(config),
@@ -72,6 +79,88 @@ async fn landing_renders_default_locale() {
     // 8 specs in examples/application.yml → 8 cards rendered.
     // Cards are <a class="rcard"> in the v2 layout.
     assert_eq!(body.matches(r#"class="rcard"#).count(), 8);
+}
+
+#[tokio::test]
+async fn sections_layout_groups_cards_by_type() {
+    // `catalog-layout: sections` (#701) renders one labeled group per
+    // app type, in canonical order, each heading carrying the Alpine
+    // per-section count binding so it hides when filters empty it.
+    let yaml = r#"
+proxy:
+  title: Sections Test
+  landing-customization:
+    catalog-layout: sections
+  specs:
+    - id: alpha
+      display-name: Alpha
+      container-image: img:1
+      template-properties:
+        type: app
+    - id: beta
+      display-name: Beta
+      container-image: img:2
+      template-properties:
+        type: report
+    - id: gamma
+      display-name: Gamma
+      container-image: img:3
+      template-properties:
+        type: app
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+
+    // Sections wrapper + exactly the two present types get a heading
+    // (app, report) — empty types (talk/package/api/link) are omitted.
+    assert!(body.contains("catalog--sections"), "sections wrapper class");
+    assert_eq!(
+        body.matches("catalog-group__head").count(),
+        2,
+        "one heading per present type (app, report) only"
+    );
+    // Per-section x-show count bindings drive heading visibility.
+    assert!(body.contains(r#"x-show="(sections['app'] || 0) > 0""#));
+    assert!(body.contains(r#"x-show="(sections['report'] || 0) > 0""#));
+    // All three cards still render (2 app + 1 report).
+    assert_eq!(body.matches(r#"class="rcard"#).count(), 3);
+}
+
+#[tokio::test]
+async fn grid_layout_is_a_single_unlabeled_group() {
+    // The default (no `catalog-layout`) renders one group with no
+    // heading and no per-section binding — the sections wrappers stay
+    // visually inert (#701).
+    let yaml = r#"
+proxy:
+  title: Grid Test
+  specs:
+    - id: alpha
+      display-name: Alpha
+      container-image: img:1
+      template-properties:
+        type: app
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!body.contains("catalog--sections"), "no sections modifier in grid");
+    assert_eq!(body.matches("catalog-group__head").count(), 0, "no headings in grid");
+    assert!(!body.contains("sections['"), "no per-section binding in grid");
 }
 
 #[tokio::test]

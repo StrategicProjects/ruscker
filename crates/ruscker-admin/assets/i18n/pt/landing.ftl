@@ -717,6 +717,7 @@ admin-landing-cover-gradient = Gradiente
 admin-landing-catalog-layout = Layout do catálogo
 admin-landing-layout-grid = Grade
 admin-landing-layout-list = Lista
+admin-landing-layout-sections = Seções
 admin-landing-density-comfortable = Confortável
 admin-landing-density-compact = Compacto
 

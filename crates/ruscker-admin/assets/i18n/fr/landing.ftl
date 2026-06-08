@@ -713,6 +713,7 @@ admin-landing-cover-gradient = Dégradé
 admin-landing-catalog-layout = Disposition du catalogue
 admin-landing-layout-grid = Grille
 admin-landing-layout-list = Liste
+admin-landing-layout-sections = Sections
 admin-landing-density-comfortable = Confortable
 admin-landing-density-compact = Compact
 

@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.96 — 2026-06-08
+
+**Logs tab — colour-coded event stream.** The Logs view rendered every
+line in flat grey because the parser expected a log format the server
+doesn't emit. It now colours each level (INFO blue, WARN amber, ERROR
+red), shows the app name and a millisecond timestamp, and the toolbar
+matches the design: a Pause button, Info/Warn/Error level chips, an
+"All apps" filter, a live line count, clear, and download — in one card.
+
+---
+
 ## v0.1.95 — 2026-06-08
 
 **Logo controls behave as expected.** Three appearance-editor logo

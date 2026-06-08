@@ -483,6 +483,18 @@ async fn index(
         catalog_density: lc.effective_catalog_density().to_string(),
     };
     let mut resp = render(&page);
+    // The landing is personalized (cards are access-filtered per viewer)
+    // AND admin-mutable (the appearance editor changes it live), so it
+    // must never be cached by the browser or a shared proxy/CDN — a
+    // cached copy both leaks one viewer's restricted cards to another and
+    // makes editor changes appear "not to take" until the cache expires.
+    // `private` keeps shared caches from storing it; `no-cache` forces a
+    // revalidation (there's no validator, so effectively a refetch). See
+    // the `/box`-behind-a-proxy report (#701 follow-up).
+    resp.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-cache"),
+    );
     // Widen *this page's* CSP so the analytics script can load/report.
     // `security_headers` uses `or_insert`, so this handler-set value
     // wins. Only applied when the operator listed origins.

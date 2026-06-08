@@ -697,7 +697,6 @@ admin-landing-logo-mode-mark = Mark + name
 admin-landing-logo-mode-symbol = Symbol only
 admin-landing-logo-mode-custom = Custom
 admin-landing-logo-size = Logo size
-admin-landing-logo-margin = Logo margin
 admin-landing-background = Background & gradients
 admin-landing-header-bg-preset = Portal header
 admin-landing-preset-flat = Flat

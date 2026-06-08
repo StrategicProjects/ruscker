@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.95 — 2026-06-08
+
+**Logo controls behave as expected.** Three appearance-editor logo
+behaviors that read as bugs are fixed:
+
+- The **Logo size / margin** sliders now resize a custom header logo too,
+  not just the built-in mark.
+- A custom header logo in **any** position (left/center/right) now hides
+  the built-in Ruscker mark — no more mark-plus-logo "two logos".
+- The mark is **always brand-colored**; a custom header background no
+  longer turns it grey.
+
+---
+
 ## v0.1.94 — 2026-06-08
 
 **Portal no longer cached + clearer header labels.**

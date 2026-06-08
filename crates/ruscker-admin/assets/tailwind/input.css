@@ -740,9 +740,14 @@ input[type="range"]::-moz-range-thumb {
   :root:not([data-theme="light"]) .log-viewer { background: #121212; }
 }
 .log-line {
-  display: grid; grid-template-columns: 92px 52px 150px 1fr; gap: 12px;
+  /* App column is `auto`: it collapses to 0 when a line carries no app
+     (most infra lines have no `spec=`), so the message sits right after
+     the level instead of across a fixed gap; it grows to the app name
+     when present, keeping rows aligned. */
+  display: grid; grid-template-columns: 92px 50px auto 1fr; gap: 10px;
   padding: 1px 14px; white-space: nowrap; animation: log-in 0.25s ease;
 }
+.log-app:not(:empty) { margin-right: 4px; }
 .log-line:hover { background: var(--surface-soft); }
 @keyframes log-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .log-line { animation: none; } }

@@ -151,19 +151,23 @@
            clear / advanced path field below. #}
         <input type="hidden" name="logo" x-model="form.logo">
 
-        {# Picker-first: a preview + a "Choose image" button that opens the
-           shared modal gallery (uploads + built-ins + upload), so the field
-           stays compact no matter how big the library grows. #}
-        <div class="flex items-center gap-3" x-cloak>
-          <div class="w-12 h-12 rounded-md border-2 border-[color:var(--border)] overflow-hidden flex items-center justify-center bg-[color:var(--surface-soft)]"
-               x-show="form.logo">
-            <img :src="assetUrl(form.logo) + (form.logo.startsWith('/assets/img/') ? '?thumb' : '')" alt="" class="w-full h-full object-contain">
-          </div>
-          <button type="button" class="admin-login-btn" style="padding:8px 14px;font-size:13px"
-                  @click="openPicker('logo')">
-            <i class="ti ti-photo" aria-hidden="true"></i>
-            {{ self.t("spec-form-choose-image") }}
-          </button>
+        {# Inline gallery (#701): pick a logo straight from the media
+           library (click a tile; click it again to clear) or upload via
+           the last tile. The submitted value is the hidden `logo` input. #}
+        <div class="logo-grid" x-cloak>
+          <template x-for="name in logoImages" :key="name">
+            <button type="button" :title="name"
+                    @click="form.logo = (form.logo === ('/assets/img/' + name) ? '' : '/assets/img/' + name)"
+                    class="logo-tile" :class="form.logo === ('/assets/img/' + name) ? 'is-sel' : ''">
+              <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
+              <span class="logo-tile__check" x-show="form.logo === ('/assets/img/' + name)" x-cloak><i class="ti ti-check" aria-hidden="true"></i></span>
+            </button>
+          </template>
+          <label class="logo-tile logo-tile--upload" :class="imgUploading ? 'is-busy' : ''"
+                 title="{{ self.t("admin-images-choose") }}">
+            <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-plus'" aria-hidden="true"></i>
+            <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'logo')">
+          </label>
         </div>
 
         {# Upload error (e.g. unsupported type / too large) #}

@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.99 — 2026-06-08
+
+**Apps editor — Access & scale.** The old "Metadata" section is now
+**Access & scale**, matching the design: a **Restricted access** toggle
+(off = public, and turning it off clears the group/user lists), the
+**Initial replicas** stepper surfaced alongside access, and an
+**Autoscaling** toggle (in Advanced) that gates the replica ceiling and
+thresholds. (Still to come: accent colour + monogram.)
+
+---
+
 ## v0.1.98 — 2026-06-08
 
 **Apps editor — closer to the design.** The Edit-application form now

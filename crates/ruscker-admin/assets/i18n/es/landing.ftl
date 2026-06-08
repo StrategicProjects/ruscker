@@ -698,6 +698,20 @@ admin-landing-logo-mode-symbol = Solo símbolo
 admin-landing-logo-mode-custom = Personalizado
 admin-landing-logo-size = Tamaño del logo
 admin-landing-logo-margin = Margen del logo
+admin-landing-background = Fondo y degradados
+admin-landing-header-bg-preset = Cabecera del portal
+admin-landing-preset-flat = Plano
+admin-landing-preset-soft = Suave
+admin-landing-preset-bold = Intenso
+admin-landing-card-covers = Portadas de tarjetas
+admin-landing-cover-tinted = Tintada
+admin-landing-cover-gradient = Degradado
+admin-landing-catalog-layout = Diseño del catálogo
+admin-landing-layout-grid = Cuadrícula
+admin-landing-layout-list = Lista
+admin-landing-density-comfortable = Cómodo
+admin-landing-density-compact = Compacto
+
 
 
 

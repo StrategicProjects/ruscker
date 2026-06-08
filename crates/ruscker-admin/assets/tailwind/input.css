@@ -206,6 +206,35 @@ body {
   box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor;
 }
 
+/* Appearance: portal header background presets (ruscker-06). A custom
+   `header-bg` (inline style) still overrides these. Tints keep the header
+   text readable, so `bold` is a stronger tint, not a saturated fill. */
+.lp-hdr-flat { background: var(--surface); }
+.lp-hdr-soft {
+  background: linear-gradient(180deg,
+    color-mix(in srgb, #0f6e56 7%, var(--surface)), var(--surface));
+}
+.lp-hdr-bold {
+  background: linear-gradient(120deg,
+    color-mix(in srgb, #0f6e56 17%, var(--surface)),
+    color-mix(in srgb, #5dcaa5 12%, var(--surface)));
+}
+
+/* Appearance: card cover style. `tinted` is the default flat tint;
+   `gradient` lays a directional shade over each cover for depth. */
+.cover-gradient .rcover-bg {
+  background-image: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.16));
+}
+
+/* Appearance: catalog density — `compact` tightens the card grid. */
+.cards-grid.is-compact { gap: 10px; }
+.cards-grid.is-compact .rcover { height: 84px; }
+
+/* Appearance: `list` layout — one card per row, cover left, meta right. */
+.cards-grid.is-list { grid-template-columns: 1fr; gap: 8px; }
+.cards-grid.is-list .rcard { display: grid; grid-template-columns: 120px 1fr; align-items: stretch; }
+.cards-grid.is-list .rcover { height: 100%; min-height: 64px; }
+
 /* ─── Dashboard: KPI cards + app-grouped replicas (handoff #623) ───
  * Replaces the flat replica table with metric cards on top and one
  * expandable card per app. Dot classes reuse the server-emitted names

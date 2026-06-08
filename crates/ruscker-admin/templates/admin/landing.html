@@ -161,6 +161,7 @@
           <div class="seg-control" role="group">
             <button type="button" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">{{ self.t("admin-landing-layout-grid") }}</button>
             <button type="button" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">{{ self.t("admin-landing-layout-list") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_layout === 'sections' }" @click="form.catalog_layout = 'sections'">{{ self.t("admin-landing-layout-sections") }}</button>
           </div>
         </div>
         <div class="spec-form-field">

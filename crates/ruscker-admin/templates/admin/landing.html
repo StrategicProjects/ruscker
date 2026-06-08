@@ -617,11 +617,15 @@
             <div class="lp-head-side">
               {# Header-left logos replace the Ruscker mark (faithful to #468);
                  a small mark shows when none are set. #}
+              {# Brand-left logos are sized by the logo-size slider (pvLogoPx),
+                 matching the real landing's brand_logo_view (#701 follow-up). #}
               <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'left')" :key="i">
-                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
+                <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'" alt="">
               </template>
+              {# Mark steps aside for ANY header logo (not just left) and is
+                 always brand-coloured — mirrors has_any_header_logo (#701). #}
               <svg class="lp-mark"
-                   x-show="form.logo_mode !== 'custom' && !logos.some(l => l.url && l.slot === 'header' && l.align === 'left')"
+                   x-show="form.logo_mode !== 'custom' && !logos.some(l => l.url && l.slot === 'header')"
                    :style="'width:' + pvLogoPx() + 'px;height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'"
                    viewBox="0 0 80 80" aria-hidden="true">
                 <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>

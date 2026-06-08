@@ -170,6 +170,32 @@ impl<'a> LandingPage<'a> {
         self.logos.iter().any(|l| l.slot == slot && l.align == align)
     }
 
+    /// Any logo at all in the header (any alignment)? When true the
+    /// built-in Ruscker mark steps aside entirely, so an operator logo in
+    /// the center/right slot no longer renders alongside the mark (#701
+    /// follow-up — "custom logo hides the mark").
+    fn has_any_header_logo(&self) -> bool {
+        self.logos.iter().any(|l| l.slot == "header")
+    }
+
+    /// The header-left "brand" logo(s), sized by the appearance editor's
+    /// logo-size / logo-margin rather than each logo's own `height` — so
+    /// the size slider that drives the built-in mark also drives the
+    /// operator's brand logo (#701 follow-up). Other slots
+    /// (center/right/footer) keep their per-logo height via [`logo_view`].
+    fn brand_logo_view(&self) -> Vec<LogoView> {
+        self.logos
+            .iter()
+            .filter(|l| l.slot == "header" && l.align == "left")
+            .map(|l| LogoView {
+                src: self.logo_src(l),
+                link: l.link.clone(),
+                height: self.logo_size.max(1) as u32,
+                margin: Some(self.logo_margin.max(0) as u32),
+            })
+            .collect()
+    }
+
     /// Group the cards for the catalog area (#701). See [`CatalogGroup`].
     /// In `grid`/`list` layout this is a single unlabeled group holding
     /// every card; in `sections` layout it's one labeled group per

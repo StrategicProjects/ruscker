@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.94 — 2026-06-08
+
+**Portal no longer cached + clearer header labels.**
+
+- The public portal is now served `Cache-Control: private, no-cache`, so
+  appearance changes (catalog layout, colors, …) show on the next load
+  instead of being masked by a browser or proxy cache — and a shared
+  cache can no longer replay one visitor's access-filtered view to
+  another. Bundled assets stay cached as before.
+- Renamed two header controls that read alike: the preset is now **Header
+  style** (was "Portal header") and the explicit color is **Custom
+  background color** (was "Background color"), with a note that the
+  custom color overrides the preset.
+
+---
+
 ## v0.1.93 — 2026-06-08
 
 **Appearance editor fixes.** Two follow-ups from testing the editor:

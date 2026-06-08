@@ -9,6 +9,31 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.90 — 2026-06-08
+
+Appearance editor rebuilt toward the design handoff, plus a Disk-tab
+polish.
+
+**Appearance editor** (the admin "Portal" tab is now **Appearance**, to
+free "Portal" for the back-to-portal link)
+- **Footer** text is editable; blank keeps the version + wordmark lockup.
+- **Default theme** (light/dark/auto) for a first-time visitor; their own
+  toggle still overrides it.
+- **Visible sections**: toggle the portal search bar and access filters.
+- **Brand color** swatch row sets the accent in one click.
+- **Logo**: header brand mode (mark+name / symbol-only / custom) with size
+  and margin.
+- **Background**: header preset (flat/soft/bold) and card cover style
+  (tinted/gradient).
+- **Catalog layout**: grid or list, comfortable or compact density.
+
+**Disk tab**
+- The table search boxes get a proper inset + search glyph, and the images
+  / containers panels size to their own content (no blank space under the
+  shorter table).
+
+---
+
 ## v0.1.89 — 2026-06-07
 
 Reliable cold starts for scale-to-zero interactive apps (#686).

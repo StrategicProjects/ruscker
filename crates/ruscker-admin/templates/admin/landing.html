@@ -2,6 +2,19 @@
 
 {% block title %}{{ self.t("admin-landing-title") }} · Ruscker{% endblock %}
 
+{# One mock catalog card for the live preview. Pure Alpine bindings (no
+   `self`), so a macro is fine — reused by the grid/list and the sections
+   branches of the preview so the markup lives in one place (#701). #}
+{% macro pv_card() %}
+        <div class="lp-card">
+          <div class="lp-card-cover" :style="pvCoverStyle()"></div>
+          <div class="lp-card-meta">
+            <div class="lp-card-name"></div>
+            <div class="lp-card-tag" :style="'background:' + pvAccent()"></div>
+          </div>
+        </div>
+{% endmacro %}
+
 {% block content %}
 
 <div x-data="ruscker.landingForm({{ form_initial_json() }}, {{ logo_images_json() }})" x-cloak>
@@ -421,7 +434,7 @@
         <div class="spec-form-field">
           <label class="spec-form-check" style="cursor:pointer;gap:10px">
             <span class="switch">
-              <input type="checkbox" name="show_search" value="on" {% if !form.show_search.is_empty() %}checked{% endif %}>
+              <input type="checkbox" name="show_search" value="on" x-model="form.show_search" {% if !form.show_search.is_empty() %}checked{% endif %}>
               <span class="switch__track"><span class="switch__dot"></span></span>
             </span>
             <span>{{ self.t("admin-landing-show-search") }}</span>
@@ -430,7 +443,7 @@
         <div class="spec-form-field">
           <label class="spec-form-check" style="cursor:pointer;gap:10px">
             <span class="switch">
-              <input type="checkbox" name="show_filters" value="on" {% if !form.show_filters.is_empty() %}checked{% endif %}>
+              <input type="checkbox" name="show_filters" value="on" x-model="form.show_filters" {% if !form.show_filters.is_empty() %}checked{% endif %}>
               <span class="switch__track"><span class="switch__dot"></span></span>
             </span>
             <span>{{ self.t("admin-landing-show-filters") }}</span>
@@ -597,9 +610,8 @@
       <div class="editor-card editor-card--preview">
         <div class="form-section__title"><i class="ti ti-eye" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-preview") }}</div>
 
-      <div class="landing-preview-frame">
-        <div class="landing-preview-header"
-             :style="(form.header_bg ? `background:${form.header_bg};` : '') + (form.header_fg ? `color:${form.header_fg};` : '')">
+      <div class="landing-preview-frame" :style="pvFrameStyle()">
+        <div class="landing-preview-header" :style="pvHeaderStyle()">
           <div class="landing-preview-header-inner">
             <div class="lp-head-side">
               {# Header-left logos replace the Ruscker mark (faithful to #468);
@@ -607,12 +619,16 @@
               <template x-for="(logo, i) in logos.filter(l => l.url && l.slot === 'header' && l.align === 'left')" :key="i">
                 <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + Math.min((logo.height || 24), 16) + 'px'" alt="">
               </template>
-              <svg class="lp-mark" x-show="!logos.some(l => l.url && l.slot === 'header' && l.align === 'left')" viewBox="0 0 80 80" aria-hidden="true">
+              <svg class="lp-mark"
+                   x-show="form.logo_mode !== 'custom' && !logos.some(l => l.url && l.slot === 'header' && l.align === 'left')"
+                   :style="'width:' + pvLogoPx() + 'px;height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'"
+                   viewBox="0 0 80 80" aria-hidden="true">
                 <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
                 <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
                 <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
               </svg>
-              <div>
+              {# Title/subtitle hidden in `symbol` (mark-only) mode. #}
+              <div x-show="form.logo_mode !== 'symbol'">
                 {# Live preview (#468): title binds to the form, falling back
                    to the config title; subtitle is optional (hidden when blank). #}
                 <div class="landing-preview-title">
@@ -643,17 +659,31 @@
           <p class="landing-preview-intro"
              x-text="previewIntro()"
              :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
-          <div class="landing-preview-mockfilter"><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
-          {# Mock cards: cover tinted with the configured accent, name/tag
-             placeholders. Reacts live to the accent colour. #}
-          <div class="landing-preview-mockgrid">
-            <template x-for="i in [1, 2, 3, 4]" :key="i">
-              <div class="lp-card">
-                <div class="lp-card-cover" :style="'background:color-mix(in srgb, ' + (form.theme_light_accent || '#0f6e56') + ' 14%, var(--surface))'"></div>
-                <div class="lp-card-meta">
-                  <div class="lp-card-name"></div>
-                  <div class="lp-card-tag" :style="'background:' + (form.theme_light_accent || '#0f6e56')"></div>
-                </div>
+          {# Search pill + filter chips honour the Visible-sections toggles. #}
+          <div class="landing-preview-mockfilter" x-show="!!form.show_search" x-cloak><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
+          <div class="landing-preview-mockchips" x-show="!!form.show_filters" x-cloak>
+            <span class="lp-chip"></span><span class="lp-chip"></span><span class="lp-chip"></span>
+          </div>
+
+          {# Catalog mock: reacts to layout (grid/list/sections), density,
+             accent and card-cover style. Sections renders two grouped
+             stacks with heading bars; grid/list is one grid. #}
+          <div class="landing-preview-catalog" :class="form.catalog_density === 'compact' ? 'is-compact' : ''">
+            <template x-if="form.catalog_layout !== 'sections'">
+              <div class="landing-preview-mockgrid" :class="form.catalog_layout === 'list' ? 'is-list' : ''">
+                <template x-for="i in [1, 2, 3, 4]" :key="i">{% call pv_card() %}{% endcall %}</template>
+              </div>
+            </template>
+            <template x-if="form.catalog_layout === 'sections'">
+              <div>
+                <template x-for="g in [1, 2]" :key="g">
+                  <div class="lp-section">
+                    <div class="lp-section-head"></div>
+                    <div class="landing-preview-mockgrid">
+                      <template x-for="i in [1, 2]" :key="i">{% call pv_card() %}{% endcall %}</template>
+                    </div>
+                  </div>
+                </template>
               </div>
             </template>
           </div>
@@ -797,6 +827,74 @@ window.ruscker.landingForm = (initial, logoImages) => ({
     return (per[code] || this.form.intro || "").trim()
         || "{{ self.t("admin-landing-preview-empty") }}";
   },
+
+  // ── Live-preview resolvers (#701 follow-up) ───────────────────
+  // The right-hand mock now reflects every appearance control, so a
+  // change shows immediately instead of only on the live portal. These
+  // mirror the server-side resolution (routes/landing.rs +
+  // build_theme_style) and the input.css fallbacks.
+
+  // Theme a cookieless visitor first sees: explicit light/dark wins,
+  // auto/blank renders as light (the OS-auto base).
+  pvTheme() { return this.form.default_theme === 'dark' ? 'dark' : 'light'; },
+
+  // Accent for the active preview theme (brand swatches set both).
+  pvAccent() {
+    const dark = this.pvTheme() === 'dark';
+    return (dark ? this.form.theme_dark_accent : this.form.theme_light_accent) || '#0f6e56';
+  },
+
+  // CSS-variable overrides on the preview frame so the mock paints in the
+  // portal's per-theme palette. bg/text/accent come from the editor (with
+  // the same built-in fallbacks as input.css); surface/border/muted are
+  // derived so cards and chrome read against the page.
+  pvFrameStyle() {
+    const dark = this.pvTheme() === 'dark';
+    const f = this.form;
+    const bg   = (dark ? f.theme_dark_bg   : f.theme_light_bg)   || (dark ? '#161616' : '#fafaf7');
+    const text = (dark ? f.theme_dark_text : f.theme_light_text) || (dark ? '#f0f0f0' : '#1a1a1a');
+    const tw = dark ? '#ffffff' : '#000000';
+    const mix = (a, p, b) => `color-mix(in srgb, ${a} ${p}%, ${b})`;
+    return [
+      `--bg:${bg}`,
+      `--text:${text}`,
+      `--surface:${mix(bg, dark ? 88 : 96, tw)}`,
+      `--border:${mix(bg, dark ? 78 : 88, tw)}`,
+      `--border-strong:${mix(bg, dark ? 62 : 72, tw)}`,
+      `--text-muted:${mix(text, 68, bg)}`,
+      `--text-faint:${mix(text, 45, bg)}`,
+    ].join(';');
+  },
+
+  // Header background: a custom header-bg wins; otherwise the preset tint
+  // (same gradients as input.css .lp-hdr-*), over the themed surface.
+  pvHeaderStyle() {
+    const f = this.form;
+    let bg = f.header_bg;
+    if (!bg) {
+      const p = f.header_preset || 'soft';
+      bg = p === 'flat'
+        ? 'var(--surface)'
+        : p === 'bold'
+          ? 'linear-gradient(120deg, color-mix(in srgb, #0f6e56 17%, var(--surface)), color-mix(in srgb, #5dcaa5 12%, var(--surface)))'
+          : 'linear-gradient(180deg, color-mix(in srgb, #0f6e56 7%, var(--surface)), var(--surface))';
+    }
+    return `background:${bg};` + (f.header_fg ? `color:${f.header_fg};` : '');
+  },
+
+  // Mock card cover: accent tint + the gradient overlay when card-cover
+  // is `gradient` (mirrors .cover-gradient .rcover-bg).
+  pvCoverStyle() {
+    return `background-color: color-mix(in srgb, ${this.pvAccent()} 14%, var(--surface));`
+      + (this.form.card_cover === 'gradient'
+        ? 'background-image: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.16));'
+        : '');
+  },
+
+  // Built-in mark size/margin, scaled down to the mock header (the real
+  // size is 12–64px around a 28px default → ~10–28px here).
+  pvLogoPx() { return Math.max(10, Math.min(28, Math.round((Number(this.form.logo_size) || 28) / 28 * 14))); },
+  pvLogoMarginPx() { return Math.max(0, Math.min(16, Math.round((Number(this.form.logo_margin) || 8) / 8 * 4))); },
 });
 </script>
 

@@ -366,6 +366,55 @@ pub struct LandingCustomization {
     #[serde(default, rename = "default-theme")]
     pub default_theme: Option<String>,
 
+    /// Show the search box in the public portal filter cluster. Default
+    /// true. Admin-managed via the appearance editor.
+    #[serde(default, rename = "show-search")]
+    pub show_search: Option<bool>,
+
+    /// Show the access filter chips (public / restricted) in the public
+    /// portal. Default true. Admin-managed via the appearance editor.
+    #[serde(default, rename = "show-filters")]
+    pub show_filters: Option<bool>,
+
+    /// Header brand presentation: `"mark"` (mark + name, default),
+    /// `"symbol"` (mark only) or `"custom"` (operator header logos only).
+    #[serde(default, rename = "logo-mode")]
+    pub logo_mode: Option<String>,
+
+    /// Header brand mark size in px (default 28). Admin-managed.
+    #[serde(default, rename = "logo-size")]
+    pub logo_size: Option<i64>,
+
+    /// Header brand mark right margin in px (default 8). Admin-managed.
+    #[serde(default, rename = "logo-margin")]
+    pub logo_margin: Option<i64>,
+
+    /// Header background preset: `"flat"`, `"soft"` (default) or `"bold"`.
+    /// A simple alternative to a hand-built `header-bg` gradient.
+    #[serde(default, rename = "header-preset")]
+    pub header_preset: Option<String>,
+
+    /// Card cover style on the public portal: `"tinted"` (default) or
+    /// `"gradient"`. Admin-managed via the appearance editor.
+    #[serde(default, rename = "card-cover")]
+    pub card_cover: Option<String>,
+
+    /// Public portal catalog layout: `"grid"` (default), `"list"` or
+    /// `"sections"` (grouped by type). Admin-managed.
+    #[serde(default, rename = "catalog-layout")]
+    pub catalog_layout: Option<String>,
+
+    /// Catalog density: `"comfortable"` (default) or `"compact"`.
+    #[serde(default, rename = "catalog-density")]
+    pub catalog_density: Option<String>,
+
+    /// Analytics provider for the portal: `"none"` (default), `"ga"`,
+    /// `"plausible"` or `"matomo"`. Drives the snippet the portal emits
+    /// together with [`Self::analytics_html`] (still honored for raw
+    /// snippets). Admin-managed.
+    #[serde(default, rename = "analytics-provider")]
+    pub analytics_provider: Option<String>,
+
     /// Free-form intro paragraph rendered between the header and
     /// the filter section. Operator-authored, plain text (no HTML).
     ///
@@ -511,6 +560,69 @@ impl LandingCustomization {
     /// operator opts out.
     pub fn effective_show_admin_link(&self) -> bool {
         self.show_admin_link.unwrap_or(true)
+    }
+
+    /// Appearance defaults (#623 / ruscker-06). Each resolves the stored
+    /// override to the built-in default when unset/blank.
+    pub fn effective_show_search(&self) -> bool {
+        self.show_search.unwrap_or(true)
+    }
+    pub fn effective_show_filters(&self) -> bool {
+        self.show_filters.unwrap_or(true)
+    }
+    /// Header brand mode: `mark` (mark + name), `symbol` (mark only),
+    /// `custom` (operator header logos only). Default `mark`.
+    pub fn effective_logo_mode(&self) -> &str {
+        match self.logo_mode.as_deref() {
+            Some("symbol") => "symbol",
+            Some("custom") => "custom",
+            _ => "mark",
+        }
+    }
+    pub fn effective_logo_size(&self) -> i64 {
+        self.logo_size.filter(|n| (12..=64).contains(n)).unwrap_or(28)
+    }
+    pub fn effective_logo_margin(&self) -> i64 {
+        self.logo_margin.filter(|n| (0..=40).contains(n)).unwrap_or(8)
+    }
+    /// Header background preset: `flat` | `soft` | `bold`. Default `soft`.
+    pub fn effective_header_preset(&self) -> &str {
+        match self.header_preset.as_deref() {
+            Some("flat") => "flat",
+            Some("bold") => "bold",
+            _ => "soft",
+        }
+    }
+    /// Card cover style: `tinted` (default) | `gradient`.
+    pub fn effective_card_cover(&self) -> &str {
+        match self.card_cover.as_deref() {
+            Some("gradient") => "gradient",
+            _ => "tinted",
+        }
+    }
+    /// Catalog layout: `grid` (default) | `list` | `sections`.
+    pub fn effective_catalog_layout(&self) -> &str {
+        match self.catalog_layout.as_deref() {
+            Some("list") => "list",
+            Some("sections") => "sections",
+            _ => "grid",
+        }
+    }
+    /// Catalog density: `comfortable` (default) | `compact`.
+    pub fn effective_catalog_density(&self) -> &str {
+        match self.catalog_density.as_deref() {
+            Some("compact") => "compact",
+            _ => "comfortable",
+        }
+    }
+    /// Analytics provider: `none` (default) | `ga` | `plausible` | `matomo`.
+    pub fn effective_analytics_provider(&self) -> &str {
+        match self.analytics_provider.as_deref() {
+            Some("ga") => "ga",
+            Some("plausible") => "plausible",
+            Some("matomo") => "matomo",
+            _ => "none",
+        }
     }
 }
 

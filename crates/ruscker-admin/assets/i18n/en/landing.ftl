@@ -514,7 +514,7 @@ spec-help-inject-base-href = Ruscker always forwards X-Forwarded-Prefix / X-Scri
 spec-form-error-volume = Each volume must be /host:/container (optionally :ro).
 admin-nav-logs = Logs
 admin-proclog-title = Logs
-admin-proclog-subtitle = Recent Ruscker process log (live).
+admin-proclog-subtitle = Event stream from the balancer and replicas
 admin-proclog-unavailable = Log buffer not wired (the server started without the logging layer).
 admin-proclog-empty = No logs captured yet at this level. New events show up here as they happen; run the server with -v to include info-level logs.
 
@@ -606,6 +606,9 @@ admin-proclog-filter-all = All levels
 admin-proclog-search = Search logs…
 admin-proclog-pause = Pause
 admin-proclog-resume = Resume
+admin-proclog-clear = Clear
+admin-proclog-lines = lines
+admin-proclog-filter-app-all = All apps
 
 landing-empty = Nothing here yet.
 

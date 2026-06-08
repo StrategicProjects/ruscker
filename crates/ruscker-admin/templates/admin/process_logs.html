@@ -4,93 +4,133 @@
 
 {% block content %}
 
-<div class="flex items-end justify-between mb-1">
+<div class="flex items-end justify-between mb-4">
   <div>
-    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-proclog-title") }}</h1>
-    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-proclog-subtitle") }}</p>
+    <h1 class="text-2xl font-medium tracking-tight">{{ self.t("admin-proclog-title") }}</h1>
+    <p class="text-sm text-[color:var(--text-muted)] mt-1">{{ self.t("admin-proclog-subtitle") }}</p>
   </div>
   {% if available %}
-  <div class="text-xs text-[color:var(--text-muted)] flex items-center gap-3">
-    {# Live-stream badge (#623): the SSE follow keeps this terminal current. #}
-    <span class="live-badge"><span class="live-dot"></span>{{ self.t("admin-dashboard-live") }}</span>
-    {% if self.truncated() %}
-    <span>{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</span>
-    {% endif %}
-    <a href="{{ base }}/admin/logs/download" class="admin-nav-link" download>
-      <i class="ti ti-download" aria-hidden="true"></i> {{ self.t("admin-proclog-download") }}
-    </a>
-  </div>
+  {# Live-stream badge (#623): the SSE follow keeps this terminal current. #}
+  <span class="live-badge"><span class="live-dot"></span>{{ self.t("admin-dashboard-live") }}</span>
   {% endif %}
 </div>
 
 {% if !available %}
   <p class="text-sm text-[color:var(--text-faint)] py-8 text-center">{{ self.t("admin-proclog-unavailable") }}</p>
 {% else %}
-  {# Buffer is wired but empty — say so explicitly so an operator can
-     tell "nothing logged yet" from a broken tab (#452). New lines still
-     stream into the <pre> below as they happen. #}
-  {% if lines.is_empty() %}
-  <p class="text-sm text-[color:var(--text-faint)] py-6 text-center">{{ self.t("admin-proclog-empty") }}</p>
-  {% endif %}
-  <div class="log-toolbar">
-    <select id="log-level" class="log-select" aria-label="{{ self.t("admin-proclog-filter-level") }}">
-      <option value="">{{ self.t("admin-proclog-filter-all") }}</option>
-      <option value="ERROR">ERROR</option>
-      <option value="WARN">WARN</option>
-      <option value="INFO">INFO</option>
-      <option value="DEBUG">DEBUG</option>
-    </select>
-    <input type="search" id="log-search" class="log-search" placeholder="{{ self.t("admin-proclog-search") }}">
-    <button type="button" id="log-pause" class="admin-nav-link" aria-pressed="false"
-            data-pause="{{ self.t("admin-proclog-pause") }}" data-resume="{{ self.t("admin-proclog-resume") }}">
-      <i class="ti ti-player-pause" aria-hidden="true"></i> <span>{{ self.t("admin-proclog-pause") }}</span>
-    </button>
-  </div>
+  <div class="log-viewer">
+    {# Toolbar: pause · level chips · app filter · (right) count + clear +
+       download — matches the handoff Logs design. #}
+    <div class="log-toolbar">
+      <button type="button" id="log-pause" class="log-pause" aria-pressed="false"
+              data-pause="{{ self.t("admin-proclog-pause") }}" data-resume="{{ self.t("admin-proclog-resume") }}">
+        <i class="ti ti-player-pause" aria-hidden="true"></i> <span>{{ self.t("admin-proclog-pause") }}</span>
+      </button>
+      <span class="log-toolbar__sep" aria-hidden="true"></span>
+      {# Level chips toggle each level's visibility (all on by default).
+         Labels are the literal log levels, coloured to match the stream. #}
+      <div class="log-chips" role="group" aria-label="{{ self.t("admin-proclog-filter-level") }}">
+        <button type="button" class="log-chip log-chip--info"  data-level="INFO">Info</button>
+        <button type="button" class="log-chip log-chip--warn"  data-level="WARN">Warn</button>
+        <button type="button" class="log-chip log-chip--error" data-level="ERROR">Error</button>
+      </div>
+      <select id="log-app" class="log-select" aria-label="{{ self.t("admin-proclog-filter-app-all") }}">
+        <option value="">{{ self.t("admin-proclog-filter-app-all") }}</option>
+      </select>
+      <span class="log-toolbar__spacer"></span>
+      <span class="log-count"><span id="log-count-n">0</span> {{ self.t("admin-proclog-lines") }}</span>
+      <button type="button" id="log-clear" class="log-iconbtn"
+              title="{{ self.t("admin-proclog-clear") }}" aria-label="{{ self.t("admin-proclog-clear") }}">
+        <i class="ti ti-eraser" aria-hidden="true"></i>
+      </button>
+      <a href="{{ base }}/admin/logs/download" class="log-iconbtn" download
+         title="{{ self.t("admin-proclog-download") }}" aria-label="{{ self.t("admin-proclog-download") }}">
+        <i class="ti ti-download" aria-hidden="true"></i>
+      </a>
+    </div>
 
-  {# Raw lines for the JS to colour/parse on load; the <pre> is replaced by
-     the terminal below. Hidden — never shown directly. #}
-  <pre id="proclog-seed" hidden>{% for line in lines %}{{ line }}
+    {# Buffer wired but empty — say so explicitly so an operator can tell
+       "nothing logged yet" from a broken tab (#452). New lines still stream
+       in below as they happen. #}
+    {% if lines.is_empty() %}
+    <p id="log-empty" class="text-sm text-[color:var(--text-faint)] py-8 text-center">{{ self.t("admin-proclog-empty") }}</p>
+    {% endif %}
+
+    {# Raw lines for the JS to colour/parse on load; the <pre> is replaced by
+       the terminal below. Hidden — never shown directly. #}
+    <pre id="proclog-seed" hidden>{% for line in lines %}{{ line }}
 {% endfor %}</pre>
-  <div id="proclog" class="log-body"></div>
+    <div id="proclog" class="log-body" role="log" aria-live="polite"></div>
+  </div>
+  {% if self.truncated() %}
+  <p class="text-[11px] text-[color:var(--text-faint)] mt-2">{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</p>
+  {% endif %}
 
   <script>
   (function () {
     var box = document.getElementById('proclog');
     var seed = document.getElementById('proclog-seed');
-    var levelSel = document.getElementById('log-level');
-    var searchIn = document.getElementById('log-search');
+    var appSel = document.getElementById('log-app');
     var pauseBtn = document.getElementById('log-pause');
+    var clearBtn = document.getElementById('log-clear');
+    var countN = document.getElementById('log-count-n');
+    var emptyHint = document.getElementById('log-empty');
+    var chips = Array.prototype.slice.call(document.querySelectorAll('.log-chip'));
     var paused = false;
+    var hiddenLevels = {};   // level -> true when its chip is toggled off
+    var knownApps = {};      // app name -> true, to dedupe the app <select>
 
     function cell(cls, text) { var s = document.createElement('span'); s.className = cls; s.textContent = text; return s; }
+
+    // A row matches when its level chip is on AND the app filter allows it.
     function matches(el) {
-      var lv = levelSel.value, q = searchIn.value.toLowerCase();
-      return (!lv || el.dataset.level === lv) && (!q || (el.dataset.text || '').indexOf(q) >= 0);
+      var lv = el.dataset.level;
+      if (lv && hiddenLevels[lv]) return false;
+      var app = appSel.value;
+      if (app && el.dataset.app !== app) return false;
+      return true;
     }
+    function refilter() {
+      var rows = box.children;
+      for (var i = 0; i < rows.length; i++) rows[i].style.display = matches(rows[i]) ? '' : 'none';
+    }
+    function updateCount() { countN.textContent = box.children.length; }
+    function addAppOption(app) {
+      var o = document.createElement('option'); o.value = app; o.textContent = app; appSel.appendChild(o);
+    }
+
     function append(raw) {
-      // Strip ANSI colour codes, then split into ts / level / target / msg.
+      // Strip ANSI, then split into  <ts>  LEVEL  <message>. The tracing
+      // stream carries no `target:` prefix, so the level is always the 2nd
+      // token; the friendly app name comes from a `spec=`/`app=` field.
       var clean = raw.replace(/\x1b\[[0-9;]*m/g, '').replace(/\s+$/, '');
       if (!clean) return;
-      var m = clean.match(/^(\S+)\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+([\w:._-]+):\s?([\s\S]*)$/);
+      if (emptyHint) { emptyHint.remove(); emptyHint = null; }
+      var m = clean.match(/^(\S+)\s+(ERROR|WARN|INFO|DEBUG|TRACE)\s+([\s\S]*)$/);
       var div = document.createElement('div');
       div.className = 'log-line';
-      div.dataset.level = m ? m[2] : '';
-      div.dataset.text = clean.toLowerCase();
       if (m) {
-        div.appendChild(cell('log-ts', m[1].replace(/^.*T/, '').replace(/\..*$/, '')));
-        div.appendChild(cell('log-lvl log-lvl-' + m[2].toLowerCase(), m[2]));
-        div.appendChild(cell('log-app', m[3]));
-        div.appendChild(cell('log-msg', m[4]));
+        var level = m[2], rest = m[3], app = '';
+        var sm = rest.match(/\b(?:spec|app|name)=["']?([A-Za-z0-9][A-Za-z0-9._-]*)/);
+        if (sm) app = sm[1];
+        div.dataset.level = level;
+        div.dataset.app = app;
+        div.dataset.text = clean.toLowerCase();
+        // HH:MM:SS.mmm (keep millis like the design; drop the date + tz).
+        var ts = m[1].replace(/^.*T/, '').replace(/(\.\d{3})\d*Z?$/, '$1').replace(/Z$/, '');
+        div.appendChild(cell('log-ts', ts));
+        div.appendChild(cell('log-lvl log-lvl-' + level.toLowerCase(), level));
+        div.appendChild(cell('log-app', app));
+        div.appendChild(cell('log-msg', rest));
+        if (app && !knownApps[app]) { knownApps[app] = true; addAppOption(app); }
       } else {
+        div.dataset.level = ''; div.dataset.app = ''; div.dataset.text = clean.toLowerCase();
         div.style.gridTemplateColumns = '1fr';
         div.appendChild(cell('log-msg', clean));
       }
       div.style.display = matches(div) ? '' : 'none';
       box.appendChild(div);
-    }
-    function refilter() {
-      var rows = box.children;
-      for (var i = 0; i < rows.length; i++) rows[i].style.display = matches(rows[i]) ? '' : 'none';
+      updateCount();
     }
     var nearBottom = function () { return box.scrollHeight - box.scrollTop - box.clientHeight < 48; };
 
@@ -99,10 +139,26 @@
     seed.remove();
     box.scrollTop = box.scrollHeight;
 
-    levelSel.addEventListener('change', refilter);
-    searchIn.addEventListener('input', refilter);
+    chips.forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var lv = chip.dataset.level;
+        hiddenLevels[lv] = !hiddenLevels[lv];
+        chip.classList.toggle('is-off', !!hiddenLevels[lv]);
+        chip.setAttribute('aria-pressed', hiddenLevels[lv] ? 'false' : 'true');
+        refilter();
+      });
+    });
+    appSel.addEventListener('change', refilter);
+    clearBtn.addEventListener('click', function () {
+      box.textContent = '';
+      knownApps = {};
+      appSel.selectedIndex = 0;
+      while (appSel.options.length > 1) appSel.remove(1);
+      updateCount();
+    });
     pauseBtn.addEventListener('click', function () {
       paused = !paused;
+      pauseBtn.classList.toggle('is-paused', paused);
       pauseBtn.setAttribute('aria-pressed', paused ? 'true' : 'false');
       var icon = pauseBtn.querySelector('i'), label = pauseBtn.querySelector('span');
       if (icon) icon.className = 'ti ' + (paused ? 'ti-player-play' : 'ti-player-pause');
@@ -114,7 +170,7 @@
       es.onmessage = function (e) {
         if (paused) return;
         var stick = nearBottom();
-        append(e.data);
+        e.data.split('\n').forEach(append);
         if (stick) box.scrollTop = box.scrollHeight;
       };
       es.onerror = function () { /* EventSource auto-reconnects */ };

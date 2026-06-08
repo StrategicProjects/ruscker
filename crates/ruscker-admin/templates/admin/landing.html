@@ -130,6 +130,47 @@
         </div>
       </section>
 
+      {# ── Card: Background — header preset + card cover style. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-background") }}</div>
+        <input type="hidden" name="header_preset" :value="form.header_preset">
+        <input type="hidden" name="card_cover" :value="form.card_cover">
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-header-bg-preset") }}</label>
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.header_preset || 'soft') === 'flat' }" @click="form.header_preset = 'flat'">{{ self.t("admin-landing-preset-flat") }}</button>
+            <button type="button" :class="{ 'is-active': (form.header_preset || 'soft') === 'soft' }" @click="form.header_preset = 'soft'">{{ self.t("admin-landing-preset-soft") }}</button>
+            <button type="button" :class="{ 'is-active': form.header_preset === 'bold' }" @click="form.header_preset = 'bold'">{{ self.t("admin-landing-preset-bold") }}</button>
+          </div>
+        </div>
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-card-covers") }}</label>
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.card_cover || 'tinted') === 'tinted' }" @click="form.card_cover = 'tinted'">{{ self.t("admin-landing-cover-tinted") }}</button>
+            <button type="button" :class="{ 'is-active': form.card_cover === 'gradient' }" @click="form.card_cover = 'gradient'">{{ self.t("admin-landing-cover-gradient") }}</button>
+          </div>
+        </div>
+      </section>
+
+      {# ── Card: Catalog layout — grid/list + density. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
+        <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
+        <input type="hidden" name="catalog_density" :value="form.catalog_density">
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">{{ self.t("admin-landing-layout-grid") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">{{ self.t("admin-landing-layout-list") }}</button>
+          </div>
+        </div>
+        <div class="spec-form-field">
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.catalog_density || 'comfortable') === 'comfortable' }" @click="form.catalog_density = 'comfortable'">{{ self.t("admin-landing-density-comfortable") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_density === 'compact' }" @click="form.catalog_density = 'compact'">{{ self.t("admin-landing-density-compact") }}</button>
+          </div>
+        </div>
+      </section>
+
       {# ── Card: Appearance — header colours + per-theme palettes. #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-card-appearance") }}</div>

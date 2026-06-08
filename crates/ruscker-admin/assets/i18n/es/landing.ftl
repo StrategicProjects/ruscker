@@ -687,6 +687,10 @@ admin-landing-footer = Pie de página
 admin-landing-footer-help = Texto en el pie del portal. En blanco muestra la versión y la marca.
 admin-landing-default-theme = Tema predeterminado
 admin-landing-default-theme-help = El tema inicial para un visitante nuevo. Aún puede cambiarlo.
+admin-landing-visible-sections = Secciones visibles
+admin-landing-show-search = Barra de búsqueda
+admin-landing-show-filters = Filtros de acceso (público/restringido)
+
 
 
 admin-landing-theme-colors = Colores por tema

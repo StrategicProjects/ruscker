@@ -97,6 +97,23 @@ struct LandingPage<'a> {
     /// Whether the "Featured" carousel may render (#506). The template also
     /// checks that at least one card is featured via [`Self::has_featured`].
     show_highlights: bool,
+    /// Appearance toggles/options (#623 / ruscker-06), resolved to their
+    /// effective values. The templates gate elements and pick CSS classes
+    /// from these.
+    show_search: bool,
+    show_filters: bool,
+    /// Header brand: `mark` | `symbol` | `custom`; size/margin in px.
+    logo_mode: String,
+    logo_size: i64,
+    logo_margin: i64,
+    /// Header background preset: `flat` | `soft` | `bold`.
+    header_preset: String,
+    /// Card cover style: `tinted` | `gradient`.
+    card_cover: String,
+    /// Catalog layout: `grid` | `list` | `sections`; density:
+    /// `comfortable` | `compact`.
+    catalog_layout: String,
+    catalog_density: String,
 }
 
 /// A landing logo resolved for rendering: `src` already carries the mount
@@ -373,6 +390,16 @@ async fn index(
             .effective_show_admin_link(),
         // Carousel toggle from the DB-backed editor (#506).
         show_highlights: lc.effective_show_highlights(),
+        // Appearance options (#623 / ruscker-06).
+        show_search: lc.effective_show_search(),
+        show_filters: lc.effective_show_filters(),
+        logo_mode: lc.effective_logo_mode().to_string(),
+        logo_size: lc.effective_logo_size(),
+        logo_margin: lc.effective_logo_margin(),
+        header_preset: lc.effective_header_preset().to_string(),
+        card_cover: lc.effective_card_cover().to_string(),
+        catalog_layout: lc.effective_catalog_layout().to_string(),
+        catalog_density: lc.effective_catalog_density().to_string(),
     };
     let mut resp = render(&page);
     // Widen *this page's* CSP so the analytics script can load/report.

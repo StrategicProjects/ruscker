@@ -691,6 +691,10 @@ admin-landing-footer = Rodapé
 admin-landing-footer-help = Texto no rodapé do portal. Em branco, mostra a versão e a marca.
 admin-landing-default-theme = Tema padrão
 admin-landing-default-theme-help = O tema inicial para quem nunca escolheu. O visitante ainda pode trocar.
+admin-landing-visible-sections = Seções visíveis
+admin-landing-show-search = Barra de busca
+admin-landing-show-filters = Filtros de acesso (público/restrito)
+
 
 
 admin-landing-theme-colors = Cores por tema

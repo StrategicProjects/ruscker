@@ -42,12 +42,24 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         show_highlights: Option<bool>,
         footer: Option<String>,
         default_theme: Option<String>,
+        show_search: Option<bool>,
+        show_filters: Option<bool>,
+        logo_mode: Option<String>,
+        logo_size: Option<i64>,
+        logo_margin: Option<i64>,
+        header_preset: Option<String>,
+        card_cover: Option<String>,
+        catalog_layout: Option<String>,
+        catalog_density: Option<String>,
+        analytics_provider: Option<String>,
     }
     let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins, custom_css, logos_json,
                 title, subtitle, theme_colors_json, show_highlights, footer,
-                default_theme
+                default_theme, show_search, show_filters, logo_mode,
+                logo_size, logo_margin, header_preset, card_cover,
+                catalog_layout, catalog_density, analytics_provider
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -97,6 +109,16 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 show_highlights: r.show_highlights,
                 footer: r.footer,
                 default_theme: r.default_theme,
+                show_search: r.show_search,
+                show_filters: r.show_filters,
+                logo_mode: r.logo_mode,
+                logo_size: r.logo_size,
+                logo_margin: r.logo_margin,
+                header_preset: r.header_preset,
+                card_cover: r.card_cover,
+                catalog_layout: r.catalog_layout,
+                catalog_density: r.catalog_density,
+                analytics_provider: r.analytics_provider,
             })
         }
     }
@@ -165,7 +187,10 @@ pub(crate) async fn update_in_tx(
                 og_image = ?, analytics_html = ?, analytics_origins = ?,
                 custom_css = ?, logos_json = ?, title = ?, subtitle = ?,
                 theme_colors_json = ?, show_highlights = ?, footer = ?,
-                default_theme = ?, updated_at = ?
+                default_theme = ?, show_search = ?, show_filters = ?,
+                logo_mode = ?, logo_size = ?, logo_margin = ?,
+                header_preset = ?, card_cover = ?, catalog_layout = ?,
+                catalog_density = ?, analytics_provider = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -185,6 +210,16 @@ pub(crate) async fn update_in_tx(
     .bind(lc.show_highlights)
     .bind(none_if_empty(&lc.footer))
     .bind(none_if_empty(&lc.default_theme))
+    .bind(lc.show_search)
+    .bind(lc.show_filters)
+    .bind(none_if_empty(&lc.logo_mode))
+    .bind(lc.logo_size)
+    .bind(lc.logo_margin)
+    .bind(none_if_empty(&lc.header_preset))
+    .bind(none_if_empty(&lc.card_cover))
+    .bind(none_if_empty(&lc.catalog_layout))
+    .bind(none_if_empty(&lc.catalog_density))
+    .bind(none_if_empty(&lc.analytics_provider))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -224,7 +259,10 @@ pub(crate) async fn update_in_tx_pg(
                 custom_css = $10, logos_json = $11, title = $12,
                 subtitle = $13, theme_colors_json = $14,
                 show_highlights = $15, footer = $16, default_theme = $17,
-                updated_at = $18
+                show_search = $18, show_filters = $19, logo_mode = $20,
+                logo_size = $21, logo_margin = $22, header_preset = $23,
+                card_cover = $24, catalog_layout = $25, catalog_density = $26,
+                analytics_provider = $27, updated_at = $28
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -244,6 +282,16 @@ pub(crate) async fn update_in_tx_pg(
     .bind(lc.show_highlights)
     .bind(none_if_empty(&lc.footer))
     .bind(none_if_empty(&lc.default_theme))
+    .bind(lc.show_search)
+    .bind(lc.show_filters)
+    .bind(none_if_empty(&lc.logo_mode))
+    .bind(lc.logo_size)
+    .bind(lc.logo_margin)
+    .bind(none_if_empty(&lc.header_preset))
+    .bind(none_if_empty(&lc.card_cover))
+    .bind(none_if_empty(&lc.catalog_layout))
+    .bind(none_if_empty(&lc.catalog_density))
+    .bind(none_if_empty(&lc.analytics_provider))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -360,6 +408,36 @@ mod tests {
         update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
         let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
         assert_eq!(got.default_theme.as_deref(), Some("dark"));
+    }
+
+    #[tokio::test]
+    async fn appearance_fields_roundtrip() {
+        let pool = open_memory().await.unwrap();
+        let lc = LandingCustomization {
+            show_search: Some(false),
+            show_filters: Some(true),
+            logo_mode: Some("symbol".into()),
+            logo_size: Some(40),
+            logo_margin: Some(12),
+            header_preset: Some("bold".into()),
+            card_cover: Some("gradient".into()),
+            catalog_layout: Some("list".into()),
+            catalog_density: Some("compact".into()),
+            analytics_provider: Some("plausible".into()),
+            ..Default::default()
+        };
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
+        assert_eq!(got.show_search, Some(false));
+        assert_eq!(got.show_filters, Some(true));
+        assert_eq!(got.logo_mode.as_deref(), Some("symbol"));
+        assert_eq!(got.logo_size, Some(40));
+        assert_eq!(got.logo_margin, Some(12));
+        assert_eq!(got.header_preset.as_deref(), Some("bold"));
+        assert_eq!(got.card_cover.as_deref(), Some("gradient"));
+        assert_eq!(got.catalog_layout.as_deref(), Some("list"));
+        assert_eq!(got.catalog_density.as_deref(), Some("compact"));
+        assert_eq!(got.analytics_provider.as_deref(), Some("plausible"));
     }
 
     #[tokio::test]

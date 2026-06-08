@@ -687,6 +687,10 @@ admin-landing-footer = Footer
 admin-landing-footer-help = Text in the portal footer. Blank shows the version and wordmark.
 admin-landing-default-theme = Default theme
 admin-landing-default-theme-help = The initial theme for a first-time visitor. They can still switch.
+admin-landing-visible-sections = Visible sections
+admin-landing-show-search = Search bar
+admin-landing-show-filters = Access filters (public/restricted)
+
 
 
 admin-landing-theme-colors = Theme colors

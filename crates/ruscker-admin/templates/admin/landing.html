@@ -262,6 +262,29 @@
         </div>
       </section>
 
+      {# ── Card: Visible sections — toggle portal chrome on/off. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-visible-sections") }}</div>
+        <div class="spec-form-field">
+          <label class="spec-form-check" style="cursor:pointer;gap:10px">
+            <span class="switch">
+              <input type="checkbox" name="show_search" value="on" {% if !form.show_search.is_empty() %}checked{% endif %}>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+            <span>{{ self.t("admin-landing-show-search") }}</span>
+          </label>
+        </div>
+        <div class="spec-form-field">
+          <label class="spec-form-check" style="cursor:pointer;gap:10px">
+            <span class="switch">
+              <input type="checkbox" name="show_filters" value="on" {% if !form.show_filters.is_empty() %}checked{% endif %}>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+            <span>{{ self.t("admin-landing-show-filters") }}</span>
+          </label>
+        </div>
+      </section>
+
       {# ── Card: Header / footer logos (#468). #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-logos") }}</div>

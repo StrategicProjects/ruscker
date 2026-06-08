@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.92 — 2026-06-08
+
+**Appearance — catalog "Sections" layout + editor card order.** The
+catalog-layout picker gains a third option, **Sections**: the portal
+catalog grouped by app type, each group under a heading that hides itself
+when the live filters (search / access / status / type) empty it. Grid
+and List are unchanged. The appearance editor's cards are also reordered
+to match the design handoff (logo controls grouped together, default
+theme ahead of catalog layout).
+
+---
+
 ## v0.1.91 — 2026-06-08
 
 **Appearance — analytics provider picker.** The appearance editor's

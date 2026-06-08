@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.97 — 2026-06-08
+
+**Logs spacing fix.** The log lines gave the app column a fixed width, so
+lines without an app (most infra events) showed a large empty gap between
+the level and the message. The column now collapses when empty, so the
+message sits right after the level.
+
+---
+
 ## v0.1.96 — 2026-06-08
 
 **Logs tab — colour-coded event stream.** The Logs view rendered every

@@ -2206,6 +2206,16 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .lp-card-meta { padding: 4px 5px; display: flex; flex-direction: column; gap: 3px; }
 .lp-card-name { height: 4px; width: 72%; border-radius: 2px; background: var(--border-strong); }
 .lp-card-tag { height: 4px; width: 26%; border-radius: 2px; opacity: 0.85; }
+/* Live preview: catalog layout/density + visible-section mocks (#701
+ * follow-up) so the preview reacts to every appearance control. */
+.landing-preview-catalog.is-compact .landing-preview-mockgrid { gap: 3px; }
+.landing-preview-mockgrid.is-list { grid-template-columns: 1fr; }
+.landing-preview-mockgrid.is-list .lp-card { display: grid; grid-template-columns: 26px 1fr; }
+.landing-preview-mockgrid.is-list .lp-card-cover { height: 100%; min-height: 18px; }
+.lp-section + .lp-section { margin-top: 6px; }
+.lp-section-head { height: 4px; width: 32%; border-radius: 2px; background: var(--border-strong); margin: 0 0 4px; }
+.landing-preview-mockchips { display: flex; gap: 4px; }
+.lp-chip { height: 9px; width: 24px; border-radius: 999px; background: var(--surface); border: 0.5px solid var(--border); }
 /* Live preview: logos in the header/footer chrome + a faithful footer. */
 .lp-head-side { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .lp-logo { display: block; width: auto; object-fit: contain; }

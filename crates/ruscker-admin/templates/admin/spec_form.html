@@ -983,7 +983,13 @@
   {# ── Image picker modal (shared by logo + cover) ───────────────
      Opened by openPicker('logo'|'cover'). Search + the uploaded Media
      images + the built-in logos + an inline upload — so picking scales to
-     any library size without an ever-growing inline thumbnail strip. #}
+     any library size without an ever-growing inline thumbnail strip.
+     Teleported to <body> so the overlay's `position: fixed` resolves
+     against the viewport, not the admin shell's `<main class="fade-in">`
+     (its transform animation makes it a containing block for fixed
+     descendants, which would otherwise center the modal in the tall
+     page instead of on screen). #}
+  <template x-teleport="body">
   <div x-show="picker.open" x-cloak class="image-picker-overlay"
        @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
     <div class="image-picker-modal">
@@ -1013,6 +1019,7 @@
       <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
     </div>
   </div>
+  </template>
 </div>
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>

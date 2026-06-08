@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.1.91 — 2026-06-08
+
+**Appearance — analytics provider picker.** The appearance editor's
+Analytics section now offers a provider picker (Google Analytics 4,
+Plausible, or Matomo) plus a site-key field; the portal builds the
+standard snippet from provider + key and opens the matching CSP origins.
+The raw analytics-HTML field stays as an escape hatch for anything else.
+
+---
+
 ## v0.1.90 — 2026-06-08
 
 Appearance editor rebuilt toward the design handoff, plus a Disk-tab

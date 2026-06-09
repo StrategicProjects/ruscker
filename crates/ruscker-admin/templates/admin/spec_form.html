@@ -1237,11 +1237,12 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     this.coverMode = mode;
     if (mode === 'auto') { this.form.cover = ''; return; }
     if (mode === 'gradient') { this.applyCoverGrad(); return; }
-    // 'solid' keeps the current value only if it isn't a gradient;
-    // otherwise clear it so the saved cover can't disagree with the
-    // chosen mode (#304). The operator then picks a colour.
+    // 'solid': seed a starting colour so the preview reflects the choice
+    // immediately (selecting the mode left `cover` empty, so the preview
+    // card didn't change until the picker was dragged — #720 follow-up).
+    // A gradient string is replaced too; an existing solid hex is kept.
     const c = (this.form.cover || '').trim();
-    if (mode === 'solid' && /^(linear|radial)-gradient\(/.test(c)) this.form.cover = '';
+    if (!c || /^(linear|radial)-gradient\(/.test(c)) this.form.cover = '#0f6e56';
   },
   // Image covers were retired (they rendered *under* the logo → two
   // overlapping pictures on one card). A legacy `url(...)` cover degrades

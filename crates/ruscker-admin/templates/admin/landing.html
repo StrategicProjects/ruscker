@@ -911,11 +911,13 @@ window.ruscker.landingForm = (initial, logoImages) => ({
     this.coverDefMode = mode;
     if (mode === 'auto') { this.form.card_cover_default = ''; return; }
     if (mode === 'gradient') { this.applyCoverDef(); return; }
-    // 'solid': drop a gradient string so the colour picker drives a fresh
-    // value (mirrors setBgMode / the spec form's cover builder).
-    if (/^(linear|radial)-gradient\(/.test((this.form.card_cover_default || '').trim())) {
-      this.form.card_cover_default = '';
-    }
+    // 'solid': seed a starting colour so the preview reflects the choice
+    // *immediately* (selecting the mode alone left the value empty, so the
+    // mock card didn't change until the picker was dragged — #720 follow-up).
+    // A gradient string is also replaced so the colour picker drives a fresh
+    // value; an existing solid hex is kept.
+    const c = (this.form.card_cover_default || '').trim();
+    if (!c || /^(linear|radial)-gradient\(/.test(c)) this.form.card_cover_default = '#0f6e56';
   },
   /// Resolve the intro shown in the preview given the admin's
   /// own locale: prefer the per-locale field, fall back to the

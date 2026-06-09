@@ -1217,7 +1217,9 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     : ((initial.cover || '').trim().indexOf('url(') === 0
         ? 'auto'
         : window.ruscker.bgMode(initial.cover)),
-  grad: window.ruscker.gradientDefault(),
+  // Seed from the saved gradient so editing it modifies it in place
+  // instead of resetting to the default palette (#720 follow-up).
+  grad: window.ruscker.gradientParse(initial.cover) || window.ruscker.gradientDefault(),
   applyCoverGrad() {
     this.form.cover = window.ruscker.gradientCss(this.grad);
   },

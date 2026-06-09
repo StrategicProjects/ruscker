@@ -858,7 +858,9 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   })(),
   // Header-background editing mode + gradient builder sub-state.
   bgMode: window.ruscker.bgMode(initial.header_bg || ''),
-  grad: window.ruscker.gradientDefault(),
+  // Seed the builder from the saved gradient (not the default) so editing
+  // a saved gradient modifies it in place instead of wiping it (#720).
+  grad: window.ruscker.gradientParse(initial.header_bg) || window.ruscker.gradientDefault(),
   // Recompute header_bg from the gradient builder. Called on any
   // builder control change while in gradient mode.
   applyGrad() {
@@ -891,7 +893,9 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   coverDefMode: !((initial.card_cover_default || '').trim())
     ? 'auto'
     : window.ruscker.bgMode(initial.card_cover_default),
-  coverDefGrad: window.ruscker.gradientDefault(),
+  // Seed from the saved gradient so editing it modifies it in place
+  // instead of resetting to the default palette (#720 follow-up).
+  coverDefGrad: window.ruscker.gradientParse(initial.card_cover_default) || window.ruscker.gradientDefault(),
   applyCoverDef() {
     this.form.card_cover_default = window.ruscker.gradientCss(this.coverDefGrad);
   },
@@ -988,11 +992,17 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   // (mirrors the public landing: inline `background` + .cover-gradient
   // .rcover-bg's `background-image`).
   pvCoverStyle() {
+    // An explicit default cover wins and is shown as-is — mirroring the
+    // public landing, where the inline `background` overrides the
+    // `.cover-gradient` overlay. (Appending the overlay here would be a
+    // second `background-image` that clobbers the colour gradient, leaving
+    // a grey wash — the bug this fixes.)
     const def = (this.form.card_cover_default || '').trim();
-    const base = def
-      ? `background: ${def};`
-      : `background-color: color-mix(in srgb, ${this.pvAccent()} 14%, var(--surface));`;
-    return base
+    if (def) return `background: ${def};`;
+    // No explicit cover: the accent tint, plus the subtle gradient overlay
+    // when card-cover is `gradient` (these are separate properties —
+    // background-color + background-image — so they layer cleanly).
+    return `background-color: color-mix(in srgb, ${this.pvAccent()} 14%, var(--surface));`
       + (this.form.card_cover === 'gradient'
         ? 'background-image: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.16));'
         : '');

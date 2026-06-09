@@ -329,18 +329,46 @@ async fn changing_password_lifts_the_guard() {
         .await;
     let cookie = format!("{COOKIE_NAME}={sid}");
 
-    let (status, loc) = post(
-        state.clone(),
-        "/admin/account/password",
-        "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9",
-        Some(&cookie),
-    )
-    .await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(loc, "/admin/dashboard");
+    // Do the POST by hand (not via the `post` helper) because we need
+    // the response's Set-Cookie: since #739 a password change revokes
+    // every session of the account — including the one making the
+    // request — and re-issues a fresh cookie on the response.
+    let app = router(state.clone());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/account/password")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", &cookie)
+                .body(Body::from(
+                    "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/dashboard")
+    );
+    let fresh_cookie = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|c| c.split(';').next())
+        .expect("the change re-issues a session cookie (#739)")
+        .to_string();
 
-    // The guard no longer fires — the dashboard renders.
-    let (dash_status, _) = get(state, "/admin/dashboard", Some(&cookie)).await;
+    // The old session died with the change (#739)…
+    let (old_status, old_loc) = get(state.clone(), "/admin/dashboard", Some(&cookie)).await;
+    assert_eq!(old_status, StatusCode::SEE_OTHER);
+    assert_eq!(old_loc, "/admin/login");
+
+    // …and on the fresh session the guard no longer fires — the
+    // dashboard renders.
+    let (dash_status, _) = get(state, "/admin/dashboard", Some(&fresh_cookie)).await;
     assert_eq!(dash_status, StatusCode::OK);
 }
 

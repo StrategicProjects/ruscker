@@ -1906,36 +1906,40 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   gap: 10px; padding: 0 18px 18px; overflow-y: auto;
 }
 .image-picker-tile {
-  aspect-ratio: 1; border-radius: 8px; overflow: hidden; padding: 0;
+  /* min-height is a fallback: some browsers don't give an aspect-ratio
+     box a height when the flex/grid track is auto, and an SVG with a big
+     viewBox then blew the tile up and overlapped its neighbours (#720). */
+  aspect-ratio: 1; min-height: 72px;
+  border-radius: 8px; overflow: hidden; padding: 0;
   border: 2px solid transparent; background: var(--surface-soft); cursor: pointer;
 }
 .image-picker-tile:hover { border-color: var(--border-strong); }
 .image-picker-tile.is-sel { border-color: #0f6e56; }
 .image-picker-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .image-picker-tile.is-builtin img { object-fit: contain; padding: 8px; }
+/* Logo galleries (spec form): logos have intentional whitespace, so fit
+   them whole instead of cropping. */
+.image-picker-grid.is-logos .image-picker-tile img { object-fit: contain; padding: 6px; }
 .image-picker-empty { padding: 0 18px 18px; font-size: 13px; color: var(--text-muted); }
 
 /* Inline logo gallery on the spec form (#701) — pick from the media
    library without opening the modal; the last tile uploads. */
-.logo-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-  gap: 8px; margin-top: 6px; max-height: 248px; overflow-y: auto; padding: 2px;
+/* Compact logo picker in the spec form (#720): a thumbnail of the current
+   logo + a "Choose from library" button that opens the search modal. The
+   old inline thumbnail grid didn't scale — a growing library overflowed
+   and tiles overlapped — so browsing moved into the `image-picker-*`
+   modal. */
+.logo-pick { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.logo-pick__thumb {
+  width: 56px; height: 56px; flex: none; border-radius: 10px; overflow: hidden;
+  border: 2px solid var(--border); background: var(--surface-soft);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: var(--text-faint); padding: 0;
 }
-.logo-tile {
-  position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden;
-  border: 2px solid var(--border); background: var(--surface-soft); cursor: pointer; padding: 0;
-}
-.logo-tile:hover { border-color: var(--border-strong); }
-.logo-tile.is-sel { border-color: var(--color-teal-600); }
-.logo-tile img { width: 100%; height: 100%; object-fit: contain; padding: 8px; display: block; }
-.logo-tile__check {
-  position: absolute; top: 3px; right: 3px; width: 16px; height: 16px; border-radius: 999px;
-  background: var(--color-teal-600); color: #fff; font-size: 11px;
-  display: inline-flex; align-items: center; justify-content: center;
-}
-.logo-tile--upload { display: flex; align-items: center; justify-content: center; color: var(--text-faint); border-style: dashed; }
-.logo-tile--upload:hover { color: var(--text); border-color: var(--border-strong); }
-.logo-tile--upload.is-busy { opacity: 0.5; pointer-events: none; }
+.logo-pick__thumb:hover { border-color: var(--border-strong); }
+.logo-pick__thumb img { width: 100%; height: 100%; object-fit: contain; padding: 6px; display: block; }
+.logo-pick__thumb .ti { font-size: 20px; }
+.logo-pick__body { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 
 /* Landing logos editor row */
 .landing-logo-row {

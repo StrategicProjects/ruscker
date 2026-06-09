@@ -242,6 +242,11 @@ spec-form-lifetime = Max lifetime (min)
 spec-form-lifetime-help = 360 = 6 hours
 spec-form-link-section = External link
 spec-form-link = Target URL
+spec-form-accent = Accent color
+spec-form-accent-help = Tints the card cover (when no cover is set).
+spec-form-monogram = Monogram
+spec-form-monogram-ph = AB
+spec-form-monogram-help = Shown on the cover when there's no logo.
 spec-form-meta = Access & scale
 spec-form-restricted = Restricted access
 spec-form-restricted-hint = Requires sign-in to open

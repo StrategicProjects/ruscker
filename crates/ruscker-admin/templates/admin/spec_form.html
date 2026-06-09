@@ -191,6 +191,32 @@
         </details>
       </div>
 
+      {# ── Accent colour + monogram (#701) — accent tints the card cover
+         (when no explicit cover); monogram is the no-logo fallback. ── #}
+      <div class="grid grid-cols-2 gap-3">
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("spec-form-accent") }}</label>
+          <div class="brand-swatches">
+            {% for c in ["#0f6e56", "#2563eb", "#1e3a5f", "#10b981", "#ec4899", "#8b5cf6", "#d97706"] %}
+            <button type="button" class="brand-swatch" style="background:{{ c }};color:{{ c }}"
+                    :class="{ 'is-active': (form.accent || '').toLowerCase() === '{{ c }}' }"
+                    @click="form.accent = (form.accent === '{{ c }}' ? '' : '{{ c }}')"
+                    aria-label="{{ c }}"></button>
+            {% endfor %}
+          </div>
+          <input type="hidden" name="accent" :value="form.accent">
+          <div class="spec-form-help">{{ self.t("spec-form-accent-help") }}</div>
+        </div>
+        <div class="spec-form-field">
+          <label for="f-monogram" class="spec-form-label">{{ self.t("spec-form-monogram") }}</label>
+          <input id="f-monogram" type="text" name="monogram" maxlength="2"
+                 value="{{ form.monogram }}" x-model="form.monogram"
+                 placeholder="{{ self.t("spec-form-monogram-ph") }}"
+                 class="spec-form-input spec-form-input--mono" style="max-width:96px">
+          <div class="spec-form-help">{{ self.t("spec-form-monogram-help") }}</div>
+        </div>
+      </div>
+
       {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}
       <div class="spec-form-field">
         <div class="spec-form-label-row">
@@ -941,7 +967,7 @@
       <div class="rcard" style="margin:0">
         <div class="rcover">
           <div class="rcover-bg"
-               :class="form.cover ? '' : 'tint-' + form.display_type"
+               :class="(form.cover || form.accent) ? '' : 'tint-' + form.display_type"
                :style="coverStyle()"></div>
           <template x-if="form.logo">
             {# Mirror the landing card's fit rule (#359): SVG logos get
@@ -952,7 +978,7 @@
                  :class="(form.logo || '').toLowerCase().endsWith('.svg') ? 'rcover-img rcover-img--contain' : 'rcover-img'">
           </template>
           <template x-if="!form.logo">
-            <span class="rcover-fallback" x-text="form.id || '—'"></span>
+            <span class="rcover-fallback" x-text="form.monogram || form.id || '—'"></span>
           </template>
           <div class="rbadges">
             <span class="rbadge" :class="'b-' + form.display_type" x-text="badgeText()"></span>
@@ -1198,7 +1224,13 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // root-absolute asset URLs for *display only* (#270). The submitted
   // `form.cover` stays base-agnostic.
   coverStyle() {
-    if (!this.form.cover) return '';
+    // An explicit cover wins; otherwise an accent paints a soft tint
+    // (mirrors the server-side CardCtx synthesis in view_model.rs).
+    if (!this.form.cover) {
+      return this.form.accent
+        ? 'background: color-mix(in srgb, ' + this.form.accent + ' 14%, var(--surface));'
+        : '';
+    }
     const base = window.RUSCKER_BASE || '';
     const css = base
       ? this.form.cover.replace(/url\((['"]?)\/assets\//g, 'url($1' + base + '/assets/')

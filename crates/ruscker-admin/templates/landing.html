@@ -131,7 +131,7 @@
               <img src="{{ logo }}" alt="" loading="lazy" onerror="this.style.display='none'"
                    class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
             {% when None %}
-              <span class="rcover-fallback">{{ card.id }}</span>
+              <span class="rcover-fallback">{% if let Some(m) = card.monogram %}{{ m }}{% else %}{{ card.id }}{% endif %}</span>
             {% endmatch %}
             <div class="rbadges">
               <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
@@ -315,7 +315,7 @@
                  onerror="this.style.display='none'"
                  class="rcover-img{% if logo.ends_with(".svg") %} rcover-img--contain{% endif %}">
           {% when None %}
-            <span class="rcover-fallback">{{ card.id }}</span>
+            <span class="rcover-fallback">{% if let Some(m) = card.monogram %}{{ m }}{% else %}{{ card.id }}{% endif %}</span>
           {% endmatch %}
 
           <div class="rbadges">

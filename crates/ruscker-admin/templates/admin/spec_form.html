@@ -151,35 +151,31 @@
            clear / advanced path field below. #}
         <input type="hidden" name="logo" x-model="form.logo">
 
-        {# Inline gallery (#701): pick a logo straight from the media
-           library (click a tile; click it again to clear) or upload via
-           the last tile. The submitted value is the hidden `logo` input. #}
-        <div class="logo-grid" x-cloak>
-          <template x-for="name in logoImages" :key="name">
-            <button type="button" :title="name"
-                    @click="form.logo = (logoSel(name) ? '' : '/assets/img/' + name)"
-                    class="logo-tile" :class="logoSel(name) ? 'is-sel' : ''">
-              <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
-              <span class="logo-tile__check" x-show="logoSel(name)" x-cloak><i class="ti ti-check" aria-hidden="true"></i></span>
+        {# Compact picker (#720): a thumbnail of the current logo + a
+           "Choose from library" button that opens the search modal below.
+           The inline thumbnail strip didn't scale — a growing library
+           overflowed and tiles overlapped — so browsing moved to the modal
+           (`openImagePicker` from the shared mixin). #}
+        <div class="logo-pick">
+          <button type="button" class="logo-pick__thumb" @click="openLogoPicker()"
+                  :title="form.logo || '{{ self.t("spec-form-logo-none") }}'">
+            <img x-show="form.logo" x-cloak :src="assetUrl(form.logo) + '?thumb'" alt="">
+            <i class="ti ti-photo" x-show="!form.logo" aria-hidden="true"></i>
+          </button>
+          <div class="logo-pick__body">
+            <button type="button" class="admin-login-btn" style="padding:7px 12px;font-size:13px"
+                    @click="openLogoPicker()">
+              <i class="ti ti-photo" aria-hidden="true"></i> {{ self.t("admin-images-choose") }}
             </button>
-          </template>
-          <label class="logo-tile logo-tile--upload" :class="imgUploading ? 'is-busy' : ''"
-                 title="{{ self.t("admin-images-choose") }}">
-            <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-plus'" aria-hidden="true"></i>
-            <input type="file" accept="image/*" class="hidden" @change="uploadImage($event)">
-          </label>
+            {# Current selection + clear #}
+            <div class="spec-form-help flex items-center gap-2" x-show="form.logo" x-cloak>
+              <span class="truncate" x-text="form.logo"></span>
+              <button type="button" class="admin-nav-link" @click="form.logo = ''"
+                      title="{{ self.t("spec-form-logo-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
+            </div>
+            <div class="spec-form-help" x-show="!form.logo" x-cloak>{{ self.t("spec-form-logo-none") }}</div>
+          </div>
         </div>
-
-        {# Upload error (e.g. unsupported type / too large) #}
-        <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
-
-        {# Current selection + clear #}
-        <div class="spec-form-help flex items-center gap-2" x-show="form.logo" x-cloak>
-          <span class="truncate" x-text="form.logo"></span>
-          <button type="button" class="admin-nav-link" @click="form.logo = ''"
-                  title="{{ self.t("spec-form-logo-clear") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
-        </div>
-        <div class="spec-form-help" x-show="!form.logo" x-cloak>{{ self.t("spec-form-logo-none") }}</div>
 
         {# Advanced: paste a path or external URL #}
         <details class="mt-1">
@@ -1028,12 +1024,56 @@
 
   </div>
 
+  {# ── Logo picker modal (shared mixin, #451/#720) ───────────────
+     Opened by the logo "Choose from library" button via
+     openImagePicker. Search + the media library + inline upload, so
+     picking scales to any library size instead of an inline strip that
+     overflows. Teleported to <body> so the overlay's `position: fixed`
+     resolves against the viewport, not the admin shell's animated
+     `<main class="fade-in">` (its transform is a containing block for
+     fixed descendants). The `is-logos` grid keeps logos uncropped. #}
+  <template x-teleport="body">
+  <div x-show="picker.open" x-cloak class="image-picker-overlay"
+       @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
+    <div class="image-picker-modal">
+      <div class="image-picker-head">
+        <strong>{{ self.t("spec-form-logo") }}</strong>
+        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
+      </div>
+      <div class="image-picker-tools">
+        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+               class="spec-form-input text-sm" style="max-width:16rem">
+        <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
+               :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
+          <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
+          {{ self.t("admin-images-choose") }}
+          <input type="file" accept="image/*" class="hidden" @change="uploadImage($event)">
+        </label>
+      </div>
+      <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
+      <div class="image-picker-grid is-logos">
+        <template x-for="name in pickerUploads()" :key="'pk-' + name">
+          <button type="button" :title="name" @click="pickImage('/assets/img/' + name)"
+                  class="image-picker-tile" :class="pickerSelected('/assets/img/' + name) ? 'is-sel' : ''">
+            <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
+          </button>
+        </template>
+      </div>
+      <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
+    </div>
+  </div>
+  </template>
+
 </div>
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
 window.ruscker = window.ruscker || {};
 window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
+  // Shared image-picker mixin (#451): the logo gallery modal, search,
+  // inline upload and selection. Spread first so the form's own props
+  // win on any name clash; the logo button calls openImagePicker (below).
+  ...window.ruscker.imagePicker(logoImages),
   form: initial,
   // Known group names for the access-group pill picker (#623). The text
   // value still lives in `form.access_groups` (comma-joined) for submit;
@@ -1102,10 +1142,7 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     var n = parseFloat(m[1]);
     return m[2].toLowerCase() === 'g' ? Math.round(n * 1024) : Math.round(n);
   },
-  // Media-library filenames for the logo gallery (#213). Inline uploads
-  // unshift new names here so a fresh thumbnail appears at once. Includes
-  // the built-in logos, which are seeded into the library (#433).
-  logoImages: Array.isArray(logoImages) ? logoImages : [],
+  // (logoImages comes from the imagePicker mixin spread above.)
   // Container-image presence check (#498): on demand, ask the backend
   // whether `container_image` is already on the server. `status` drives
   // the badge; cleared when the field changes so a stale ✓ never lingers.
@@ -1148,28 +1185,12 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     es.addEventListener('done', finish);
     es.onerror = finish;  // stream closed / network / 4xx — re-check tells us
   },
-  // Prefix the base path on a root-absolute asset URL (#270). These
-  // <img :src> values are set by Alpine at runtime, so the base-path
-  // response rewriter (which only touches static HTML) never sees them
-  // — under `--base-path /box` a bare `/assets/img/x` would 404. The
-  // stored value stays base-agnostic; only the rendered URL gets the
-  // prefix. A non-`/` value (full URL) is returned as-is.
-  assetUrl(p) {
-    return p && p.charAt(0) === '/' ? (window.RUSCKER_BASE || '') + p : (p || '');
-  },
-  // Basename of a logo path/URL for gallery-selection matching — strip
-  // any query (`?thumb`), fragment, and directory so the current logo is
-  // marked selected even if the stored value carries a base-path prefix
-  // (`/box/assets/img/x.png`) or differs only in path shape (#720 fix).
-  logoBasename(p) {
-    var s = String(p || '').split('?')[0].split('#')[0];
-    return s.substring(s.lastIndexOf('/') + 1);
-  },
-  // Is gallery tile `name` the currently selected logo? Compares by
-  // basename so the active tile lights up regardless of prefix.
-  logoSel(name) {
-    var sel = this.logoBasename(this.form.logo);
-    return !!sel && sel === name;
+  // Open the shared library modal for the logo; the pick writes the
+  // chosen asset path into `form.logo`, with the current value
+  // highlighted. (`assetUrl`/`uploadImage`/`pickerUploads` come from the
+  // imagePicker mixin spread above.)
+  openLogoPicker() {
+    this.openImagePicker((v) => { this.form.logo = v; }, this.form.logo);
   },
   // Cover background for the preview. `form.cover` is a CSS value that
   // may embed `url('/assets/img/x')`; prefix the base path on those
@@ -1196,8 +1217,7 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     return !((this.form.access_groups || '').trim()
           || (this.form.access_users || '').trim());
   },
-  imgUploading: false,
-  imgError: '',
+  // (imgUploading / imgError come from the imagePicker mixin.)
   // Advanced starts collapsed by default — even when editing a spec that
   // has advanced config set — so the form opens clean and uncluttered
   // (operator request). Click the toggle to reveal it.
@@ -1252,40 +1272,8 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   coverInit() {
     if ((this.form.cover || '').trim().indexOf('url(') === 0) this.form.cover = '';
   },
-  // Inline upload to the media library, then select the result as the
-  // logo. Reuses the same pipeline as the media page; no navigation.
-  // Honors RUSCKER_BASE for subpath mounts.
-  async uploadImage(event) {
-    // Accept a file from a file-input change OR a drag-drop (consistency
-    // with the media page #410): the dropped file lives on dataTransfer.
-    const input = event.target;
-    const file =
-      (event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) ||
-      (input && input.files && input.files[0]);
-    if (!file) return;
-    this.imgError = '';
-    this.imgUploading = true;
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const base = (window.RUSCKER_BASE || '');
-      const resp = await fetch(base + '/admin/media/upload-inline', { method: 'POST', body: fd });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data.filename) {
-        this.imgError = data.error || ('upload failed (' + resp.status + ')');
-        return;
-      }
-      if (this.logoImages.indexOf(data.filename) === -1) this.logoImages.unshift(data.filename);
-      this.form.logo = data.url || ('/assets/img/' + data.filename);
-    } catch (e) {
-      this.imgError = String(e);
-    } finally {
-      this.imgUploading = false;
-      // Reset only a real file input (a drop target has no `.value`),
-      // so the same file can be chosen again.
-      if (input && 'value' in input) input.value = '';
-    }
-  },
+  // (uploadImage comes from the imagePicker mixin — its inline upload
+  // auto-selects the result via the active openImagePicker callback.)
   needsContainer() {
     return ['app', 'api', 'talk', 'report'].includes(this.form.display_type);
   },

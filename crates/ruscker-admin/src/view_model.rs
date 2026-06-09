@@ -226,6 +226,10 @@ pub struct CardCtx<'a> {
     /// `landing_customization.header_bg`.) Any embedded
     /// `url(/assets/…)` is base-prefixed at construction (#294).
     pub cover: Option<String>,
+    /// Short fallback shown on the card cover when there's no logo
+    /// (`template-properties.monogram`, 1–2 chars). When unset the card
+    /// id is used, as before.
+    pub monogram: Option<&'a str>,
     pub updated_raw: Option<&'a str>,
     /// "DD/MM" — short form used in the meta row.
     pub updated_short: Option<String>,
@@ -256,12 +260,24 @@ impl<'a> CardCtx<'a> {
         let active = tp.is_active();
         let subject = tp.get_str("subject");
         let logo = tp.get_str("logo").map(|l| prefix_asset_url(l, base));
+        let monogram = tp.get_str("monogram").filter(|s| !s.trim().is_empty());
         // Empty string ⇒ treat as unset so the kind-tint fallback
         // kicks in rather than rendering `background: ;`.
+        // An explicit `cover` always wins; otherwise, when the operator
+        // set a per-app `accent` (#701), synthesize a soft tinted cover
+        // from it (`color-mix(accent 14%, surface)` — the same recipe the
+        // editor preview uses) so the accent shows on the card without a
+        // full cover. No accent ⇒ None ⇒ the per-kind tint class.
         let cover = tp
             .get_str("cover")
             .filter(|s| !s.trim().is_empty())
-            .map(|c| prefix_css_asset_urls(c, base));
+            .map(|c| prefix_css_asset_urls(c, base))
+            .or_else(|| {
+                tp.get_str("accent")
+                    .map(str::trim)
+                    .filter(|a| is_css_color(a))
+                    .map(|a| format!("color-mix(in srgb, {a} 14%, var(--surface))"))
+            });
         let updated_raw = tp.get_str("updated");
         let updated_date = updated_raw.and_then(parse_dmy);
         let updated_short = updated_date.map(|d| d.format("%d/%m").to_string());
@@ -283,6 +299,7 @@ impl<'a> CardCtx<'a> {
             featured: spec.is_featured(),
             logo,
             cover,
+            monogram,
             updated_raw,
             updated_short,
             status,
@@ -320,6 +337,19 @@ fn prefix_css_asset_urls(value: &str, base: &str) -> String {
         .replace("url(/assets/", &format!("url({base}/assets/"))
         .replace("url('/assets/", &format!("url('{base}/assets/"))
         .replace("url(\"/assets/", &format!("url(\"{base}/assets/"))
+}
+
+/// Accept a value only if it's plausibly a CSS colour and can't break
+/// out of the `color-mix(... {a} ...)` it's interpolated into — the
+/// `accent` is admin-authored (same trust as `cover`), but it lands
+/// inside a function call rather than a bare declaration, so a stray
+/// `)`/`;`/`<` would corrupt the cover. Hex, `rgb()/hsl()`, and bare
+/// colour keywords all pass.
+fn is_css_color(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '#' | '(' | ')' | ',' | '%' | '.' | ' ' | '-')
+        })
 }
 
 /// Parse the operator-authored `DD/MM/YYYY` form used in the SEPE
@@ -509,6 +539,32 @@ mod tests {
         let spec = spec_with_tp("  subject: Saúde\n");
         let card = CardCtx::from_spec(&spec, "");
         assert_eq!(card.cover, None);
+    }
+
+    #[test]
+    fn accent_synthesizes_a_tinted_cover_when_no_cover() {
+        // #701: a per-app accent (and no explicit cover) tints the card.
+        let spec = spec_with_tp("  accent: \"#2563eb\"\n");
+        let card = CardCtx::from_spec(&spec, "");
+        assert_eq!(
+            card.cover.as_deref(),
+            Some("color-mix(in srgb, #2563eb 14%, var(--surface))")
+        );
+        // An explicit cover still wins over the accent.
+        let spec2 = spec_with_tp("  accent: \"#2563eb\"\n  cover: \"#101010\"\n");
+        assert_eq!(CardCtx::from_spec(&spec2, "").cover.as_deref(), Some("#101010"));
+        // A junk accent that could break out of color-mix is ignored.
+        let spec3 = spec_with_tp("  accent: \"red); }\"\n");
+        assert_eq!(CardCtx::from_spec(&spec3, "").cover, None);
+    }
+
+    #[test]
+    fn monogram_read_from_template_properties() {
+        let spec = spec_with_tp("  monogram: \"PR\"\n");
+        assert_eq!(CardCtx::from_spec(&spec, "").monogram, Some("PR"));
+        // Blank ⇒ None (template falls back to the id).
+        let spec2 = spec_with_tp("  monogram: \"  \"\n");
+        assert_eq!(CardCtx::from_spec(&spec2, "").monogram, None);
     }
 
     #[test]

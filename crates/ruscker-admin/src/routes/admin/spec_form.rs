@@ -208,6 +208,15 @@ pub struct SpecForm {
     /// fail-softs), same policy as `landing_customization.header_bg`.
     #[serde(default)]
     pub cover: String,
+    /// Per-app accent colour (`template-properties.accent`). When set and
+    /// no explicit `cover`, the landing card cover is tinted from it
+    /// (#701). Empty ⇒ no accent.
+    #[serde(default)]
+    pub accent: String,
+    /// Short monogram (`template-properties.monogram`, 1–2 chars) shown on
+    /// the card cover when there's no logo; empty ⇒ the id is used.
+    #[serde(default)]
+    pub monogram: String,
     /// Updated date in DD/MM/YYYY. Empty ⇒ stamp with today.
     pub updated: String,
     /// External link target (for type=link/package).
@@ -326,6 +335,8 @@ impl SpecForm {
             featured: if spec.is_featured() { "on".into() } else { String::new() },
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
             cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
+            accent: tp.get_str("accent").map(str::to_string).unwrap_or_default(),
+            monogram: tp.get_str("monogram").map(str::to_string).unwrap_or_default(),
             updated: tp.get_str("updated").map(str::to_string).unwrap_or_default(),
             link: tp.get_str("link").map(str::to_string).unwrap_or_default(),
             seats_per_container: spec
@@ -482,6 +493,8 @@ impl SpecForm {
         set_or_remove(&mut tp_map, "subject", &self.subject);
         set_or_remove(&mut tp_map, "logo", &self.logo);
         set_or_remove(&mut tp_map, "cover", &self.cover);
+        set_or_remove(&mut tp_map, "accent", &self.accent);
+        set_or_remove(&mut tp_map, "monogram", &self.monogram);
         set_or_remove(&mut tp_map, "link", &self.link);
 
         let container_image = match dt {

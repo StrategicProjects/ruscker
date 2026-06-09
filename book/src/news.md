@@ -9,6 +9,26 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.1 — 2026-06-09
+
+**Apps editor + Appearance polish.** Four operator-reported fixes:
+
+- **Current logo reads as selected** in the inline logo gallery. The
+  match was an exact path compare, which missed a stored value carrying
+  a base-path prefix (`/box/assets/img/…`); it now compares by filename.
+- **Card cover drops the "Image" mode.** A logo renders *on top* of the
+  cover, so an image cover + a logo painted two overlapping pictures on
+  one card. Cover is now tint / colour / gradient only; a legacy image
+  cover degrades to the kind-tint/accent fallback.
+- **Environment-variable rows** are laid out one clean line each
+  (`KEY · = · value · ✕`) instead of the inputs stacking full-width.
+- **Default card cover in Appearance.** A new Auto / Solid / Gradient
+  builder in the Background section sets one catalog-wide default cover
+  for cards without their own `cover`/`accent` (which still win), so the
+  default is no longer editable only per app (migration 0021).
+
+---
+
 ## v0.2.0 — 2026-06-09
 
 **Apps editor redesign complete + per-app accent & monogram.** The

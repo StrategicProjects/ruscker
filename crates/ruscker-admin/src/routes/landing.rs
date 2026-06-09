@@ -327,6 +327,16 @@ async fn index(
             }),
         None => state.config.proxy.landing_customization.clone(),
     };
+    // Portal-wide default cover (#720): cards without their own
+    // `cover`/`accent` inherit the appearance editor's default (a solid
+    // colour or gradient) instead of the per-kind tint. Applied here,
+    // after `lc` resolves, so it's a no-op on no-DB / "Auto" deployments.
+    if let Some(default_cover) = lc.effective_card_cover_default() {
+        for card in &mut cards {
+            card.apply_default_cover(default_cover, &state.base_path);
+        }
+    }
+
     let header_style = match (&lc.header_bg, &lc.header_fg) {
         (Some(bg), Some(fg)) => format!("background: {}; color: {};", bg, fg),
         (Some(bg), None) => format!("background: {};", bg),

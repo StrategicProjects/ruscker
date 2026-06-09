@@ -219,6 +219,7 @@
         <div class="form-section__title">{{ self.t("admin-landing-background") }}</div>
         <input type="hidden" name="header_preset" :value="form.header_preset">
         <input type="hidden" name="card_cover" :value="form.card_cover">
+        <input type="hidden" name="card_cover_default" :value="form.card_cover_default">
         <div class="spec-form-field">
           <label class="spec-form-label">{{ self.t("admin-landing-header-bg-preset") }}</label>
           <div class="seg-control" role="group">
@@ -233,6 +234,66 @@
           <div class="seg-control" role="group">
             <button type="button" :class="{ 'is-active': (form.card_cover || 'tinted') === 'tinted' }" @click="form.card_cover = 'tinted'">{{ self.t("admin-landing-cover-tinted") }}</button>
             <button type="button" :class="{ 'is-active': form.card_cover === 'gradient' }" @click="form.card_cover = 'gradient'">{{ self.t("admin-landing-cover-gradient") }}</button>
+          </div>
+        </div>
+
+        {# Default cover colour/gradient (#720): the base painted behind
+           cards that have no per-app cover/accent. "Auto" keeps the
+           per-kind tint; solid / gradient set one default for the catalog
+           so the operator no longer has to edit every app to change it. #}
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-card-cover-default") }}</label>
+          <div class="grad-modes" role="tablist">
+            <button type="button" class="grad-mode" :class="coverDefMode === 'auto' ? 'is-active' : ''"
+                    @click="setCoverDefMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
+            <button type="button" class="grad-mode" :class="coverDefMode === 'solid' ? 'is-active' : ''"
+                    @click="setCoverDefMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+            <button type="button" class="grad-mode" :class="coverDefMode === 'gradient' ? 'is-active' : ''"
+                    @click="setCoverDefMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          </div>
+
+          {# AUTO — nothing to set; the per-kind tint stays the fallback. #}
+          <div class="spec-form-help" x-show="coverDefMode === 'auto'">{{ self.t("admin-landing-card-cover-default-auto-help") }}</div>
+
+          {# SOLID #}
+          <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
+            <input type="color" x-model="form.card_cover_default" :value="form.card_cover_default || '#0f6e56'">
+            <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
+                   class="spec-form-input spec-form-input--mono">
+          </div>
+
+          {# GRADIENT — same builder component as the header background. #}
+          <div class="grad-builder" x-show="coverDefMode === 'gradient'" x-cloak>
+            <div class="grad-row">
+              <select class="theme-select" x-model="coverDefGrad.type" @change="applyCoverDef()">
+                <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+                <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+              </select>
+              <label class="grad-angle" x-show="coverDefGrad.type === 'linear'">
+                <span x-text="coverDefGrad.angle + '°'"></span>
+                <input type="range" min="0" max="360" step="5"
+                       x-model.number="coverDefGrad.angle" @input="applyCoverDef()">
+              </label>
+            </div>
+            <template x-for="(stop, i) in coverDefGrad.stops" :key="i">
+              <div class="grad-stop">
+                <input type="color" x-model="stop.color" @input="applyCoverDef()">
+                <input type="number" min="0" max="100" class="grad-pos"
+                       x-model.number="stop.pos" @input="applyCoverDef()">
+                <span class="grad-pos-unit">%</span>
+                <button type="button" class="admin-nav-link" @click="removeCoverDefStop(i)"
+                        x-show="coverDefGrad.stops.length > 2"
+                        title="{{ self.t("admin-grad-remove-stop") }}">
+                  <i class="ti ti-x" aria-hidden="true"></i>
+                </button>
+              </div>
+            </template>
+            <button type="button" class="admin-nav-link grad-add" @click="addCoverDefStop()"
+                    x-show="coverDefGrad.stops.length < 4">
+              <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+            </button>
+            <input type="text" x-model="form.card_cover_default" readonly
+                   class="spec-form-input spec-form-input--mono grad-output">
           </div>
         </div>
       </section>
@@ -823,6 +884,39 @@ window.ruscker.landingForm = (initial, logoImages) => ({
     if (mode === 'gradient') this.applyGrad();
     else this.form.header_bg = '';
   },
+
+  // ── Default card-cover builder (#720) — a parallel solid/gradient
+  // builder for `card_cover_default`, the base painted behind cards
+  // with no per-app cover. 'auto' (empty) keeps the per-kind tint.
+  coverDefMode: !((initial.card_cover_default || '').trim())
+    ? 'auto'
+    : window.ruscker.bgMode(initial.card_cover_default),
+  coverDefGrad: window.ruscker.gradientDefault(),
+  applyCoverDef() {
+    this.form.card_cover_default = window.ruscker.gradientCss(this.coverDefGrad);
+  },
+  addCoverDefStop() {
+    if (this.coverDefGrad.stops.length < 4) {
+      this.coverDefGrad.stops.push({ color: '#1d9e75', pos: 50 });
+      this.applyCoverDef();
+    }
+  },
+  removeCoverDefStop(i) {
+    if (this.coverDefGrad.stops.length > 2) {
+      this.coverDefGrad.stops.splice(i, 1);
+      this.applyCoverDef();
+    }
+  },
+  setCoverDefMode(mode) {
+    this.coverDefMode = mode;
+    if (mode === 'auto') { this.form.card_cover_default = ''; return; }
+    if (mode === 'gradient') { this.applyCoverDef(); return; }
+    // 'solid': drop a gradient string so the colour picker drives a fresh
+    // value (mirrors setBgMode / the spec form's cover builder).
+    if (/^(linear|radial)-gradient\(/.test((this.form.card_cover_default || '').trim())) {
+      this.form.card_cover_default = '';
+    }
+  },
   /// Resolve the intro shown in the preview given the admin's
   /// own locale: prefer the per-locale field, fall back to the
   /// default. Mirrors the server-side resolution in routes/landing.rs.
@@ -887,10 +981,16 @@ window.ruscker.landingForm = (initial, logoImages) => ({
     return `background:${bg};` + (f.header_fg ? `color:${f.header_fg};` : '');
   },
 
-  // Mock card cover: accent tint + the gradient overlay when card-cover
-  // is `gradient` (mirrors .cover-gradient .rcover-bg).
+  // Mock card cover: the default cover (#720) when set, else the accent
+  // tint — plus the gradient overlay when card-cover is `gradient`
+  // (mirrors the public landing: inline `background` + .cover-gradient
+  // .rcover-bg's `background-image`).
   pvCoverStyle() {
-    return `background-color: color-mix(in srgb, ${this.pvAccent()} 14%, var(--surface));`
+    const def = (this.form.card_cover_default || '').trim();
+    const base = def
+      ? `background: ${def};`
+      : `background-color: color-mix(in srgb, ${this.pvAccent()} 14%, var(--surface));`;
+    return base
       + (this.form.card_cover === 'gradient'
         ? 'background-image: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.16));'
         : '');

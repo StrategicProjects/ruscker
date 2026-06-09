@@ -515,7 +515,16 @@ async fn forward(
     //    can't be set on a 101). Issuing the sticky cookie on the
     //    preceding HTTP request is how WS-only apps stay sticky.
     if let MaybeWs(Some(upgrade)) = ws_upgrade {
-        let upstream_ws_url = format!("ws://{}{}", replica.upstream, upstream_path);
+        // The query string must ride along (#730): Jupyter kernel channels
+        // (`/api/kernels/<id>/channels?session_id=…`), SockJS cache-busters
+        // and any app keying WS reconnection on query params depend on it.
+        // Mirrors what `do_forward` does for the HTTP path.
+        let query = req
+            .uri()
+            .query()
+            .map(|q| format!("?{q}"))
+            .unwrap_or_default();
+        let upstream_ws_url = format!("ws://{}{}{}", replica.upstream, upstream_path, query);
         // Forward the client's *app* cookies and requested subprotocol
         // onto the upstream handshake so the app keeps its session — but
         // strip Ruscker's own cookies first (#258). The HTTP path strips
@@ -537,8 +546,38 @@ async fn forward(
             spec = %spec.id, replica = %replica.id, url = %upstream_ws_url,
             "ws upgrade"
         );
-        return upgrade
-            .on_upgrade(move |socket| ws::pump(socket, upstream_ws_url, cookie, subprotocols));
+        // Connect the upstream BEFORE answering the client's 101 (#730):
+        // a dead replica then gets the client a real 502 instead of an
+        // opaque post-upgrade 1006 drop, and the subprotocol the upstream
+        // selected can be echoed on our 101 — a browser that offered
+        // subprotocols and receives a 101 without one selected must fail
+        // the connection (RFC 6455 §4.1).
+        let handshake = match ws::connect(
+            &upstream_ws_url,
+            cookie.as_deref(),
+            subprotocols.as_deref(),
+        )
+        .await
+        {
+            Ok(h) => h,
+            Err(err) => {
+                tracing::error!(
+                    spec = %spec.id, replica = %replica.id, error = ?err,
+                    "upstream ws connect failed"
+                );
+                return with_cors(
+                    (StatusCode::BAD_GATEWAY, "upstream unavailable").into_response(),
+                    cors_on,
+                );
+            }
+        };
+        let upgrade = match handshake.selected_protocol.clone() {
+            // axum echoes a protocol only if the client offered it — which
+            // it did, since the upstream chose from the client's own list.
+            Some(proto) => upgrade.protocols([proto]),
+            None => upgrade,
+        };
+        return upgrade.on_upgrade(move |socket| ws::pump(socket, handshake.stream));
     }
 
     // 6. HTTP forward.
@@ -2744,5 +2783,160 @@ docker-registry-password: hunter2
             !sticky_replica_is_live(&starting, "rstudio", &owner),
             "a Starting (not-yet-Ready) replica is not a usable seat yet"
         );
+    }
+
+    // #730 end-to-end: the WS upgrade must (a) carry the query string to
+    // the upstream handshake, (b) echo the upstream-SELECTED subprotocol
+    // on the 101 to the client, and (c) pump frames both ways. The mock
+    // upstream picks the SECOND offered protocol, so a pass proves the
+    // echo is the upstream's choice, not the client's first offer.
+    #[tokio::test]
+    // tungstenite's accept_hdr callback returns its large ErrorResponse
+    // by value; fine for a test.
+    #[allow(clippy::result_large_err)]
+    async fn ws_upgrade_preserves_query_and_echoes_upstream_subprotocol() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::handshake::server::{
+            Request as WsRequest, Response as WsResponse,
+        };
+        use tokio_tungstenite::tungstenite::Message as TgMsg;
+
+        // Mock upstream: record the handshake URI, select a subprotocol,
+        // then echo one text frame.
+        let up_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let up_addr = up_listener.local_addr().unwrap();
+        let upstream = tokio::spawn(async move {
+            let (tcp, _) = up_listener.accept().await.unwrap();
+            let mut seen_uri = String::new();
+            let mut ws = tokio_tungstenite::accept_hdr_async(
+                tcp,
+                |req: &WsRequest, mut resp: WsResponse| {
+                    seen_uri = req.uri().to_string();
+                    resp.headers_mut().insert(
+                        header::SEC_WEBSOCKET_PROTOCOL,
+                        HeaderValue::from_static("superchat"),
+                    );
+                    Ok(resp)
+                },
+            )
+            .await
+            .unwrap();
+            if let Some(Ok(msg)) = ws.next().await {
+                ws.send(msg).await.unwrap();
+            }
+            seen_uri
+        });
+
+        // Proxy state: one spec, one Ready replica pointing at the mock.
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::ZERO,
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        state.config = std::sync::Arc::new(
+            ruscker_config::Config::from_yaml(
+                "proxy:\n  specs:\n    - id: wsapp\n      container-image: test:latest\n",
+            )
+            .expect("config"),
+        );
+        state.replicas.write().await.add(Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "wsapp".into(),
+            container_id: "c".into(),
+            upstream: up_addr,
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 10,
+            host: None,
+        });
+
+        let app = Router::new()
+            .merge(routes())
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        // WS client through the proxy, offering two subprotocols + a query.
+        let mut req = format!("ws://{proxy_addr}/app/wsapp/ws/echo?session_id=abc")
+            .into_client_request()
+            .expect("client request");
+        req.headers_mut().insert(
+            header::SEC_WEBSOCKET_PROTOCOL,
+            HeaderValue::from_static("chat, superchat"),
+        );
+        let (mut client, resp) = tokio_tungstenite::connect_async(req)
+            .await
+            .expect("ws handshake through the proxy");
+        assert_eq!(
+            resp.headers()
+                .get(header::SEC_WEBSOCKET_PROTOCOL)
+                .and_then(|v| v.to_str().ok()),
+            Some("superchat"),
+            "the proxy 101 must echo the subprotocol the upstream selected"
+        );
+
+        client.send(TgMsg::text("hello")).await.expect("send");
+        let echoed = client.next().await.expect("a frame").expect("ok frame");
+        assert_eq!(echoed.into_text().expect("text").as_str(), "hello");
+
+        assert_eq!(
+            upstream.await.unwrap(),
+            "/ws/echo?session_id=abc",
+            "query string must reach the upstream handshake"
+        );
+    }
+
+    // #730: a WS request whose replica is unreachable must get a real
+    // 502 — not a 101 followed by an opaque drop (the pre-#730 shape).
+    #[tokio::test]
+    async fn ws_upgrade_to_a_dead_replica_returns_502_not_101() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        use tokio_tungstenite::tungstenite::Error as TgError;
+
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::ZERO,
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        state.config = std::sync::Arc::new(
+            ruscker_config::Config::from_yaml(
+                "proxy:\n  specs:\n    - id: wsapp\n      container-image: test:latest\n",
+            )
+            .expect("config"),
+        );
+        // Ready replica whose upstream is a dead port.
+        state.replicas.write().await.add(Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "wsapp".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 10,
+            host: None,
+        });
+
+        let app = Router::new()
+            .merge(routes())
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let proxy_addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+        let req = format!("ws://{proxy_addr}/app/wsapp/ws")
+            .into_client_request()
+            .expect("client request");
+        match tokio_tungstenite::connect_async(req).await {
+            Err(TgError::Http(resp)) => {
+                assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+            }
+            other => panic!("expected an HTTP 502 handshake rejection, got {other:?}"),
+        }
     }
 }

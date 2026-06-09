@@ -57,50 +57,58 @@ const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// frames (the close handshake, a last burst) before forced teardown.
 const DRAIN_GRACE: Duration = Duration::from_secs(5);
 
-type UpstreamStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
+/// An established upstream WebSocket connection.
+pub type UpstreamStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
-/// Connect to `upstream_ws_url` and pump frames between `client` and the
-/// upstream in both directions until either closes (or the connection
-/// goes idle). `cookie` / `subprotocols` are forwarded onto the upstream
-/// handshake so the app sees the client's session and negotiated
-/// protocol.
-pub async fn pump(
-    client: WebSocket,
-    upstream_ws_url: String,
-    cookie: Option<String>,
-    subprotocols: Option<String>,
-) {
-    let mut request = match upstream_ws_url.as_str().into_client_request() {
-        Ok(r) => r,
-        Err(err) => {
-            tracing::error!(error = ?err, url = %upstream_ws_url, "build upstream ws request failed");
-            return;
-        }
-    };
+/// Result of a successful upstream handshake: the stream plus the
+/// subprotocol the upstream selected on its 101 (if any). The caller
+/// must echo that selection on its own 101 to the client — a browser
+/// that offered subprotocols and receives a 101 without one selected
+/// is required by RFC 6455 §4.1 to fail the connection (#730).
+pub struct UpstreamHandshake {
+    pub stream: UpstreamStream,
+    pub selected_protocol: Option<String>,
+}
+
+/// Open the WebSocket handshake to `upstream_ws_url`, forwarding the
+/// client's `cookie` and offered `subprotocols` so the app sees the
+/// client's session and can negotiate a protocol.
+///
+/// This runs *before* the client's own upgrade is answered: on failure
+/// the caller still holds a plain HTTP request and can return a real
+/// 502 instead of an opaque post-101 drop (#730).
+pub async fn connect(
+    upstream_ws_url: &str,
+    cookie: Option<&str>,
+    subprotocols: Option<&str>,
+) -> Result<UpstreamHandshake, tokio_tungstenite::tungstenite::Error> {
+    let mut request = upstream_ws_url.into_client_request()?;
     // Forward the client's session cookie and requested subprotocol.
-    if let Some(v) = cookie
-        .as_deref()
-        .and_then(|s| HeaderValue::from_str(s).ok())
-    {
+    if let Some(v) = cookie.and_then(|s| HeaderValue::from_str(s).ok()) {
         request.headers_mut().insert(header::COOKIE, v);
     }
-    if let Some(v) = subprotocols
-        .as_deref()
-        .and_then(|s| HeaderValue::from_str(s).ok())
-    {
+    if let Some(v) = subprotocols.and_then(|s| HeaderValue::from_str(s).ok()) {
         request
             .headers_mut()
             .insert(header::SEC_WEBSOCKET_PROTOCOL, v);
     }
 
-    let upstream = match tokio_tungstenite::connect_async(request).await {
-        Ok((s, _resp)) => s,
-        Err(err) => {
-            tracing::error!(error = ?err, url = %upstream_ws_url, "upstream ws connect failed");
-            return;
-        }
-    };
+    let (stream, resp) = tokio_tungstenite::connect_async(request).await?;
+    let selected_protocol = resp
+        .headers()
+        .get(header::SEC_WEBSOCKET_PROTOCOL)
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    Ok(UpstreamHandshake {
+        stream,
+        selected_protocol,
+    })
+}
 
+/// Pump frames between `client` and the already-connected `upstream`
+/// in both directions until either closes (or the connection goes
+/// idle). Open the upstream with [`connect`] first.
+pub async fn pump(client: WebSocket, upstream: UpstreamStream) {
     let (cli_tx, cli_rx) = client.split();
     let (up_tx, up_rx) = upstream.split();
 
@@ -245,5 +253,53 @@ mod tests {
     fn close_frame_translation_passes_none_through() {
         assert!(ax_close_to_tg(None).is_none());
         assert!(tg_close_to_ax(None).is_none());
+    }
+
+    // #730: the upstream handshake must carry the full URL (Jupyter
+    // kernel channels key on `?session_id=`) and report back which
+    // subprotocol the upstream selected, so the proxy can echo it on
+    // its own 101 to the client.
+    #[tokio::test]
+    // tungstenite's accept_hdr callback returns its large ErrorResponse
+    // by value; fine for a test.
+    #[allow(clippy::result_large_err)]
+    async fn connect_preserves_query_and_reports_upstream_selected_subprotocol() {
+        use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut seen_uri = String::new();
+            let ws = tokio_tungstenite::accept_hdr_async(
+                tcp,
+                |req: &Request, mut resp: Response| {
+                    seen_uri = req.uri().to_string();
+                    // The app picks the SECOND offered protocol — proves the
+                    // reported selection is the upstream's choice, not an
+                    // echo of the client's first offer.
+                    resp.headers_mut().insert(
+                        header::SEC_WEBSOCKET_PROTOCOL,
+                        HeaderValue::from_static("superchat"),
+                    );
+                    Ok(resp)
+                },
+            )
+            .await
+            .unwrap();
+            drop(ws);
+            seen_uri
+        });
+
+        let url = format!("ws://{addr}/api/kernels/k1/channels?session_id=abc");
+        let hs = connect(&url, None, Some("chat, superchat"))
+            .await
+            .expect("upstream handshake");
+        assert_eq!(hs.selected_protocol.as_deref(), Some("superchat"));
+        assert_eq!(
+            server.await.unwrap(),
+            "/api/kernels/k1/channels?session_id=abc",
+            "query string must reach the upstream handshake"
+        );
     }
 }

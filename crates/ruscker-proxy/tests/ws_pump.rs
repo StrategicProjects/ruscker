@@ -37,14 +37,19 @@ async fn spawn_echo_upstream() -> String {
     format!("ws://{addr}/")
 }
 
-/// Spawn the axum proxy app (one `/ws` route → `ws::pump`). Returns its
-/// bound address.
+/// Spawn the axum proxy app (one `/ws` route → `ws::connect` +
+/// `ws::pump`, the #730 two-step shape). Returns its bound address.
 async fn spawn_proxy(upstream_url: String) -> std::net::SocketAddr {
     let app = Router::new().route(
         "/ws",
         any(move |ws: WebSocketUpgrade| {
             let url = upstream_url.clone();
-            async move { ws.on_upgrade(move |sock| ruscker_proxy::ws::pump(sock, url, None, None)) }
+            async move {
+                let handshake = ruscker_proxy::ws::connect(&url, None, None)
+                    .await
+                    .expect("upstream handshake");
+                ws.on_upgrade(move |sock| ruscker_proxy::ws::pump(sock, handshake.stream))
+            }
         }),
     );
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

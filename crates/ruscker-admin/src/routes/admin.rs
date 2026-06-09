@@ -554,6 +554,8 @@ async fn password_submit(
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
+    cookies: Cookies,
+    headers: HeaderMap,
     Form(form): Form<PasswordForm>,
 ) -> Response {
     let Some(actor) = session.actor.clone() else {
@@ -612,6 +614,21 @@ async fn password_submit(
         tracing::error!(error = ?e, "password change failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }
+
+    // A self-service password change must invalidate every OTHER live
+    // session for this account (#739) — changing the password is the
+    // natural response to a suspected session compromise, and there is
+    // no separate "log out everywhere" control. The admin-reset path
+    // already does this (#544); this path was the gap. `revoke_by_actor`
+    // also kills the session making this request, so mint a fresh one
+    // and re-issue the cookie: every other session dies, the user
+    // stays signed in.
+    state.admin_sessions.revoke_by_actor(&actor).await;
+    let session_id = state
+        .admin_sessions
+        .create(session.role, Some(actor.clone()))
+        .await;
+    issue_session_cookie(&cookies, &headers, session_id);
     Redirect::to("/admin/dashboard").into_response()
 }
 
@@ -693,6 +710,130 @@ mod tests {
     use crate::i18n::{Locale, Locales};
     use crate::theme::Theme;
     use askama::Template;
+
+    /// Minimal AppState over an in-memory SQLite DB with admin auth
+    /// configured — just enough for account-route tests.
+    async fn state_with_db() -> crate::AppState {
+        use std::sync::Arc;
+        let pool = crate::db::ConfigDb::Sqlite(crate::db::open_memory().await.expect("memory db"));
+        crate::AppState {
+            config: Arc::new(ruscker_config::Config::from_yaml("proxy:\n  specs: []").expect("config")),
+            base_path: Arc::from(""),
+            locales: Arc::new(Locales::load().expect("load locales")),
+            admin_auth: crate::auth::AdminAuth::with_token("break-glass-token"),
+            admin_sessions: Arc::new(crate::auth::InMemoryAdminSessionStore::default()),
+            log_buffer: None,
+            login_limiter: Arc::new(crate::auth::LoginRateLimiter::default_policy()),
+            api_limiter: Arc::new(crate::ratelimit::ApiRateLimiter::new()),
+            db: Some(pool),
+            images_dir: None,
+            master_key: Default::default(),
+            backend: None,
+            replicas: Arc::new(tokio::sync::RwLock::new(ruscker_core::ReplicaRegistry::new())),
+            cookie_key: ruscker_proxy::sticky::CookieKey::random(),
+            spawn_locks: Arc::new(dashmap::DashMap::new()),
+            sessions: Arc::new(crate::sessions::InMemorySessionStore::new()),
+            logout_index: Arc::new(dashmap::DashMap::new()),
+            leader: Arc::new(crate::leader::AlwaysLeader),
+            metrics: crate::metrics_cache::MetricsCache::new(),
+            draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            spec_cache: Arc::new(dashmap::DashMap::new()),
+        }
+    }
+
+    // #739: a self-service password change must revoke every OTHER live
+    // session for the account (an attacker's stolen session must die),
+    // while the user making the change stays signed in on a freshly
+    // minted session.
+    #[tokio::test]
+    async fn self_password_change_revokes_other_sessions_but_keeps_the_user_in() {
+        use axum::body::Body;
+        use axum::http::{header, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let state = state_with_db().await;
+        let pool = state.db.as_ref().unwrap();
+        crate::db::users::create(
+            pool,
+            "alice",
+            "old-password-1",
+            crate::auth::Role::Editor,
+            false,
+            &[],
+            None,
+        )
+        .await
+        .expect("create user");
+
+        // Two live sessions: the requester's and a second device's
+        // (the one a compromise would ride).
+        let mine = state
+            .admin_sessions
+            .create(crate::auth::Role::Editor, Some("alice".into()))
+            .await;
+        let other = state
+            .admin_sessions
+            .create(crate::auth::Role::Editor, Some("alice".into()))
+            .await;
+
+        let app = axum::Router::new()
+            .route(
+                "/admin/account/password",
+                axum::routing::post(super::password_submit),
+            )
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state.clone());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/account/password")
+                    .header(header::COOKIE, format!("{}={}", crate::auth::COOKIE_NAME, mine))
+                    .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .body(Body::from(
+                        "current=old-password-1&new_password=new-password-2&confirm=new-password-2",
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::SEE_OTHER, "change accepted");
+
+        // The other device's session is dead; so is the requester's old id.
+        assert!(
+            state.admin_sessions.validate(&other).await.is_none(),
+            "the second session must be revoked by the password change"
+        );
+        assert!(
+            state.admin_sessions.validate(&mine).await.is_none(),
+            "the old session id must not survive either"
+        );
+
+        // The response re-issues a fresh, VALID session cookie — the
+        // user who changed the password stays signed in.
+        let set = resp
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .expect("a session cookie is re-issued");
+        let new_sid = set
+            .split(';')
+            .next()
+            .and_then(|kv| kv.strip_prefix(&format!("{}=", crate::auth::COOKIE_NAME)))
+            .expect("cookie carries the new session id");
+        let info = state
+            .admin_sessions
+            .validate(new_sid)
+            .await
+            .expect("the fresh session is live");
+        assert_eq!(info.actor.as_deref(), Some("alice"));
+
+        // And the new password is the one that verifies.
+        assert!(crate::db::users::verify_login(pool, "alice", "new-password-2")
+            .await
+            .expect("verify")
+            .is_some());
+    }
 
     #[test]
     fn strip_base_prefix_root_is_noop() {

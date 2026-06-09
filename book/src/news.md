@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.4 — 2026-06-09
+
+**Logo picker is now a searchable modal.** The app form's inline logo
+thumbnail grid didn't scale — with a large media library the tiles
+overflowed and overlapped (an SVG with a big viewBox got no height from
+`aspect-ratio` and blew up its cell). It's now a compact control (current
+logo thumbnail + "Choose from library") that opens the shared image-picker
+modal with search, the full library, and inline upload. Tiles got a
+`min-height` fallback so a failed `aspect-ratio` can't overflow them, and
+logos render `contain` (no crop).
+
+---
+
 ## v0.2.3 — 2026-06-09
 
 **Gradient card-cover preview fix.** A gradient default card cover didn't

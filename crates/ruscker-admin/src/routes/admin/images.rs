@@ -19,6 +19,7 @@ use axum::{
     routing::{get, post},
     Form, Json, Router,
 };
+use ruscker_config::Spec;
 use serde::Deserialize;
 
 use crate::auth::{RequireEditor, Role};
@@ -469,64 +470,84 @@ async fn rename(
         }
     }
 
-    // Rewrite spec logo/cover references old → new.
-    if let Ok(specs) = db::specs::list_all(pool).await {
-        for spec in specs {
-            let logo_hit = spec
-                .template_properties
-                .get_str("logo")
-                .is_some_and(|v| references_image(v, &old));
-            let cover_hit = spec
-                .template_properties
-                .get_str("cover")
-                .is_some_and(|v| references_image(v, &old));
-            if !logo_hit && !cover_hit {
-                continue;
-            }
-            let mut spec = spec;
-            if logo_hit {
-                if let Some(v) = spec.template_properties.get_str("logo") {
+    // Compute the rewritten spec + landing references in memory, then
+    // commit the image rename together with EVERY reference in a single
+    // transaction (#720 audit P2). Previously each rewrite was its own
+    // transaction and the image rename came last, so a failure there left
+    // cards pointing at a filename that no longer existed.
+    let specs_to_update: Vec<Spec> = match db::specs::list_all(pool).await {
+        Ok(specs) => specs
+            .into_iter()
+            .filter_map(|mut spec| {
+                let logo_hit = spec
+                    .template_properties
+                    .get_str("logo")
+                    .is_some_and(|v| references_image(v, &old));
+                let cover_hit = spec
+                    .template_properties
+                    .get_str("cover")
+                    .is_some_and(|v| references_image(v, &old));
+                if !logo_hit && !cover_hit {
+                    return None;
+                }
+                if let Some(v) = spec.template_properties.get_str("logo").filter(|_| logo_hit) {
                     let nv = rewrite_reference(v, &old, &new);
                     spec.template_properties.set_str("logo", &nv);
                 }
-            }
-            if cover_hit {
-                if let Some(v) = spec.template_properties.get_str("cover") {
+                if let Some(v) = spec.template_properties.get_str("cover").filter(|_| cover_hit) {
                     let nv = rewrite_reference(v, &old, &new);
                     spec.template_properties.set_str("cover", &nv);
                 }
-            }
-            if let Err(e) = db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
-                tracing::warn!(spec = %spec.id, error = ?e, "rewrite spec image on rename failed");
-            }
+                Some(spec)
+            })
+            .collect(),
+        Err(err) => {
+            tracing::error!(error = ?err, "list specs for rename failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "rename failed").into_response();
         }
-    }
+    };
+    let landing = match db::landing::fetch(pool).await {
+        Ok(mut lc) => {
+            let mut touched = false;
+            for logo in &mut lc.logos {
+                if references_image(&logo.url, &old) {
+                    logo.url = rewrite_reference(&logo.url, &old, &new);
+                    touched = true;
+                }
+            }
+            touched.then_some(lc)
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch landing for rename failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "rename failed").into_response();
+        }
+    };
 
-    // Rewrite landing header/footer logo URLs old → new.
-    if let Ok(mut lc) = db::landing::fetch(pool).await {
-        let mut touched = false;
-        for logo in &mut lc.logos {
-            if references_image(&logo.url, &old) {
-                logo.url = rewrite_reference(&logo.url, &old, &new);
-                touched = true;
-            }
-        }
-        if touched {
-            if let Err(e) = db::landing::update(pool, &lc, Some(editor.actor())).await {
-                tracing::warn!(error = ?e, "rewrite landing logos on rename failed");
-            }
-        }
-    }
-
-    match db::images::rename(pool, &id, &new, Some(editor.actor())).await {
+    match db::images::rename_with_refs(
+        pool,
+        &id,
+        &new,
+        &specs_to_update,
+        landing.as_ref(),
+        Some(editor.actor()),
+    )
+    .await
+    {
         Ok(()) => {
             crate::routes::assets::invalidate_thumb(&old);
             crate::routes::assets::invalidate_thumb(&new);
-            tracing::info!(id, %old, %new, "image renamed; references rewritten");
+            tracing::info!(id, %old, %new, specs = specs_to_update.len(),
+                "image renamed atomically; references rewritten");
             Redirect::to("/admin/media").into_response()
         }
+        // The in-tx collision re-check rolled the whole batch back: the
+        // target name was taken between the pre-check and the commit.
+        Err(err) if err.to_string().contains("taken") => {
+            tracing::warn!(error = ?err, id, "image rename rolled back (name taken)");
+            Redirect::to("/admin/media?error=taken").into_response()
+        }
         Err(err) => {
-            tracing::error!(error = ?err, id, "image rename failed");
+            tracing::error!(error = ?err, id, "image rename failed (rolled back)");
             (StatusCode::INTERNAL_SERVER_ERROR, "rename failed").into_response()
         }
     }
@@ -552,48 +573,72 @@ async fn delete(
         }
     };
 
-    // Reset every spec that used the image: a referencing `logo` falls back
-    // to the Ruscker mark; a referencing `cover` is cleared (kind tint).
-    let mut reset = 0usize;
-    if let Ok(specs) = db::specs::list_all(pool).await {
-        for spec in specs {
-            let logo_hit = spec
-                .template_properties
-                .get_str("logo")
-                .is_some_and(|v| references_image(v, &filename));
-            let cover_hit = spec
-                .template_properties
-                .get_str("cover")
-                .is_some_and(|v| references_image(v, &filename));
-            if !logo_hit && !cover_hit {
-                continue;
-            }
-            let mut spec = spec;
-            if logo_hit {
-                spec.template_properties
-                    .set_str("logo", RUSCKER_DEFAULT_LOGO);
-            }
-            if cover_hit {
-                spec.template_properties.remove("cover");
-            }
-            if let Err(e) = db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
-                tracing::warn!(spec = %spec.id, error = ?e, "reset spec image on delete failed");
-            } else {
-                reset += 1;
+    // Reset every reference in memory, then delete the image AND commit
+    // the resets in a single transaction (#720 audit P2) — a referencing
+    // spec `logo` falls back to the Ruscker mark, a `cover` is cleared
+    // (kind tint), and a landing logo url is cleared. Doing it atomically
+    // means a failure can't leave a card pointing at a gone image (or
+    // remove the image while a card still references it).
+    let mut reset_specs: Vec<Spec> = Vec::new();
+    match db::specs::list_all(pool).await {
+        Ok(specs) => {
+            for mut spec in specs {
+                let logo_hit = spec
+                    .template_properties
+                    .get_str("logo")
+                    .is_some_and(|v| references_image(v, &filename));
+                let cover_hit = spec
+                    .template_properties
+                    .get_str("cover")
+                    .is_some_and(|v| references_image(v, &filename));
+                if !logo_hit && !cover_hit {
+                    continue;
+                }
+                if logo_hit {
+                    spec.template_properties
+                        .set_str("logo", RUSCKER_DEFAULT_LOGO);
+                }
+                if cover_hit {
+                    spec.template_properties.remove("cover");
+                }
+                reset_specs.push(spec);
             }
         }
+        Err(err) => {
+            tracing::error!(error = ?err, "list specs for delete failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response();
+        }
     }
+    let landing = match db::landing::fetch(pool).await {
+        Ok(mut lc) => {
+            let mut touched = false;
+            for logo in &mut lc.logos {
+                if references_image(&logo.url, &filename) {
+                    logo.url = String::new();
+                    touched = true;
+                }
+            }
+            touched.then_some(lc)
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch landing for delete failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response();
+        }
+    };
 
-    match db::images::delete_one(pool, &id, Some(editor.actor())).await {
+    match db::images::delete_with_refs(pool, &id, &reset_specs, landing.as_ref(), Some(editor.actor()))
+        .await
+    {
         Ok(name) => {
             if let Some(n) = name {
                 crate::routes::assets::invalidate_thumb(&n);
             }
-            tracing::info!(id, %filename, reset, "image deleted; apps reset to default logo");
+            tracing::info!(id, %filename, reset = reset_specs.len(),
+                "image deleted atomically; references reset");
             Redirect::to("/admin/media").into_response()
         }
         Err(err) => {
-            tracing::error!(error = ?err, id, "image delete failed");
+            tracing::error!(error = ?err, id, "image delete failed (rolled back)");
             (StatusCode::INTERNAL_SERVER_ERROR, "delete failed").into_response()
         }
     }

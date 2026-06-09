@@ -236,3 +236,46 @@ async fn inline_upload_is_editor_gated() {
         "anon upload ⇒ redirect to login, got {status}"
     );
 }
+
+// ── Image pull: side effect on POST, follow-only GET (#720 P2) ──────
+
+#[tokio::test]
+async fn image_pull_start_is_post_only() {
+    // The old side-effecting `GET /admin/specs/image-pull` is gone: the
+    // path now only accepts POST, so a GET is 405 (no pull on GET).
+    assert_eq!(
+        send(state(), "GET", "/admin/specs/image-pull", None).await,
+        StatusCode::METHOD_NOT_ALLOWED,
+        "pull must not be startable via GET"
+    );
+}
+
+#[tokio::test]
+async fn image_pull_is_editor_gated() {
+    // Viewer is forbidden on both the start (POST) and the follow (GET).
+    let st = state();
+    let c = cookie_for(&st, Role::Viewer).await;
+    assert_eq!(
+        send(st, "POST", "/admin/specs/image-pull", Some(&c)).await,
+        StatusCode::FORBIDDEN,
+    );
+    let st = state();
+    let c = cookie_for(&st, Role::Viewer).await;
+    assert_eq!(
+        send(st, "GET", "/admin/specs/image-pull/events?job=bogus", Some(&c)).await,
+        StatusCode::FORBIDDEN,
+    );
+}
+
+#[tokio::test]
+async fn following_an_unknown_pull_job_is_404_for_editor() {
+    // Editor passes the guard; the follow GET is side-effect-free and
+    // returns 404 for a token that was never issued (or already drained).
+    let st = state();
+    let c = cookie_for(&st, Role::Editor).await;
+    assert_eq!(
+        send(st, "GET", "/admin/specs/image-pull/events?job=bogus", Some(&c)).await,
+        StatusCode::NOT_FOUND,
+        "unknown pull token ⇒ 404, never a side effect"
+    );
+}

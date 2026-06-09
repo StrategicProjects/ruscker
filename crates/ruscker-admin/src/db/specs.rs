@@ -404,7 +404,7 @@ pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<
     }
 }
 
-async fn upsert_in_tx(
+pub(crate) async fn upsert_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     spec: &Spec,
     now: DateTime<Utc>,
@@ -504,7 +504,7 @@ async fn upsert_in_tx(
 /// Postgres twin of [`upsert_in_tx`] — identical logic, `$n`
 /// placeholders. Used by the Postgres arms of [`upsert_one`] and
 /// [`import_all`] (each dispatches on the `ConfigDb` dialect).
-async fn upsert_in_tx_pg(
+pub(crate) async fn upsert_in_tx_pg(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     spec: &Spec,
     now: DateTime<Utc>,

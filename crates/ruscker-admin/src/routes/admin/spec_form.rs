@@ -44,7 +44,10 @@ pub fn routes() -> Router<AppState> {
         )
         .route("/admin/specs/{id}/duplicate", get(duplicate_form))
         .route("/admin/specs/image-check", get(image_check))
-        .route("/admin/specs/image-pull", get(image_pull))
+        // POST starts the pull (a side effect → CSRF-guarded); the GET
+        // only follows the resulting progress stream (#720 audit P2).
+        .route("/admin/specs/image-pull", post(image_pull_start))
+        .route("/admin/specs/image-pull/events", get(image_pull_events))
         .route("/admin/specs/{id}", post(update))
         .route("/admin/specs/{id}/delete", post(delete))
 }
@@ -108,19 +111,42 @@ struct ImagePullQuery {
     credential: String,
 }
 
-/// `GET /admin/specs/image-pull?image=…&credential=…` — pull an absent
-/// image now, streaming the daemon's progress over SSE so the editor's
-/// Pull button (#498, slice B) can show it. Reuses the same pull path as
-/// a spawn. A terminal `done` event lets the client close the stream and
-/// re-check presence (success ⇒ present, failure ⇒ still absent + the
-/// `error: …` line). Editor-gated.
-async fn image_pull(
+/// One progress message from a running pull job.
+enum PullEvent {
+    Line(String),
+    Done,
+}
+
+/// A started-but-not-yet-followed image pull. The progress stream is
+/// parked here under a one-shot token; the follower GET takes the
+/// receiver exactly once.
+struct PullJob {
+    rx: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<PullEvent>>>,
+}
+
+/// In-flight pull jobs keyed by one-shot token (#720 audit P2). A pull is
+/// a side effect, so it's *started* by a CSRF-guarded POST and *followed*
+/// by a side-effect-free GET/SSE — instead of a GET that pulled. A module
+/// static (same pattern as the thumbnail caches in `routes::assets`), so
+/// it needs no `AppState` field; an unfollowed job is swept after a grace
+/// period so a started-but-never-watched pull can't leak its entry.
+static PULL_JOBS: std::sync::LazyLock<
+    dashmap::DashMap<String, std::sync::Arc<PullJob>>,
+> = std::sync::LazyLock::new(dashmap::DashMap::new);
+
+const PULL_JOB_TTL_SECS: u64 = 300;
+
+/// `POST /admin/specs/image-pull` (form: `image`, `credential`) — START
+/// pulling an absent image (#498 slice B; #720 P2 moved the side effect
+/// off GET). Validates, kicks off the daemon pull, parks the progress
+/// stream under a random token, and returns `{ "job": "<token>" }`. The
+/// editor then opens an EventSource on `…/image-pull/events?job=<token>`.
+/// Editor-gated; the POST inherits the chrome CSRF (Fetch-Metadata) guard.
+async fn image_pull_start(
     _: RequireEditor,
     State(state): State<AppState>,
-    Query(q): Query<ImagePullQuery>,
+    Form(q): Form<ImagePullQuery>,
 ) -> Response {
-    use axum::http::header::{HeaderName, CACHE_CONTROL};
-    use axum::response::sse::{Event, KeepAlive, Sse};
     use futures_util::StreamExt;
 
     let image = q.image.trim().to_string();
@@ -135,20 +161,78 @@ async fn image_pull(
         return (StatusCode::SERVICE_UNAVAILABLE, "Docker backend not connected").into_response();
     };
     let creds = resolve_pull_creds(&state, &q.credential).await;
-    let line_stream = match backend.pull_image(&image, creds.as_ref(), None).await {
+    let mut line_stream = match backend.pull_image(&image, creds.as_ref(), None).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(image, error = ?e, "image pull start failed");
             return (StatusCode::BAD_GATEWAY, format!("pull failed: {e}")).into_response();
         }
     };
-    // Progress lines as default events, then one terminal `done` event so
-    // the client closes the EventSource (no auto-reconnect → re-pull).
-    let progress = line_stream.map(|line| Ok::<_, std::convert::Infallible>(Event::default().data(line)));
-    let done = futures_util::stream::once(async {
-        Ok::<_, std::convert::Infallible>(Event::default().event("done").data(""))
+    // Drive the pull on a task, forwarding lines into the channel; the
+    // follower GET drains them. A terminal `Done` lets the follower close.
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<PullEvent>();
+    tokio::spawn(async move {
+        while let Some(line) = line_stream.next().await {
+            if tx.send(PullEvent::Line(line)).is_err() {
+                return; // follower disconnected
+            }
+        }
+        let _ = tx.send(PullEvent::Done);
     });
-    let sse = Sse::new(progress.chain(done))
+    let token = uuid::Uuid::new_v4().to_string();
+    PULL_JOBS.insert(
+        token.clone(),
+        std::sync::Arc::new(PullJob {
+            rx: tokio::sync::Mutex::new(Some(rx)),
+        }),
+    );
+    // Sweep an unfollowed job after a grace period (no follower ever
+    // connected) so the registry can't grow without bound.
+    let sweep = token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(PULL_JOB_TTL_SECS)).await;
+        PULL_JOBS.remove(&sweep);
+    });
+    tracing::info!(image, job = %token, "image pull started; awaiting follower");
+    Json(serde_json::json!({ "job": token })).into_response()
+}
+
+#[derive(Deserialize)]
+struct PullEventsQuery {
+    job: String,
+}
+
+/// `GET /admin/specs/image-pull/events?job=<token>` — FOLLOW a pull job
+/// started by [`image_pull_start`]. Side-effect-free: it only streams the
+/// already-running pull's progress over SSE (default events = lines, then
+/// one terminal `done` event), then drops the job. An unknown or
+/// already-followed token ⇒ 404. Editor-gated (RBAC preserved).
+async fn image_pull_events(_: RequireEditor, Query(q): Query<PullEventsQuery>) -> Response {
+    use axum::http::header::{HeaderName, CACHE_CONTROL};
+    use axum::response::sse::{Event, KeepAlive, Sse};
+
+    // Take the job out of the registry (so a token can't be replayed and
+    // nothing leaks), then take its receiver exactly once.
+    let Some((_, job)) = PULL_JOBS.remove(&q.job) else {
+        return (StatusCode::NOT_FOUND, "unknown or already-followed pull job").into_response();
+    };
+    let Some(mut rx) = job.rx.lock().await.take() else {
+        return (StatusCode::NOT_FOUND, "pull job already followed").into_response();
+    };
+    let stream = async_stream::stream! {
+        while let Some(ev) = rx.recv().await {
+            match ev {
+                PullEvent::Line(l) => {
+                    yield Ok::<_, std::convert::Infallible>(Event::default().data(l));
+                }
+                PullEvent::Done => {
+                    yield Ok(Event::default().event("done").data(""));
+                    break;
+                }
+            }
+        }
+    };
+    let sse = Sse::new(stream)
         .keep_alive(KeepAlive::new().interval(std::time::Duration::from_secs(15)));
     // `X-Accel-Buffering: no` so nginx streams the pull instead of buffering.
     (
@@ -699,8 +783,36 @@ impl SpecForm {
             errs.push("spec-form-error-volume");
         }
 
+        // container-env: every non-blank line must be `NAME=value` with a
+        // valid NAME. A typo'd line (missing `=`, or a key with spaces /
+        // bad chars) used to be silently dropped by `parse_env` — turning
+        // a mistake into lost config. Block the save instead (#720 P4).
+        if self
+            .container_env
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .any(|l| match l.split_once('=') {
+                None => true,
+                Some((k, _)) => !is_valid_env_key(k.trim()),
+            })
+        {
+            errs.push("spec-form-error-env");
+        }
+
         errs
     }
+}
+
+/// A valid environment-variable name: a letter or `_`, then letters,
+/// digits or `_` (the POSIX-ish shape Docker accepts). Empty is invalid.
+fn is_valid_env_key(k: &str) -> bool {
+    let mut chars = k.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 fn empty_to_none(s: &str) -> Option<String> {
@@ -1636,5 +1748,30 @@ proxy:
         f.max_body_size = "10m".into();
         f.container_cpu_request = "0.25".into();
         assert!(f.validate(FormMode::New).is_empty());
+    }
+
+    // #720 P4: an invalid container-env line is a config error, not a
+    // silent drop. A missing `=` or a bad key blocks the save.
+    #[test]
+    fn validate_rejects_bad_container_env() {
+        let mut f = valid_form();
+        f.container_env = "JUST_A_KEY".into(); // no `=`
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-env"));
+
+        let mut f = valid_form();
+        f.container_env = "BAD KEY=value".into(); // space in key
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-env"));
+
+        let mut f = valid_form();
+        f.container_env = "1ABC=value".into(); // key starts with a digit
+        assert!(f.validate(FormMode::New).contains(&"spec-form-error-env"));
+    }
+
+    #[test]
+    fn validate_accepts_good_container_env() {
+        let mut f = valid_form();
+        // blank lines ok; values may contain `=` and `${VAR}`.
+        f.container_env = "\nDATABASE_URL=postgres://x\n_LOG=info\nTOKEN=${API_TOKEN}\n".into();
+        assert!(!f.validate(FormMode::New).contains(&"spec-form-error-env"));
     }
 }

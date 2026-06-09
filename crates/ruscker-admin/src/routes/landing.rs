@@ -337,10 +337,18 @@ async fn index(
         }
     }
 
-    let header_style = match (&lc.header_bg, &lc.header_fg) {
-        (Some(bg), Some(fg)) => format!("background: {}; color: {};", bg, fg),
-        (Some(bg), None) => format!("background: {};", bg),
-        (None, Some(fg)) => format!("color: {};", fg),
+    // Sanitize the header colours through the same charset guard as the
+    // per-theme palette (#720 audit P5): the editor is Admin-only, but a
+    // stray `;`/`}`/`<` in `header-bg`/`header-fg` would corrupt the
+    // inline `style`. The charset still passes `linear-gradient(...)`
+    // (alphanumerics + `(),%.- `), so the gradient builder keeps working;
+    // it only drops values that could break out of the declaration.
+    let header_bg = sanitize_css_color(&lc.header_bg);
+    let header_fg = sanitize_css_color(&lc.header_fg);
+    let header_style = match (&header_bg, &header_fg) {
+        (Some(bg), Some(fg)) => format!("background: {bg}; color: {fg};"),
+        (Some(bg), None) => format!("background: {bg};"),
+        (None, Some(fg)) => format!("color: {fg};"),
         (None, None) => String::new(),
     };
     let intro = lc
@@ -619,9 +627,14 @@ fn analytics_provider_snippet(provider: &str, key: &str) -> Option<(String, Stri
     }
 }
 
-/// Accept a CSS color value only if it's plausibly a color and can't
-/// break out of a `{ }` declaration block — even though the editor is
-/// Admin-only, a stray `}`/`;`/`<` would corrupt the whole `<style>`.
+/// Accept a CSS colour (or gradient) value only if it can't break out of
+/// the declaration / inline `style` it lands in — even though the editor
+/// is Admin-only, a stray `}`/`;`/`<`/`:`/quote would corrupt the
+/// surrounding `<style>` or `style="…"`. Charset-based: alphanumerics
+/// plus `# ( ) , % . - space`, which passes `#rrggbb`, `rgb()/hsl()`,
+/// bare keywords AND `linear-/radial-gradient(...)`, while rejecting
+/// anything that could escape the value (used for per-theme palette
+/// colours and the header background/foreground, #720 P5).
 fn sanitize_css_color(s: &Option<String>) -> Option<String> {
     let t = s.as_deref().map(str::trim).filter(|t| !t.is_empty())?;
     let ok = t
@@ -698,5 +711,31 @@ mod analytics_tests {
         assert!(analytics_provider_snippet("ga", "").is_none());
         assert!(analytics_provider_snippet("ga", "G-X\"><script>").is_none());
         assert!(analytics_provider_snippet("none", "x").is_none());
+    }
+}
+
+#[cfg(test)]
+mod sanitize_tests {
+    use super::sanitize_css_color;
+
+    fn san(s: &str) -> Option<String> {
+        sanitize_css_color(&Some(s.to_string()))
+    }
+
+    #[test]
+    fn passes_colours_and_gradients() {
+        assert_eq!(san("#0f6e56").as_deref(), Some("#0f6e56"));
+        assert_eq!(san("rgb(15, 110, 86)").as_deref(), Some("rgb(15, 110, 86)"));
+        assert!(san("linear-gradient(135deg, #ff0000 0%, #0000ff 100%)").is_some());
+        assert!(san("radial-gradient(circle, #fff 0%, #000 100%)").is_some());
+    }
+
+    #[test]
+    fn rejects_declaration_breakouts() {
+        // `;`/`}`/`<`/`:`/quotes can't escape the inline style — all dropped.
+        assert!(san("red; } body { display:none").is_none());
+        assert!(san("#fff\"></style><script>alert(1)</script>").is_none());
+        assert!(san("url('/x.png')").is_none()); // `/` + `:` + quote rejected
+        assert!(san("expression(alert(1))").is_some()); // harmless: no breakout chars, and `expression()` is dead in modern browsers
     }
 }

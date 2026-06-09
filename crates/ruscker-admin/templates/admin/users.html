@@ -134,7 +134,7 @@
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
           </form>
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
-                onsubmit="return confirm('{{ self.t("admin-users-confirm-delete") }}')">
+                data-confirm="{{ self.t("admin-users-confirm-delete") }}">
             <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>
           </form>
         </td>

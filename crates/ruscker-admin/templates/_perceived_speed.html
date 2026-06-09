@@ -68,7 +68,8 @@
   });
 
   // A form submit that navigates. Bubble phase so a cancelled
-  // `onsubmit="return confirm(...)"` (defaultPrevented) is skipped. Opt out
+  // `data-confirm` guard (defaultPrevented by the layout's capture-phase
+  // listener, #741) is skipped. Opt out
   // with data-no-progress for an Alpine/fetch-hijacked form that stays put.
   document.addEventListener("submit", function (e) {
     if (e.defaultPrevented) return;

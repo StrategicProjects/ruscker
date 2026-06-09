@@ -176,20 +176,9 @@
 (function () {
   var container = document.getElementById('dash-groups');
   var emptyEl = document.getElementById('dash-empty');
-  // Confirm guard for the stop/restart forms (#740). Delegated — NOT an
-  // inline onsubmit per form: the old generated rows interpolated the
-  // localized message into a double-quoted onsubmit attribute, the
-  // message's own quotes terminated the attribute, the handler never
-  // compiled, and destructive actions fired with NO confirmation. One
-  // listener on the container survives every SSE innerHTML rebuild and
-  // covers the server-rendered rows too (submit events bubble).
-  if (container) {
-    container.addEventListener('submit', function (e) {
-      var form = e.target;
-      var msg = form && form.getAttribute && form.getAttribute('data-confirm');
-      if (msg && !window.confirm(msg)) e.preventDefault();
-    });
-  }
+  // The stop/restart forms carry `data-confirm` (#740) — the confirm
+  // itself is the layout's global document-level guard (#741), which
+  // survives every SSE innerHTML rebuild here.
   var ds = (container && container.dataset) || {};
   var pendingLabel = ds.pendingLabel || 'awaiting first reading';
   var logsTitle = ds.logsTitle || 'Logs';

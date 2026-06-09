@@ -161,7 +161,7 @@
            (`openImagePicker` from the shared mixin). #}
         <div class="logo-pick">
           <button type="button" class="logo-pick__thumb" @click="openLogoPicker()"
-                  :title="form.logo || '{{ self.t("spec-form-logo-none") }}'">
+                  :title="form.logo || $el.dataset.noLogo" data-no-logo="{{ self.t("spec-form-logo-none") }}">
             <img x-show="form.logo" x-cloak :src="thumbUrl(form.logo)" alt="">
             <i class="ti ti-photo" x-show="!form.logo" aria-hidden="true"></i>
           </button>
@@ -1029,7 +1029,7 @@
         <div class="spec-form-actions-box">
           <div class="spec-form-actions-title">{{ self.t("spec-form-actions") }}</div>
           <form method="post" action="{{ base }}/admin/specs/{{ form.id }}/delete"
-                onsubmit="return confirm('{{ self.t("spec-form-delete-confirm") }}');">
+                data-confirm="{{ self.t("spec-form-delete-confirm") }}">
             <button type="submit" class="spec-form-delete">
               <i class="ti ti-trash" aria-hidden="true"></i>
               {{ self.t("spec-form-delete") }}

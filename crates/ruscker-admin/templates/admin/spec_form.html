@@ -159,7 +159,7 @@
         <div class="logo-pick">
           <button type="button" class="logo-pick__thumb" @click="openLogoPicker()"
                   :title="form.logo || '{{ self.t("spec-form-logo-none") }}'">
-            <img x-show="form.logo" x-cloak :src="assetUrl(form.logo) + '?thumb'" alt="">
+            <img x-show="form.logo" x-cloak :src="thumbUrl(form.logo)" alt="">
             <i class="ti ti-photo" x-show="!form.logo" aria-hidden="true"></i>
           </button>
           <div class="logo-pick__body">
@@ -217,8 +217,10 @@
          Image covers were retired: a logo sits *on top* of the cover, so
          a cover image + a logo rendered two overlapping pictures on one
          card. The cover is now a tint/colour/gradient only; the logo is
-         the single image. `coverInit()` drops any legacy `url(...)`. #}
-      <div class="spec-form-field" x-init="coverInit()">
+         the single image. A spec saved with a legacy image cover (`url(…)`)
+         keeps it — shown in the read-only "legacy" notice below — until the
+         operator picks another mode; it is never dropped silently (#720 P3). #}
+      <div class="spec-form-field">
         <div class="spec-form-label-row">
           <label class="spec-form-label">{{ self.t("spec-form-cover") }}</label>
           {% call help(self.t("spec-help-cover")) %}{% endcall %}
@@ -278,6 +280,18 @@
           <input type="text" name="cover" x-model="form.cover" readonly
                  :disabled="coverMode !== 'gradient'"
                  class="spec-form-input spec-form-input--mono grad-output">
+        </div>
+
+        {# LEGACY image cover (#720 P3) — a `url(…)` cover saved before
+           image covers were retired. Kept as-is (the hidden field submits
+           it while in this mode) until the operator picks Auto/Solid/
+           Gradient to replace it, instead of being wiped on open. #}
+        <div x-show="coverMode === 'legacy'" x-cloak>
+          <div class="info-box" style="margin-top:6px">
+            <i class="ti ti-info-circle" aria-hidden="true"></i>
+            <span>{{ self.t("spec-form-cover-legacy-help") }}</span>
+          </div>
+          <input type="hidden" name="cover" :value="form.cover" :disabled="coverMode !== 'legacy'">
         </div>
       </div>
 
@@ -1034,14 +1048,21 @@
      fixed descendants). The `is-logos` grid keeps logos uncropped. #}
   <template x-teleport="body">
   <div x-show="picker.open" x-cloak class="image-picker-overlay"
+       x-init="$watch('picker.open', open => {
+                 if (open) { _logoTrigger = document.activeElement;
+                   $nextTick(() => $refs.logoSearch && $refs.logoSearch.focus()); }
+                 else if (_logoTrigger && _logoTrigger.focus) { _logoTrigger.focus(); } })"
        @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
-    <div class="image-picker-modal">
+    <div class="image-picker-modal" role="dialog" aria-modal="true"
+         aria-labelledby="logo-picker-title" @keydown.tab="trapLogoTab($event)">
       <div class="image-picker-head">
-        <strong>{{ self.t("spec-form-logo") }}</strong>
-        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
+        <strong id="logo-picker-title">{{ self.t("spec-form-logo") }}</strong>
+        <button type="button" class="admin-nav-link" @click="picker.open = false"
+                aria-label="{{ self.t("admin-import-cancel") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
       </div>
       <div class="image-picker-tools">
-        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+        <input type="search" x-ref="logoSearch" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+               aria-label="{{ self.t("admin-images-search") }}"
                class="spec-form-input text-sm" style="max-width:16rem">
         <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
                :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
@@ -1165,25 +1186,39 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // re-check presence so the badge reflects success (present) or failure
   // (still absent + the last `error:` line).
   pull: { running: false, line: '' },
-  pullImage() {
+  async pullImage() {
     const image = (this.form.container_image || '').trim();
     if (!image || this.pull.running) return;
     this.pull = { running: true, line: '' };
     const base = window.RUSCKER_BASE || '';
-    const cred = encodeURIComponent(this.form.docker_registry_credential || '');
-    const url = base + '/admin/specs/image-pull?image=' + encodeURIComponent(image) + '&credential=' + cred;
-    const es = new EventSource(url);
+    const cred = this.form.docker_registry_credential || '';
     let finished = false;
     const finish = () => {
       if (finished) return;
       finished = true;
-      es.close();
       this.pull.running = false;
       this.checkImage();
     };
-    es.onmessage = (e) => { if (e.data) this.pull.line = e.data; };
-    es.addEventListener('done', finish);
-    es.onerror = finish;  // stream closed / network / 4xx — re-check tells us
+    try {
+      // POST starts the pull (a side effect → same-origin/CSRF-guarded)
+      // and returns a one-shot job token; the GET below only FOLLOWS it.
+      const resp = await fetch(base + '/admin/specs/image-pull', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: 'image=' + encodeURIComponent(image) + '&credential=' + encodeURIComponent(cred),
+      });
+      if (!resp.ok) { this.pull.line = 'pull failed (' + resp.status + ')'; finish(); return; }
+      const data = await resp.json().catch(() => ({}));
+      if (!data.job) { finish(); return; }
+      const es = new EventSource(base + '/admin/specs/image-pull/events?job=' + encodeURIComponent(data.job));
+      const close = () => { es.close(); finish(); };
+      es.onmessage = (e) => { if (e.data) this.pull.line = e.data; };
+      es.addEventListener('done', close);
+      es.onerror = close;  // stream closed / network / 4xx — re-check tells us
+    } catch (e) {
+      this.pull.line = String(e);
+      finish();
+    }
   },
   // Open the shared library modal for the logo; the pick writes the
   // chosen asset path into `form.logo`, with the current value
@@ -1191,6 +1226,26 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // imagePicker mixin spread above.)
   openLogoPicker() {
     this.openImagePicker((v) => { this.form.logo = v; }, this.form.logo);
+  },
+  // `?thumb` only for local media (`/assets/img/…`): an external or
+  // advanced URL (CDN, signed link) must pass through untouched — a
+  // stray `?thumb` would break the signature / hit a 404 (#720 P6).
+  thumbUrl(p) {
+    const local = (p || '').indexOf('/assets/img/') === 0;
+    return this.assetUrl(p) + (local ? '?thumb' : '');
+  },
+  // ── Logo modal accessibility (#720 P7) ───────────────────────────
+  // Remembers what had focus before the dialog opened, so it can be
+  // restored on close (set by the $watch in the modal's x-init).
+  _logoTrigger: null,
+  // Focus trap: keep Tab/Shift+Tab inside the dialog while it's open.
+  trapLogoTab(e) {
+    const sel = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const f = Array.from(e.currentTarget.querySelectorAll(sel)).filter((el) => el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
   },
   // Cover background for the preview. `form.cover` is a CSS value that
   // may embed `url('/assets/img/x')`; prefix the base path on those
@@ -1229,13 +1284,13 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // set. Off ⇒ the ceiling + thresholds are cleared (run at the floor).
   autoscaling: (parseInt(initial.max_replicas, 10) || 0) > 1,
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
-  // 'solid' (color), 'gradient' (builder). Seeded from any existing
-  // `cover` value; a legacy image cover (`url(...)`) opens as 'auto'
-  // since image covers were retired (see `coverInit`).
+  // 'solid' (color), 'gradient' (builder), or 'legacy' for a saved
+  // image cover (`url(...)`) from before image covers were retired —
+  // preserved (not wiped) until the operator picks another mode (#720 P3).
   coverMode: !((initial.cover || '').trim())
     ? 'auto'
     : ((initial.cover || '').trim().indexOf('url(') === 0
-        ? 'auto'
+        ? 'legacy'
         : window.ruscker.bgMode(initial.cover)),
   // Seed from the saved gradient so editing it modifies it in place
   // instead of resetting to the default palette (#720 follow-up).
@@ -1264,13 +1319,9 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     // card didn't change until the picker was dragged — #720 follow-up).
     // A gradient string is replaced too; an existing solid hex is kept.
     const c = (this.form.cover || '').trim();
-    if (!c || /^(linear|radial)-gradient\(/.test(c)) this.form.cover = '#0f6e56';
-  },
-  // Image covers were retired (they rendered *under* the logo → two
-  // overlapping pictures on one card). A legacy `url(...)` cover degrades
-  // to the kind-tint / accent fallback and is dropped on the next save.
-  coverInit() {
-    if ((this.form.cover || '').trim().indexOf('url(') === 0) this.form.cover = '';
+    if (!c || /^(linear|radial)-gradient\(/.test(c) || c.indexOf('url(') === 0) {
+      this.form.cover = '#0f6e56';
+    }
   },
   // (uploadImage comes from the imagePicker mixin — its inline upload
   // auto-selects the result via the active openImagePicker callback.)

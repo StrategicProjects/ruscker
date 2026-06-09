@@ -468,6 +468,7 @@ spec-form-cover = Cover de la tarjeta
 spec-form-choose-image = Elegir imagen
 spec-form-cover-auto = Auto (color del tipo)
 spec-form-cover-auto-help = Usa el tono por defecto del tipo. Elija Sólido o Degradado para personalizar.
+spec-form-cover-legacy-help = Esta portada usa una imagen (modo descontinuado — el logo ya va encima de la portada). Se mantiene como está; elija Auto, Sólido o Degradado arriba para reemplazarla.
 
 # ── Formulario de spec: sección avanzada + ayuda por campo (#2) ────
 spec-form-advanced = Avanzado
@@ -522,6 +523,7 @@ spec-form-inject-base-href = Reescribir el HTML de la app para el sub-path
 spec-form-inject-base-href-help = Activado por defecto. Ruscker reescribe <base href> y las URL relativas a la raíz para que una app que asume estar en la raíz del servidor funcione bajo su sub-path /app/. Desactiva solo si la app lee X-Forwarded-Prefix y construye sus propias rutas.
 spec-help-inject-base-href = Ruscker siempre reenvía X-Forwarded-Prefix / X-Script-Name (y X-Forwarded-Proto/-Host). Frameworks como FastAPI (root_path), Dash y Streamlit pueden auto-enrutarse con ellos — entonces esta reescritura de HTML es redundante.
 spec-form-error-volume = Cada volumen debe ser /host:/contenedor (opcional :ro).
+spec-form-error-env = Cada variable de entorno debe ser NOMBRE=valor, con un NOMBRE válido (letras, números, _; empezando por letra o _). Corrige o elimina la línea inválida.
 admin-nav-logs = Registros
 admin-proclog-title = Registros
 admin-proclog-subtitle = Flujo de eventos del balanceador y las réplicas

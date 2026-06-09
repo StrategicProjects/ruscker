@@ -10,8 +10,9 @@
 //! install crosses ~1 GB of images or someone wants to share a
 //! gallery across multiple Ruscker instances.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use chrono::{DateTime, Utc};
+use ruscker_config::{LandingCustomization, Spec};
 use uuid::Uuid;
 
 use crate::db::ConfigDb;
@@ -381,6 +382,252 @@ pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<
     }
 }
 
+/// Rename an image AND rewrite every reference to it (the given specs +
+/// landing) in **one transaction** (#720 audit P2). Before, the route
+/// rewrote specs/landing in separate transactions and renamed the image
+/// last — a failure there left cards pointing at a filename that no
+/// longer existed. Here all writes commit together or not at all.
+///
+/// `specs` are the already-rewritten specs to upsert; `landing` is the
+/// rewritten customization, or `None` when it held no reference. The
+/// target filename is re-checked *inside* the tx (authoritative over the
+/// route's advisory pre-check), so a colliding name rolls the batch back.
+pub(crate) async fn rename_with_refs(
+    db: &ConfigDb,
+    id: &str,
+    new_filename: &str,
+    specs: &[Spec],
+    landing: Option<&LandingCustomization>,
+    actor: Option<&str>,
+) -> Result<()> {
+    let now = Utc::now();
+    let target = format!("image:{id}");
+    let diff = serde_json::to_string(&serde_json::json!({ "filename": new_filename }))?;
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            let taken: (i64,) =
+                sqlx::query_as("SELECT count(*) FROM images WHERE filename = ? AND id != ?")
+                    .bind(new_filename)
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context("rename collision check (sqlite)")?;
+            if taken.0 > 0 {
+                bail!("filename '{new_filename}' is already taken");
+            }
+            sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (sqlite)")?;
+            audit_sqlite(&mut tx, actor, "image.rename", &target, Some(&diff), now).await?;
+            for spec in specs {
+                crate::db::specs::upsert_in_tx(&mut tx, spec, now).await?;
+                let t = format!("spec:{}", spec.id);
+                audit_sqlite(&mut tx, actor, "spec.update", &t, None, now).await?;
+            }
+            if let Some(lc) = landing {
+                crate::db::landing::update_in_tx(&mut tx, lc, now).await?;
+                audit_sqlite(
+                    &mut tx,
+                    actor,
+                    "landing.update",
+                    "landing:customization",
+                    None,
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await.context("commit image rename")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin image rename tx")?;
+            let taken: (i64,) =
+                sqlx::query_as("SELECT count(*) FROM images WHERE filename = $1 AND id != $2")
+                    .bind(new_filename)
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context("rename collision check (postgres)")?;
+            if taken.0 > 0 {
+                bail!("filename '{new_filename}' is already taken");
+            }
+            sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
+                .bind(new_filename)
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .context("rename image (postgres)")?;
+            audit_pg(&mut tx, actor, "image.rename", &target, Some(&diff), now).await?;
+            for spec in specs {
+                crate::db::specs::upsert_in_tx_pg(&mut tx, spec, now).await?;
+                let t = format!("spec:{}", spec.id);
+                audit_pg(&mut tx, actor, "spec.update", &t, None, now).await?;
+            }
+            if let Some(lc) = landing {
+                crate::db::landing::update_in_tx_pg(&mut tx, lc, now).await?;
+                audit_pg(
+                    &mut tx,
+                    actor,
+                    "landing.update",
+                    "landing:customization",
+                    None,
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await.context("commit image rename")?;
+        }
+    }
+    Ok(())
+}
+
+/// Delete an image AND reset every reference to it (the given specs +
+/// landing) in **one transaction** (#720 audit P2). `specs` are the
+/// already-reset specs to upsert (logo → default mark, cover removed);
+/// `landing` is the reset customization, or `None`. Returns the deleted
+/// row's filename (for cache invalidation), or `None` if it was already
+/// gone — in which case nothing is written.
+pub(crate) async fn delete_with_refs(
+    db: &ConfigDb,
+    id: &str,
+    specs: &[Spec],
+    landing: Option<&LandingCustomization>,
+    actor: Option<&str>,
+) -> Result<Option<String>> {
+    let now = Utc::now();
+    let target = format!("image:{id}");
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin image delete tx")?;
+            let filename: Option<(String,)> =
+                sqlx::query_as("SELECT filename FROM images WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("lookup image for delete")?;
+            if filename.is_none() {
+                return Ok(None); // already gone — tx drops, nothing written
+            }
+            sqlx::query("DELETE FROM images WHERE id = ?")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete image {id}"))?;
+            let diff = serde_json::to_string(&delete_diff(filename.as_ref()))?;
+            audit_sqlite(&mut tx, actor, "image.delete", &target, Some(&diff), now).await?;
+            for spec in specs {
+                crate::db::specs::upsert_in_tx(&mut tx, spec, now).await?;
+                let t = format!("spec:{}", spec.id);
+                audit_sqlite(&mut tx, actor, "spec.update", &t, None, now).await?;
+            }
+            if let Some(lc) = landing {
+                crate::db::landing::update_in_tx(&mut tx, lc, now).await?;
+                audit_sqlite(
+                    &mut tx,
+                    actor,
+                    "landing.update",
+                    "landing:customization",
+                    None,
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await.context("commit image delete")?;
+            Ok(filename.map(|(f,)| f))
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin image delete tx")?;
+            let filename: Option<(String,)> =
+                sqlx::query_as("SELECT filename FROM images WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("lookup image for delete")?;
+            if filename.is_none() {
+                return Ok(None);
+            }
+            sqlx::query("DELETE FROM images WHERE id = $1")
+                .bind(id)
+                .execute(&mut *tx)
+                .await
+                .with_context(|| format!("delete image {id}"))?;
+            let diff = serde_json::to_string(&delete_diff(filename.as_ref()))?;
+            audit_pg(&mut tx, actor, "image.delete", &target, Some(&diff), now).await?;
+            for spec in specs {
+                crate::db::specs::upsert_in_tx_pg(&mut tx, spec, now).await?;
+                let t = format!("spec:{}", spec.id);
+                audit_pg(&mut tx, actor, "spec.update", &t, None, now).await?;
+            }
+            if let Some(lc) = landing {
+                crate::db::landing::update_in_tx_pg(&mut tx, lc, now).await?;
+                audit_pg(
+                    &mut tx,
+                    actor,
+                    "landing.update",
+                    "landing:customization",
+                    None,
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await.context("commit image delete")?;
+            Ok(filename.map(|(f,)| f))
+        }
+    }
+}
+
+/// Append one audit row inside a SQLite transaction (shared by the atomic
+/// image ops above). `diff` is the JSON diff, or `None` for no diff.
+async fn audit_sqlite(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    actor: Option<&str>,
+    action: &str,
+    target: &str,
+    diff: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(target)
+    .bind(diff)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("audit {action}"))?;
+    Ok(())
+}
+
+/// Postgres twin of [`audit_sqlite`].
+async fn audit_pg(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    actor: Option<&str>,
+    action: &str,
+    target: &str,
+    diff: Option<&str>,
+    now: DateTime<Utc>,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+         VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(target)
+    .bind(diff)
+    .bind(now)
+    .execute(&mut **tx)
+    .await
+    .with_context(|| format!("audit {action}"))?;
+    Ok(())
+}
+
 /// Audit diff for a delete — the filename if we captured one, else
 /// an empty object.
 fn delete_diff(filename: Option<&(String,)>) -> serde_json::Value {
@@ -434,5 +681,126 @@ mod pg_tests {
             Some("logo.webp")
         );
         assert!(fetch_by_filename(&db, "logo.webp").await.unwrap().is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_memory;
+    use ruscker_config::Config;
+
+    async fn insert_image(db: &ConfigDb, id: &str, filename: &str) {
+        let ConfigDb::Sqlite(pool) = db else {
+            return;
+        };
+        sqlx::query(
+            "INSERT INTO images (id, filename, mime_type, size_bytes, blob, uploaded_at)
+             VALUES (?, ?, 'image/png', 3, ?, ?)",
+        )
+        .bind(id)
+        .bind(filename)
+        .bind(vec![1u8, 2, 3])
+        .bind(Utc::now())
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn spec_with_logo(id: &str, logo: &str) -> Spec {
+        std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+        let yaml = format!(
+            "proxy:\n  specs:\n    - id: {id}\n      container-image: img\n      template-properties:\n        logo: \"{logo}\"\n"
+        );
+        Config::from_yaml(&yaml)
+            .unwrap()
+            .proxy
+            .specs
+            .into_iter()
+            .next()
+            .unwrap()
+    }
+
+    async fn logo_of(db: &ConfigDb, id: &str) -> Option<String> {
+        crate::db::specs::fetch_one(db, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .template_properties
+            .get_str("logo")
+            .map(str::to_string)
+    }
+
+    // Happy path: the image rename and the spec rewrite commit together.
+    #[tokio::test]
+    async fn rename_with_refs_commits_image_and_spec_together() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        insert_image(&db, "img1", "old.png").await;
+        let mut spec = spec_with_logo("app", "/assets/img/old.png");
+        crate::db::specs::upsert_one(&db, &spec, None).await.unwrap();
+
+        spec.template_properties
+            .set_str("logo", "/assets/img/new.png");
+        rename_with_refs(&db, "img1", "new.png", std::slice::from_ref(&spec), None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(filename_for(&db, "img1").await.unwrap().as_deref(), Some("new.png"));
+        assert_eq!(logo_of(&db, "app").await.as_deref(), Some("/assets/img/new.png"));
+    }
+
+    // Conflict: renaming onto a name another image already holds must roll
+    // the WHOLE batch back — the spec ref stays pointing at the old name,
+    // and the image keeps its old name (no half-applied state).
+    #[tokio::test]
+    async fn rename_with_refs_rolls_back_on_name_conflict() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        insert_image(&db, "img1", "old.png").await;
+        insert_image(&db, "img2", "taken.png").await;
+        let spec = spec_with_logo("app", "/assets/img/old.png");
+        crate::db::specs::upsert_one(&db, &spec, None).await.unwrap();
+
+        let mut rewritten = spec.clone();
+        rewritten
+            .template_properties
+            .set_str("logo", "/assets/img/taken.png");
+        let res =
+            rename_with_refs(&db, "img1", "taken.png", std::slice::from_ref(&rewritten), None, None)
+                .await;
+
+        assert!(res.is_err(), "rename onto a taken name must fail");
+        assert_eq!(
+            filename_for(&db, "img1").await.unwrap().as_deref(),
+            Some("old.png"),
+            "image name rolled back"
+        );
+        assert_eq!(
+            logo_of(&db, "app").await.as_deref(),
+            Some("/assets/img/old.png"),
+            "spec ref rolled back — not left pointing at the failed rename"
+        );
+    }
+
+    // Delete + reference reset commit together: image gone, spec reset.
+    #[tokio::test]
+    async fn delete_with_refs_removes_image_and_resets_specs_together() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        insert_image(&db, "img1", "gone.png").await;
+        let mut spec = spec_with_logo("app", "/assets/img/gone.png");
+        crate::db::specs::upsert_one(&db, &spec, None).await.unwrap();
+
+        spec.template_properties
+            .set_str("logo", "/assets/img/ruscker-mark.svg");
+        let removed = delete_with_refs(&db, "img1", std::slice::from_ref(&spec), None, None)
+            .await
+            .unwrap();
+
+        assert_eq!(removed.as_deref(), Some("gone.png"));
+        assert!(filename_for(&db, "img1").await.unwrap().is_none(), "image deleted");
+        assert_eq!(
+            logo_of(&db, "app").await.as_deref(),
+            Some("/assets/img/ruscker-mark.svg"),
+            "spec logo reset to the default mark"
+        );
     }
 }

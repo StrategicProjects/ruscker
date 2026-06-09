@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.3 — 2026-06-09
+
+**Gradient card-cover preview fix.** A gradient default card cover didn't
+show in the Appearance preview (the mock cards stayed grey) when the
+**Card covers: Gradient** toggle was on — the preview emitted two
+`background-image` declarations, so the subtle overlay clobbered the
+colour gradient. The preview now shows an explicit cover as-is, mirroring
+the public landing. Also: the gradient builders now seed from the saved
+value (`gradientParse`), so reopening shows the saved stops and editing a
+saved gradient modifies it in place instead of silently resetting it to
+the default palette.
+
+---
+
 ## v0.2.2 — 2026-06-09
 
 **Card-cover preview fix.** Selecting the **Solid** card-cover mode only

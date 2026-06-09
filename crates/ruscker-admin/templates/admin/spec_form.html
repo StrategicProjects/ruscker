@@ -157,16 +157,16 @@
         <div class="logo-grid" x-cloak>
           <template x-for="name in logoImages" :key="name">
             <button type="button" :title="name"
-                    @click="form.logo = (form.logo === ('/assets/img/' + name) ? '' : '/assets/img/' + name)"
-                    class="logo-tile" :class="form.logo === ('/assets/img/' + name) ? 'is-sel' : ''">
+                    @click="form.logo = (logoSel(name) ? '' : '/assets/img/' + name)"
+                    class="logo-tile" :class="logoSel(name) ? 'is-sel' : ''">
               <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
-              <span class="logo-tile__check" x-show="form.logo === ('/assets/img/' + name)" x-cloak><i class="ti ti-check" aria-hidden="true"></i></span>
+              <span class="logo-tile__check" x-show="logoSel(name)" x-cloak><i class="ti ti-check" aria-hidden="true"></i></span>
             </button>
           </template>
           <label class="logo-tile logo-tile--upload" :class="imgUploading ? 'is-busy' : ''"
                  title="{{ self.t("admin-images-choose") }}">
             <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-plus'" aria-hidden="true"></i>
-            <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, 'logo')">
+            <input type="file" accept="image/*" class="hidden" @change="uploadImage($event)">
           </label>
         </div>
 
@@ -217,8 +217,12 @@
         </div>
       </div>
 
-      {# ── Card cover (#11) — Auto tint / Solid / Gradient ───── #}
-      <div class="spec-form-field">
+      {# ── Card cover (#11) — Auto tint / Solid / Gradient ─────
+         Image covers were retired: a logo sits *on top* of the cover, so
+         a cover image + a logo rendered two overlapping pictures on one
+         card. The cover is now a tint/colour/gradient only; the logo is
+         the single image. `coverInit()` drops any legacy `url(...)`. #}
+      <div class="spec-form-field" x-init="coverInit()">
         <div class="spec-form-label-row">
           <label class="spec-form-label">{{ self.t("spec-form-cover") }}</label>
           {% call help(self.t("spec-help-cover")) %}{% endcall %}
@@ -230,8 +234,6 @@
                   @click="setCoverMode('solid')">{{ self.t("admin-grad-solid") }}</button>
           <button type="button" class="grad-mode" :class="coverMode === 'gradient' ? 'is-active' : ''"
                   @click="setCoverMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
-          <button type="button" class="grad-mode" :class="coverMode === 'image' ? 'is-active' : ''"
-                  @click="setCoverMode('image')">{{ self.t("spec-form-cover-image") }}</button>
         </div>
 
         {# AUTO: nothing to configure — the kind tint is used. The
@@ -280,21 +282,6 @@
           <input type="text" name="cover" x-model="form.cover" readonly
                  :disabled="coverMode !== 'gradient'"
                  class="spec-form-input spec-form-input--mono grad-output">
-        </div>
-
-        {# IMAGE — same library + inline upload as the logo picker (#213). #}
-        <div x-show="coverMode === 'image'" x-cloak>
-          <div class="flex items-center gap-3 mt-1">
-            <button type="button" class="admin-login-btn" style="padding:8px 14px;font-size:13px"
-                    @click="openPicker('cover')">
-              <i class="ti ti-photo" aria-hidden="true"></i>
-              {{ self.t("spec-form-choose-image") }}
-            </button>
-          </div>
-          <div class="spec-form-help">{{ self.t("spec-form-cover-image-help") }}</div>
-          <input type="text" name="cover" x-model="form.cover" readonly
-                 :disabled="coverMode !== 'image'"
-                 class="spec-form-input spec-form-input--mono">
         </div>
       </div>
 
@@ -1041,46 +1028,6 @@
 
   </div>
 
-  {# ── Image picker modal (shared by logo + cover) ───────────────
-     Opened by openPicker('logo'|'cover'). Search + the uploaded Media
-     images + the built-in logos + an inline upload — so picking scales to
-     any library size without an ever-growing inline thumbnail strip.
-     Teleported to <body> so the overlay's `position: fixed` resolves
-     against the viewport, not the admin shell's `<main class="fade-in">`
-     (its transform animation makes it a containing block for fixed
-     descendants, which would otherwise center the modal in the tall
-     page instead of on screen). #}
-  <template x-teleport="body">
-  <div x-show="picker.open" x-cloak class="image-picker-overlay"
-       @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
-    <div class="image-picker-modal">
-      <div class="image-picker-head">
-        <strong x-text="picker.target === 'cover' ? '{{ self.t("spec-form-cover") }}' : '{{ self.t("spec-form-logo") }}'"></strong>
-        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
-      </div>
-      <div class="image-picker-tools">
-        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
-               class="spec-form-input text-sm" style="max-width:16rem">
-        <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
-               :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
-          <i class="ti" :class="imgUploading ? 'ti-loader-2 animate-spin' : 'ti-upload'" aria-hidden="true"></i>
-          {{ self.t("admin-images-choose") }}
-          <input type="file" accept="image/*" class="hidden" @change="uploadImage($event, picker.target)">
-        </label>
-      </div>
-      <div class="spec-form-help" style="color:var(--color-lock)" x-show="imgError" x-text="imgError" x-cloak></div>
-      <div class="image-picker-grid">
-        <template x-for="name in pickerUploads()" :key="'pk-' + name">
-          <button type="button" :title="name" @click="pickImage('/assets/img/' + name)"
-                  class="image-picker-tile" :class="pickerSelected('/assets/img/' + name) ? 'is-sel' : ''">
-            <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
-          </button>
-        </template>
-      </div>
-      <div class="image-picker-empty" x-show="!pickerUploads().length">{{ self.t("admin-images-no-match") }}</div>
-    </div>
-  </div>
-  </template>
 </div>
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
@@ -1155,19 +1102,10 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     var n = parseFloat(m[1]);
     return m[2].toLowerCase() === 'g' ? Math.round(n * 1024) : Math.round(n);
   },
-  // Media-library filenames for the logo/cover pickers (#213). Inline
-  // uploads unshift new names here so a fresh thumbnail appears at once.
-  // Includes the built-in logos, which are seeded into the library (#433).
+  // Media-library filenames for the logo gallery (#213). Inline uploads
+  // unshift new names here so a fresh thumbnail appears at once. Includes
+  // the built-in logos, which are seeded into the library (#433).
   logoImages: Array.isArray(logoImages) ? logoImages : [],
-  // How many gallery tiles to render initially (#293) — keeps the DOM +
-  // thumbnail requests bounded on a large media library. "Show more"
-  // reveals another page.
-  logoShown: 24,
-  coverShown: 24,
-  galleryPage: 24,
-  // Image-picker modal state (shared by logo + cover). `target` selects
-  // which field a pick writes to; `q` filters uploads + built-ins.
-  picker: { open: false, target: 'logo', q: '' },
   // Container-image presence check (#498): on demand, ask the backend
   // whether `container_image` is already on the server. `status` drives
   // the badge; cleared when the field changes so a stale ✓ never lingers.
@@ -1219,6 +1157,20 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   assetUrl(p) {
     return p && p.charAt(0) === '/' ? (window.RUSCKER_BASE || '') + p : (p || '');
   },
+  // Basename of a logo path/URL for gallery-selection matching — strip
+  // any query (`?thumb`), fragment, and directory so the current logo is
+  // marked selected even if the stored value carries a base-path prefix
+  // (`/box/assets/img/x.png`) or differs only in path shape (#720 fix).
+  logoBasename(p) {
+    var s = String(p || '').split('?')[0].split('#')[0];
+    return s.substring(s.lastIndexOf('/') + 1);
+  },
+  // Is gallery tile `name` the currently selected logo? Compares by
+  // basename so the active tile lights up regardless of prefix.
+  logoSel(name) {
+    var sel = this.logoBasename(this.form.logo);
+    return !!sel && sel === name;
+  },
   // Cover background for the preview. `form.cover` is a CSS value that
   // may embed `url('/assets/img/x')`; prefix the base path on those
   // root-absolute asset URLs for *display only* (#270). The submitted
@@ -1257,12 +1209,13 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // set. Off ⇒ the ceiling + thresholds are cleared (run at the floor).
   autoscaling: (parseInt(initial.max_replicas, 10) || 0) > 1,
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
-  // 'solid' (color), 'gradient' (builder). Seeded from any
-  // existing `cover` value.
+  // 'solid' (color), 'gradient' (builder). Seeded from any existing
+  // `cover` value; a legacy image cover (`url(...)`) opens as 'auto'
+  // since image covers were retired (see `coverInit`).
   coverMode: !((initial.cover || '').trim())
     ? 'auto'
     : ((initial.cover || '').trim().indexOf('url(') === 0
-        ? 'image'
+        ? 'auto'
         : window.ruscker.bgMode(initial.cover)),
   grad: window.ruscker.gradientDefault(),
   applyCoverGrad() {
@@ -1284,51 +1237,22 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     this.coverMode = mode;
     if (mode === 'auto') { this.form.cover = ''; return; }
     if (mode === 'gradient') { this.applyCoverGrad(); return; }
-    // 'solid' / 'image' keep the current value only if it already
-    // matches the new mode; otherwise clear it so the saved cover can't
-    // disagree with the chosen mode (#304). The operator then picks a
-    // color / image.
+    // 'solid' keeps the current value only if it isn't a gradient;
+    // otherwise clear it so the saved cover can't disagree with the
+    // chosen mode (#304). The operator then picks a colour.
     const c = (this.form.cover || '').trim();
-    const isGradient = /^(linear|radial)-gradient\(/.test(c);
-    const isImage = c.startsWith('url(');
-    if (mode === 'solid' && (isGradient || isImage)) this.form.cover = '';
-    if (mode === 'image' && !isImage) this.form.cover = '';
+    if (mode === 'solid' && /^(linear|radial)-gradient\(/.test(c)) this.form.cover = '';
   },
-  // Set the cover to a library image as a CSS background (#213).
-  setCoverImage(name) {
-    this.setCoverPath('/assets/img/' + name);
+  // Image covers were retired (they rendered *under* the logo → two
+  // overlapping pictures on one card). A legacy `url(...)` cover degrades
+  // to the kind-tint / accent fallback and is dropped on the next save.
+  coverInit() {
+    if ((this.form.cover || '').trim().indexOf('url(') === 0) this.form.cover = '';
   },
-  // Set the cover from a full asset path (a Media image or a built-in
-  // logo, Option A) as a CSS background.
-  setCoverPath(path) {
-    this.coverMode = 'image';
-    this.form.cover = "url('" + path + "') center / cover no-repeat";
-  },
-  // ── Image-picker modal ──────────────────────────────────────
-  openPicker(target) {
-    this.picker.target = target;
-    this.picker.q = '';
-    this.imgError = '';
-    this.picker.open = true;
-  },
-  pickImage(value) {
-    if (this.picker.target === 'cover') this.setCoverPath(value);
-    else this.form.logo = value;
-    this.picker.open = false;
-  },
-  pickerSelected(value) {
-    return this.picker.target === 'cover'
-      ? this.form.cover.indexOf(value) !== -1
-      : this.form.logo === value;
-  },
-  pickerUploads() {
-    const q = this.picker.q.trim().toLowerCase();
-    return q ? this.logoImages.filter((n) => n.toLowerCase().includes(q)) : this.logoImages;
-  },
-  // Inline upload to the media library, then select the result for
-  // `target` ('logo' or 'cover'). Reuses the same pipeline as the
-  // media page; no navigation. Honors RUSCKER_BASE for subpath mounts.
-  async uploadImage(event, target) {
+  // Inline upload to the media library, then select the result as the
+  // logo. Reuses the same pipeline as the media page; no navigation.
+  // Honors RUSCKER_BASE for subpath mounts.
+  async uploadImage(event) {
     // Accept a file from a file-input change OR a drag-drop (consistency
     // with the media page #410): the dropped file lives on dataTransfer.
     const input = event.target;
@@ -1349,8 +1273,7 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
         return;
       }
       if (this.logoImages.indexOf(data.filename) === -1) this.logoImages.unshift(data.filename);
-      if (target === 'cover') this.setCoverImage(data.filename);
-      else this.form.logo = data.url || ('/assets/img/' + data.filename);
+      this.form.logo = data.url || ('/assets/img/' + data.filename);
     } catch (e) {
       this.imgError = String(e);
     } finally {

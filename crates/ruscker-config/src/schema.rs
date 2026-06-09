@@ -399,6 +399,12 @@ pub struct LandingCustomization {
     #[serde(default, rename = "card-cover")]
     pub card_cover: Option<String>,
 
+    /// Default card-cover CSS (a solid colour or a gradient) applied to
+    /// every card without its own `cover`/`accent`. Blank/`None` → keep
+    /// the per-kind tint. Admin-managed via the appearance editor (#720).
+    #[serde(default, rename = "card-cover-default")]
+    pub card_cover_default: Option<String>,
+
     /// Public portal catalog layout: `"grid"` (default), `"list"` or
     /// `"sections"` (grouped by type). Admin-managed.
     #[serde(default, rename = "catalog-layout")]
@@ -607,6 +613,15 @@ impl LandingCustomization {
             Some("gradient") => "gradient",
             _ => "tinted",
         }
+    }
+    /// Default card-cover CSS (solid colour or gradient) for cards with no
+    /// `cover`/`accent` of their own, or `None` to keep the per-kind tint
+    /// (the editor's "Auto"). Blank strings collapse to `None` (#720).
+    pub fn effective_card_cover_default(&self) -> Option<&str> {
+        self.card_cover_default
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
     /// Catalog layout: `grid` (default) | `list` | `sections`.
     pub fn effective_catalog_layout(&self) -> &str {

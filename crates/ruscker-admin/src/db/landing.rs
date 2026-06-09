@@ -49,6 +49,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         logo_margin: Option<i64>,
         header_preset: Option<String>,
         card_cover: Option<String>,
+        card_cover_default: Option<String>,
         catalog_layout: Option<String>,
         catalog_density: Option<String>,
         analytics_provider: Option<String>,
@@ -60,8 +61,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 title, subtitle, theme_colors_json, show_highlights, footer,
                 default_theme, show_search, show_filters, logo_mode,
                 logo_size, logo_margin, header_preset, card_cover,
-                catalog_layout, catalog_density, analytics_provider,
-                analytics_key
+                card_cover_default, catalog_layout, catalog_density,
+                analytics_provider, analytics_key
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_optional(pool).await,
@@ -118,6 +119,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 logo_margin: r.logo_margin,
                 header_preset: r.header_preset,
                 card_cover: r.card_cover,
+                card_cover_default: r.card_cover_default,
                 catalog_layout: r.catalog_layout,
                 catalog_density: r.catalog_density,
                 analytics_provider: r.analytics_provider,
@@ -192,9 +194,9 @@ pub(crate) async fn update_in_tx(
                 theme_colors_json = ?, show_highlights = ?, footer = ?,
                 default_theme = ?, show_search = ?, show_filters = ?,
                 logo_mode = ?, logo_size = ?, logo_margin = ?,
-                header_preset = ?, card_cover = ?, catalog_layout = ?,
-                catalog_density = ?, analytics_provider = ?,
-                analytics_key = ?, updated_at = ?
+                header_preset = ?, card_cover = ?, card_cover_default = ?,
+                catalog_layout = ?, catalog_density = ?,
+                analytics_provider = ?, analytics_key = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -221,6 +223,7 @@ pub(crate) async fn update_in_tx(
     .bind(lc.logo_margin)
     .bind(none_if_empty(&lc.header_preset))
     .bind(none_if_empty(&lc.card_cover))
+    .bind(none_if_empty(&lc.card_cover_default))
     .bind(none_if_empty(&lc.catalog_layout))
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))
@@ -266,9 +269,10 @@ pub(crate) async fn update_in_tx_pg(
                 show_highlights = $15, footer = $16, default_theme = $17,
                 show_search = $18, show_filters = $19, logo_mode = $20,
                 logo_size = $21, logo_margin = $22, header_preset = $23,
-                card_cover = $24, catalog_layout = $25, catalog_density = $26,
-                analytics_provider = $27, analytics_key = $28,
-                updated_at = $29
+                card_cover = $24, card_cover_default = $25,
+                catalog_layout = $26, catalog_density = $27,
+                analytics_provider = $28, analytics_key = $29,
+                updated_at = $30
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -295,6 +299,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(lc.logo_margin)
     .bind(none_if_empty(&lc.header_preset))
     .bind(none_if_empty(&lc.card_cover))
+    .bind(none_if_empty(&lc.card_cover_default))
     .bind(none_if_empty(&lc.catalog_layout))
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))

@@ -2188,6 +2188,33 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   flex: 1;
 }
 
+/* Environment-variable editor rows in the spec form (#720). Each var is
+   a single full-width line — KEY · `=` · value · remove — laid out on a
+   grid so the two inputs sit side by side instead of stacking at 100%
+   width (the row had no styling, so they wrapped and read as broken). */
+.env-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.5fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+.env-row .spec-form-input { width: 100%; }
+.env-eq {
+  color: var(--text-faint);
+  font-weight: 600;
+  text-align: center;
+  user-select: none;
+}
+/* The small "+ Add variable" affordance above the rows. */
+.mini-add {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 12px; font-weight: 500;
+  color: var(--color-teal-600);
+  background: none; border: 0; cursor: pointer; padding: 2px 2px;
+}
+.mini-add:hover { text-decoration: underline; }
+.mini-add .ti { font-size: 13px; }
+
 .info-box {
   display: flex; gap: 10px;
   background: var(--surface-soft);

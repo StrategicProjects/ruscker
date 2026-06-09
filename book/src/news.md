@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.0 — 2026-06-09
+
+**Apps editor redesign complete + per-app accent & monogram.** The
+final piece of the editor rework: each app can now set an **accent
+colour** (tints the card cover when no cover is set) and a **monogram**
+(1–2 chars shown on the cover when there's no logo) — both stored in
+`template-properties`, no migration. The editor's Appearance section
+gains a swatch row and a monogram field, and the live preview reflects
+them. This closes the editor redesign that also brought the handoff
+section structure, the inline logo gallery, and the Access & scale
+section (v0.1.98–0.1.99).
+
+---
+
 ## v0.1.99 — 2026-06-08
 
 **Apps editor — Access & scale.** The old "Metadata" section is now

@@ -252,32 +252,75 @@ impl LocalDockerBackend {
             .map_err(|e| backend_err("create container", e))?;
         let container_id = created.id;
 
-        // 3. Start it.
-        self.docker
-            .start_container(&container_id, None::<StartContainerOptions>)
-            .await
-            .map_err(|e| backend_err("start container", e))?;
+        // Steps 3–5 run with the container already created (and, after
+        // step 3, RUNNING). Any failure here used to just bubble up,
+        // leaving the container behind with full ruscker labels but no
+        // registry entry (#733): each visitor retry then spawned another
+        // duplicate (the coalescer can't see an unregistered container),
+        // and a restart's reconcile adopted the orphan as `Ready` even
+        // though it never answered HTTP. Funnel them through one
+        // fallible block so any error reaps the container first.
+        let ready = async {
+            // 3. Start it.
+            self.docker
+                .start_container(&container_id, None::<StartContainerOptions>)
+                .await
+                .map_err(|e| backend_err("start container", e))?;
 
-        // 4. Inspect to learn the host port Docker assigned.
-        let bound = self.bound_host_port(&container_id, &port_key).await?;
-        // Proxy connects to the daemon's host (127.0.0.1 local, or the
-        // remote host's reachable address) on the published port.
-        // `to_socket_addrs` resolves an IP literal instantly and a
-        // hostname via DNS, so a remote `ssh://user@host` works too.
-        let upstream: SocketAddr = format!("{}:{bound}", self.upstream_host)
-            .to_socket_addrs()
-            .map_err(|e| {
-                CoreError::Backend(format!("resolve upstream {}: {e}", self.upstream_host))
-            })?
-            .next()
-            .ok_or_else(|| {
-                CoreError::Backend(format!("no address for upstream {}", self.upstream_host))
-            })?;
+            // 4. Inspect to learn the host port Docker assigned.
+            let bound = self.bound_host_port(&container_id, &port_key).await?;
+            // Proxy connects to the daemon's host (127.0.0.1 local, or the
+            // remote host's reachable address) on the published port.
+            // `to_socket_addrs` resolves an IP literal instantly and a
+            // hostname via DNS, so a remote `ssh://user@host` works too.
+            let upstream: SocketAddr = format!("{}:{bound}", self.upstream_host)
+                .to_socket_addrs()
+                .map_err(|e| {
+                    CoreError::Backend(format!("resolve upstream {}: {e}", self.upstream_host))
+                })?
+                .next()
+                .ok_or_else(|| {
+                    CoreError::Backend(format!("no address for upstream {}", self.upstream_host))
+                })?;
 
-        // 5. Wait for the container's process to bind that port. Passes
-        //    the backend + container id so a startup crash fails fast and
-        //    the error carries the container's log tail (#550).
-        wait_for_ready(self, &container_id, upstream).await?;
+            // 5. Wait for the container's process to bind that port. Passes
+            //    the backend + container id so a startup crash fails fast and
+            //    the error carries the container's log tail (#550).
+            wait_for_ready(self, &container_id, upstream).await?;
+            Ok::<SocketAddr, CoreError>(upstream)
+        }
+        .await;
+
+        let upstream = match ready {
+            Ok(u) => u,
+            Err(err) => {
+                // Best-effort reap; `force` covers the already-running
+                // case. A removal failure is logged, not returned — the
+                // spawn error is the one the caller needs to see.
+                if let Err(rm) = self
+                    .docker
+                    .remove_container(
+                        &container_id,
+                        Some(RemoveContainerOptions {
+                            force: true,
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        container = %container_id, error = %rm,
+                        "failed to remove container after spawn failure — manual cleanup may be needed"
+                    );
+                } else {
+                    tracing::info!(
+                        container = %container_id,
+                        "removed container left by failed spawn"
+                    );
+                }
+                return Err(err);
+            }
+        };
 
         Ok(Replica {
             id: replica_id,
@@ -1438,8 +1481,22 @@ mod tests {
             "container log tail missing from error: {msg}"
         );
 
-        // Reap the dead (label-scoped) container.
-        let _ = backend.prune_stopped().await;
+        // (C) #733: the failed spawn must not leave its container behind
+        // — neither running (each visitor retry would spawn another
+        // duplicate, and a restart's reconcile would adopt it as `Ready`)
+        // nor stopped (disk litter). The backend reaps it itself, so this
+        // doubles as the teardown.
+        let leftovers: Vec<_> = backend
+            .list_managed_containers()
+            .await
+            .expect("list managed")
+            .into_iter()
+            .filter(|c| c.spec_id.as_deref() == Some("itest-crash"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "failed spawn left containers behind: {leftovers:?}"
+        );
     }
 
     /// #453 part B: the disk-panel methods see a live replica + its image

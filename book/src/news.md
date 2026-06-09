@@ -9,6 +9,18 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.2 — 2026-06-09
+
+**Card-cover preview fix.** Selecting the **Solid** card-cover mode only
+flipped the editing mode and left the value empty, so the live preview
+didn't change until the colour picker was dragged — it read as "the
+cover adjustment isn't reflecting". Switching to Solid now seeds a
+starting brand colour, so the mock card updates immediately and the
+picker edits it live. Applies to both the Appearance default-cover
+builder and the per-app cover builder in the spec form.
+
+---
+
 ## v0.2.1 — 2026-06-09
 
 **Apps editor + Appearance polish.** Four operator-reported fixes:

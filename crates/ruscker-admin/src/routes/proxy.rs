@@ -679,7 +679,16 @@ async fn forward(
             spec_id: spec.id.clone(),
             replica_id: replica.id.clone(),
         };
-        set_sticky_cookie(&cookies, &state.cookie_key, &session, is_https);
+        set_sticky_cookie(&cookies, &state.cookie_key, &session, &forwarded_prefix, is_https);
+    }
+
+    // Expire a legacy global sticky cookie (pre-#731 `Path=/`) when the
+    // browser still carries one: nothing reads it anymore, and it would
+    // otherwise ride along on every portal request for up to 8h.
+    if cookies.get(COOKIE_NAME).is_some() {
+        let mut dead = Cookie::new(COOKIE_NAME, "");
+        dead.set_path("/");
+        cookies.remove(dead);
     }
 
     // API specs aren't sticky, so count each forwarded call here (#549
@@ -956,7 +965,7 @@ async fn resolve_replica(
     cookies: &Cookies,
     is_visit: bool,
 ) -> anyhow::Result<(Replica, uuid::Uuid, bool, bool, bool)> {
-    if let Some(raw) = cookies.get(COOKIE_NAME) {
+    if let Some(raw) = cookies.get(&sticky::cookie_name(&spec.id)) {
         if let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) {
             // Defense in depth: a cookie for spec A must not
             // route to a replica registered against spec B.
@@ -1016,6 +1025,7 @@ fn set_sticky_cookie(
     cookies: &Cookies,
     key: &CookieKey,
     session: &StickySession,
+    mount_path: &str,
     is_https: bool,
 ) {
     let value = match sticky::encode(key, session) {
@@ -1025,8 +1035,17 @@ fn set_sticky_cookie(
             return;
         }
     };
-    let mut c = Cookie::new(COOKIE_NAME, value);
-    c.set_path("/");
+    // One cookie per spec, scoped to the app's own mount (#731). A
+    // single `Path=/` cookie made two apps in the same browser fight
+    // over it: opening B overwrote A's session, orphaning A's seat
+    // (the splash then told A's user the app was full — on a seat THEY
+    // held) and sending B's cookie on A's subresources broke multi-
+    // replica stickiness. Per-spec name + path means each app keeps
+    // its own session and the cookie never even travels cross-app.
+    // `mount_path` carries no trailing slash (`/box/app/my-shiny`), so
+    // it path-matches `/box/app/my-shiny` and everything below it.
+    let mut c = Cookie::new(sticky::cookie_name(&session.spec_id), value);
+    c.set_path(mount_path.to_string());
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Lax);
     // `Secure` only under TLS (X-Forwarded-Proto: https) — the
@@ -1076,7 +1095,7 @@ async fn has_ready_replica(state: &AppState, spec: &Spec) -> bool {
 /// has its seat fixes that (mirrors the sticky-first branch of
 /// `resolve_replica`; read-only, reserves nothing).
 async fn has_sticky_seat(state: &AppState, spec: &Spec, cookies: &Cookies) -> bool {
-    let Some(raw) = cookies.get(COOKIE_NAME) else {
+    let Some(raw) = cookies.get(&sticky::cookie_name(&spec.id)) else {
         return false;
     };
     let Ok(session) = sticky::decode(&state.cookie_key, raw.value()) else {
@@ -1744,11 +1763,18 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
 /// cookie (replica resolution) before this runs, so dropping it here
 /// is safe.
 const RUSCKER_COOKIE_NAMES: &[&str] = &[
-    crate::auth::COOKIE_NAME,        // ruscker_admin_session
-    ruscker_proxy::sticky::COOKIE_NAME, // __ruscker_session
-    crate::theme::COOKIE_NAME,       // ruscker_theme
-    crate::i18n::COOKIE_NAME,        // ruscker_locale
+    crate::auth::COOKIE_NAME,  // ruscker_admin_session
+    crate::theme::COOKIE_NAME, // ruscker_theme
+    crate::i18n::COOKIE_NAME,  // ruscker_locale
 ];
+
+/// Is `name` a cookie Ruscker owns (and must therefore never reach an
+/// upstream app)? Sticky cookies are per-spec since #731
+/// (`__ruscker_session_{spec}`), so they match by prefix — which also
+/// covers the legacy un-suffixed `__ruscker_session`.
+fn is_ruscker_cookie(name: &str) -> bool {
+    RUSCKER_COOKIE_NAMES.contains(&name) || name.starts_with(COOKIE_NAME)
+}
 
 /// Drop Ruscker's own cookies from a raw `Cookie` header value,
 /// preserving any cookies the app itself set. Returns `None` when
@@ -1760,7 +1786,7 @@ fn filter_ruscker_cookies(raw: &str) -> Option<String> {
         .filter(|pair| !pair.is_empty())
         .filter(|pair| {
             let name = pair.split('=').next().unwrap_or("").trim();
-            !RUSCKER_COOKIE_NAMES.contains(&name)
+            !is_ruscker_cookie(name)
         })
         .collect();
     if kept.is_empty() {
@@ -1816,9 +1842,12 @@ mod tests {
         h.insert(
             header::COOKIE,
             HeaderValue::from_str(&format!(
-                "{}=secret-admin-sid; {}=abc; app_token=keepme; {}=dark; {}=pt",
+                "{}=secret-admin-sid; {}=abc; {}=def; app_token=keepme; {}=dark; {}=pt",
                 crate::auth::COOKIE_NAME,
+                // Legacy global sticky AND a per-spec one (#731) — both
+                // must match the prefix filter.
                 ruscker_proxy::sticky::COOKIE_NAME,
+                ruscker_proxy::sticky::cookie_name("my-shiny"),
                 crate::theme::COOKIE_NAME,
                 crate::i18n::COOKIE_NAME,
             ))
@@ -3074,6 +3103,146 @@ docker-registry-password: hunter2
         assert!(
             head.to_ascii_lowercase().contains("accept-encoding: gzip, br"),
             "non-transforming forward must pass the client's offer through, got:\n{head}"
+        );
+    }
+
+    /// AppState with two interactive specs (`alpha`, `beta`), each with a
+    /// Ready multi-seat replica pointing at `up_addr`, served as a router.
+    async fn two_app_router(up_addr: SocketAddr) -> Router {
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::ZERO,
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        state.config = std::sync::Arc::new(
+            ruscker_config::Config::from_yaml(
+                "proxy:\n  specs:\n    - id: alpha\n      container-image: t:1\n    - id: beta\n      container-image: t:1\n",
+            )
+            .expect("config"),
+        );
+        for id in ["alpha", "beta"] {
+            state.replicas.write().await.add(Replica {
+                id: ReplicaId(uuid::Uuid::new_v4()),
+                spec_id: id.into(),
+                container_id: "c".into(),
+                upstream: up_addr,
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 0,
+                sessions_max: 10,
+                host: None,
+            });
+        }
+        Router::new()
+            .merge(routes())
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state)
+    }
+
+    /// All `Set-Cookie` values of a response.
+    fn set_cookies(resp: &Response) -> Vec<String> {
+        resp.headers()
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(String::from))
+            .collect()
+    }
+
+    // #731: each app gets its OWN sticky cookie, scoped to its mount —
+    // opening app B must not overwrite app A's session, and a returning
+    // visit with A's cookie keeps A's session (no fresh Set-Cookie).
+    #[tokio::test]
+    async fn sticky_cookies_are_per_spec_and_path_scoped() {
+        use tower::ServiceExt;
+
+        // capture_upstream answers 200 to every request; the head
+        // channel is unused here.
+        let (up_addr, _heads) = capture_upstream().await;
+        let app = two_app_router(up_addr).await;
+        let visit = |path: &str, cookie: Option<String>| {
+            let mut b = Request::builder()
+                .uri(path)
+                .header(header::ACCEPT, "text/html");
+            if let Some(c) = cookie {
+                b = b.header(header::COOKIE, c);
+            }
+            b.body(Body::empty()).unwrap()
+        };
+
+        // First visit to alpha → per-spec cookie, path-scoped to its mount.
+        let resp = app.clone().oneshot(visit("/app/alpha/", None)).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let alpha_cookie = set_cookies(&resp)
+            .into_iter()
+            .find(|c| c.starts_with("__ruscker_session_alpha="))
+            .expect("alpha visit sets its per-spec sticky cookie");
+        assert!(
+            alpha_cookie.contains("Path=/app/alpha"),
+            "cookie must be scoped to alpha's mount: {alpha_cookie}"
+        );
+        let alpha_pair = alpha_cookie.split(';').next().unwrap().to_string();
+
+        // Visiting beta (with alpha's cookie still in the jar) sets ONLY
+        // beta's cookie — alpha's is neither replaced nor expired.
+        let resp = app
+            .clone()
+            .oneshot(visit("/app/beta/", Some(alpha_pair.clone())))
+            .await
+            .unwrap();
+        let beta_cookies = set_cookies(&resp);
+        assert!(
+            beta_cookies.iter().any(|c| c.starts_with("__ruscker_session_beta=")),
+            "beta visit sets beta's cookie: {beta_cookies:?}"
+        );
+        assert!(
+            !beta_cookies.iter().any(|c| c.starts_with("__ruscker_session_alpha=")),
+            "beta visit must not touch alpha's cookie: {beta_cookies:?}"
+        );
+
+        // Returning to alpha with its cookie: the session is honored —
+        // no fresh sticky Set-Cookie is issued.
+        let resp = app
+            .clone()
+            .oneshot(visit("/app/alpha/", Some(alpha_pair)))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(
+            !set_cookies(&resp)
+                .iter()
+                .any(|c| c.starts_with("__ruscker_session_alpha=")),
+            "an honored sticky session must not re-issue its cookie"
+        );
+    }
+
+    // #731: a lingering pre-#731 global cookie (`__ruscker_session`,
+    // `Path=/`) is actively expired so it doesn't ride every portal
+    // request for another 8h.
+    #[tokio::test]
+    async fn legacy_global_sticky_cookie_is_expired() {
+        use tower::ServiceExt;
+
+        let (up_addr, _heads) = capture_upstream().await;
+        let app = two_app_router(up_addr).await;
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/app/alpha/")
+                    .header(header::ACCEPT, "text/html")
+                    .header(header::COOKIE, format!("{COOKIE_NAME}=stale-legacy-value"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let removal = set_cookies(&resp)
+            .into_iter()
+            .find(|c| c.starts_with(&format!("{COOKIE_NAME}=")) && !c.contains("_alpha"))
+            .expect("legacy cookie gets a removal Set-Cookie");
+        assert!(
+            removal.contains("Max-Age=0") && removal.contains("Path=/"),
+            "removal must expire the Path=/ legacy cookie: {removal}"
         );
     }
 }

@@ -40,10 +40,29 @@ use std::sync::Arc;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-/// Cookie name set on responses and read on requests. The leading
-/// `__` follows the convention for proxy-controlled cookies that
-/// the app must not stomp on.
+/// Cookie-name prefix for sticky sessions. The leading `__` follows
+/// the convention for proxy-controlled cookies that the app must not
+/// stomp on.
+///
+/// Until #731 this exact name was THE cookie, set with `Path=/` — so
+/// the browser kept a single sticky session for the whole portal and
+/// opening app B overwrote app A's (orphaning A's seat and breaking
+/// A's stickiness). The real cookie name is now per-spec
+/// ([`cookie_name`]); the bare prefix survives as (a) the prefix the
+/// upstream cookie filters match on, and (b) the legacy name the
+/// proxy actively expires when it sees it.
 pub const COOKIE_NAME: &str = "__ruscker_session";
+
+/// The per-spec sticky cookie name (#731): one cookie per app, so two
+/// apps open in the same browser each keep their own session. Scoped
+/// further by the `Path` attribute at the set site, but the distinct
+/// *name* is what guarantees no collision with a lingering legacy
+/// `Path=/` cookie (cookies are keyed by name+domain+path — a same-
+/// name cookie on a different path would be sent alongside and read
+/// ambiguously).
+pub fn cookie_name(spec_id: &str) -> String {
+    format!("{COOKIE_NAME}_{spec_id}")
+}
 
 /// Bytes of HMAC kept in the cookie. Trade-off: 16 B = 128 bits
 /// of forgery resistance, ~22 base64 chars vs. 44 for the full
@@ -216,6 +235,15 @@ fn decode_hex(s: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cookie_name_is_per_spec_and_keeps_the_prefix() {
+        // #731: distinct specs get distinct cookies; the shared prefix is
+        // what the upstream cookie filters match on.
+        assert_eq!(cookie_name("my-shiny"), "__ruscker_session_my-shiny");
+        assert_ne!(cookie_name("a"), cookie_name("b"));
+        assert!(cookie_name("any").starts_with(COOKIE_NAME));
+    }
 
     fn fixed_key() -> CookieKey {
         CookieKey::parse(&"ab".repeat(32)).unwrap()

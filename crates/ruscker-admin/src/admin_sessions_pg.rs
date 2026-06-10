@@ -40,8 +40,20 @@ use chrono::{DateTime, Utc};
 use dashmap::DashMap;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tracing::warn;
+
+/// How many `validate` calls between cache sweeps (#738). The cache
+/// writes an entry for EVERY sid looked up — including a negative one
+/// for an attacker-chosen cookie value that was never in the DB — and
+/// nothing else ever evicted stale entries, so an unauthenticated
+/// client spraying random `ruscker_admin_session` values grew the map
+/// one never-freed entry per request. The amortized sweep drops every
+/// entry past its `valid_until`, bounding the map to the sids seen
+/// within roughly one cache-TTL window (+ at most this many extras
+/// between sweeps). Same shape as the ApiRateLimiter sweep (#737).
+const SWEEP_EVERY: u32 = 512;
 
 /// Default lifetime of a sign-in session in Postgres. Matches the
 /// in-memory default (`24h`) and the cookie's `Max-Age`.
@@ -64,8 +76,12 @@ pub struct PostgresAdminSessionStore {
     cache_ttl: Duration,
     /// Local cache: sid → (info, valid_until). A `None` info means
     /// "we know the sid is invalid (deleted or expired)", which lets
-    /// repeated lookups of a stale cookie also skip the DB.
+    /// repeated lookups of a stale cookie also skip the DB. Swept of
+    /// expired entries every [`SWEEP_EVERY`] validates (#738) so
+    /// attacker-chosen sids can't grow it without bound.
     cache: DashMap<String, CachedEntry>,
+    /// `validate` calls since the last cache sweep.
+    since_sweep: AtomicU32,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +119,7 @@ impl PostgresAdminSessionStore {
             ttl,
             cache_ttl,
             cache: DashMap::new(),
+            since_sweep: AtomicU32::new(0),
         })
     }
 
@@ -222,6 +239,15 @@ impl AdminSessionStore for PostgresAdminSessionStore {
 
     async fn validate(&self, id: &str) -> Option<SessionInfo> {
         let now = Instant::now();
+
+        // Amortized sweep (#738): every SWEEP_EVERY validates, drop every
+        // entry past its `valid_until` — they'd be re-resolved on their
+        // next touch anyway, so they only pin memory for sids (often
+        // attacker-chosen ones) that may never come back.
+        if self.since_sweep.fetch_add(1, Ordering::Relaxed) + 1 >= SWEEP_EVERY {
+            self.since_sweep.store(0, Ordering::Relaxed);
+            self.cache.retain(|_, e| e.valid_until > now);
+        }
 
         // Cache hit (fresh) — the hot path.
         if let Some(entry) = self.cache.get(id) {
@@ -498,6 +524,44 @@ mod postgres_it {
         assert!(
             store.validate(&sid).await.is_none(),
             "cache window must be clipped to expires_at"
+        );
+    }
+
+    #[tokio::test]
+    async fn cache_sweep_bounds_a_flood_of_unknown_sids() {
+        // #738: an unauthenticated client spraying random session-cookie
+        // values caches one negative entry per distinct sid, and nothing
+        // ever evicted them — unbounded memory growth. The amortized
+        // sweep must reap them once they age past the cache TTL.
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let cache_ttl = Duration::from_millis(50);
+        let store = PostgresAdminSessionStore::connect_with(
+            &pg_url(),
+            Duration::from_secs(60),
+            cache_ttl,
+        )
+        .await
+        .unwrap();
+        reset_rows(&store.pool).await;
+
+        // The spray: distinct bogus sids, one cached negative each.
+        for i in 0..200 {
+            assert!(store.validate(&format!("bogus-{i}")).await.is_none());
+        }
+        assert!(
+            store.cache_len() >= 200,
+            "negatives are cached (the anti-hammer behaviour is kept)"
+        );
+
+        // Age them past the cache TTL, then cross the sweep threshold.
+        tokio::time::sleep(cache_ttl + Duration::from_millis(20)).await;
+        for _ in 0..(SWEEP_EVERY as usize + 8) {
+            let _ = store.validate("bogus-fixed").await;
+        }
+        assert!(
+            store.cache_len() < 16,
+            "expired negative entries must be swept; cache still holds {}",
+            store.cache_len()
         );
     }
 

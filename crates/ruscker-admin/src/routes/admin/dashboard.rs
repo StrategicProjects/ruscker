@@ -1119,6 +1119,22 @@ mod tests {
         }
     }
 
+    // #742: the SSE apply must (a) skip the innerHTML rebuild when the
+    // markup is unchanged and (b) restore keyboard focus to the
+    // equivalent element after a real rebuild — otherwise focus was
+    // thrown back to <body> every tick, making the replica actions
+    // unreachable by keyboard. Structural guard on the wiring.
+    #[test]
+    fn sse_apply_carries_the_focus_preservation_wiring() {
+        let html = render_with(
+            vec![fake_row("alpha", "Alpha App", ReplicaState::Ready, 1, 1)],
+            true,
+        );
+        assert!(html.contains("lastGroupsHtml"), "identical-snapshot skip missing");
+        assert!(html.contains("function focusKey"), "focus capture missing");
+        assert!(html.contains("function refocus"), "focus restore missing");
+    }
+
     #[test]
     fn renders_replicas_grouped_by_app_in_accordion_cards() {
         // #623 redesign: each app is one expandable `.app-group` card with

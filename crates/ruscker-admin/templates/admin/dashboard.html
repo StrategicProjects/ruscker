@@ -326,19 +326,64 @@
     if (rows.length === 0) {
       container.style.display = 'none';
       container.innerHTML = '';
+      lastGroupsHtml = null; // a later identical snapshot must rebuild
       if (emptyEl) emptyEl.style.display = '';
       return;
     }
     if (emptyEl) emptyEl.style.display = 'none';
     container.style.display = '';
 
-    // Rebuild the whole grouped container each tick. Far simpler than a
-    // per-row diff and cheap at this scale (a handful of apps, ~1 tick/s);
-    // the open/closed state lives in `closed`, not the DOM, so it survives.
-    container.innerHTML = groupRows(rows).map(function (g) {
+    // Rebuild the whole grouped container. Far simpler than a per-row
+    // diff and cheap at this scale (a handful of apps, ~1 tick/s); the
+    // open/closed state lives in `closed`, not the DOM, so it survives.
+    // But innerHTML destroys keyboard focus and text selection (#742) —
+    // a keyboard user was thrown back to <body> every tick, making the
+    // stop/restart buttons unreachable. So: skip the rebuild entirely
+    // when the markup is unchanged (the common idle tick), and
+    // otherwise restore focus to the equivalent element afterwards.
+    var html = groupRows(rows).map(function (g) {
       return groupHtml(g, !closed[g.spec_id]);
     }).join('');
+    if (html === lastGroupsHtml) return;
+    lastGroupsHtml = html;
+    var key = null;
+    if (document.activeElement && container.contains(document.activeElement)) {
+      key = focusKey(document.activeElement);
+    }
+    container.innerHTML = html;
+    refocus(key);
   }
+
+  // Identify a focused element structurally — by its replica row (or
+  // group head) plus its index among the focusables inside it — so the
+  // equivalent element can be re-focused in the rebuilt DOM (#742).
+  function focusKey(el) {
+    var row = el.closest && el.closest('[data-replica-id]');
+    var head = el.closest && el.closest('.app-group__head');
+    var scope = row || head;
+    if (!scope) return null;
+    var focusables = scope.querySelectorAll('a, button, [tabindex]');
+    return {
+      row: row ? row.getAttribute('data-replica-id') : null,
+      spec: !row && head ? head.parentElement.getAttribute('data-spec-id') : null,
+      idx: Array.prototype.indexOf.call(focusables, el),
+      self: scope === el,
+    };
+  }
+  function refocus(key) {
+    if (!key) return;
+    var scope = key.row
+      ? container.querySelector('[data-replica-id="' + CSS.escape(key.row) + '"]')
+      : key.spec
+        ? container.querySelector('.app-group[data-spec-id="' + CSS.escape(key.spec) + '"] .app-group__head')
+        : null;
+    if (!scope) return;   // the replica/group is gone — nothing to restore
+    if (key.self) { scope.focus(); return; }
+    var focusables = scope.querySelectorAll('a, button, [tabindex]');
+    var el = key.idx >= 0 ? focusables[key.idx] : null;
+    (el || scope).focus();
+  }
+  var lastGroupsHtml = null;
 
   // Expand/collapse a group on head click or Enter/Space. Delegated on the
   // container so it keeps working after every innerHTML rebuild. Action

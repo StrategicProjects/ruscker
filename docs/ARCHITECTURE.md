@@ -26,9 +26,14 @@ and the `ruscker-cli` binary stitches them together.
 ![Crate dependency map: ruscker-cli builds on the I/O crates (docker, proxy, admin), which build on ruscker-core, which builds on ruscker-config.](images/crate-map.svg)
 
 Keeping the backend behind the `ContainerBackend` trait in
-`ruscker-core` means a future Kubernetes or multi-host backend is a new
-impl, not a rewrite — see [Deployment shapes](#deployment-shapes) and
-`docs/adr/`.
+`ruscker-core` is what made the multi-host backend
+(`ruscker-docker::MultiHostDockerBackend`, Phase 6) a new impl rather
+than a rewrite — and leaves the same door open for Kubernetes. Since
+v0.2.5 the multi-host impl covers the **whole** trait surface
+(spawn/stop/list, metrics/logs, disk management, image
+presence/pull), each operation fanning out across hosts with
+degraded-mode tolerance for an unreachable daemon. See
+[Deployment shapes](#deployment-shapes) and `docs/adr/`.
 
 ## Request flow
 
@@ -36,21 +41,25 @@ impl, not a rewrite — see [Deployment shapes](#deployment-shapes) and
 
 ```
 1. Visitor hits  https://portal/app/sales-dashboard/
-2. Proxy reads cookie  __ruscker_session
-3. Cookie missing → Proxy.create_session:
-     a. Look up spec 'sales-dashboard' in config
-     b. Ask ContainerBackend.list() for current replicas
-     c. Router.pick(replicas) → ReplicaDecision::Use(R2)  (least-conn)
-     d. If Saturated:
-          - Check spec.max_replicas
-          - If room, ContainerBackend.spawn() → wait for Ready → retry
-          - Else 503
-     e. SessionStore.create(Session { spec, replica: R2 })
-     f. Sign and set cookie  __ruscker_session
-4. Forward GET /  to  http://127.0.0.1:<R2_port>/   (path rewrite)
+2. Proxy reads cookie  __ruscker_session_sales-dashboard   (one per app)
+3. Cookie missing → resolve_replica:
+     a. Look up spec 'sales-dashboard' (DB first, YAML fallback)
+     b. pick_or_spawn: pick a Ready replica with a free seat
+        (least-conn) and reserve the seat atomically
+     c. No replica yet → cold-start splash to the visitor while a
+        coalesced spawn runs in the background; the splash polls a
+        readiness probe and reloads into the app
+     d. At max-replicas with no free seat → the splash says "full"
+        and keeps polling for a freed seat
+     e. SessionStore.touch_or_register(session, spec, R2)
+     f. Sign + set cookie  __ruscker_session_sales-dashboard
+        (Path={base}/app/sales-dashboard — never sent to other apps)
+4. Forward GET /  to  http://127.0.0.1:<R2_port>/   (path strip)
 5. Stream response back
 6. Browser opens WebSocket  ws://portal/app/sales-dashboard/websocket
-7. Proxy upgrades, opens parallel WS to  ws://127.0.0.1:<R2_port>/websocket
+7. Proxy connects the upstream WS FIRST (query string preserved,
+   subprotocol negotiated); only then answers the client's 101 — a
+   dead replica gets a clean 502, not a post-upgrade drop
 8. Bidirectional frame pump
 9. On heartbeat: SessionStore.touch()
 10. Idle timeout reached → Session purged → if last seat, container drained
@@ -61,7 +70,7 @@ impl, not a rewrite — see [Deployment shapes](#deployment-shapes) and
 ```
 1. Client hits  https://portal/api/data-api/v1/data
 2. Spec.kind() == Api  → no sticky cookie path
-3. Router.pick() balances by in-flight request count → R3
+3. pick_replica() balances by in-flight request count → R3
 4. Bump R3's in-flight gauge, forward request, stream response
 5. In-flight gauge drops only after the full body has streamed out
 6. No session state, no follow-up — done.
@@ -129,6 +138,17 @@ The generalized shim **retired the old Voilà-specific rewrite**: Voilà's
 RequireJS bootstrap assigns its static URLs to `script.src` at runtime,
 which the patched `src` setter now prefixes without a bespoke pass.
 
+**The rewriter needs uncompressed HTML** (v0.2.5): nothing between
+the container and the rewriter decompresses bodies, so when the
+transform is enabled the upstream request carries
+`Accept-Encoding: identity` (ShinyProxy does the same) — an app that
+gzips its HTML (Dash behind flask-compress, nginx-fronted) would
+otherwise stream compressed bytes straight past `inject_base_href`.
+Defense-in-depth: a response that still arrives with a
+`Content-Encoding` passes through untouched rather than being
+corrupted. The `/api/` family and `inject-base-href: false` specs are
+never transformed and keep end-to-end compression.
+
 **JupyterLab is the one app that still needs a special case**
 (`rewrite::rewrite_jupyter_config`). Lab is served with `base_url=/` and
 reports `baseUrl: "/"` in its `jupyter-config-data` JSON; its bootstrap
@@ -151,8 +171,10 @@ rewrite — only the redirect `Location` header (`prefix_base_path`).
 - `ruscker-config::schema`
 - `ruscker-config::env`
 - `ruscker-config::validate`
-- `ruscker-core::routing`
-- `ruscker-core::replica` (types only)
+- `ruscker-core::replica` (types only — incl. the seat accounting on
+  `ReplicaRegistry`; the replica-*picking* logic lives next to the
+  proxy in `ruscker-admin::routes::proxy::{pick_replica,
+  pick_accepting}`, where the seat reservation has to be atomic)
 - `ruscker-core::session` (types only — `SessionStore` trait is async,
   but the trait def is pure)
 
@@ -243,10 +265,17 @@ config catalog and session store, so either can serve any session.
 Exactly one instance holds the scaler leadership at a time via a Postgres
 advisory lock; standbys serve traffic and reconcile counts but skip the
 spawn/reap loop. The sticky cookie is an HMAC over a shared key, so any
-instance can validate any other's cookie. The `ContainerBackend` /
-`SessionStore` traits leave room for a multi-host or Kubernetes backend
-without touching proxy code. See the deployment guide's
+instance can validate any other's cookie. See the deployment guide's
 "Running active-active" section for the runnable example.
+
+### Multi-host Docker (since Phase 6)
+
+Orthogonal to HA: one Ruscker instance can drive **several Docker
+daemons** (`proxy.hosts` — ssh / tcp+TLS / unix), placing replicas by
+weighted spread or bin-pack with optional anti-affinity. The proxy
+reaches each container directly at `host:published-port`, so keep the
+hosts on a private network. Combine with HA freely — the placement map
+is per-instance, rebuilt from container labels on `list()`.
 
 ## What's not covered here
 

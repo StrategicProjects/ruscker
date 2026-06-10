@@ -55,7 +55,9 @@ systematic bug / security / UX audit in June 2026 (v0.2.5), with every
 finding fixed. Built for extreme efficiency, its idle footprint sits
 in the low tens of megabytes:
 
-> **~540 MB → ~14 MB idle** — measured on a real production deployment.
+> **~14 MB idle** — measured on a real production deployment serving a
+> real multi-app config. (The JVM-based proxy it replaced on the same
+> machine sat at ~540 MB.)
 
 It handles complex, multi-spec configurations with **no unsupported
 features** during migration, and apps spawn on demand reliably. Releases

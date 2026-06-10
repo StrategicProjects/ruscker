@@ -169,6 +169,35 @@ pub mod spec_access;
 pub mod specs;
 pub mod users;
 
+#[cfg(test)]
+mod migration_parity {
+    // #758: `migrations-pg/` silently stopped at 0016 while `migrations/`
+    // reached 0021 — every Postgres-catalog deployment's landing fetch
+    // broke from v0.1.90 until the drift was found, because the only
+    // schema-parity test was gated behind `postgres-it` and hadn't run.
+    // Filename parity needs no database, so it runs in the default gate;
+    // the file *contents* may differ (dialects), the SET may not.
+    #[test]
+    fn sqlite_and_postgres_migration_sets_match() {
+        fn names(dir: &str) -> Vec<String> {
+            let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(dir);
+            let mut v: Vec<String> = std::fs::read_dir(&root)
+                .unwrap_or_else(|e| panic!("read {root:?}: {e}"))
+                .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+                .filter(|n| n.ends_with(".sql"))
+                .collect();
+            v.sort();
+            v
+        }
+        assert_eq!(
+            names("migrations"),
+            names("migrations-pg"),
+            "migrations/ and migrations-pg/ must carry the same migration \
+             files — port the missing twin before shipping (#758)"
+        );
+    }
+}
+
 #[cfg(all(test, feature = "postgres-it"))]
 mod pg_tests {
     use super::*;

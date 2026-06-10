@@ -390,7 +390,7 @@ Tell visitors when an app is full instead of an endless "Starting…".
   visitor used to see the same "Starting…" page and wait forever, as if
   the container were perpetually booting. The waiting page now detects
   this: while the app can still scale it shows "Starting…" as before, but
-  at capacity it says "<app> is full right now — this page opens
+  at capacity it says "`<app>` is full right now — this page opens
   automatically as soon as one frees up." Both keep polling, so the visitor
   is let in the moment a seat frees.
 

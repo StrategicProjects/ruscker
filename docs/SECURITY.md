@@ -5,10 +5,10 @@ Status: living document. Tracks the Phase 5 security audit
 **[accepted limitation]**, or **[deferred]**. File references use
 `crate/path:symbol` so they survive line-number drift.
 
-> **Scope.** This covers v0.1.80: single-operator install, Ruscker
-> behind a TLS-terminating reverse proxy, Docker on the same host.
-> Multi-tenant / shared-team auth (OIDC, RBAC) is out of scope until
-> Phase 8.
+> **Scope.** This covers v0.2.5 (the 2026-06 audit release):
+> single-operator install, Ruscker behind a TLS-terminating reverse
+> proxy, Docker on one or more hosts. Multi-tenant / shared-team auth
+> (OIDC, SAML) is out of scope until Phase 8.
 
 ---
 
@@ -72,6 +72,20 @@ Status: living document. Tracks the Phase 5 security audit
   reverse proxy the peer IP is the proxy, and a per-IP key would
   trust a spoofable `X-Forwarded-For`. A global cap can't be
   evaded by rotating source addresses.
+- **[implemented]** Self-service password change revokes the
+  account's **other** sessions (#739) — changing your password is the
+  natural response to a suspected compromise, so every other live
+  session (including an attacker's) dies; the requester is re-issued a
+  fresh session so they stay signed in. The admin-initiated reset has
+  done this since #544.
+- **[implemented]** Operational replica actions are audited (#745) —
+  dashboard stop/restart write `replica.stop`/`replica.restart` rows
+  (with the acting user) to the same `audit_log` config mutations use.
+- **[implemented]** HA admin-session cache is bounded (#738) — the
+  Postgres-backed session store caches a negative entry per looked-up
+  session id (anti-hammer); an amortized sweep now evicts expired
+  entries, so an unauthenticated client spraying random cookie values
+  can no longer grow the node's memory without bound.
 - **[implemented]** Admin cookie is `HttpOnly` + `SameSite=Strict`
   + `Secure` (under TLS, see §7) — `routes::admin::login_submit`.
 - **[implemented]** Opaque server-side sessions (#77) — the cookie
@@ -236,9 +250,11 @@ Status: living document. Tracks the Phase 5 security audit
   break-glass token POST) pass — they aren't browser CSRF.
 - **[implemented]** Ruscker cookies are stripped before forwarding
   upstream (#258) — `strip_ruscker_cookies` removes the admin session,
-  the sticky cookie, and the theme/locale prefs from the upstream-bound
-  `Cookie` header so an app container never sees them (the admin session
-  id is a bearer).
+  every sticky cookie (matched by the `__ruscker_session` prefix, so
+  per-spec and legacy names are both covered), and the theme/locale
+  prefs from the upstream-bound `Cookie` header so an app container
+  never sees them (the admin session id is a bearer). The WebSocket
+  handshake path applies the same filter.
 - **[accepted limitation — needs origin separation]** Admin and apps
   share one origin by default. A script inside an **untrusted** app
   served at `/app/{spec}` is genuinely *same-origin* with `/admin`, so
@@ -250,10 +266,14 @@ Status: living document. Tracks the Phase 5 security audit
   hostname/origin** (e.g. `admin.example.org` vs `apps.example.org`) so
   the browser's same-origin policy isolates them. Trusted, first-party
   apps on one origin are fine.
-- **[implemented]** Sticky-cookie cross-app defense — the handler
-  checks `session.spec_id == spec.id` before honoring a sticky
-  cookie, even though its `Path=/` spans apps.
-  (`routes::proxy::resolve_replica`.)
+- **[implemented]** Per-app sticky cookies (#731, v0.2.5) — the
+  sticky cookie is named `__ruscker_session_{spec}` and scoped with
+  `Path={base}/app/{spec}`, so it is only ever sent to its own app:
+  two apps in one browser can't fight over a session, and the cookie
+  never travels cross-app at all. A lingering pre-v0.2.5 global
+  cookie (`Path=/`) is actively expired. The embedded
+  `session.spec_id == spec.id` check stays as defense-in-depth
+  against a copied/forged cookie (`routes::proxy::resolve_replica`).
 - **[implemented]** Sticky cookie integrity — HMAC-SHA256
   truncated to 16 bytes (128-bit forgery resistance) over the
   signed payload (`ruscker_proxy::sticky`). 128 bits is far past
@@ -268,9 +288,16 @@ Status: living document. Tracks the Phase 5 security audit
   hop-by-hop strip list.
 - **[deferred]** WS pump backpressure — a slow client can
   accumulate frames. Bound the channel with a drop policy.
-- **[deferred]** Whitelist (rather than only strip a couple of)
-  client-supplied `X-Forwarded-*` headers before forwarding
-  upstream.
+- **[implemented]** `X-Forwarded-For` is normalized on the forward
+  (#744, v0.2.5) — in trusted mode (§7) the real peer IP is appended
+  to the inbound chain; untrusted, the spoofable client value is
+  replaced with the peer. Upstream apps never see a forged chain.
+  `X-Forwarded-Proto`/`-Port` are stripped and re-set authoritatively.
+- **[implemented]** The per-client API rate limiter is bounded (#737)
+  — an amortized sweep evicts `(spec, client)` windows whose newest
+  hit aged past the largest configured window, so rotating source
+  addresses (one IPv6 /64 is 2^64 of them) can't grow the map without
+  bound.
 
 ## 7. TLS, headers & network
 
@@ -281,10 +308,32 @@ Status: living document. Tracks the Phase 5 security audit
   `Referrer-Policy: same-origin`, and a `Content-Security-Policy`
   (`default-src 'self'; … frame-ancestors 'none'; base-uri 'self';
   form-action 'self'`).
-- **[implemented]** `Secure` cookie flag under TLS — admin +
-  sticky cookies set `Secure` when `auth::request_is_https`
-  (reads `X-Forwarded-Proto`) is true. Off on plain-HTTP dev so
-  the browser doesn't drop the cookie.
+- **[implemented]** `Secure` cookie flag under TLS — admin + sticky
+  cookies set `Secure` when `auth::request_is_https` is true. Since
+  v0.2.5 (#762) that reads `X-Forwarded-Proto` **only under the trust
+  opt-in below**, and takes the **rightmost** entry of a chained list
+  (the one appended by the proxy closest to Ruscker — the leftmost
+  slot is client-controlled whenever a proxy appends). Off on
+  plain-HTTP dev so the browser doesn't drop the cookie.
+
+### Forwarded-header trust model (v0.2.5)
+
+One switch — `server.useForwardHeaders: true` (or a
+`forward-headers-strategy` other than `none`) — gates **every**
+read of client-suppliable `X-Forwarded-*` headers:
+
+| Surface | Trusted (`useForwardHeaders: true`) | Untrusted (default) |
+|---|---|---|
+| `X-Forwarded-Proto` → cookie `Secure` flag | honoured (rightmost entry) | ignored — cookies never carry `Secure` |
+| `X-Forwarded-For` → API rate-limit client key | rightmost parseable address | TCP peer |
+| `X-Forwarded-For` → forwarded upstream to apps | peer appended to the inbound chain | inbound value replaced with the peer |
+
+The default is **untrusted** because honouring these headers from
+arbitrary clients lets anyone spoof their identity (rate-limit
+evasion) or flip cookie flags. **If a reverse proxy terminates TLS in
+front of Ruscker, you must set `useForwardHeaders: true`** (and make
+the proxy set `X-Forwarded-Proto`, §9) or cookies will be minted
+without `Secure`. ShinyProxy-migrated configs already carry the flag.
 - **[accepted limitation]** Ruscker does NOT terminate TLS —
   expects a reverse proxy (see §9).
 - **[deferred]** CSP currently allows `'unsafe-inline'` for
@@ -341,8 +390,11 @@ server {
 }
 ```
 
-`X-Forwarded-Proto: https` is what flips the `Secure` cookie flag
-on (§7) — without it Ruscker assumes plain HTTP and omits `Secure`.
+`X-Forwarded-Proto: https` is what flips the `Secure` cookie flag on
+(§7) — and since v0.2.5 it is only honoured when the YAML sets
+`server.useForwardHeaders: true`. Behind a TLS-terminating proxy you
+need **both** (the header on the proxy, the flag in the YAML);
+without them Ruscker assumes plain HTTP and omits `Secure`.
 
 ### Binding
 

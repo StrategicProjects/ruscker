@@ -1,6 +1,6 @@
 # ADR 0003 — Sticky session affinity is mandatory for interactive apps
 
-Status: accepted
+Status: accepted (amended 2026-06, v0.2.5 — see Amendment below)
 
 ## Context
 
@@ -118,3 +118,27 @@ A real LB can do source-IP affinity. Rejected because:
 Rejected as massively out of scope. Frameworks like Shiny aren't
 built for it and adding it externally requires deep R-runtime
 intrusion.
+
+
+## Amendment (2026-06, v0.2.5 — #731)
+
+The original design used **one** cookie named `__ruscker_session` with
+`Path=/`. In practice that meant the whole browser held a single
+sticky session: opening app B overwrote app A's cookie, orphaning A's
+seat (its user landed on the "full" splash for a seat they themselves
+held) and breaking stickiness for multi-replica apps whenever a second
+app's cookie was present.
+
+Since v0.2.5 the cookie is **per spec**:
+
+- **Name:** `__ruscker_session_{spec_id}` — the distinct name (not just
+  the path) is what avoids read-ambiguity with a lingering legacy
+  `Path=/` cookie, since cookies are keyed by name+domain+path.
+- **Path:** `{base}/app/{spec_id}` — the cookie is only ever *sent* to
+  its own app, so it cannot collide and never travels cross-app.
+- **Legacy cleanup:** a pre-v0.2.5 global cookie is actively expired
+  (`Max-Age=0`, `Path=/`) when seen.
+- The embedded `spec_id` check from the original design is kept as
+  defense-in-depth against a copied or forged cookie.
+
+The payload, signing scheme and replica-gone fallback are unchanged.

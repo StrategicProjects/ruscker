@@ -86,7 +86,18 @@ pub fn interpolate(input: &str) -> Result<String> {
         // a secret scalar key (`docker-registry-password`) is preserved
         // directly. Both are resolved at use, not parse.
         if key == "container-env" {
-            env_block_indent = Some(indent);
+            // Record the KEY's column, not the line's (#736). When
+            // `container-env:` is the FIRST key of a list item
+            // (`- container-env:`), the line's indent is the dash's
+            // column — but the spec's sibling keys (`id:`,
+            // `container-image:`) sit at the key column, two deeper.
+            // Recording the dash column kept every sibling "inside"
+            // the block: their `${VAR}` refs were never interpolated
+            // (e.g. a literal `nginx:${TAG}` image reaching the pull)
+            // and the MissingEnvVar safety was silently bypassed. For
+            // a plain mapping line the two columns coincide.
+            let dash_prefix = trimmed.len() - trimmed.trim_start_matches('-').trim_start().len();
+            env_block_indent = Some(indent + dash_prefix);
             output.push_str(line);
             continue;
         }
@@ -369,6 +380,32 @@ proxy:
         assert!(!is_pure_env_ref("plainsecret"));
         assert!(!is_pure_env_ref(""));
         assert!(!is_pure_env_ref("${}")); // empty braces, no valid name
+    }
+
+    #[test]
+    fn container_env_as_first_list_key_does_not_swallow_siblings() {
+        // #736: with `container-env:` as the FIRST key of a `- ` list
+        // item, the sibling keys after the block must interpolate
+        // normally — only the block's CHILDREN stay verbatim.
+        with_env(&[("RUSCKER_E2E_TAG", "1.2.3")], || {
+            let yaml = "\
+proxy:
+  specs:
+  - container-env:
+      DB_PASSWORD: ${RUSCKER_E2E_SECRET}
+    id: app
+    container-image: nginx:${RUSCKER_E2E_TAG}
+";
+            let out = interpolate(yaml).unwrap();
+            assert!(
+                out.contains("DB_PASSWORD: ${RUSCKER_E2E_SECRET}"),
+                "block child stays verbatim: {out}"
+            );
+            assert!(
+                out.contains("container-image: nginx:1.2.3"),
+                "sibling key after the block must interpolate: {out}"
+            );
+        });
     }
 
     #[test]

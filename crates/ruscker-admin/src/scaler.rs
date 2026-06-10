@@ -334,6 +334,15 @@ async fn tick(
                 reg.remove(id);
             }
             drop(reg);
+            // Purge the dead replicas' sessions too, mirroring `stop_one`
+            // (#735): entries pointing at a crashed replica otherwise
+            // linger until the idle sweep — and forever under
+            // `heartbeat-timeout: -1` — keeping `sessions.len()` inflated
+            // (graceful shutdown then waits out the whole grace window)
+            // and, in HA, leaking `proxy_sessions` rows in Postgres.
+            for id in &dead {
+                state.sessions.drop_replica(id).await;
+            }
             warn!(reaped = dead.len(), "pruned replicas whose container is no longer running");
         }
     }
@@ -2174,5 +2183,83 @@ proxy:
         assert_eq!(pruned, vec![dead.id.clone()], "only the stopped container's replica");
         // Empty backend listing (the test mocks) prunes nothing.
         assert!(stopped_replica_ids(&snap, &[]).is_empty(), "absence is not stopped");
+    }
+
+    // #735: the liveness prune must also purge the dead replica's
+    // tracked sessions, mirroring `stop_one` — otherwise they linger
+    // until the idle sweep (and forever under `heartbeat-timeout: -1`),
+    // keeping `sessions.len()` inflated so graceful shutdown waits out
+    // the whole grace window, and leaking `proxy_sessions` rows in HA.
+    #[tokio::test]
+    async fn tick_prune_drops_sessions_of_dead_replicas() {
+        use ruscker_core::ManagedContainer;
+
+        /// Backend that reports the registry's container as exited.
+        struct DeadReporter;
+        #[async_trait]
+        impl ContainerBackend for DeadReporter {
+            async fn spawn(&self, _spec_id: &str, _image: &str) -> CoreResult<Replica> {
+                Err(ruscker_core::CoreError::Backend("no spawns in this test".into()))
+            }
+            async fn spawn_with_port(
+                &self,
+                spec_id: &str,
+                image: &str,
+                _port: u16,
+            ) -> CoreResult<Replica> {
+                self.spawn(spec_id, image).await
+            }
+            async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+                Ok(())
+            }
+            async fn list(&self) -> CoreResult<Vec<Replica>> {
+                Ok(vec![])
+            }
+            async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+                Ok(ReplicaMetrics {
+                    cpu_percent: 0.0,
+                    memory_bytes: 0,
+                    network_rx_bytes: 0,
+                    network_tx_bytes: 0,
+                })
+            }
+            async fn list_managed_containers(&self) -> CoreResult<Vec<ManagedContainer>> {
+                Ok(vec![ManagedContainer {
+                    id: "c-dead".into(),
+                    name: "c-dead".into(),
+                    image: "img".into(),
+                    spec_id: Some("app".into()),
+                    status: "Exited (137) 2 seconds ago".into(),
+                    running: false,
+                }])
+            }
+        }
+
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 0\n",
+            Arc::new(DeadReporter),
+        );
+        let dead = Replica {
+            container_id: "c-dead".into(),
+            ..fake_replica("app")
+        };
+        state.replicas.write().await.add(dead.clone());
+        state
+            .sessions
+            .touch_or_register(&state.replicas, uuid::Uuid::new_v4(), "app", &dead.id, false)
+            .await;
+        assert_eq!(state.sessions.len(), 1, "session registered on the doomed replica");
+
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+
+        assert!(
+            state.replicas.read().await.replicas_of("app").is_empty(),
+            "dead replica pruned from the registry"
+        );
+        assert_eq!(
+            state.sessions.len(),
+            0,
+            "the pruned replica's sessions must be purged with it (#735)"
+        );
     }
 }

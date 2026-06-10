@@ -28,16 +28,27 @@
 //!
 //! ## Memory
 //!
-//! One [`VecDeque`] per distinct `(spec, client)` seen. Empty
-//! deques are dropped on the next access for that key, so memory
-//! tracks the set of *recently active* clients rather than every
-//! client ever seen. A spec with no `rate-limit` configured is
-//! never consulted and costs nothing.
+//! One [`VecDeque`] per distinct `(spec, client)` seen. Entries are
+//! never emptied in place (an allowed request always re-records), so
+//! an amortized sweep runs every [`SWEEP_EVERY`] checks and drops
+//! every entry whose **newest** timestamp has aged past the largest
+//! policy window observed — memory then tracks the set of *recently
+//! active* clients rather than every client ever seen (#737: before
+//! the sweep existed, a client rotating source addresses — trivial
+//! within an IPv6 /64 — grew the map one permanent allocation per
+//! distinct address). A spec with no `rate-limit` configured is never
+//! consulted and costs nothing.
 
 use dashmap::DashMap;
 use ruscker_config::RatePolicy;
 use std::collections::VecDeque;
-use std::time::Instant;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
+
+/// How many `check` calls between idle-entry sweeps. Amortizes the
+/// full-map `retain` to ~0.1% of requests; between sweeps the map can
+/// grow by at most this many new entries beyond the active set.
+const SWEEP_EVERY: u32 = 1024;
 
 /// Outcome of a rate-limit check.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +68,13 @@ pub enum RateDecision {
 #[derive(Debug, Default)]
 pub struct ApiRateLimiter {
     windows: DashMap<(String, String), VecDeque<Instant>>,
+    /// Largest policy window observed (ms) — the sweep's idle horizon.
+    /// Per-spec policies differ; sweeping with the largest one is the
+    /// conservative choice (never evicts timestamps a stricter spec
+    /// might still count).
+    max_window_ms: AtomicU64,
+    /// `check` calls since the last sweep.
+    since_sweep: AtomicU32,
 }
 
 impl ApiRateLimiter {
@@ -71,6 +89,14 @@ impl ApiRateLimiter {
     /// is counted immediately — there's no separate "commit" step.
     pub fn check(&self, spec_id: &str, client: &str, policy: &RatePolicy) -> RateDecision {
         let now = Instant::now();
+        // Bookkeeping for the idle sweep (#737): remember the widest
+        // window in play and run the sweep every SWEEP_EVERY calls.
+        self.max_window_ms
+            .fetch_max(policy.window.as_millis() as u64, Ordering::Relaxed);
+        if self.since_sweep.fetch_add(1, Ordering::Relaxed) + 1 >= SWEEP_EVERY {
+            self.since_sweep.store(0, Ordering::Relaxed);
+            self.sweep_idle(now);
+        }
         // `entry` holds a shard lock for the duration; we never await
         // while holding it, so this stays a plain synchronous section.
         let mut entry = self
@@ -105,6 +131,16 @@ impl ApiRateLimiter {
                 retry_after_secs: retry,
             }
         }
+    }
+
+    /// Drop every `(spec, client)` entry whose newest timestamp has
+    /// aged past the largest observed window — its deque would prune
+    /// to empty on the next touch anyway, so the entry only pins
+    /// memory for a client that may never return (#737).
+    fn sweep_idle(&self, now: Instant) {
+        let horizon = Duration::from_millis(self.max_window_ms.load(Ordering::Relaxed));
+        self.windows
+            .retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= horizon));
     }
 }
 
@@ -155,6 +191,40 @@ mod tests {
             rl.check("api-a", "client", &p),
             RateDecision::Deny { .. }
         ));
+    }
+
+    // #737: the sweep drops entries whose newest hit aged out of the
+    // widest window, and keeps the active ones — so a client rotating
+    // addresses can't grow the map without bound.
+    #[test]
+    fn sweep_drops_idle_clients_and_keeps_active_ones() {
+        let rl = ApiRateLimiter::new();
+        let p = policy(5, Duration::from_millis(10));
+        rl.check("api", "idle-client", &p);
+        std::thread::sleep(Duration::from_millis(25));
+        rl.check("api", "active-client", &p);
+        assert_eq!(rl.windows.len(), 2, "both entries present before the sweep");
+
+        rl.sweep_idle(Instant::now());
+        assert_eq!(rl.windows.len(), 1, "idle entry dropped");
+        assert!(
+            rl.windows.contains_key(&("api".into(), "active-client".into())),
+            "the in-window client survives the sweep"
+        );
+    }
+
+    // The sweep horizon is the LARGEST window seen — a stricter spec's
+    // hits must not be evicted early just because a looser spec exists.
+    #[test]
+    fn sweep_horizon_is_the_widest_observed_window() {
+        let rl = ApiRateLimiter::new();
+        rl.check("strict", "c", &policy(5, Duration::from_millis(10)));
+        rl.check("loose", "c", &policy(5, Duration::from_secs(60)));
+        std::thread::sleep(Duration::from_millis(25));
+        // Both entries' newest hits are older than the strict window but
+        // inside the loose one → neither is swept.
+        rl.sweep_idle(Instant::now());
+        assert_eq!(rl.windows.len(), 2, "60s horizon keeps both entries");
     }
 
     #[test]

@@ -280,9 +280,11 @@ A spec describes one app, API, or external link. Every spec has an
   type: shiny                         # optional, default 'shiny' if image set
   container-port: 8501                # port the app listens on inside the
                                       #   container; default 3838 (Shiny).
-                                      #   Set for Streamlit (8501), Dash
-                                      #   (8050), … . ShinyProxy `port:`
-                                      #   is accepted as an alias.
+                                      #   `type: streamlit|dash|voila`
+                                      #   defaults to the framework's
+                                      #   well-known port (8501 / 8050 /
+                                      #   8866) when unset. ShinyProxy
+                                      #   `port:` is accepted as an alias.
   seats-per-container: 10             # sessions per replica
   max-lifetime: 360                   # minutes — hard recycle (enforced, #334)
   container-lifetime: 360             # minutes — soft recycle when idle (enforced, #334)
@@ -647,7 +649,14 @@ ignored:
 (`proxy.specs[*].volumes` and `container-env` / `container-cmd` are now
 supported — see "Containerized specs" above.)
 
-Setting any of these will produce a startup warning but not an error.
+Setting any of these will produce a startup warning but not an error
+(`serve` runs the same validation `ruscker validate` does and logs
+each finding at startup). The same applies to fields that *parse* but
+have no runtime effect yet: `server.secure-cookies`,
+`server.servlet.session.timeout`, `proxy.heartbeat-rate`,
+`proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`
+and `logging.file` each produce a warning when set, so a migrated
+config never silently loses configured behaviour.
 Run `ruscker validate --strict-compat <config>` to list every
 unsupported feature a config uses (and exit non-zero if any are
 found) — the recommended pre-flight check when migrating from

@@ -1323,12 +1323,25 @@ impl Spec {
     /// let the backend use its default (3838, the Shiny Server port).
     ///
     /// Precedence: explicit `container-port` (or ShinyProxy `port`) →
-    /// `api.port` → a per-kind default (8080 for APIs) → `None`
-    /// (backend default). Centralises what the proxy + scaler used to
-    /// resolve by hand.
+    /// `api.port` → the declared framework's well-known port
+    /// (`type: streamlit` → 8501, `dash` → 8050, `voila` → 8866) → a
+    /// per-kind default (8080 for APIs) → `None` (backend default).
+    /// Centralises what the proxy + scaler used to resolve by hand.
+    ///
+    /// The framework defaults exist because `kind()` collapses those
+    /// overrides into [`SpecKind::InteractiveApp`]: without them, a
+    /// `type: streamlit` spec with no `container-port` silently
+    /// forwarded to Shiny's 3838 and the app was unreachable (#743) —
+    /// the ports are the very ones the `container-port` doc cites.
     pub fn effective_inner_port(&self) -> Option<u16> {
         self.container_port
             .or_else(|| self.api.as_ref().and_then(|a| a.port))
+            .or(match self.kind_override {
+                Some(SpecKindOverride::Streamlit) => Some(8501),
+                Some(SpecKindOverride::Dash) => Some(8050),
+                Some(SpecKindOverride::Voila) => Some(8866),
+                _ => None,
+            })
             .or_else(|| match self.kind() {
                 SpecKind::Api => Some(8080),
                 _ => None,
@@ -2092,6 +2105,26 @@ proxy:
         assert_eq!(s.effective_inner_port(), Some(8080));
         // A Shiny-ish app with nothing set → None (backend default 3838).
         let s = parse_spec("id: a\ncontainer-image: x:1\ntype: shiny\n");
+        assert_eq!(s.effective_inner_port(), None);
+    }
+
+    // #743: a framework `type:` without `container-port` forwards to the
+    // framework's well-known port — before this, `kind()` collapsed the
+    // override into InteractiveApp and the backend defaulted to Shiny's
+    // 3838, leaving the app unreachable.
+    #[test]
+    fn effective_inner_port_uses_framework_well_known_ports() {
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: streamlit\n");
+        assert_eq!(s.effective_inner_port(), Some(8501));
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: dash\n");
+        assert_eq!(s.effective_inner_port(), Some(8050));
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: voila\n");
+        assert_eq!(s.effective_inner_port(), Some(8866));
+        // An explicit container-port still wins.
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: streamlit\ncontainer-port: 9000\n");
+        assert_eq!(s.effective_inner_port(), Some(9000));
+        // The generic `app` override keeps the backend default.
+        let s = parse_spec("id: a\ncontainer-image: x:1\ntype: app\n");
         assert_eq!(s.effective_inner_port(), None);
     }
 }

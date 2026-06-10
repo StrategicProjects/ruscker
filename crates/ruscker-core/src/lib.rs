@@ -7,25 +7,22 @@
 //!   or future runtimes
 //! - [`SessionStore`] — abstract interface over in-memory, Redis, or
 //!   Postgres session state
-//! - [`RoutingDecision`] — how the proxy chooses a replica for a new
-//!   session
 //! - [`Replica`] — runtime representation of a running container
 //!
 //! Nothing in this crate does I/O directly — implementations live in
 //! sibling crates. This keeps the domain pure and testable.
 //!
-//! ## What's implemented in MVP
+//! ## Where routing lives
 //!
-//! The MVP scope is small: types and traits only. Production-ready
-//! implementations come in Phase 3 (proxy + docker + lifecycle).
-
-#![allow(dead_code)]
+//! The replica-picking logic (`pick_replica` / `pick_accepting`) lives
+//! in `ruscker-admin::routes::proxy`, next to the seat accounting it
+//! depends on. An early `Router`/`RoutingDecision` abstraction here had
+//! no callers and had already drifted from the real implementation, so
+//! it was removed (#743) rather than left as a trap.
 
 pub mod replica;
-pub mod routing;
 
 pub use replica::{Replica, ReplicaId, ReplicaState};
-pub use routing::{RoutingDecision, Router};
 
 use async_trait::async_trait;
 use futures_util::Stream;

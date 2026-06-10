@@ -72,8 +72,9 @@ state, behind a load balancer; a Postgres advisory lock elects a single
 auto-scaler leader with automatic failover. There's a runnable two-node
 harness in `examples/ha/` — see the
 [active-active section](./deploying.md) of the deploy guide.
-One operational caveat: until a shared admin-session store ships, pin
-the **sign-in session** paths to a single upstream — see
+For the **sign-in session**, point every instance at a shared
+admin-session store (`--admin-session-store-url postgres://…`); a
+sticky upstream for the login paths remains the fallback — see
 [Sticky upstream for the sign-in session][ha-sticky].
 
 [ha-sticky]: ./deploying.md#fallback-sticky-upstream

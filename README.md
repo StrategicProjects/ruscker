@@ -231,7 +231,7 @@ validator flags any plaintext secret it finds.
 ruscker/
 ├── crates/
 │   ├── ruscker-config/   # YAML schema + parsing + validation (pure)
-│   ├── ruscker-core/     # traits, types, routing, replica registry (pure)
+│   ├── ruscker-core/     # traits, types, replica registry (pure)
 │   ├── ruscker-docker/   # Docker backend (bollard)
 │   ├── ruscker-proxy/    # sticky cookie + WebSocket pump
 │   ├── ruscker-admin/    # landing + admin + proxy routes (axum/askama)

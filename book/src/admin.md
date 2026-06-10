@@ -208,9 +208,9 @@ needs, plus bulk "prune stopped containers" and "remove unused images".
 ![Logs viewer: a terminal-style live stream with colour-coded levels and a toolbar with pause, level chips, an app filter and download.](images/admin-logs.png)
 
 The server log stream, live over Server-Sent Events. Lines are colour-
-coded by level (error / warn / info / debug), with a level dropdown, a
-free-text filter, and a pause/resume control. A download link grabs the
-current buffer.
+coded by level, with level chips (info / warn / error), an app filter
+dropdown, a line counter, and pause/resume + clear controls. A download
+link grabs the current buffer.
 
 ### Audit log
 Every admin mutation (spec/image/credential/landing/block changes,

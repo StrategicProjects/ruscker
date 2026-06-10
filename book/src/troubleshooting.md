@@ -31,7 +31,7 @@ snippet in [Deploying](./deploying.md).
 ## The admin shows the wrong / old features after an upgrade
 Templates are compiled into the binary, so changes need a **rebuild +
 reinstall**, not just editing files on the server:
-`sudo dpkg -i --force-confold ruscker_<version>_amd64.deb && sudo
+`sudo dpkg -i --force-confold ruscker_<version>-1_amd64.deb && sudo
 systemctl restart ruscker`.
 
 ## `413 Payload Too Large` on a Media upload
@@ -41,7 +41,8 @@ limit fires first** and is the more common culprit.
 **nginx (most common).** nginx's default `client_max_body_size` is 1 MB.
 Any upload larger than that is rejected by nginx before Ruscker even sees
 the request — the admin shows a generic "upload doesn't work" failure with
-no obvious error. Ruscker itself accepts up to 12 MB for media uploads.
+no obvious error. Ruscker accepts images up to 10 MB (the request
+limit is 12 MB, allowing multipart overhead).
 Set a higher limit in your nginx server block:
 
 ```nginx
@@ -83,7 +84,7 @@ sudo locale-gen en_US.UTF-8 && sudo update-locale LANG=en_US.UTF-8
 or just prefix the install in your deploy/auto-update script:
 ```bash
 export LC_ALL=C.UTF-8 LANGUAGE=
-sudo apt-get install -y ./ruscker_<version>_amd64.deb
+sudo apt-get install -y ./ruscker_<version>-1_amd64.deb
 ```
 
 ## Cookies don't carry `Secure` behind my TLS proxy

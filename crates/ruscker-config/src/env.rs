@@ -166,6 +166,21 @@ fn interpolate_line(line: &str) -> Result<String> {
             .as_str();
         let default = caps.get(2).map(|m| m.as_str());
 
+        // A nested reference in the default (`${A:-${B}}`) is not
+        // supported — and worse, the token regex's `[^}]*` default
+        // capture stops at the FIRST `}`, so silently accepting it
+        // corrupted the value: with `A` set the output grew a stray
+        // trailing `}`, with `A` unset the literal `${B}` came out and
+        // was never re-resolved. Refuse loudly instead (#743).
+        if default.is_some_and(|d| d.contains("${")) {
+            return Err(Error::InvalidEnvRef {
+                literal: format!(
+                    "{}}} — a nested reference in a `:-` default is not supported",
+                    full_match.as_str()
+                ),
+            });
+        }
+
         result.push_str(&line[last_end..full_match.start()]);
 
         let value = match env::var(var_name) {
@@ -354,6 +369,20 @@ proxy:
         assert!(!is_pure_env_ref("plainsecret"));
         assert!(!is_pure_env_ref(""));
         assert!(!is_pure_env_ref("${}")); // empty braces, no valid name
+    }
+
+    #[test]
+    fn nested_default_is_refused_not_corrupted() {
+        // #743: `${A:-${B}}` used to truncate at the first `}` — with A
+        // set the value grew a stray trailing `}`, with A unset the
+        // literal `${B}` leaked out and was never re-resolved. Now it's
+        // a hard error either way (checked before any env lookup, so no
+        // env juggling needed here).
+        let err = interpolate("v: ${RUSCKER_A:-${RUSCKER_B}}").unwrap_err();
+        assert!(
+            matches!(&err, Error::InvalidEnvRef { literal } if literal.contains("${RUSCKER_A:-${RUSCKER_B}}")),
+            "got {err:?}"
+        );
     }
 
     #[test]

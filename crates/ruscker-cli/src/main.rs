@@ -438,6 +438,14 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
         format!("failed to load config from {}", config_path.display())
     })?;
 
+    // Surface validation warnings at startup (#743) — operators who
+    // never run `ruscker validate` otherwise miss them entirely, and
+    // docs/YAML_SCHEMA.md has long promised a startup warning for
+    // ignored fields. Warnings only; serve still boots.
+    for w in &config.validate().warnings {
+        tracing::warn!("config: {}", format_warning(w));
+    }
+
     let addr = match bind_override {
         Some(a) => a,
         None => {
@@ -888,6 +896,24 @@ fn format_warning(w: &Warning) -> String {
         }
         Warning::InvalidHost { host, reason } => {
             format!("docker host `{host}`: {reason} — it will fail to connect at startup")
+        }
+        Warning::ReplicaCeilingZero { spec_id } => {
+            format!(
+                "spec {spec_id} sets max-replicas: 0 — every spawn is refused, the app can never start"
+            )
+        }
+        Warning::MissingContainerImage { spec_id } => {
+            format!(
+                "spec {spec_id} declares a containerized type but has no container-image — it will fail when first visited"
+            )
+        }
+        Warning::ExternalWithContainerImage { spec_id } => {
+            format!(
+                "spec {spec_id} is `type: external` but sets container-image — the image is ignored"
+            )
+        }
+        Warning::IgnoredCompatField { field } => {
+            format!("`{field}` is set but has no effect in Ruscker — the configured behaviour is NOT applied")
         }
     }
 }

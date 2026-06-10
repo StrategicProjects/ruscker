@@ -140,6 +140,35 @@ pub enum Warning {
         host: String,
         reason: String,
     },
+    /// A containerized spec's `max-replicas` is explicitly `0` — every
+    /// spawn is refused (`live >= max`), so the app can never start and
+    /// visitors wait on the splash forever. The default floor exists
+    /// precisely to prevent this; an explicit zero is almost always a
+    /// mistake (#743).
+    ReplicaCeilingZero {
+        spec_id: String,
+    },
+    /// `type:` declares a containerized kind but the spec has no
+    /// `container-image` — the spawn fails only when a visitor first
+    /// opens the app (#743).
+    MissingContainerImage {
+        spec_id: String,
+    },
+    /// `type: external` together with a `container-image` — the image
+    /// is silently ignored; one of the two is a mistake (#743).
+    ExternalWithContainerImage {
+        spec_id: String,
+    },
+    /// A modeled ShinyProxy field is set to a non-default value but has
+    /// no runtime effect in Ruscker — the operator gets none of what
+    /// they configured. `server.secure-cookies` is the sharpest case: a
+    /// false security expectation (the real `Secure` flag follows
+    /// `X-Forwarded-Proto`). Surfaced always (not just under
+    /// `--strict-compat`) per the project policy that unsupported
+    /// features must be loud (#743).
+    IgnoredCompatField {
+        field: &'static str,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -179,7 +208,13 @@ pub fn scan_raw_text(raw: &str) -> Vec<Warning> {
             let field = caps.get(1).unwrap().as_str().to_string();
             let value = caps.get(2).unwrap().as_str().trim();
             let unquoted = value.trim_matches(|c| c == '"' || c == '\'');
-            if unquoted.is_empty() || unquoted.starts_with("${") {
+            // Only a PURE `${VAR}` reference is exempt — the loose
+            // `starts_with("${")` gate let `${VAR}-literalsecret` pass
+            // unflagged even though interpolation preserves the whole
+            // line verbatim, landing the literal tail in the DB on
+            // import (#743; same reasoning as the credential-store
+            // regression #422 that motivated `is_pure_env_ref`).
+            if unquoted.is_empty() || crate::env::is_pure_env_ref(unquoted) {
                 continue;
             }
             warnings.push(Warning::EmbeddedCredential {
@@ -352,10 +387,41 @@ pub fn run(config: &Config) -> ValidationReport {
     }
 
     check_hosts(&config.proxy.hosts, &mut warnings);
+    check_ignored_compat_fields(config, &mut warnings);
 
     let stats = collect_stats(config);
 
     ValidationReport { warnings, stats }
+}
+
+/// Modeled ShinyProxy fields that parse fine but have **no runtime
+/// consumer** in Ruscker (#743). They all carry defaults, so "the
+/// operator set it" means "differs from the default". Each one set is
+/// one warning — silently ignoring configured behaviour violates the
+/// project's compat policy, and `server.secure-cookies` in particular
+/// builds a false security expectation.
+fn check_ignored_compat_fields(config: &Config, warnings: &mut Vec<Warning>) {
+    let mut ignored = |field: &'static str, set: bool| {
+        if set {
+            warnings.push(Warning::IgnoredCompatField { field });
+        }
+    };
+    ignored("server.secure-cookies", config.server.secure_cookies);
+    ignored(
+        "server.servlet.session.timeout",
+        config.server.session_timeout_secs().is_some(),
+    );
+    ignored(
+        "proxy.heartbeat-rate",
+        config.proxy.heartbeat_rate != 10_000,
+    );
+    ignored("proxy.hide-navbar", config.proxy.hide_navbar);
+    ignored("proxy.landing-page", config.proxy.landing_page != "/");
+    ignored(
+        "proxy.container-log-path",
+        config.proxy.container_log_path.is_some(),
+    );
+    ignored("logging.file", config.logging.file.is_some());
 }
 
 /// Validate `proxy.hosts` (Phase 6): non-empty unique ids, a supported
@@ -458,6 +524,29 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             spec_id: spec.id.clone(),
             min,
             max,
+        });
+    }
+    // An explicit `max-replicas: 0` on a containerized spec refuses
+    // every spawn — the exact hang the default floor exists to prevent,
+    // reachable via config with zero feedback (#743). `max >= min`
+    // keeps this from doubling up with InvalidReplicaRange above.
+    if spec.kind() != SpecKind::External && max == 0 && max >= min {
+        warnings.push(Warning::ReplicaCeilingZero {
+            spec_id: spec.id.clone(),
+        });
+    }
+
+    // `type:` vs `container-image` conflicts are silent in both
+    // directions (#743): a containerized kind with no image fails only
+    // at visit time; `type: external` with an image silently ignores it.
+    if spec.kind() != SpecKind::External && spec.container_image.is_none() {
+        warnings.push(Warning::MissingContainerImage {
+            spec_id: spec.id.clone(),
+        });
+    }
+    if spec.kind() == SpecKind::External && spec.container_image.is_some() {
+        warnings.push(Warning::ExternalWithContainerImage {
+            spec_id: spec.id.clone(),
         });
     }
 
@@ -1113,5 +1202,120 @@ proxy:
     fn no_hosts_is_clean() {
         // Absent `hosts` is the default single-local-daemon mode.
         assert!(host_warnings("proxy:\n  specs: []\n").is_empty());
+    }
+
+    // ── #743: new validation gaps ────────────────────────────────
+
+    #[test]
+    fn flags_explicit_zero_replica_ceiling() {
+        let yaml = "proxy:\n  specs:\n    - id: dead\n      container-image: a:1\n      min-replicas: 0\n      max-replicas: 0\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::ReplicaCeilingZero { spec_id } if spec_id == "dead"
+            )),
+            "got {:?}",
+            report.warnings
+        );
+        // The default ceiling is fine.
+        let ok = Config::from_yaml("proxy:\n  specs:\n    - id: ok\n      container-image: a:1\n")
+            .expect("parse")
+            .validate();
+        assert!(
+            !ok.warnings
+                .iter()
+                .any(|w| matches!(w, Warning::ReplicaCeilingZero { .. })),
+            "got {:?}",
+            ok.warnings
+        );
+    }
+
+    #[test]
+    fn flags_type_vs_image_conflicts_both_directions() {
+        // Containerized type with no image: fails only at visit time.
+        let yaml = "proxy:\n  specs:\n    - id: imageless\n      type: shiny\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::MissingContainerImage { spec_id } if spec_id == "imageless"
+            )),
+            "got {:?}",
+            report.warnings
+        );
+        // `type: external` with an image: the image is silently ignored.
+        let yaml = "proxy:\n  specs:\n    - id: ext\n      type: external\n      container-image: a:1\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::ExternalWithContainerImage { spec_id } if spec_id == "ext"
+            )),
+            "got {:?}",
+            report.warnings
+        );
+        // A plain link spec (no type, no image) is a legitimate External.
+        let yaml = "proxy:\n  specs:\n    - id: link\n      external-url: https://example.org\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            !report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::MissingContainerImage { .. } | Warning::ExternalWithContainerImage { .. }
+            )),
+            "got {:?}",
+            report.warnings
+        );
+    }
+
+    #[test]
+    fn scan_flags_partial_env_ref_credential() {
+        // `${VAR}-tail` is NOT a pure env-ref: interpolation preserves
+        // the line verbatim, so the literal tail would land in the DB.
+        let raw = "docker-registry-password: ${REG_PASS}-literal\n";
+        let warnings = scan_raw_text(raw);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, Warning::EmbeddedCredential { .. })),
+            "got {warnings:?}"
+        );
+        // A pure ref stays exempt.
+        assert!(scan_raw_text("docker-registry-password: ${REG_PASS}\n").is_empty());
+    }
+
+    #[test]
+    fn flags_ignored_compat_fields_only_when_set() {
+        let yaml = "\
+server:
+  secure-cookies: true
+proxy:
+  hide-navbar: true
+  specs: []
+";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        let ignored: Vec<&'static str> = report
+            .warnings
+            .iter()
+            .filter_map(|w| match w {
+                Warning::IgnoredCompatField { field } => Some(*field),
+                _ => None,
+            })
+            .collect();
+        assert!(ignored.contains(&"server.secure-cookies"), "got {ignored:?}");
+        assert!(ignored.contains(&"proxy.hide-navbar"), "got {ignored:?}");
+
+        // Defaults (nothing set) produce none of these warnings.
+        let clean = Config::from_yaml("proxy:\n  specs: []\n")
+            .expect("parse")
+            .validate();
+        assert!(
+            !clean
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::IgnoredCompatField { .. })),
+            "got {:?}",
+            clean.warnings
+        );
     }
 }

@@ -80,8 +80,9 @@ the **sign-in session** paths to a single upstream — see
 
 ### Is it production-ready?
 
-Yes. The current release is **v0.1.80** — Phases 0–7 are complete and
-the proxy is production-ready and horizontally scalable.
+Yes. Phases 0–7 are complete, the proxy is production-ready and
+horizontally scalable, and the codebase was systematically audited for
+bugs, security and UX in June 2026 (shipped as v0.2.5).
 Releases are multi-arch and cosign-signed; see the
 [release notes](./news.md) and the [Roadmap](./roadmap.md).
 Phase 8 (external auth: OIDC / SAML / LDAP) is the main remaining

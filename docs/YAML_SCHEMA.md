@@ -20,20 +20,37 @@ Supported:
 
 ```yaml
 server:
-  useForwardHeaders: true             # Honor X-Forwarded-* headers
+  useForwardHeaders: true             # Trust X-Forwarded-* headers (see below)
   forward-headers-strategy: native    # 'native' | 'framework' | 'none'
-  secure-cookies: true                # Set Secure flag on cookies
-  servlet.session.timeout: 3600       # Spring flat-key form
-  # OR equivalently:
-  servlet:
-    session:
-      timeout: 3600
   context-path: /apps                  # Mount portal under a subpath (see below)
   # ShinyProxy's nested form is also accepted:
   servlet.context-path: /apps
 ```
 
-Resolved via `Server::session_timeout_secs()` — either form works.
+Parsed for compatibility but **ignored** (each produces a startup
+warning when set — see [Validation warnings](#validation-warnings)):
+
+```yaml
+server:
+  secure-cookies: true                # IGNORED — see useForwardHeaders below
+  servlet.session.timeout: 3600       # IGNORED (admin sessions are 24h fixed)
+  # OR equivalently:
+  servlet:
+    session:
+      timeout: 3600
+```
+
+### `server.useForwardHeaders` — forwarded-header trust
+
+Since v0.2.5 this single switch gates **every** read of
+client-suppliable `X-Forwarded-*` headers: the cookie `Secure` flag
+(`X-Forwarded-Proto`), the per-client API rate-limit key, and the
+`X-Forwarded-For` chain forwarded to your apps (trusted → the real
+peer is appended; untrusted → the spoofable inbound value is
+replaced). **If a reverse proxy terminates TLS in front of Ruscker,
+set it to `true`** — otherwise cookies are minted without `Secure`.
+ShinyProxy's `secure-cookies` flag is *not* what does this in Ruscker;
+it's ignored. Full rationale in `docs/SECURITY.md` §7.
 
 ### `server.context-path` — subpath mounting
 
@@ -70,11 +87,17 @@ ignored by Ruscker.
 | Field | Type | Default | Notes |
 |---|---|---|---|
 | `title` | string | `"Ruscker"` | Browser tab title |
-| `landing-page` | string | `"/"` | Where the portal is served |
-| `hide-navbar` | bool | `false` | Suppress default navbar |
+| `landing-page` | string | `"/"` | **Ignored** (warned when set) — the portal is always at the root / base path |
+| `hide-navbar` | bool | `false` | **Ignored** (warned when set) |
 | `template-path` | path | none | Override template directory |
-| `heartbeat-rate` | ms | `10000` | Client heartbeat interval |
-| `heartbeat-timeout` | ms | `3600000` | Session expiry; `-1` = never |
+| `heartbeat-rate` | ms | `10000` | **Ignored** (warned when set) — the landing's heartbeat is fixed |
+| `heartbeat-timeout` | ms | `3600000` | Session expiry; `-1` = never. Per-spec override supported |
+| `container-log-path` | path | none | **Ignored** (warned when set) — use `docker logs` / the admin Logs tab |
+| `port` | u16 | `8080` | HTTP listener port |
+| `bind-address` | string | `"0.0.0.0"` | Listener interface |
+| `authentication` | enum | `none` | `none` (MVP) / `openid` / `ldap` / `saml` / `simple` |
+| `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
+| `specs` | array | `[]` | List of apps/links/APIs |
 | `container-wait-time` | ms | `60000` | Max wait for container Ready |
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
@@ -123,12 +146,6 @@ and `tls` mismatched with the scheme.
   falling back to the strategy above if every eligible host does
   (so scaling never stalls). Hosts at `max-containers` are skipped; if
   all are full, the spawn fails (the scaler retries).
-| `container-log-path` | path | none | Directory for per-container logs |
-| `port` | u16 | `8080` | HTTP listener port |
-| `bind-address` | string | `"0.0.0.0"` | Listener interface |
-| `authentication` | enum | `none` | `none` (MVP) / `openid` / `ldap` / `saml` / `simple` |
-| `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
-| `specs` | array | `[]` | List of apps/links/APIs |
 
 ### Authentication
 
@@ -590,10 +607,18 @@ heartbeat-rate: ${HEARTBEAT_RATE:-10000}
 
 Rules:
 
-- Variable names: `[A-Z_][A-Z0-9_]*`
+- Variable names: `[A-Za-z_][A-Za-z0-9_]*` (lower/mixed case accepted)
 - Missing variable without default: hard error at parse time
 - Missing variable with default: substituted with the default
-- Comments (lines starting with `#`) are not interpolated
+- Comments (lines starting with `#`, or trailing `# …`) are not
+  interpolated
+- A **nested** reference in a default (`${A:-${B}}`) is refused with a
+  hard error (v0.2.5) — it used to silently corrupt the value
+- `docker-registry-password` and everything under `container-env` are
+  **preserved verbatim** and resolved only at use (spawn/pull), so
+  secrets never land in the database on `import`. This holds wherever
+  `container-env` appears in the spec — including as the first key of
+  a list item (fixed in v0.2.5)
 
 This applies to the whole YAML file, not just credentials. Use it for
 any value that varies between environments.
@@ -632,6 +657,34 @@ logging:
 
 Accepted for ShinyProxy compat. Ruscker uses `tracing` for logging
 and respects the `RUST_LOG` env var as well.
+
+## Validation warnings
+
+`ruscker validate <config>` — and, since v0.2.5, `ruscker serve` at
+startup — reports these non-fatal findings. None of them stops the
+server; each one means some configured intent is **not** taking
+effect, so treat warnings in production logs as action items.
+
+| Warning | Meaning |
+|---|---|
+| duplicate spec id | Two specs share an `id`; only the last parsed wins |
+| no display-name / no description | Cosmetic: the landing card falls back to the `id` / renders empty |
+| embedded credential | A sensitive field (`docker-registry-password`, …) carries a literal value instead of a pure `${VAR}` reference — including a partial one like `${VAR}-suffix` (v0.2.5) |
+| unknown template-properties type | `template-properties.type` isn't one of the known card types |
+| invalid replica range | `max-replicas < min-replicas` — the scaler can't satisfy both |
+| replica ceiling zero (v0.2.5) | Explicit `max-replicas: 0` on a containerized spec — every spawn is refused; the app can never start |
+| missing container-image (v0.2.5) | A containerized `type:` with no `container-image` — fails only when first visited |
+| external with container-image (v0.2.5) | `type: external` + `container-image` — the image is silently ignored |
+| invalid scale threshold | `scale-up`/`scale-down` thresholds inverted or out of `0..1` |
+| container fields without image | `seats-per-container` etc. on a spec with no image |
+| invalid rate-limit / max-body-size / cpu / memory / volume | The value doesn't parse, so the intended cap or mount is **not enforced** |
+| zero seats | `seats-per-container: 0` confuses the auto-scaler |
+| invalid docker host | A `proxy.hosts` entry that will fail to connect at startup |
+| ignored compat field (v0.2.5) | A modeled ShinyProxy field with no runtime effect is set (`server.secure-cookies`, `server.servlet.session.timeout`, `proxy.heartbeat-rate`, `proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`, `logging.file`) |
+
+`ruscker validate --strict-compat` additionally lists every
+*unsupported* ShinyProxy feature a migrated config uses and exits
+non-zero — the recommended pre-flight when migrating.
 
 ## Not supported (MVP)
 

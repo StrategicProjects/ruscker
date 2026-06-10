@@ -127,6 +127,50 @@ const LIST_SELECT: &str =
 /// `query_as` family takes `&'static str` only). All values are
 /// bound through `push_bind`; no string interpolation, no SQL
 /// injection.
+/// Write one standalone audit row — for operational actions that don't
+/// ride a config-mutation transaction (replica stop/restart, #745).
+/// Config mutations keep writing their rows inside their own txs.
+pub async fn record(
+    db: &ConfigDb,
+    actor: &str,
+    action: &str,
+    target: &str,
+    diff_json: Option<&str>,
+) -> Result<()> {
+    let now = Utc::now();
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(target)
+            .bind(diff_json)
+            .bind(now)
+            .execute(pool)
+            .await
+            .context("audit record (sqlite)")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(target)
+            .bind(diff_json)
+            .bind(now)
+            .execute(pool)
+            .await
+            .context("audit record (postgres)")?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn list(db: &ConfigDb, filter: &AuditFilter) -> Result<Vec<AuditEntry>> {
     let rows: Vec<ListRow> = match db {
         ConfigDb::Sqlite(pool) => {

@@ -269,6 +269,100 @@ fn upsert_audit_action(outcome: &UpsertOutcome) -> Option<&'static str> {
 /// differ per backend, so the body forks per arm — but each arm reuses
 /// the dialect's `upsert_in_tx*` helper and the shared
 /// [`upsert_audit_action`].
+/// The spec's current `version` counter, or `None` when absent. Powers
+/// the edit form's optimistic-concurrency check (#745).
+pub async fn fetch_version(db: &ConfigDb, id: &str) -> Result<Option<i64>> {
+    let row: Option<(i64,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as("SELECT version FROM specs WHERE id = ?")
+            .bind(id)
+            .fetch_optional(pool)
+            .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as("SELECT version FROM specs WHERE id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await,
+    }
+    .with_context(|| format!("fetch version of {id}"))?;
+    Ok(row.map(|(v,)| v))
+}
+
+/// Insert a NEW spec, failing closed when the id already exists (#745).
+/// The create form's pre-check + `upsert_one` was a TOCTOU: two
+/// concurrent creates of the same id both passed the check and the
+/// second silently overwrote the first. The existence check here runs
+/// inside the write transaction, and a racing insert that still slips
+/// past it dies on the primary-key constraint instead of clobbering.
+/// Returns `Ok(false)` when the id is already taken.
+pub async fn insert_new(db: &ConfigDb, spec: &Spec, actor: Option<&str>) -> Result<bool> {
+    let now = Utc::now();
+    let target = format!("spec:{}", spec.id);
+    let is_unique_violation = |e: &anyhow::Error| {
+        e.downcast_ref::<sqlx::Error>()
+            .and_then(|se| se.as_database_error())
+            .is_some_and(|de| de.is_unique_violation())
+    };
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin insert_new tx")?;
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT 1 FROM specs WHERE id = ?")
+                    .bind(&spec.id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("insert_new existence check")?;
+            if exists.is_some() {
+                return Ok(false);
+            }
+            match upsert_in_tx(&mut tx, spec, now).await {
+                Ok(_) => {}
+                Err(e) if is_unique_violation(&e) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'spec.create', ?, NULL, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit insert_new")?;
+            tx.commit().await.context("commit insert_new tx")?;
+            Ok(true)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin insert_new tx")?;
+            let exists: Option<(i64,)> =
+                sqlx::query_as("SELECT 1 FROM specs WHERE id = $1")
+                    .bind(&spec.id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("insert_new existence check")?;
+            if exists.is_some() {
+                return Ok(false);
+            }
+            match upsert_in_tx_pg(&mut tx, spec, now).await {
+                Ok(_) => {}
+                Err(e) if is_unique_violation(&e) => return Ok(false),
+                Err(e) => return Err(e),
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'spec.create', $2, NULL, $3)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit insert_new")?;
+            tx.commit().await.context("commit insert_new tx")?;
+            Ok(true)
+        }
+    }
+}
+
 pub async fn upsert_one(
     db: &ConfigDb,
     spec: &Spec,
@@ -694,6 +788,53 @@ fn kind_str(spec: &Spec) -> &'static str {
 mod tests {
     use super::*;
     use crate::db::open_memory;
+
+    // #745: the create path must fail CLOSED on an existing id — the old
+    // pre-check + upsert let a concurrent create silently overwrite.
+    #[tokio::test]
+    async fn insert_new_refuses_an_existing_id_without_clobbering() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let first: Spec =
+            serde_yaml_ng::from_str("id: app
+display-name: Original
+container-image: a:1")
+                .unwrap();
+        assert!(insert_new(&db, &first, Some("alice")).await.unwrap());
+
+        let second: Spec =
+            serde_yaml_ng::from_str("id: app
+display-name: Usurper
+container-image: b:2")
+                .unwrap();
+        assert!(
+            !insert_new(&db, &second, Some("bob")).await.unwrap(),
+            "existing id must be refused"
+        );
+        let kept = fetch_one(&db, "app").await.unwrap().expect("still there");
+        assert_eq!(
+            kept.display_name.as_deref(),
+            Some("Original"),
+            "the loser must not overwrite the original"
+        );
+    }
+
+    // #745: `fetch_version` tracks the per-save counter the edit form's
+    // optimistic-concurrency check compares against.
+    #[tokio::test]
+    async fn fetch_version_follows_saves() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        assert_eq!(fetch_version(&db, "ghost").await.unwrap(), None);
+        let mut spec: Spec =
+            serde_yaml_ng::from_str("id: app
+display-name: V1
+container-image: a:1").unwrap();
+        insert_new(&db, &spec, None).await.unwrap();
+        let v1 = fetch_version(&db, "app").await.unwrap().expect("versioned");
+        spec.display_name = Some("V2".into());
+        upsert_one(&db, &spec, None).await.unwrap();
+        let v2 = fetch_version(&db, "app").await.unwrap().expect("versioned");
+        assert!(v2 > v1, "a save must bump the version ({v1} → {v2})");
+    }
 
     fn fixture_yaml() -> String {
         std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");

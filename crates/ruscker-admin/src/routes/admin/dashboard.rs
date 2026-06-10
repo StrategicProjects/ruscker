@@ -719,7 +719,7 @@ fn parse_replica_id(s: &str) -> Result<ReplicaId, Box<Response>> {
 /// Redirects back to the dashboard so the browser lands on a
 /// fresh render.
 async fn stop_replica(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -741,8 +741,22 @@ async fn stop_replica(
     // Drop the replica's sessions too, or `len()` stays inflated until
     // the idle sweep (forever under `heartbeat-timeout: -1`) (#324).
     state.sessions.drop_replica(&rid).await;
+    // Destructive operational action → audit row (#745); config
+    // mutations were audited, replica stop/restart only hit the log.
+    record_replica_action(&state, editor.actor(), "replica.stop", &replica_id).await;
     tracing::info!(replica = %replica_id, "replica stopped via dashboard");
     Redirect::to("/admin/dashboard").into_response()
+}
+
+/// Best-effort audit row for a dashboard replica action (#745) — a
+/// missing DB or a write error must not fail the action itself.
+async fn record_replica_action(state: &AppState, actor: &str, action: &str, replica_id: &str) {
+    let Some(db) = state.db.as_ref() else { return };
+    if let Err(e) =
+        crate::db::audit::record(db, actor, action, &format!("replica:{replica_id}"), None).await
+    {
+        tracing::warn!(error = ?e, action, replica = %replica_id, "audit write failed");
+    }
 }
 
 /// POST `/admin/dashboard/replicas/{id}/restart` — stop the
@@ -751,7 +765,7 @@ async fn stop_replica(
 /// respawn ~one tick later), restart brings capacity back
 /// right away.
 async fn restart_replica(
-    _: RequireEditor,
+    editor: RequireEditor,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -800,6 +814,7 @@ async fn restart_replica(
         )
             .into_response();
     }
+    record_replica_action(&state, editor.actor(), "replica.restart", &replica_id).await;
     tracing::info!(replica = %replica_id, spec = %spec.id, "replica restarted via dashboard");
     Redirect::to("/admin/dashboard").into_response()
 }

@@ -632,6 +632,15 @@ async fn import_confirm(
         return Redirect::to("/admin/specs?import=ok&created=0&updated=0&unchanged=0&warnings=0")
             .into_response();
     }
+    // #745: the interactive form enforces the id shape; the import path
+    // persisted whatever ids the YAML carried (they flow into /app/{id}
+    // routes, admin links and docker labels). Same gate on both
+    // creation paths, fail closed.
+    if let Some(bad) = ids.iter().find(|id| !super::spec_form::is_kebab_id(id)) {
+        return redirect_err(&format!(
+            "invalid spec id `{bad}` — ids must start with a letter and use only letters, digits, '_' and '-'"
+        ));
+    }
     let mut config = match ruscker_config::Config::from_yaml(&raw) {
         Ok(c) => c,
         Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),

@@ -273,6 +273,7 @@ spec-form-error-number = Um campo numérico tem valor não numérico.
 spec-form-error-cpu = O limite de CPU deve ser um número positivo (ex.: 0.5).
 spec-form-error-memory = O limite de memória deve ser um tamanho como 512m ou 1.5g.
 spec-form-error-replica-range = Réplicas máx. deve ser maior ou igual a réplicas mín.
+spec-form-error-stale = Outra pessoa salvou este app enquanto você editava. Revise os valores atuais abaixo e envie novamente.
 
 # Admin image library
 admin-images-title = Biblioteca de mídia

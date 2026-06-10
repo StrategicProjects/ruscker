@@ -10,16 +10,22 @@
   </div>
 </div>
 
-{% if flash != "" %}
-  <div class="admin-login-error mb-3" role="status"
-       style="{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" %}{% else %}background:rgba(29,158,117,0.12);color:var(--text-primary){% endif %}">
-    <i class="ti ti-info-circle" aria-hidden="true"></i>
-    {% if flash == "created" %}{{ self.t("admin-users-flash-created") }}
-    {% else if flash == "saved" %}{{ self.t("admin-users-flash-saved") }}
-    {% else if flash == "deleted" %}{{ self.t("admin-users-flash-deleted") }}
-    {% else if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
+{# Flash split (#746): error vs success used to share one class + icon,
+   distinguished only by an inline background colour — colour-only state,
+   and errors never got role="alert". #}
+{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" %}
+  <div class="admin-login-error mb-3" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {% if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
     {% else if flash == "exists" %}{{ self.t("admin-users-flash-exists") }}
     {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
+  </div>
+{% else if flash != "" %}
+  <div class="admin-flash-ok mb-3" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {% if flash == "created" %}{{ self.t("admin-users-flash-created") }}
+    {% else if flash == "saved" %}{{ self.t("admin-users-flash-saved") }}
+    {% else %}{{ self.t("admin-users-flash-deleted") }}{% endif %}
   </div>
 {% endif %}
 

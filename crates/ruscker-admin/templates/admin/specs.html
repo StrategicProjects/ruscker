@@ -111,7 +111,9 @@
       </button>
     </div>
   </div>
-  <table class="admin-table" data-enhance>
+  {# data-no-search: the sticky toolbar's pill is THE search here —
+     the enhancer's injected input fought it over the same rows (#746). #}
+  <table class="admin-table" data-enhance data-no-search>
     <thead>
       <tr>
         <th>{{ self.t("admin-specs-col-id") }}</th>

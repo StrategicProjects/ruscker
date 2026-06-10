@@ -103,12 +103,13 @@
                  x-model="form.subject"
                  list="subject-suggestions"
                  class="spec-form-input">
+          {# Suggestions come from the catalog's existing subjects (#746)
+             — a fixed pt-BR list shipped domain-specific values to every
+             deployment and locale. #}
           <datalist id="subject-suggestions">
-            <option value="Gestão"></option>
-            <option value="Infraestrutura e Mobilidade"></option>
-            <option value="Políticas Públicas"></option>
-            <option value="Saúde Pública"></option>
-            <option value="Segurança Pública"></option>
+            {% for subj in subject_suggestions %}
+            <option value="{{ subj }}"></option>
+            {% endfor %}
           </datalist>
         </div>
       </section>
@@ -661,7 +662,7 @@
             <div style="display:flex;flex-direction:column;gap:7px">
               <template x-for="(row, i) in envRows" :key="i">
                 <div class="env-row">
-                  <input type="text" class="spec-form-input spec-form-input--mono" placeholder="CHAVE"
+                  <input type="text" class="spec-form-input spec-form-input--mono" placeholder="{{ self.t("spec-form-env-key") }}"
                          x-model="row.key" @input="row.key = row.key.toUpperCase().replace(/[^A-Z0-9_]/g, '_'); envSync()">
                   <span class="env-eq">=</span>
                   <input type="text" class="spec-form-input spec-form-input--mono" placeholder="{{ self.t("spec-form-env-value") }}"
@@ -1052,12 +1053,12 @@
   <template x-teleport="body">
   <div x-show="picker.open" x-cloak class="image-picker-overlay"
        x-init="$watch('picker.open', open => {
-                 if (open) { _logoTrigger = document.activeElement;
+                 if (open) { _pickerTrigger = document.activeElement;
                    $nextTick(() => $refs.logoSearch && $refs.logoSearch.focus()); }
-                 else if (_logoTrigger && _logoTrigger.focus) { _logoTrigger.focus(); } })"
+                 else if (_pickerTrigger && _pickerTrigger.focus) { _pickerTrigger.focus(); } })"
        @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
     <div class="image-picker-modal" role="dialog" aria-modal="true"
-         aria-labelledby="logo-picker-title" @keydown.tab="trapLogoTab($event)">
+         aria-labelledby="logo-picker-title" @keydown.tab="trapPickerTab($event)">
       <div class="image-picker-head">
         <strong id="logo-picker-title">{{ self.t("spec-form-logo") }}</strong>
         <button type="button" class="admin-nav-link" @click="picker.open = false"
@@ -1240,16 +1241,8 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // ── Logo modal accessibility (#720 P7) ───────────────────────────
   // Remembers what had focus before the dialog opened, so it can be
   // restored on close (set by the $watch in the modal's x-init).
-  _logoTrigger: null,
-  // Focus trap: keep Tab/Shift+Tab inside the dialog while it's open.
-  trapLogoTab(e) {
-    const sel = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])';
-    const f = Array.from(e.currentTarget.querySelectorAll(sel)).filter((el) => el.offsetParent !== null);
-    if (!f.length) return;
-    const first = f[0], last = f[f.length - 1];
-    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
-    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-  },
+  // Focus trap + trigger tracking now live on the shared imagePicker
+  // mixin (#746) — both picker modals use the same dialog a11y.
   // Cover background for the preview. `form.cover` is a CSS value that
   // may embed `url('/assets/img/x')`; prefix the base path on those
   // root-absolute asset URLs for *display only* (#270). The submitted
@@ -1338,13 +1331,17 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
     return this.form.display_type === 'api';
   },
   badgeText() {
+    // Localized type-*-abbr strings, same keys the real card uses (#746)
+    // — the preview previously hardcoded the pt-BR abbreviations.
     const map = {
-      // PT — matches type-*-abbr keys; localizing the preview is
-      // a polish item for the next batch.
-      app: 'APP', talk: 'APR', report: 'RLT',
-      package: 'PCT', api: 'API', link: 'LNK',
+      app: "{{ self.t("type-app-abbr") }}",
+      talk: "{{ self.t("type-talk-abbr") }}",
+      report: "{{ self.t("type-report-abbr") }}",
+      package: "{{ self.t("type-package-abbr") }}",
+      api: "{{ self.t("type-api-abbr") }}",
+      link: "{{ self.t("type-link-abbr") }}",
     };
-    return map[this.form.display_type] || 'APP';
+    return map[this.form.display_type] || map.app;
   },
 });
 </script>

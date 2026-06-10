@@ -723,7 +723,8 @@
 
         <div class="landing-preview-body">
           <p class="landing-preview-intro"
-             x-text="previewIntro()"
+             x-text="previewIntro() || $el.dataset.placeholder"
+             data-placeholder="{{ self.t("admin-landing-preview-empty") }}"
              :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
           {# Search pill + filter chips honour the Visible-sections toggles. #}
           <div class="landing-preview-mockfilter" x-show="!!form.show_search" x-cloak><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
@@ -800,15 +801,24 @@
      and without the teleport the modal renders centered in the (tall)
      page instead of the screen. #}
   <template x-teleport="body">
+  {# Same dialog a11y as the spec-form picker (#746): focus moves to the
+     search on open, returns to the trigger on close, Tab is trapped. #}
   <div x-show="picker.open" x-cloak class="image-picker-overlay"
+       x-init="$watch('picker.open', open => {
+                 if (open) { _pickerTrigger = document.activeElement;
+                   $nextTick(() => $refs.landingPickerSearch && $refs.landingPickerSearch.focus()); }
+                 else if (_pickerTrigger && _pickerTrigger.focus) { _pickerTrigger.focus(); } })"
        @keydown.escape.window="picker.open = false" @click.self="picker.open = false">
-    <div class="image-picker-modal">
+    <div class="image-picker-modal" role="dialog" aria-modal="true"
+         aria-labelledby="landing-picker-title" @keydown.tab="trapPickerTab($event)">
       <div class="image-picker-head">
-        <strong>{{ self.t("spec-form-choose-image") }}</strong>
-        <button type="button" class="admin-nav-link" @click="picker.open = false"><i class="ti ti-x" aria-hidden="true"></i></button>
+        <strong id="landing-picker-title">{{ self.t("spec-form-choose-image") }}</strong>
+        <button type="button" class="admin-nav-link" @click="picker.open = false"
+                aria-label="{{ self.t("admin-import-cancel") }}"><i class="ti ti-x" aria-hidden="true"></i></button>
       </div>
       <div class="image-picker-tools">
-        <input type="search" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+        <input type="search" x-ref="landingPickerSearch" x-model="picker.q" placeholder="{{ self.t("admin-images-search") }}"
+               aria-label="{{ self.t("admin-images-search") }}"
                class="spec-form-input text-sm" style="max-width:16rem">
         <label class="admin-login-btn" style="cursor:pointer;padding:6px 12px;font-size:12px"
                :class="imgUploading ? 'opacity-50 pointer-events-none' : ''">
@@ -878,13 +888,17 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       this.applyGrad();
     }
   },
-  // Switching to gradient mode seeds header_bg from the builder
-  // so the preview updates immediately; switching to solid clears
-  // the gradient string so the color picker drives a fresh value.
+  // Switching to gradient mode seeds header_bg from the builder so
+  // the preview updates immediately. 'solid' mirrors the v0.2.2 seed
+  // fix the cover builders got (#746): keep an existing solid hex,
+  // replace a gradient with a seeded colour — the old `header_bg = ''`
+  // both left the preview inert until the picker was dragged AND
+  // silently wiped a saved gradient the moment Solid was clicked.
   setBgMode(mode) {
     this.bgMode = mode;
-    if (mode === 'gradient') this.applyGrad();
-    else this.form.header_bg = '';
+    if (mode === 'gradient') { this.applyGrad(); return; }
+    const c = (this.form.header_bg || '').trim();
+    if (!c || /^(linear|radial)-gradient\(/.test(c)) this.form.header_bg = '#0f6e56';
   },
 
   // ── Default card-cover builder (#720) — a parallel solid/gradient
@@ -929,8 +943,10 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   previewIntro() {
     const code = "{{ locale.code() }}";
     const per = { pt: this.form.intro_pt, en: this.form.intro_en, es: this.form.intro_es, fr: this.form.intro_fr };
-    return (per[code] || this.form.intro || "").trim()
-        || "{{ self.t("admin-landing-preview-empty") }}";
+    // Empty stays empty (#746): the template shows a dimmed placeholder
+    // for the no-intro case — baking the fallback text in here made the
+    // `:class` dimming dead code, so the placeholder read as real text.
+    return (per[code] || this.form.intro || "").trim();
   },
 
   // ── Live-preview resolvers (#701 follow-up) ───────────────────

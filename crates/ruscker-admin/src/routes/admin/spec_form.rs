@@ -975,6 +975,11 @@ struct SpecFormPage<'a> {
     /// Filenames in the media library, for the logo picker. Empty
     /// when no DB is wired or the listing fails.
     logo_images: Vec<String>,
+    /// Distinct subjects already used across the catalog, for the
+    /// subject `<datalist>` (#746) — replaces a hardcoded pt-BR list
+    /// that shipped domain-specific suggestions to every deployment
+    /// and locale.
+    subject_suggestions: Vec<String>,
     /// Names of stored registry credentials, for the
     /// `docker-registry-credential` datalist (#351). Empty when no DB
     /// is wired or the listing fails — the field stays free-text.
@@ -1042,6 +1047,21 @@ impl<'a> SpecFormPage<'a> {
 
 /// Media-library filenames for the logo picker. Empty when no DB is
 /// wired or the query fails — the picker degrades to the text field.
+/// Distinct, sorted `template-properties.subject` values across the
+/// effective catalog (#746) — real data instead of a fixed list.
+async fn subject_suggestions(state: &AppState) -> Vec<String> {
+    let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
+    let mut subjects: Vec<String> = specs
+        .iter()
+        .filter_map(|sp| sp.template_properties.get_str("subject"))
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect();
+    subjects.sort();
+    subjects.dedup();
+    subjects
+}
+
 async fn logo_filenames(state: &AppState) -> Vec<String> {
     match state.db.as_ref() {
         Some(pool) => db::images::list_all(pool)
@@ -1113,6 +1133,7 @@ async fn new_form(
         },
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        subject_suggestions: subject_suggestions(&state).await,
         available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
@@ -1160,6 +1181,7 @@ async fn edit_form(
         },
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        subject_suggestions: subject_suggestions(&state).await,
         available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
@@ -1227,6 +1249,7 @@ async fn duplicate_form(
         form,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
+        subject_suggestions: subject_suggestions(&state).await,
         available_groups: group_names(&state).await,
         credential_names: credential_names(&state).await,
     };
@@ -1437,6 +1460,7 @@ async fn render_form_with_errors(
         form,
         errors,
         logo_images: logo_filenames(state).await,
+        subject_suggestions: subject_suggestions(state).await,
         available_groups: group_names(state).await,
         credential_names: credential_names(state).await,
     };

@@ -265,6 +265,7 @@ spec-form-actions = Ações
 spec-form-delete = Excluir aplicação
 spec-form-delete-confirm = Tem certeza? Esta ação não pode ser desfeita.
 
+spec-form-env-key = CHAVE
 spec-form-error-id-required = ID é obrigatório.
 spec-form-error-id-shape = ID deve começar com letra e conter apenas letras, números, "_" e "-".
 spec-form-error-id-duplicate = Já existe uma aplicação com esse ID.
@@ -407,6 +408,7 @@ search-shortcut = ⌘ K
 
 filter-subject-label = Assunto
 filter-subject-all = Todos os assuntos
+filter-status-label = Situação
 filter-status-active = Apenas ativos
 filter-status-all = Ativos e inativos
 filter-status-inactive-only = Apenas inativos

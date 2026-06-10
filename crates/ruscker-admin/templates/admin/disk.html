@@ -10,12 +10,20 @@
   </div>
 </div>
 
+{# Flash split (#746) — see groups/users: persistent role="alert"
+   errors, toastable role="status" successes; no colour-only state. #}
 {% if let Some(f) = flash %}
-  <div class="admin-login-error mb-3" role="status"
-       style="{% if flash_error %}{% else %}background:rgba(29,158,117,0.12);color:var(--text-primary){% endif %}">
-    <i class="ti ti-info-circle" aria-hidden="true"></i>
+  {% if flash_error %}
+  <div class="admin-login-error mb-3" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
     {{ self.t(f) }}
   </div>
+  {% else %}
+  <div class="admin-flash-ok mb-3" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {{ self.t(f) }}
+  </div>
+  {% endif %}
 {% endif %}
 
 {% if !available %}

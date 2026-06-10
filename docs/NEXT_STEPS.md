@@ -5,6 +5,10 @@ production. The "obvious" work is done; the next direction is a genuine
 choice, not a backlog to grind. This document captures the options so we
 can decide deliberately. It is a discussion artifact, not a commitment.
 
+> Status update (2026-06-10): the reliability preference below was
+> executed as the v0.2.5 audit (18 fixes) and the documentation
+> refresh. The remaining options stand as written.
+>
 > Owner preference (2026-06-01): **reliability** + a **documented
 > single-node deploy recipe**. The plan below leads with those; the rest
 > is kept for context.

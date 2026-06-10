@@ -70,7 +70,9 @@ tool" cases) is in
 
 ## Status
 
-**Production-ready and running in production.** Releases are
+**Production-ready and running in production.** The whole codebase
+went through a systematic bug / security / UX audit in June 2026,
+shipped as v0.2.5 with every finding fixed. Releases are
 multi-arch (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
 has the current version. Built for efficiency, Ruscker's idle footprint

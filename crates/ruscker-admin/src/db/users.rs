@@ -232,17 +232,24 @@ pub async fn verify_login(
     }
     .with_context(|| format!("login lookup {username}"))?;
 
+    // argon2id is ~tens of ms of pure CPU — run it on the blocking
+    // pool so it can't stall a tokio worker (and every proxied request
+    // sharing it) during a login burst (#744). The unknown-username
+    // branch spends the same verify time on a decoy hash so response
+    // timing doesn't reveal whether the account exists.
+    let pw = password.to_string();
+    let (hash_to_check, found) = match &row {
+        Some((.., hash)) => (hash.clone(), true),
+        None => (dummy_hash().to_string(), false),
+    };
+    let verified = tokio::task::spawn_blocking(move || verify_password(&pw, &hash_to_check))
+        .await
+        .context("password verify task")?;
     match row {
-        Some((id, u, r, m, g, c, by, hash)) if verify_password(password, &hash) => {
+        Some((id, u, r, m, g, c, by, _)) if found && verified => {
             Ok(Some(row_from(id, u, r, m, g, c, by)))
         }
-        Some(_) => Ok(None),
-        None => {
-            // Spend the same argon2 verify time on an unknown username
-            // so response timing doesn't reveal whether it exists.
-            let _ = verify_password(password, dummy_hash());
-            Ok(None)
-        }
+        _ => Ok(None),
     }
 }
 
@@ -266,7 +273,14 @@ pub async fn create(
     actor: Option<&str>,
 ) -> Result<()> {
     let username = normalize_username(username);
-    let hash = hash_password(password)?;
+    // argon2id hashing is CPU-bound — blocking pool, not a tokio
+    // worker (#744).
+    let hash = {
+        let pw = password.to_string();
+        tokio::task::spawn_blocking(move || hash_password(&pw))
+            .await
+            .context("password hash task")??
+    };
     let groups = join_groups(groups);
     let now = Utc::now();
     let id = uuid::Uuid::new_v4().to_string();
@@ -331,7 +345,12 @@ pub async fn set_password(
     actor: Option<&str>,
 ) -> Result<()> {
     let username = normalize_username(username);
-    let hash = hash_password(new_password)?;
+    let hash = {
+        let pw = new_password.to_string();
+        tokio::task::spawn_blocking(move || hash_password(&pw))
+            .await
+            .context("password hash task")??
+    };
     let now = Utc::now();
     let target = format!("user:{username}");
 

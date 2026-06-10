@@ -230,10 +230,16 @@ async fn forward(
     upstream_path: String,
     mut req: Request,
 ) -> Response {
+    // Whether the operator opted into trusting X-Forwarded-* (#328);
+    // gates both the scheme below and the X-Forwarded-For handling in
+    // the forward (#744).
+    let xfwd_trusted = forward_headers_trusted(&state.config.server);
     // Capture the request scheme before `req` is consumed by the
     // forward — used to decide the `Secure` flag on the sticky
-    // cookie we may set at the end.
-    let is_https = crate::auth::request_is_https(req.headers());
+    // cookie we may set at the end. Same trust gate as every other
+    // forwarded header (#744): without the opt-in, a direct client
+    // could flip the cookie's `Secure` flag with a spoofed header.
+    let is_https = crate::auth::request_is_https(req.headers(), xfwd_trusted);
 
     // Signed-in username (if any), captured before the access-guard below
     // consumes `session.0`. Used to index the session for `stop-on-logout`
@@ -621,6 +627,37 @@ async fn forward(
             HeaderValue::from_static("identity"),
         );
     }
+    // X-Forwarded-For (#744): apps behind a proxy expect the standard
+    // chain, and before this the client's header passed through
+    // VERBATIM with the real peer never appended — upstream apps that
+    // log or trust XFF saw spoofable data and never the true client.
+    // Trusted mode (server.useForwardHeaders) appends the peer to the
+    // inbound chain; untrusted mode replaces the (spoofable) inbound
+    // value with just the peer.
+    {
+        let peer_ip = peer.map(|p| p.ip().to_string());
+        let existing = req
+            .headers()
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+        let new_xff = match (peer_ip, existing) {
+            (Some(ip), Some(chain)) if xfwd_trusted => Some(format!("{chain}, {ip}")),
+            (Some(ip), _) => Some(ip),
+            // No peer (Router::oneshot tests): keep a trusted chain,
+            // drop an untrusted one.
+            (None, Some(chain)) if xfwd_trusted => Some(chain),
+            (None, _) => None,
+        };
+        match new_xff.and_then(|v| HeaderValue::from_str(&v).ok()) {
+            Some(v) => {
+                req.headers_mut().insert("x-forwarded-for", v);
+            }
+            None => {
+                req.headers_mut().remove("x-forwarded-for");
+            }
+        }
+    }
     let resp = match do_forward(
         &replica,
         upstream_path,
@@ -692,9 +729,14 @@ async fn forward(
     }
 
     // API specs aren't sticky, so count each forwarded call here (#549
-    // follow-up). One per request — for an API, each call *is* the access.
+    // follow-up). One per request — for an API, each call *is* the
+    // access. Spawned, not awaited (#744): the write is best-effort by
+    // contract, and awaiting it inline added a DB round-trip to every
+    // API response (serializing on SQLite's single writer under load).
     if spec.kind() == SpecKind::Api {
-        record_access(&state, &spec.id).await;
+        let st = state.clone();
+        let id = spec.id.clone();
+        tokio::spawn(async move { record_access(&st, &id).await });
     }
 
     let resp = with_cors(resp, cors_on);
@@ -1113,7 +1155,21 @@ async fn has_sticky_seat(state: &AppState, spec: &Spec, cookies: &Cookies) -> bo
 async fn at_capacity(state: &AppState, spec: &Spec) -> bool {
     let max = spec.effective_max_replicas() as usize;
     let reg = state.replicas.read().await;
-    reg.replicas_of(&spec.id).len() >= max
+    // Count only replicas a spawn would actually compete with —
+    // mirroring `spawn_one`'s notion of "live" (#744). Counting
+    // Failed/Stopped leftovers made the splash say "full — waiting for
+    // a slot" and skip the background spawn while `pick_or_spawn`'s own
+    // capped branch would happily have spawned over them.
+    reg.replicas_of(&spec.id)
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.state,
+                ReplicaState::Starting | ReplicaState::Ready | ReplicaState::Draining
+            )
+        })
+        .count()
+        >= max
 }
 
 /// The post-decode core of [`has_sticky_seat`]: does this sticky session
@@ -2981,6 +3037,116 @@ docker-registry-password: hunter2
                 assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
             }
             other => panic!("expected an HTTP 502 handshake rejection, got {other:?}"),
+        }
+    }
+
+    // #744: `at_capacity` must count only replicas a spawn would compete
+    // with (Starting/Ready/Draining) — a registry still holding a crashed
+    // replica made the splash claim "full — waiting for a slot" and skip
+    // the background spawn, while pick_or_spawn would happily have
+    // spawned over the corpse.
+    #[tokio::test]
+    async fn at_capacity_ignores_failed_and_stopped_replicas() {
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::from_millis(1),
+        });
+        let state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: capp
+container-image: t:1
+max-replicas: 1",
+        )
+        .unwrap();
+
+        let mk = |st: ReplicaState| Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "capp".into(),
+            container_id: "c".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: st,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+            host: None,
+        };
+
+        state.replicas.write().await.add(mk(ReplicaState::Failed));
+        assert!(
+            !at_capacity(&state, &spec).await,
+            "a Failed leftover must not count toward the ceiling"
+        );
+        state.replicas.write().await.add(mk(ReplicaState::Ready));
+        assert!(
+            at_capacity(&state, &spec).await,
+            "a live replica does count (max-replicas: 1)"
+        );
+    }
+
+    // #744: X-Forwarded-For handling on the forward. Untrusted (the
+    // default): a client-supplied chain is spoofable and must be
+    // dropped/replaced. Trusted (server.useForwardHeaders): the inbound
+    // chain is preserved (the peer is appended when one exists — under
+    // Router::oneshot there is no TCP peer, so the chain passes as-is).
+    #[tokio::test]
+    async fn xff_dropped_when_untrusted_and_kept_when_trusted() {
+        use tower::ServiceExt;
+
+        for (trusted, expect_xff) in [(false, false), (true, true)] {
+            let (up_addr, mut heads) = capture_upstream().await;
+            let backend = StdArc::new(CountingBackend {
+                spawns: AtomicU32::new(0),
+                delay: StdDuration::from_millis(1),
+            });
+            let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+            let yaml = if trusted {
+                "server:
+  useForwardHeaders: true
+proxy:
+  specs:
+    - id: x
+      container-image: t:1
+"
+            } else {
+                "proxy:
+  specs:
+    - id: x
+      container-image: t:1
+"
+            };
+            state.config = std::sync::Arc::new(ruscker_config::Config::from_yaml(yaml).unwrap());
+            state.replicas.write().await.add(Replica {
+                id: ReplicaId(uuid::Uuid::new_v4()),
+                spec_id: "x".into(),
+                container_id: "c".into(),
+                upstream: up_addr,
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 0,
+                sessions_max: 10,
+                host: None,
+            });
+            let app = Router::new()
+                .merge(routes())
+                .layer(tower_cookies::CookieManagerLayer::new())
+                .with_state(state);
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/app/x/data")
+                        .header("x-forwarded-for", "6.6.6.6")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let head = heads.recv().await.expect("upstream saw the request").to_ascii_lowercase();
+            assert_eq!(
+                head.contains("x-forwarded-for: 6.6.6.6"),
+                expect_xff,
+                "trusted={trusted}: spoofable XFF must only survive when the operator opted in\n{head}"
+            );
         }
     }
 

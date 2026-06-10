@@ -264,15 +264,22 @@ impl SessionStore for InMemorySessionStore {
         if victims.is_empty() {
             return 0;
         }
-        let n = victims.len();
+        let mut evicted = 0;
         {
             let mut reg = registry.write().await;
             for (sid, rid) in &victims {
-                reg.dec_sessions(rid);
-                self.sessions.remove(sid);
+                // Remove first; decrement only when WE removed it. A
+                // concurrent `end_session` (stop-on-logout #337) may have
+                // already evicted this sid and decremented — a second
+                // decrement undercounts the replica's seats and re-opens
+                // the over-admission class #582 closed (#744).
+                if self.sessions.remove(sid).is_some() {
+                    reg.dec_sessions(rid);
+                    evicted += 1;
+                }
             }
         }
-        n
+        evicted
     }
 
     /// Purge every session entry pointing at `replica_id`. Collects the

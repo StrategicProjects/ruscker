@@ -1,9 +1,10 @@
 # Roadmap
 
-Ruscker is at **v0.1.80** — Phases 0 through 7 are done and the proxy is
-production-ready and horizontally scalable. Phase 8 (external auth) is
-the main optional, demand-driven work left. For what changed in each
-release, see the [release notes](./news.md).
+Ruscker is at **v0.2.5** — Phases 0 through 7 are done, the proxy is
+production-ready and horizontally scalable, and a full bug / security /
+UX audit of the codebase shipped as v0.2.5 (every finding fixed). Phase
+8 (external auth) is the main optional, demand-driven work left. For
+what changed in each release, see the [release notes](./news.md).
 
 ![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-1.0 point releases add demo forks, URL-rewrite modernization, unified credentials, the media library, portal logos, admin UX polish, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
 
@@ -71,9 +72,13 @@ can serve any session; one scaler leader via Postgres advisory locks,
 with failover. A runnable 2-instance compose harness lives in
 `examples/ha/`. See [Deployment shapes](./architecture.md#deployment-shapes).
 
-### Post-phase polish → **v0.1.4 – v0.1.80**
+### Post-phase polish → **v0.1.4 – v0.2.5**
 
-Incremental improvements shipped after Phase 7.
+Incremental improvements shipped after Phase 7 — culminating in the
+**v0.2.x series**: the admin redesign to the new visual language
+(dashboard, Apps editor, the Appearance tab, Logs, Disk), and the
+**v0.2.5 audit release** (18 fixes across proxy correctness, security
+hardening, reliability and admin UX — see the release notes).
 
 **Demo app images.** The Dash, FastAPI, and Quarto showcase cards now
 point to dedicated **`milkway/ruscker-*-demo`** images on Docker Hub.

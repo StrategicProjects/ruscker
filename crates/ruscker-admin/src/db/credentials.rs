@@ -246,9 +246,14 @@ pub async fn resolve(
     }
 }
 
-/// Decrypt the password for a single credential. Used by the
-/// runtime when pulling an image; **not** exposed in the UI.
-/// Returns `None` if the name doesn't exist.
+/// Decrypt the password for a single credential. Returns `None` if the
+/// name doesn't exist. Handles BOTH storage forms the same way
+/// [`resolve`] does (#744): an empty nonce marks a `${VAR}` env-ref
+/// stored verbatim (resolved from the environment here), a non-empty
+/// nonce is AES-GCM ciphertext — this used to decrypt unconditionally
+/// and errored on every env-ref credential ("nonce must be 12 bytes,
+/// got 0"), a divergent copy of the storage contract waiting for its
+/// first production caller.
 pub async fn fetch_password(
     db: &ConfigDb,
     key: &MasterKey,
@@ -272,9 +277,16 @@ pub async fn fetch_password(
     match row {
         None => Ok(None),
         Some((enc, nonce)) => {
-            let pt = key.decrypt(&enc, &nonce)?;
-            let s = String::from_utf8(pt.to_vec())
-                .context("decrypted password is not valid UTF-8")?;
+            let s = if nonce.is_empty() {
+                let raw = String::from_utf8(enc)
+                    .context("stored credential reference is not valid UTF-8")?;
+                ruscker_config::env::interpolate_value(&raw)
+                    .with_context(|| format!("resolve ${{VAR}} in credential {name}"))?
+            } else {
+                let pt = key.decrypt(&enc, &nonce)?;
+                String::from_utf8(pt.to_vec())
+                    .context("decrypted password is not valid UTF-8")?
+            };
             Ok(Some(Zeroizing::new(s)))
         }
     }
@@ -471,6 +483,16 @@ mod tests {
             c2.password, "resolved-pw",
             "verbatim env-ref ignores the master key (not encrypted)"
         );
+
+        // #744: `fetch_password` must read BOTH storage forms like
+        // `resolve` does — it used to decrypt unconditionally and
+        // errored on every env-ref credential ("nonce must be 12
+        // bytes, got 0").
+        let pw = fetch_password(&db, &key, "envcred")
+            .await
+            .unwrap()
+            .expect("env-ref credential readable");
+        assert_eq!(&*pw, "resolved-pw");
     }
 
     #[tokio::test]

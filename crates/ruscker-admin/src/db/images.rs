@@ -257,130 +257,11 @@ pub async fn unique_filename(db: &ConfigDb, desired: &str) -> Result<String> {
     anyhow::bail!("no free filename for {desired} after 9999 tries")
 }
 
-/// Rename an image (filename only — the id and BLOB are untouched).
-/// The caller must ensure `new_filename` is free and fix up any
-/// references first. Writes an `image.rename` audit row.
-pub async fn rename(db: &ConfigDb, id: &str, new_filename: &str, actor: Option<&str>) -> Result<()> {
-    let now = Utc::now();
-    let target = format!("image:{id}");
-    let diff = serde_json::to_string(&serde_json::json!({ "filename": new_filename }))?;
-    match db {
-        ConfigDb::Sqlite(pool) => {
-            let mut tx = pool.begin().await.context("begin image rename tx")?;
-            sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
-                .bind(new_filename)
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .context("rename image (sqlite)")?;
-            sqlx::query(
-                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-                 VALUES (?, 'image.rename', ?, ?, ?)",
-            )
-            .bind(actor)
-            .bind(&target)
-            .bind(&diff)
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .context("audit image.rename (sqlite)")?;
-            tx.commit().await.context("commit image rename")?;
-        }
-        ConfigDb::Postgres(pool) => {
-            let mut tx = pool.begin().await.context("begin image rename tx")?;
-            sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
-                .bind(new_filename)
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .context("rename image (postgres)")?;
-            sqlx::query(
-                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-                 VALUES ($1, 'image.rename', $2, $3, $4)",
-            )
-            .bind(actor)
-            .bind(&target)
-            .bind(&diff)
-            .bind(now)
-            .execute(&mut *tx)
-            .await
-            .context("audit image.rename (postgres)")?;
-            tx.commit().await.context("commit image rename")?;
-        }
-    }
-    Ok(())
-}
-
-/// Delete an image by id. Returns the deleted row's filename (so the
-/// caller can invalidate caches keyed by it, #301), or `None` if no
-/// such image existed. Audit row is written when a row was removed.
-pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<Option<String>> {
-    let now = Utc::now();
-    let target = format!("image:{id}");
-    match db {
-        ConfigDb::Sqlite(pool) => {
-            let mut tx = pool.begin().await.context("begin image delete tx")?;
-            // Capture filename for the audit diff before deletion.
-            let filename: Option<(String,)> =
-                sqlx::query_as("SELECT filename FROM images WHERE id = ?")
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .context("lookup image for delete")?;
-            let rows = sqlx::query("DELETE FROM images WHERE id = ?")
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("delete image {id}"))?;
-            let removed = rows.rows_affected() > 0;
-            if removed {
-                sqlx::query(
-                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-                     VALUES (?, 'image.delete', ?, ?, ?)",
-                )
-                .bind(actor)
-                .bind(&target)
-                .bind(serde_json::to_string(&delete_diff(filename.as_ref()))?)
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .context("audit image.delete")?;
-            }
-            tx.commit().await.context("commit image delete")?;
-            Ok(if removed { filename.map(|(f,)| f) } else { None })
-        }
-        ConfigDb::Postgres(pool) => {
-            let mut tx = pool.begin().await.context("begin image delete tx")?;
-            let filename: Option<(String,)> =
-                sqlx::query_as("SELECT filename FROM images WHERE id = $1")
-                    .bind(id)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .context("lookup image for delete")?;
-            let rows = sqlx::query("DELETE FROM images WHERE id = $1")
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("delete image {id}"))?;
-            let removed = rows.rows_affected() > 0;
-            if removed {
-                sqlx::query(
-                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
-                     VALUES ($1, 'image.delete', $2, $3, $4)",
-                )
-                .bind(actor)
-                .bind(&target)
-                .bind(serde_json::to_string(&delete_diff(filename.as_ref()))?)
-                .bind(now)
-                .execute(&mut *tx)
-                .await
-                .context("audit image.delete")?;
-            }
-            tx.commit().await.context("commit image delete")?;
-            Ok(if removed { filename.map(|(f,)| f) } else { None })
-        }
-    }
-}
+// The pre-#729 single-row `rename` / `delete_one` were REMOVED (#744):
+// they mutated the image row without touching spec/landing references
+// (the dangling-ref TOCTOU the audit fixed) and survived only as a
+// footgun for the next call site. Use `rename_with_refs` /
+// `delete_with_refs` — one transaction covering the row AND its refs.
 
 /// Rename an image AND rewrite every reference to it (the given specs +
 /// landing) in **one transaction** (#720 audit P2). Before, the route
@@ -675,9 +556,13 @@ mod pg_tests {
         assert_eq!(metas[0].size_bytes, 4);
         assert_eq!(metas[0].width, Some(48));
 
-        // Returns the deleted filename now (#301).
+        // Returns the deleted filename now (#301); the atomic
+        // refs-aware delete is the only deletion path since #744.
         assert_eq!(
-            delete_one(&db, &id, Some("admin")).await.unwrap().as_deref(),
+            delete_with_refs(&db, &id, &[], None, Some("admin"))
+                .await
+                .unwrap()
+                .as_deref(),
             Some("logo.webp")
         );
         assert!(fetch_by_filename(&db, "logo.webp").await.unwrap().is_none());

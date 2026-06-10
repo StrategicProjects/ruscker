@@ -393,14 +393,25 @@ impl Default for LoginRateLimiter {
 /// whether to set the `Secure` flag on cookies — we can't just
 /// always set it because the dev server runs plain HTTP and the
 /// browser would then drop the cookie.
-pub fn request_is_https(headers: &axum::http::HeaderMap) -> bool {
+pub fn request_is_https(headers: &axum::http::HeaderMap, forwarded_trusted: bool) -> bool {
+    // Same trust model as every other X-Forwarded-* read (#744): only
+    // honoured when the operator opted in (`server.useForwardHeaders`).
+    // Before this, ANY client could flip a cookie's `Secure` flag with
+    // a spoofed header. TLS-terminating deployments must set the flag
+    // — ShinyProxy-migrated configs already do.
+    if !forwarded_trusted {
+        return false;
+    }
     headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
-        // XFP can be a comma list ("https, http") when chained;
-        // the leftmost is the original client scheme.
+        // XFP can be a comma list ("https, http") when chained; take
+        // the RIGHTMOST entry — the one appended by the trusted proxy
+        // closest to us. The leftmost is client-controlled whenever a
+        // proxy appends instead of replacing (the spoof-unsafe slot,
+        // same rationale as `client_key`'s XFF handling).
         .map(|s| {
-            s.split(',')
+            s.rsplit(',')
                 .next()
                 .map(|p| p.trim().eq_ignore_ascii_case("https"))
                 .unwrap_or(false)
@@ -739,22 +750,36 @@ mod tests {
     }
 
     #[test]
-    fn request_is_https_reads_x_forwarded_proto() {
+    fn request_is_https_reads_x_forwarded_proto_when_trusted() {
         let mut h = HeaderMap::new();
-        assert!(!request_is_https(&h), "no header → not https");
+        assert!(!request_is_https(&h, true), "no header → not https");
         h.insert("x-forwarded-proto", "http".parse().unwrap());
-        assert!(!request_is_https(&h));
+        assert!(!request_is_https(&h, true));
         h.insert("x-forwarded-proto", "https".parse().unwrap());
-        assert!(request_is_https(&h));
+        assert!(request_is_https(&h, true));
+    }
+
+    // #744: XFP rides the same opt-in as every other forwarded header —
+    // without `server.useForwardHeaders`, a direct client could flip a
+    // cookie's `Secure` flag with a spoofed header.
+    #[test]
+    fn request_is_https_ignores_header_when_untrusted() {
+        let mut h = HeaderMap::new();
+        h.insert("x-forwarded-proto", "https".parse().unwrap());
+        assert!(!request_is_https(&h, false), "untrusted → header ignored");
     }
 
     #[test]
     fn request_is_https_handles_chained_proto_list() {
         let mut h = HeaderMap::new();
-        // Chained proxies: leftmost is the original client scheme.
+        // Chained proxies: the RIGHTMOST entry is the one the trusted
+        // proxy appended — the spoof-safe slot (#744). A client sending
+        // "https" through an appending plain-HTTP proxy must not win.
         h.insert("x-forwarded-proto", "https, http".parse().unwrap());
-        assert!(request_is_https(&h));
+        assert!(!request_is_https(&h, true), "client-spoofed leftmost loses");
+        h.insert("x-forwarded-proto", "http, https".parse().unwrap());
+        assert!(request_is_https(&h, true), "trusted rightmost wins");
         h.insert("x-forwarded-proto", "HTTPS".parse().unwrap());
-        assert!(request_is_https(&h), "case-insensitive");
+        assert!(request_is_https(&h, true), "case-insensitive");
     }
 }

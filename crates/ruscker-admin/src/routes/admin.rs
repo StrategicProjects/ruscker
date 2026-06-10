@@ -140,14 +140,19 @@ async fn redirect_to_dashboard(_: AdminSession) -> Redirect {
 }
 
 /// Issue the admin session cookie. 24h lifetime; `Secure` only under
-/// TLS (signalled by `X-Forwarded-Proto`) so the plain-HTTP dev server
-/// doesn't make the browser drop it. The value is an opaque session id.
-fn issue_session_cookie(cookies: &Cookies, headers: &HeaderMap, session_id: String) {
+/// TLS (signalled by `X-Forwarded-Proto`, honoured only when the
+/// operator trusts forwarded headers — #744) so the plain-HTTP dev
+/// server doesn't make the browser drop it. The value is an opaque
+/// session id.
+fn issue_session_cookie(state: &AppState, cookies: &Cookies, headers: &HeaderMap, session_id: String) {
     let mut c = Cookie::new(COOKIE_NAME, session_id);
     c.set_path("/");
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Strict);
-    c.set_secure(crate::auth::request_is_https(headers));
+    c.set_secure(crate::auth::request_is_https(
+        headers,
+        crate::routes::proxy::forward_headers_trusted(&state.config.server),
+    ));
     c.set_max_age(Duration::hours(24));
     cookies.add(c);
 }
@@ -281,7 +286,7 @@ async fn login_submit(
         .admin_sessions
         .create(user.role, Some(user.username.clone()))
         .await;
-    issue_session_cookie(&cookies, &headers, session_id);
+    issue_session_cookie(&state, &cookies, &headers, session_id);
 
     // First login with an admin-assigned password ⇒ ask whether to
     // change it.
@@ -384,7 +389,7 @@ async fn token_login(
 
     state.login_limiter.record_success();
     let session_id = state.admin_sessions.create(Role::Admin, None).await;
-    issue_session_cookie(&cookies, &headers, session_id);
+    issue_session_cookie(&state, &cookies, &headers, session_id);
 
     // No admin account yet (and a DB to create one in) ⇒ run setup.
     let need_setup = match state.db.as_ref() {
@@ -504,7 +509,7 @@ async fn setup_submit(
         .admin_sessions
         .create(Role::Admin, Some(username))
         .await;
-    issue_session_cookie(&cookies, &headers, session_id);
+    issue_session_cookie(&state, &cookies, &headers, session_id);
     Redirect::to("/admin/dashboard").into_response()
 }
 
@@ -628,7 +633,7 @@ async fn password_submit(
         .admin_sessions
         .create(session.role, Some(actor.clone()))
         .await;
-    issue_session_cookie(&cookies, &headers, session_id);
+    issue_session_cookie(&state, &cookies, &headers, session_id);
     Redirect::to("/admin/dashboard").into_response()
 }
 

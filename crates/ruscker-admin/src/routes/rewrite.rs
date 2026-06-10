@@ -187,6 +187,20 @@ pub async fn inject_base_href(
         return Response::from_parts(parts, body);
     }
 
+    // Defense-in-depth (#732): the proxy asks the upstream for
+    // `Accept-Encoding: identity` whenever this transform is enabled,
+    // but a non-compliant server may compress anyway. A content-encoded
+    // body is opaque bytes — running the rewriter over it would corrupt
+    // the stream — so pass it through untouched instead.
+    let content_encoded = parts
+        .headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|s| !s.trim().eq_ignore_ascii_case("identity"));
+    if content_encoded {
+        return Response::from_parts(parts, body);
+    }
+
     // Decide *before* consuming the body. A declared Content-Length over
     // the transform cap streams the original through untouched — we
     // can't buffer-then-fail, because `to_bytes` would have already
@@ -1031,6 +1045,38 @@ mod tests {
         let out = inject_base_href(resp, "/app/foo/", "").await;
         let s = body_string(out).await;
         assert_eq!(s, "{\"a\":1}");
+    }
+
+    // #732: a content-encoded HTML body is opaque bytes — the rewriter
+    // must pass it through bit-identical (no <base href>, no shim)
+    // instead of corrupting the compressed stream.
+    #[tokio::test]
+    async fn inject_base_href_passes_compressed_html_through_untouched() {
+        // Not real gzip — just bytes that must come back identical.
+        let payload: &[u8] = b"\x1f\x8b\x08\x00<html><head></head></html>";
+        let resp = Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "text/html; charset=utf-8")
+            .header(header::CONTENT_ENCODING, "gzip")
+            .body(Body::from(payload))
+            .unwrap();
+        let out = inject_base_href(resp, "/app/foo/", "").await;
+        assert_eq!(
+            out.headers().get(header::CONTENT_ENCODING).unwrap(),
+            "gzip"
+        );
+        let bytes = out.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(bytes.as_ref(), payload, "compressed body must not be touched");
+    }
+
+    // `identity` means "not encoded" — the transform must still run.
+    #[tokio::test]
+    async fn inject_base_href_treats_identity_encoding_as_plain() {
+        let mut resp = html_response("<html><head></head><body></body></html>");
+        resp.headers_mut()
+            .insert(header::CONTENT_ENCODING, "identity".parse().unwrap());
+        let out = body_string(inject_base_href(resp, "/app/foo/", "").await).await;
+        assert!(out.contains("<base href=\"/app/foo/\">"), "got: {out}");
     }
 
     #[tokio::test]

@@ -228,7 +228,7 @@ async fn forward(
     route_prefix: &'static str,
     spec_id: String,
     upstream_path: String,
-    req: Request,
+    mut req: Request,
 ) -> Response {
     // Capture the request scheme before `req` is consumed by the
     // forward — used to decide the `Secure` flag on the sticky
@@ -606,6 +606,21 @@ async fn forward(
     // to meter). Only API specs — interactive apps meter via sticky sessions.
     let inflight =
         (route_prefix == API_PREFIX).then(|| InflightGuard::new(replica.id.clone()));
+    // Whether 6b below will transform HTML bodies. Decided here because
+    // the *request* must match: when we transform, the upstream must not
+    // compress — nothing decompresses in between, so a gzip/br HTML body
+    // would reach the rewriter as opaque bytes: no `<base href>`, no
+    // runtime shim, and lol_html mutating compressed bytes corrupts the
+    // stream outright (#732). `identity` asks the app for plain bytes
+    // (ShinyProxy does the same). Non-transformed routes (the `/api/`
+    // family, `inject-base-href: false`) keep end-to-end compression.
+    let transform_html = route_prefix == APP_PREFIX && spec.effective_inject_base_href();
+    if transform_html {
+        req.headers_mut().insert(
+            header::ACCEPT_ENCODING,
+            HeaderValue::from_static("identity"),
+        );
+    }
     let resp = match do_forward(
         &replica,
         upstream_path,
@@ -637,7 +652,7 @@ async fn forward(
     //     return JSON / binary, not HTML. Operators can also disable
     //     the transform per spec (`inject-base-href: false`) once the
     //     app self-routes from the forwarded-prefix headers above.
-    let resp = if route_prefix == APP_PREFIX && spec.effective_inject_base_href() {
+    let resp = if transform_html {
         // Include the portal base path (#173) so the app's `<base href>`
         // is `/box/app/{spec}/` when Ruscker is mounted under `/box`.
         let base = format!("{}{route_prefix}{}/", state.base_path, spec.id);
@@ -2938,5 +2953,127 @@ docker-registry-password: hunter2
             }
             other => panic!("expected an HTTP 502 handshake rejection, got {other:?}"),
         }
+    }
+
+    /// Mock HTTP upstream that captures each connection's request head
+    /// and answers a minimal 200. Returns its address and the channel
+    /// the heads arrive on.
+    async fn capture_upstream() -> (
+        SocketAddr,
+        tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut conn, _)) = listener.accept().await else {
+                    return;
+                };
+                let tx = tx.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        match conn.read(&mut chunk).await {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                        }
+                    }
+                    let _ = tx.send(String::from_utf8_lossy(&buf).into_owned());
+                    let _ = conn
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                        )
+                        .await;
+                });
+            }
+        });
+        (addr, rx)
+    }
+
+    // #732: when the response will be HTML-transformed (the `/app/`
+    // family with `inject-base-href` on — the default), the upstream
+    // request must carry `Accept-Encoding: identity`: a gzip/br HTML
+    // body would reach the rewriter as opaque bytes (no <base href>,
+    // possibly corrupted). With the transform disabled per spec, the
+    // client's Accept-Encoding must pass through untouched.
+    #[tokio::test]
+    async fn app_forward_asks_upstream_for_identity_encoding_iff_transforming() {
+        use tower::ServiceExt;
+
+        let (up_addr, mut heads) = capture_upstream().await;
+
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::ZERO,
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        state.config = std::sync::Arc::new(
+            ruscker_config::Config::from_yaml(
+                "proxy:\n  specs:\n    - id: rewritten\n      container-image: t:1\n    - id: raw\n      container-image: t:1\n      inject-base-href: false\n",
+            )
+            .expect("config"),
+        );
+        for id in ["rewritten", "raw"] {
+            state.replicas.write().await.add(Replica {
+                id: ReplicaId(uuid::Uuid::new_v4()),
+                spec_id: id.into(),
+                container_id: "c".into(),
+                upstream: up_addr,
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 0,
+                sessions_max: 10,
+                host: None,
+            });
+        }
+        let app = Router::new()
+            .merge(routes())
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state);
+
+        // Transformed spec: the client's gzip offer must NOT reach the app.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/app/rewritten/data.html")
+                    .header(header::ACCEPT_ENCODING, "gzip, br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let head = heads.recv().await.expect("upstream saw the request");
+        let head_lower = head.to_ascii_lowercase();
+        assert!(
+            head_lower.contains("accept-encoding: identity"),
+            "transforming forward must ask for identity, got:\n{head}"
+        );
+        assert!(
+            !head_lower.contains("gzip"),
+            "client's compressed offer leaked through:\n{head}"
+        );
+
+        // Transform disabled: end-to-end compression stays available.
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/app/raw/data.html")
+                    .header(header::ACCEPT_ENCODING, "gzip, br")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let head = heads.recv().await.expect("upstream saw the request");
+        assert!(
+            head.to_ascii_lowercase().contains("accept-encoding: gzip, br"),
+            "non-transforming forward must pass the client's offer through, got:\n{head}"
+        );
     }
 }

@@ -1085,6 +1085,40 @@ mod tests {
         assert!(html.contains("3</span>") || html.contains(">3<"));
     }
 
+    // #740: the stop/restart confirmation must ride a `data-confirm`
+    // attribute consumed by the delegated submit listener — NEVER an
+    // inline onsubmit handler. An inline handler interpolating a
+    // localized message breaks at the message's own quotes (the
+    // JSON.stringify-in-double-quoted-attribute variant shipped with NO
+    // confirmation at all), so the rendered page must not contain
+    // `onsubmit` anywhere — including inside the SSE row-builder script.
+    #[test]
+    fn replica_actions_use_data_confirm_not_inline_onsubmit() {
+        let html = render_with(
+            vec![fake_row("alpha", "Alpha App", ReplicaState::Ready, 1, 1)],
+            true,
+        );
+        assert!(
+            html.contains("data-confirm="),
+            "action forms must carry the confirm message via data-confirm"
+        );
+        assert!(
+            html.contains("addEventListener('submit'"),
+            "the delegated confirm listener must be wired on the container"
+        );
+        // Every <form …> opening tag on the page — server-rendered AND the
+        // ones built as string literals inside the SSE row script — must be
+        // free of inline onsubmit. (A page-wide substring check would trip
+        // on the _perceived_speed.html comment that *mentions* onsubmit.)
+        for chunk in html.split("<form").skip(1) {
+            let tag = &chunk[..chunk.find('>').unwrap_or(chunk.len())];
+            assert!(
+                !tag.contains("onsubmit"),
+                "a form still carries an inline onsubmit handler: <form{tag}>"
+            );
+        }
+    }
+
     #[test]
     fn renders_replicas_grouped_by_app_in_accordion_cards() {
         // #623 redesign: each app is one expandable `.app-group` card with

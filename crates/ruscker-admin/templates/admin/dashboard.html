@@ -149,10 +149,14 @@
         <span class="replica-actions">
           {% if role.can_manage() %}
           <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"><i class="ti ti-file-text" aria-hidden="true"></i></a>
-          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/restart" style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-restart") }}')">
+          {# data-confirm + the delegated submit listener below — never an
+             inline onsubmit: a localized message inside an inline handler
+             breaks the handler when it carries quotes/apostrophes (#740,
+             same class as #532/#741). #}
+          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/restart" style="display:inline" data-confirm="{{ self.t("admin-dashboard-confirm-restart") }}">
             <button type="submit" title="{{ self.t("admin-dashboard-action-restart") }}"><i class="ti ti-refresh" aria-hidden="true"></i></button>
           </form>
-          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/stop" style="display:inline" onsubmit="return confirm('{{ self.t("admin-dashboard-confirm-stop") }}')">
+          <form method="post" action="{{ base }}/admin/dashboard/replicas/{{ row.replica_id }}/stop" style="display:inline" data-confirm="{{ self.t("admin-dashboard-confirm-stop") }}">
             <button type="submit" class="is-danger" title="{{ self.t("admin-dashboard-action-stop") }}"><i class="ti ti-player-stop" aria-hidden="true"></i></button>
           </form>
           {% endif %}
@@ -172,6 +176,20 @@
 (function () {
   var container = document.getElementById('dash-groups');
   var emptyEl = document.getElementById('dash-empty');
+  // Confirm guard for the stop/restart forms (#740). Delegated — NOT an
+  // inline onsubmit per form: the old generated rows interpolated the
+  // localized message into a double-quoted onsubmit attribute, the
+  // message's own quotes terminated the attribute, the handler never
+  // compiled, and destructive actions fired with NO confirmation. One
+  // listener on the container survives every SSE innerHTML rebuild and
+  // covers the server-rendered rows too (submit events bubble).
+  if (container) {
+    container.addEventListener('submit', function (e) {
+      var form = e.target;
+      var msg = form && form.getAttribute && form.getAttribute('data-confirm');
+      if (msg && !window.confirm(msg)) e.preventDefault();
+    });
+  }
   var ds = (container && container.dataset) || {};
   var pendingLabel = ds.pendingLabel || 'awaiting first reading';
   var logsTitle = ds.logsTitle || 'Logs';
@@ -216,11 +234,11 @@
       + '<a href="' + base + '/admin/dashboard/logs/' + rid + '" title="' + escapeHtml(logsTitle)
         + '"><i class="ti ti-file-text"></i></a>'
       + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
-        + '/restart" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmRestart) + ')">'
+        + '/restart" style="display:inline" data-confirm="' + escapeHtml(confirmRestart) + '">'
         + '<button type="submit" title="' + escapeHtml(restartLabel) + '"><i class="ti ti-refresh"></i></button>'
       + '</form>'
       + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
-        + '/stop" style="display:inline" onsubmit="return confirm(' + JSON.stringify(confirmStop) + ')">'
+        + '/stop" style="display:inline" data-confirm="' + escapeHtml(confirmStop) + '">'
         + '<button type="submit" class="is-danger" title="' + escapeHtml(stopLabel) + '"><i class="ti ti-player-stop"></i></button>'
       + '</form>';
   }

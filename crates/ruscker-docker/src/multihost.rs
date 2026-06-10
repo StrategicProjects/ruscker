@@ -16,8 +16,8 @@ use bollard::{Docker, API_DEFAULT_VERSION};
 use dashmap::DashMap;
 use ruscker_config::{Host, Placement};
 use ruscker_core::{
-    ContainerBackend, CoreError, CoreResult, LogStream, Replica, ReplicaId, ReplicaMetrics,
-    SpawnRequest,
+    ContainerBackend, CoreError, CoreResult, ImageInfo, LogStream, ManagedContainer,
+    RegistryCredentials, Replica, ReplicaId, ReplicaMetrics, SpawnRequest,
 };
 
 use crate::LocalDockerBackend;
@@ -295,6 +295,30 @@ impl MultiHostDockerBackend {
     }
 }
 
+/// Fold one host's image into the cross-host view (#734): the same image
+/// id on several hosts is one logical disk-panel entry. Container
+/// references sum across hosts; a `-1` "unknown" from any host poisons
+/// the sum to `-1`, which the panel treats as in-use — the safe side for
+/// a "remove unused" action. Tags union.
+fn merge_image(by_id: &mut std::collections::HashMap<String, ImageInfo>, img: ImageInfo) {
+    match by_id.get_mut(&img.id) {
+        Some(seen) => {
+            seen.containers = match (seen.containers, img.containers) {
+                (-1, _) | (_, -1) => -1,
+                (a, b) => a + b,
+            };
+            for t in img.tags {
+                if !seen.tags.contains(&t) {
+                    seen.tags.push(t);
+                }
+            }
+        }
+        None => {
+            by_id.insert(img.id.clone(), img);
+        }
+    }
+}
+
 #[async_trait]
 impl ContainerBackend for MultiHostDockerBackend {
     async fn spawn(&self, spec_id: &str, image: &str) -> CoreResult<Replica> {
@@ -400,6 +424,160 @@ impl ContainerBackend for MultiHostDockerBackend {
         Err(CoreError::Backend(format!(
             "replica {replica_id} not found on any host"
         )))
+    }
+
+    // ── Disk management + image ops (#734) ─────────────────────────
+    // These used to fall through to the trait's no-op defaults, which
+    // silently disabled three subsystems on multi-host: the scaler's
+    // crash-liveness reconcile (`list_managed_containers` returned an
+    // empty Vec, so a crashed replica stayed `Ready` holding leaked
+    // seats), the entire Disk panel + `stop_spec`'s reap, and the spec
+    // editor's image indicator / Pull button. Every impl follows
+    // `list`'s degraded philosophy: a host that fails to answer is
+    // logged and skipped, never fatal for the others.
+
+    async fn list_managed_containers(&self) -> CoreResult<Vec<ManagedContainer>> {
+        // NOTE for the scaler's liveness prune: a skipped (unreachable)
+        // host simply doesn't report its containers, and
+        // `stopped_replica_ids` treats *absence* as "not stopped" — so a
+        // degraded fan-out can never cause a false prune.
+        let mut all = Vec::new();
+        for h in &self.hosts {
+            match h.backend.list_managed_containers().await {
+                Ok(cs) => all.extend(cs),
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "list managed containers on host failed; skipping");
+                }
+            }
+        }
+        Ok(all)
+    }
+
+    async fn remove_container(&self, container_id: &str) -> CoreResult<()> {
+        // Container ids aren't in the placement map (that's keyed by
+        // replica id), so mirror `stop`'s placement-miss path: try every
+        // host, succeed on the first that owns it.
+        let mut last_err: Option<CoreError> = None;
+        for h in &self.hosts {
+            match h.backend.remove_container(container_id).await {
+                Ok(()) => return Ok(()),
+                Err(e) => last_err = Some(e),
+            }
+        }
+        Err(last_err
+            .unwrap_or_else(|| CoreError::Backend("no docker hosts configured".into())))
+    }
+
+    async fn prune_stopped(&self) -> CoreResult<usize> {
+        let mut removed = 0;
+        for h in &self.hosts {
+            match h.backend.prune_stopped().await {
+                Ok(n) => removed += n,
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "prune stopped on host failed; skipping");
+                }
+            }
+        }
+        Ok(removed)
+    }
+
+    async fn list_images(&self) -> CoreResult<Vec<ImageInfo>> {
+        // Merge by image id — the same image pulled on two hosts is one
+        // logical entry for the disk panel. Container references sum
+        // across hosts (a `-1` "unknown" from any host poisons the sum
+        // to `-1`, which the panel treats as in-use — the safe side).
+        let mut by_id: std::collections::HashMap<String, ImageInfo> =
+            std::collections::HashMap::new();
+        for h in &self.hosts {
+            match h.backend.list_images().await {
+                Ok(images) => {
+                    for img in images {
+                        merge_image(&mut by_id, img);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "list images on host failed; skipping");
+                }
+            }
+        }
+        Ok(by_id.into_values().collect())
+    }
+
+    async fn remove_image(&self, image: &str) -> CoreResult<()> {
+        // Remove everywhere it exists. A host that doesn't have it
+        // errors (daemon 404) — that's fine as long as SOME host removed
+        // it; if none did, surface the last error.
+        let mut removed_any = false;
+        let mut last_err: Option<CoreError> = None;
+        for h in &self.hosts {
+            match h.backend.remove_image(image).await {
+                Ok(()) => removed_any = true,
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if removed_any {
+            Ok(())
+        } else {
+            Err(last_err
+                .unwrap_or_else(|| CoreError::Backend("no docker hosts configured".into())))
+        }
+    }
+
+    async fn image_present(&self, image: &str) -> CoreResult<bool> {
+        // "Present" means present on EVERY reachable host — a spawn can
+        // land anywhere, so the editor's indicator should only read
+        // "on server" when no host would need a cold pull. Unreachable
+        // hosts are skipped (degraded), matching `list`.
+        let mut on_all = true;
+        let mut answered = false;
+        for h in &self.hosts {
+            match h.backend.image_present(image).await {
+                Ok(present) => {
+                    answered = true;
+                    on_all &= present;
+                }
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "image presence check on host failed; skipping");
+                }
+            }
+        }
+        Ok(answered && on_all)
+    }
+
+    async fn pull_image(
+        &self,
+        image: &str,
+        creds: Option<&RegistryCredentials>,
+        platform: Option<&str>,
+    ) -> CoreResult<LogStream> {
+        // Pull on every host in parallel, interleaving the progress
+        // lines with a `[host]` prefix so the editor's Pull console
+        // shows where each line came from. A host whose pull fails to
+        // START contributes a single error line instead of killing the
+        // others; if no host can start, error out.
+        use futures_util::StreamExt;
+        let mut streams: Vec<LogStream> = Vec::new();
+        let mut started = 0usize;
+        for h in &self.hosts {
+            let prefix = format!("[{}] ", h.id);
+            match h.backend.pull_image(image, creds, platform).await {
+                Ok(s) => {
+                    started += 1;
+                    streams.push(Box::pin(s.map(move |line| format!("{prefix}{line}"))));
+                }
+                Err(e) => {
+                    streams.push(Box::pin(futures_util::stream::iter(vec![format!(
+                        "{prefix}pull failed to start: {e}"
+                    )])));
+                }
+            }
+        }
+        if started == 0 {
+            return Err(CoreError::Backend(
+                "image pull failed to start on every host".into(),
+            ));
+        }
+        Ok(Box::pin(futures_util::stream::select_all(streams)))
     }
 }
 
@@ -603,5 +781,112 @@ mod tests {
         // Routed stop reaches the owning host.
         backend.stop(&r1.id).await.expect("stop 1");
         backend.stop(&r2.id).await.expect("stop 2");
+    }
+
+    // ── #734: cross-host image merge (pure) ─────────────────────────
+
+    fn img(id: &str, tags: &[&str], containers: i64) -> ruscker_core::ImageInfo {
+        ruscker_core::ImageInfo {
+            id: id.into(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            size_bytes: 1024,
+            containers,
+        }
+    }
+
+    #[test]
+    fn merge_image_sums_containers_and_unions_tags() {
+        let mut by_id = std::collections::HashMap::new();
+        merge_image(&mut by_id, img("sha256:a", &["app:1"], 2));
+        merge_image(&mut by_id, img("sha256:a", &["app:1", "app:latest"], 3));
+        let merged = &by_id["sha256:a"];
+        assert_eq!(merged.containers, 5, "references sum across hosts");
+        assert_eq!(merged.tags, vec!["app:1", "app:latest"], "tags union, no dupes");
+        assert_eq!(by_id.len(), 1, "same id is one logical entry");
+    }
+
+    #[test]
+    fn merge_image_unknown_count_poisons_to_in_use() {
+        // A `-1` (daemon can't tell) from ANY host must keep the merged
+        // entry on the safe side of "remove unused".
+        let mut by_id = std::collections::HashMap::new();
+        merge_image(&mut by_id, img("sha256:b", &[], 0));
+        merge_image(&mut by_id, img("sha256:b", &[], -1));
+        assert_eq!(by_id["sha256:b"].containers, -1);
+        // And the other order too.
+        let mut by_id = std::collections::HashMap::new();
+        merge_image(&mut by_id, img("sha256:c", &[], -1));
+        merge_image(&mut by_id, img("sha256:c", &[], 4));
+        assert_eq!(by_id["sha256:c"].containers, -1);
+    }
+
+    /// #734 against a real daemon: a single-host MultiHostDockerBackend
+    /// must actually answer the disk/image surface — every one of these
+    /// returned the trait's empty/no-op default before, which silently
+    /// disabled the scaler's liveness reconcile, the Disk panel and the
+    /// image indicator on multi-host deployments.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn multihost_disk_and_image_ops_against_real_docker() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = MultiHostDockerBackend {
+            hosts: vec![HostEntry {
+                id: "h1".into(),
+                backend: LocalDockerBackend::local().expect("connect docker"),
+                max_containers: None,
+                weight: 1,
+            }],
+            placement: DashMap::new(),
+        };
+
+        let replica = backend
+            .spawn_request(&SpawnRequest::new("mh-disk-itest", &image).with_port(80))
+            .await
+            .expect("spawn");
+
+        // The liveness reconcile's input: the fan-out must report the
+        // running container (the old default returned an empty Vec).
+        let managed = backend
+            .list_managed_containers()
+            .await
+            .expect("list managed");
+        let ours = managed
+            .iter()
+            .find(|c| c.id == replica.container_id)
+            .expect("spawned container reported by the fan-out");
+        assert!(ours.running);
+        assert_eq!(ours.spec_id.as_deref(), Some("mh-disk-itest"));
+
+        // Image surface: present on the (single) host, listed with size.
+        assert!(
+            backend.image_present(&image).await.expect("presence"),
+            "freshly used image must read as present"
+        );
+        assert!(
+            backend
+                .list_images()
+                .await
+                .expect("list images")
+                .iter()
+                .any(|i| i.size_bytes > 0),
+            "fan-out image list must carry real entries"
+        );
+
+        // remove_container routes by try-each-host (and doubles as
+        // teardown).
+        backend
+            .remove_container(&replica.container_id)
+            .await
+            .expect("remove container");
+        assert!(
+            !backend
+                .list_managed_containers()
+                .await
+                .expect("list after")
+                .iter()
+                .any(|c| c.id == replica.container_id),
+            "removed container must disappear from the fan-out"
+        );
     }
 }

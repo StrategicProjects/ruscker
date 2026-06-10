@@ -116,11 +116,13 @@
           </div>
           {# Rename: prompt for a new name (extension is kept server-side),
              then submit. References on cards/landing follow the rename. The
-             prompt text must carry no apostrophe — Askama escapes it and the
-             browser would break the single-quoted JS string (cf. #532). #}
+             prompt text rides data-* + dataset (#741) — interpolated into the
+             attribute expression, an apostrophe in a translation broke the
+             handler (the #532 comment-only policy regressed elsewhere). #}
           <form method="post" :action="assetUrl('/admin/media/' + img.id + '/rename')"
+                data-rename-prompt="{{ self.t("admin-images-rename-prompt") }}"
                 @submit="
-                  let nn = prompt('{{ self.t("admin-images-rename-prompt") }}', img.filename);
+                  let nn = prompt($el.dataset.renamePrompt, img.filename);
                   if (!nn || !nn.trim() || nn.trim() === img.filename) { $event.preventDefault(); return; }
                   $el.querySelector('input[name=newname]').value = nn.trim();
                 ">
@@ -129,8 +131,13 @@
               <i class="ti ti-pencil" aria-hidden="true"></i>
             </button>
           </form>
+          {# Conditional message → stays an Alpine handler (the global
+             data-confirm guard is unconditional), but the strings ride
+             data-* so translations can't break the expression (#741). #}
           <form method="post" :action="assetUrl('/admin/media/' + img.id + '/delete')"
-                @submit="if (!confirm(img.in_use ? '{{ self.t("admin-images-delete-confirm-inuse") }}' : '{{ self.t("admin-images-delete-confirm") }}')) $event.preventDefault()">
+                data-msg-inuse="{{ self.t("admin-images-delete-confirm-inuse") }}"
+                data-msg-plain="{{ self.t("admin-images-delete-confirm") }}"
+                @submit="if (!confirm(img.in_use ? $el.dataset.msgInuse : $el.dataset.msgPlain)) $event.preventDefault()">
             <button type="submit" class="image-tile-delete" title="{{ self.t("admin-images-delete") }}">
               <i class="ti ti-trash" aria-hidden="true"></i>
             </button>

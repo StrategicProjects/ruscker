@@ -69,7 +69,7 @@
         </div>
         {% if unused_images_count > 0 %}
         <form method="post" action="{{ base }}/admin/disk/images/prune" class="disk-prune-form"
-              onsubmit="return confirm('{{ self.t("admin-disk-prune-images-confirm") }}')">
+              data-confirm="{{ self.t("admin-disk-prune-images-confirm") }}">
           <button type="submit" class="admin-login-btn admin-login-btn--danger"
                   style="padding:7px 12px;font-size:12px"
                   data-busy="{{ self.t("admin-disk-cleaning") }}">
@@ -110,7 +110,7 @@
                 </span>
               {% else %}
                 <form method="post" action="{{ base }}/admin/disk/images/remove" style="display:inline"
-                      onsubmit="return confirm('{{ self.t("admin-disk-remove-image-confirm") }}')">
+                      data-confirm="{{ self.t("admin-disk-remove-image-confirm") }}">
                   <input type="hidden" name="id" value="{{ img.id }}">
                   <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
                     <i class="ti ti-trash"></i>
@@ -141,7 +141,7 @@
         </div>
         {% if stopped_count > 0 %}
         <form method="post" action="{{ base }}/admin/disk/containers/prune" class="disk-prune-form"
-              onsubmit="return confirm('{{ self.t("admin-disk-prune-confirm") }}')">
+              data-confirm="{{ self.t("admin-disk-prune-confirm") }}">
           <button type="submit" class="admin-login-btn admin-login-btn--danger"
                   style="padding:7px 12px;font-size:12px"
                   data-busy="{{ self.t("admin-disk-cleaning") }}">
@@ -177,7 +177,7 @@
             </td>
             <td style="text-align:right;white-space:nowrap">
               <form method="post" action="{{ base }}/admin/disk/containers/remove" style="display:inline"
-                    onsubmit="return confirm('{% if c.running %}{{ self.t("admin-disk-remove-running-confirm") }}{% else %}{{ self.t("admin-disk-remove-confirm") }}{% endif %}')">
+                    data-confirm="{% if c.running %}{{ self.t("admin-disk-remove-running-confirm") }}{% else %}{{ self.t("admin-disk-remove-confirm") }}{% endif %}">
                 <input type="hidden" name="id" value="{{ c.id }}">
                 <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
                   <i class="ti ti-trash"></i>

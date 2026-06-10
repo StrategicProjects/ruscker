@@ -433,6 +433,21 @@ window.ruscker.imagePicker = (filenames) => ({
   document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('table[data-enhance]').forEach(enhance);
   });
+
+  // Global confirm guard for destructive forms (#741): the form carries
+  // its localized message in `data-confirm="…"` instead of an inline
+  // `onsubmit` handler — Askama entity-escapes the message, but the
+  // browser DECODES entities in attribute values before compiling
+  // inline JS, so any quote/apostrophe in a translation (FR
+  // "d'exécution") silently broke the handler and the destructive
+  // action fired unconfirmed. Capture phase so a cancel marks
+  // `defaultPrevented` before the perceived-speed bubble listener
+  // would start the progress bar.
+  document.addEventListener('submit', function (e) {
+    var f = e.target;
+    var msg = f && f.getAttribute && f.getAttribute('data-confirm');
+    if (msg && !window.confirm(msg)) e.preventDefault();
+  }, true);
 })();
 </script>
 

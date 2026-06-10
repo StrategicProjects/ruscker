@@ -56,13 +56,14 @@
         {# Rename: prompt for a new name (read the old one from the DOM, not
            interpolated into JS, so a name with a quote can't break it). #}
         <form method="post" action="{{ base }}/admin/groups/rename" style="display:inline"
-              onsubmit="var i=this.querySelector('input[name=new]'); var n=prompt('{{ self.t("admin-groups-rename-prompt") }}', this.querySelector('input[name=old]').value); if(n===null||!n.trim()||n.indexOf(',')>=0){return false;} i.value=n.trim();">
+              data-rename-prompt="{{ self.t("admin-groups-rename-prompt") }}"
+              onsubmit="var i=this.querySelector('input[name=new]'); var n=prompt(this.dataset.renamePrompt, this.querySelector('input[name=old]').value); if(n===null||!n.trim()||n.indexOf(',')>=0){return false;} i.value=n.trim();">
           <input type="hidden" name="old" value="{{ g.name }}">
           <input type="hidden" name="new">
           <button type="submit" class="group-action" title="{{ self.t("admin-groups-rename") }}"><i class="ti ti-pencil" aria-hidden="true"></i></button>
         </form>
         <form method="post" action="{{ base }}/admin/groups/delete" style="display:inline"
-              onsubmit="return confirm('{{ self.t("admin-groups-delete-confirm") }}');">
+              data-confirm="{{ self.t("admin-groups-delete-confirm") }}">
           <input type="hidden" name="name" value="{{ g.name }}">
           <button type="submit" class="group-action group-action-del" title="{{ self.t("admin-groups-delete") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
         </form>
@@ -77,7 +78,7 @@
             <span class="group-pill">
               <i class="ti ti-user" aria-hidden="true"></i> {{ m }}
               <form method="post" action="{{ base }}/admin/groups/members/remove" style="display:inline"
-                    onsubmit="return confirm('{{ self.t("admin-groups-remove-member-confirm") }}');">
+                    data-confirm="{{ self.t("admin-groups-remove-member-confirm") }}">
                 <input type="hidden" name="group" value="{{ g.name }}">
                 <input type="hidden" name="username" value="{{ m }}">
                 <button type="submit" class="group-pill-x" title="{{ self.t("admin-groups-remove-member") }}">×</button>

@@ -9,6 +9,93 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.5 — 2026-06-10
+
+**Audit release.** A full bug / security / UX audit of the codebase
+(issues #730–#746 + #758) — every finding fixed, 18 PRs. Highlights, by
+area:
+
+**Proxy correctness**
+
+- **One sticky-session cookie per app.** A single global cookie meant two
+  interactive apps open in the same browser fought over one session:
+  opening app B silently dropped app A's session (orphaning its seat —
+  users landed on the "full" splash for a seat they held) and broke
+  stickiness for multi-replica apps. The cookie is now per-spec and
+  scoped to the app's own URL path; lingering old cookies are expired
+  automatically.
+- **Compressed upstream HTML no longer bypasses the URL rewriter.** Apps
+  that gzip their HTML (Dash behind flask-compress, nginx-fronted apps)
+  served pages with no `<base href>` and broken assets; the proxy now
+  asks such upstreams for uncompressed HTML, ShinyProxy-style.
+- **WebSocket upgrades** keep the request's query string (Jupyter kernel
+  channels use `?session_id=`), echo the negotiated subprotocol on the
+  101 (required by RFC 6455 — newer jupyter-server broke without it),
+  and a dead replica now yields a real 502 instead of a silent drop.
+
+**Reliability**
+
+- A spawn that fails after the container was created (slow boot, crash)
+  now removes that container — it used to linger, spawn duplicates and
+  even be adopted as `Ready` after a restart.
+- The scaler's crash cleanup also releases the dead replica's tracked
+  sessions (graceful shutdown no longer waits out the full grace window).
+- **Multi-host:** the disk panel, image indicator / Pull button and the
+  scaler's crash cleanup now work across all hosts (they silently did
+  nothing on multi-host deployments before).
+- **HA / shared Postgres catalog:** migrations 0017–0021 were never
+  ported to Postgres, so the landing and the whole Appearance editor
+  were broken on `--config-db-url` deployments since v0.1.90. Ported,
+  plus a guard test so the two migration sets can't drift again.
+
+**Security**
+
+- **Forwarded-header trust unified** behind `server.useForwardHeaders`:
+  `X-Forwarded-Proto` is no longer trusted from arbitrary clients (it
+  could flip a cookie's `Secure` flag), and the real client IP is now
+  appended to `X-Forwarded-For` for upstream apps. **Deployments that
+  terminate TLS in a reverse proxy must set `useForwardHeaders: true`**
+  for cookies to carry `Secure` — ShinyProxy-migrated configs already do.
+- Changing your own password now signs out every other session for the
+  account (the admin-initiated reset already did).
+- Two unbounded-memory fixes: the per-client API rate limiter and the
+  HA admin-session cache now sweep stale entries (the latter was a
+  pre-auth memory-DoS vector).
+
+**Admin & UX**
+
+- **Dashboard stop/restart confirmation actually works again** — the
+  live-updated rows carried a broken inline handler, so destructive
+  actions fired with no confirmation at all. Confirmations across the
+  whole admin now use a single robust mechanism that survives any
+  translation (the French strings used to break it), enforced by a new
+  template lint.
+- The dashboard's live updates no longer steal keyboard focus every
+  second; sortable tables and audit rows are keyboard-accessible.
+- Editing the same app in two tabs no longer silently overwrites the
+  other editor's changes (a conflict banner asks to re-submit); creating
+  an app with a taken id fails cleanly under concurrency; replica
+  stop/restart actions are written to the audit log.
+- The landing editor's image picker got the same dialog accessibility as
+  the app form's; assorted i18n fixes (subject suggestions now come from
+  your own catalog instead of a fixed list).
+
+**Configuration**
+
+- `serve` now runs validation at startup and logs every warning — and
+  ShinyProxy fields that parse but have no effect in Ruscker
+  (`server.secure-cookies`, `proxy.hide-navbar`, …) each warn instead of
+  being silently ignored.
+- `type: streamlit | dash | voila` without `container-port` now forwards
+  to the framework's well-known port (8501 / 8050 / 8866) instead of
+  Shiny's 3838.
+- `${VAR}` edge cases: a nested default (`${A:-${B}}`) is refused loudly
+  instead of corrupting the value, and `container-env` placed as the
+  first key of a spec no longer exempts the spec's other fields from
+  interpolation.
+
+---
+
 ## v0.2.4 — 2026-06-09
 
 **Logo picker is now a searchable modal.** The app form's inline logo

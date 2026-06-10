@@ -261,6 +261,7 @@ spec-form-actions = Actions
 spec-form-delete = Delete app
 spec-form-delete-confirm = Are you sure? This cannot be undone.
 
+spec-form-env-key = KEY
 spec-form-error-id-required = ID is required.
 spec-form-error-id-shape = ID must start with a letter and contain only letters, digits, "_" and "-".
 spec-form-error-id-duplicate = An app with that ID already exists.
@@ -403,6 +404,7 @@ search-shortcut = ⌘ K
 
 filter-subject-label = Subject
 filter-subject-all = All subjects
+filter-status-label = Status
 filter-status-active = Active only
 filter-status-all = Active and inactive
 filter-status-inactive-only = Inactive only

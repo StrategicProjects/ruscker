@@ -207,6 +207,19 @@ window.ruscker.imagePicker = (filenames) => ({
   picker: { open: false, q: '' },
   imgUploading: false,
   imgError: '',
+  // Dialog a11y shared by every picker modal (#746): the element that
+  // opened the modal (focus returns to it on close) and a Tab trap.
+  // Living on the mixin keeps the spec-form and landing copies from
+  // forking on a11y again (the #720 fixes only reached one of them).
+  _pickerTrigger: null,
+  trapPickerTab(e) {
+    const sel = 'a[href],button:not([disabled]),input:not([disabled]),[tabindex]:not([tabindex="-1"])';
+    const f = Array.from(e.currentTarget.querySelectorAll(sel)).filter((el) => el.offsetParent !== null);
+    if (!f.length) return;
+    const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  },
   // Set by openImagePicker: where a pick goes, and the current value (to
   // highlight its tile). Underscored so they don't collide with caller
   // state when spread.
@@ -382,50 +395,67 @@ window.ruscker.imagePicker = (filenames) => ({
       return c.dataset.sortValue !== undefined ? c.dataset.sortValue : c.textContent.trim();
     }
 
-    // search toolbar
-    var wrap = document.createElement('div');
-    wrap.className = 'admin-table-toolbar';
-    var input = document.createElement('input');
-    input.type = 'search';
-    input.className = 'admin-table-search';
-    input.setAttribute('aria-label', I18N.search);
-    input.placeholder = I18N.search;
-    wrap.appendChild(input);
-    table.parentNode.insertBefore(wrap, table);
+    // search toolbar — skipped when the page brings its own search
+    // (`data-no-search`): the Apps page's sticky toolbar pill and the
+    // injected input filtered the same rows through two different
+    // mechanisms with contradictory results (#746).
+    if (!table.hasAttribute('data-no-search')) {
+      var wrap = document.createElement('div');
+      wrap.className = 'admin-table-toolbar';
+      var input = document.createElement('input');
+      input.type = 'search';
+      input.className = 'admin-table-search';
+      input.setAttribute('aria-label', I18N.search);
+      input.placeholder = I18N.search;
+      wrap.appendChild(input);
+      table.parentNode.insertBefore(wrap, table);
 
-    // empty-state row
-    var emptyRow = document.createElement('tr');
-    emptyRow.dataset.tableEmpty = '1';
-    emptyRow.style.display = 'none';
-    var emptyCell = document.createElement('td');
-    emptyCell.colSpan = headRow.cells.length;
-    emptyCell.className = 'admin-table-empty';
-    emptyCell.textContent = I18N.noResults;
-    emptyRow.appendChild(emptyCell);
-    tbody.appendChild(emptyRow);
+      // empty-state row
+      var emptyRow = document.createElement('tr');
+      emptyRow.dataset.tableEmpty = '1';
+      emptyRow.style.display = 'none';
+      var emptyCell = document.createElement('td');
+      emptyCell.colSpan = headRow.cells.length;
+      emptyCell.className = 'admin-table-empty';
+      emptyCell.textContent = I18N.noResults;
+      emptyRow.appendChild(emptyCell);
+      tbody.appendChild(emptyRow);
 
-    function applyFilter() {
-      var q = input.value.trim().toLowerCase(), visible = 0;
-      dataRows().forEach(function (r) {
-        var match = !q || r.textContent.toLowerCase().indexOf(q) !== -1;
-        r.style.display = match ? '' : 'none';
-        if (match) visible++;
-      });
-      emptyRow.style.display = visible ? 'none' : '';
+      var applyFilter = function () {
+        var q = input.value.trim().toLowerCase(), visible = 0;
+        dataRows().forEach(function (r) {
+          var match = !q || r.textContent.toLowerCase().indexOf(q) !== -1;
+          r.style.display = match ? '' : 'none';
+          if (match) visible++;
+        });
+        emptyRow.style.display = visible ? 'none' : '';
+      };
+      input.addEventListener('input', applyFilter);
     }
-    input.addEventListener('input', applyFilter);
 
-    // sortable headers
+    // sortable headers — keyboard-reachable (#746): tabbable, Enter/
+    // Space sorts, and aria-sort announces the direction instead of
+    // the glyph-only cue.
     Array.prototype.forEach.call(headRow.cells, function (th, idx) {
       if (th.hasAttribute('data-nosort')) return;
       th.classList.add('admin-th-sort');
-      th.addEventListener('click', function () {
+      th.setAttribute('tabindex', '0');
+      th.setAttribute('role', 'columnheader');
+      var doSort = function () {
         var asc = th.dataset.sortDir !== 'asc';
-        Array.prototype.forEach.call(headRow.cells, function (h) { if (h !== th) delete h.dataset.sortDir; });
+        Array.prototype.forEach.call(headRow.cells, function (h) {
+          if (h !== th) { delete h.dataset.sortDir; h.removeAttribute('aria-sort'); }
+        });
         th.dataset.sortDir = asc ? 'asc' : 'desc';
+        th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+        var anchor = tbody.querySelector('[data-table-empty]');
         dataRows()
           .sort(function (a, b) { return compare(cellVal(a, idx), cellVal(b, idx)) * (asc ? 1 : -1); })
-          .forEach(function (r) { tbody.insertBefore(r, emptyRow); });
+          .forEach(function (r) { anchor ? tbody.insertBefore(r, anchor) : tbody.appendChild(r); });
+      };
+      th.addEventListener('click', doSort);
+      th.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); doSort(); }
       });
     });
   }

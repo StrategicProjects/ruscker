@@ -83,7 +83,13 @@
       </thead>
       <tbody>
         {% for e in entries %}
-        <tr{% if e.diff.is_some() %} @click="toggle({{ e.id }})" style="cursor:pointer"{% endif %}>
+        {# Diff rows are toggleable — keyboard-reachable like the
+           dashboard group heads (#746): tabbable, Enter/Space toggles,
+           aria-expanded announces state. #}
+        <tr{% if e.diff.is_some() %} @click="toggle({{ e.id }})"
+            @keydown.enter.prevent="toggle({{ e.id }})" @keydown.space.prevent="toggle({{ e.id }})"
+            tabindex="0" role="button" :aria-expanded="open === {{ e.id }} ? 'true' : 'false'"
+            style="cursor:pointer"{% endif %}>
           <td class="dash-mono text-[color:var(--text-faint)]" style="white-space:nowrap">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</td>
           <td>
             <span class="user-cell">

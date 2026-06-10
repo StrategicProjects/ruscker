@@ -120,8 +120,11 @@
         <div class="highlights-track" x-ref="track" :style="trackStyle()">
       {% for card in cards %}
         {% if card.featured %}
+        {# An inactive card is not a destination (#746): no href (placeholder
+           link — not a tab stop, not announced as a link), aria-disabled for
+           AT, and the old `href="#"` scroll-to-top click is gone. #}
         <a class="rcard {% if !card.active %}inactive{% endif %}"
-           href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}">
+           {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}>
           <div class="rcover">
             {% match card.cover %}
               {% when Some with (cover) %}<div class="rcover-bg" style="background: {{ cover }};"></div>
@@ -202,7 +205,7 @@
     <div class="select-wrap" :class="status_ !== 'active' ? 'is-active' : ''">
       <select x-model="status_"
               class="theme-select"
-              aria-label="status">
+              aria-label="{{ self.t("filter-status-label") }}">
         <option value="active">{{ self.t("filter-status-active") }}</option>
         <option value="all">{{ self.t("filter-status-all") }}</option>
         <option value="inactive">{{ self.t("filter-status-inactive-only") }}</option>
@@ -285,7 +288,7 @@
       <div class="cards-grid stagger{% if catalog_layout == "list" %} is-list{% endif %}{% if catalog_density == "compact" %} is-compact{% endif %}">
         {% for card in sec.cards %}
       <a class="rcard {% if !card.active %}inactive{% endif %}"
-         href="{% if card.active %}{{ card.href }}{% else %}#{% endif %}"
+         {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}
          data-type="{{ card.display_type.key() }}"
          data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
          data-active="{% if card.active %}active{% else %}inactive{% endif %}"
@@ -408,9 +411,12 @@ window.ruscker.landing = () => ({
     this.$watch('status_',() => this.recount());
     this.$nextTick(() => this.recount());
 
-    // ⌘K / Ctrl+K focuses the search box, matching the kbd-hint.
+    // ⌘K / Ctrl+K focuses the search box, matching the kbd-hint. The
+    // input only renders when the operator left the search section
+    // visible — without the guard the shortcut threw (and still ate
+    // the browser's own ⌘K) on portals with search hidden (#746).
     addEventListener('keydown', (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && this.$refs.search) {
         e.preventDefault();
         this.$refs.search.focus();
       }

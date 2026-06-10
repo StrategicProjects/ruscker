@@ -12,15 +12,26 @@
   <div class="text-xs text-[color:var(--text-faint)]">{{ groups.len() }}</div>
 </div>
 
+{# Flash split (#746): an error is a PERSISTENT inline banner with
+   role="alert" — the old single .admin-flash-ok class made the layout
+   promote even errors into a 4s auto-dismissing toast, announced only
+   politely. Successes keep the toastable class. Matches images/
+   credentials/landing. #}
 {% match flash %}{% when Some with (f) %}
-  <div class="admin-flash-ok mb-4" role="status" style="{% if f == "bad-input" %}background:rgba(239,68,68,0.12);color:var(--text-primary){% endif %}">
-    <i class="ti ti-{% if f == "bad-input" %}alert-circle{% else %}check{% endif %}" aria-hidden="true"></i>
+  {% if f == "bad-input" %}
+  <div class="admin-login-error mb-4" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {{ self.t("admin-groups-flash-bad-input") }}
+  </div>
+  {% else %}
+  <div class="admin-flash-ok mb-4" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
     {% if f == "renamed" %}{{ self.t("admin-groups-flash-renamed") }}
     {% else if f == "deleted" %}{{ self.t("admin-groups-flash-deleted") }}
     {% else if f == "member-added" %}{{ self.t("admin-groups-flash-member-added") }}
-    {% else if f == "member-removed" %}{{ self.t("admin-groups-flash-member-removed") }}
-    {% else %}{{ self.t("admin-groups-flash-bad-input") }}{% endif %}
+    {% else %}{{ self.t("admin-groups-flash-member-removed") }}{% endif %}
   </div>
+  {% endif %}
 {% when None %}{% endmatch %}
 
 {# Create a group: a group exists once a user belongs to it, so "create" =

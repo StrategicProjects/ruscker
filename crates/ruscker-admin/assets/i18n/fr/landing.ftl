@@ -261,6 +261,7 @@ spec-form-actions = Actions
 spec-form-delete = Supprimer l'application
 spec-form-delete-confirm = Êtes-vous sûr ? Cette action est irréversible.
 
+spec-form-env-key = CLÉ
 spec-form-error-id-required = L'ID est obligatoire.
 spec-form-error-id-shape = L'ID doit commencer par une lettre et contenir uniquement lettres, chiffres, "_" et "-".
 spec-form-error-id-duplicate = Une application avec cet ID existe déjà.
@@ -403,6 +404,7 @@ search-shortcut = ⌘ K
 
 filter-subject-label = Sujet
 filter-subject-all = Tous les sujets
+filter-status-label = Statut
 filter-status-active = Actifs uniquement
 filter-status-all = Actifs et inactifs
 filter-status-inactive-only = Inactifs uniquement

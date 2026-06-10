@@ -271,6 +271,13 @@ impl<'a> CardCtx<'a> {
         let cover = tp
             .get_str("cover")
             .filter(|s| !s.trim().is_empty())
+            // #745: `accent` below is gated by `is_css_color`, but an
+            // explicit cover was rendered verbatim into the card's
+            // inline `style` — same-element CSS injection for an
+            // Editor. Covers are looser than plain colours (gradients,
+            // legacy `url(...)` paths), so this is a blocklist of the
+            // breakout chars rather than `is_css_color`.
+            .filter(|s| is_safe_cover_value(s))
             .map(|c| prefix_css_asset_urls(c, base))
             .or_else(|| {
                 tp.get_str("accent")
@@ -362,6 +369,21 @@ fn prefix_css_asset_urls(value: &str, base: &str) -> String {
 /// inside a function call rather than a bare declaration, so a stray
 /// `)`/`;`/`<` would corrupt the cover. Hex, `rgb()/hsl()`, and bare
 /// colour keywords all pass.
+/// A card-cover CSS value that cannot break out of its inline
+/// `background:` declaration — no `;` (extra properties), `{}`/`<>`
+/// (style/markup contexts) or backslash (CSS escapes). Looser than
+/// [`is_css_color`] on purpose: covers legitimately carry `/`, `:`
+/// and quotes (gradients with positions, legacy
+/// `url('/assets/img/…')`). Quotes are fine here — Askama
+/// entity-escapes them in the attribute, and inside CSS they can
+/// only open a string, never terminate the declaration.
+fn is_safe_cover_value(s: &str) -> bool {
+    !s.trim().is_empty()
+        && !s
+            .chars()
+            .any(|c| matches!(c, ';' | '{' | '}' | '<' | '>' | '\\'))
+}
+
 fn is_css_color(s: &str) -> bool {
     !s.is_empty()
         && s.chars().all(|c| {
@@ -648,6 +670,28 @@ mod tests {
         assert!(
             !CardCtx::from_spec(&restricted, "").access_open,
             "access-groups present ⇒ restricted"
+        );
+    }
+
+    // #745: an explicit cover is sanitized — `accent` already was, but
+    // a cover went verbatim into the card's inline style (same-element
+    // CSS injection for an Editor). Legit shapes survive.
+    #[test]
+    fn cover_blocklist_rejects_declaration_breakout_keeps_legit_values() {
+        let inj = spec_with_tp("  cover: \"red; background-image: url(//evil)\"\n");
+        assert_eq!(
+            CardCtx::from_spec(&inj, "").cover,
+            None,
+            "a `;` smuggling extra declarations must be dropped"
+        );
+        let grad = spec_with_tp(
+            "  cover: \"linear-gradient(135deg, #0f6e56 0%, #5dcaa5 100%)\"\n",
+        );
+        assert!(CardCtx::from_spec(&grad, "").cover.is_some(), "gradients pass");
+        let legacy = spec_with_tp("  cover: \"url('/assets/img/c.png')\"\n");
+        assert!(
+            CardCtx::from_spec(&legacy, "").cover.is_some(),
+            "legacy quoted url() covers pass"
         );
     }
 

@@ -58,6 +58,9 @@
           action="{{ base }}{% if mode.is_new() %}/admin/specs{% else %}/admin/specs/{{ form.id }}{% endif %}"
           class="spec-form-fields"
           autocomplete="off">
+      {# Optimistic-concurrency token (#745) — `update` rejects a submit
+         whose base version is stale (someone saved meanwhile). #}
+      <input type="hidden" name="base_version" value="{{ form.base_version }}">
 
       {# ── Card: Identity — id + name + subject ───────────────── #}
       <section class="editor-card">

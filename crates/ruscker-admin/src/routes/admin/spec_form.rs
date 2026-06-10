@@ -274,6 +274,12 @@ async fn resolve_pull_creds(
 #[serde(default)]
 pub struct SpecForm {
     pub id: String,
+    /// The spec `version` the edit form was rendered against (#745) —
+    /// optimistic concurrency: a submit whose base is stale (someone
+    /// else saved meanwhile) is rejected instead of last-write-wins.
+    /// Empty on the create form and on pre-#745 tabs (check skipped).
+    #[serde(default)]
+    pub base_version: String,
     pub display_name: String,
     pub description: String,
     /// "app" | "talk" | "report" | "package" | "api" | "link"
@@ -406,6 +412,7 @@ impl SpecForm {
         let dt = DisplayType::from_spec(spec);
         Self {
             id: spec.id.clone(),
+            base_version: String::new(),
             display_name: spec.display_name.clone().unwrap_or_default(),
             description: spec.description.clone().unwrap_or_default(),
             display_type: dt.key().to_string(),
@@ -924,7 +931,7 @@ fn placement_to_key(p: Placement) -> String {
     }
     .into()
 }
-fn is_kebab_id(s: &str) -> bool {
+pub(crate) fn is_kebab_id(s: &str) -> bool {
     !s.is_empty()
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         && s.chars()
@@ -1139,7 +1146,18 @@ async fn edit_form(
         nav_section: "specs",
         role: editor.role,
         mode: FormMode::Edit,
-        form: SpecForm::from_spec(&spec),
+        form: {
+            let mut f = SpecForm::from_spec(&spec);
+            // Optimistic-concurrency token (#745): the template emits it
+            // as a hidden field; `update` rejects a stale submit.
+            f.base_version = db::specs::fetch_version(pool, &id)
+                .await
+                .ok()
+                .flatten()
+                .map(|v| v.to_string())
+                .unwrap_or_default();
+            f
+        },
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
         available_groups: group_names(&state).await,
@@ -1262,8 +1280,23 @@ async fn create(
         }
     };
 
-    match db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
-        Ok(_) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
+    // insert_new fails CLOSED on an existing id (#745) — the friendly
+    // pre-check above is just UX; this is the race-proof gate (the old
+    // upsert silently overwrote the loser of a concurrent create).
+    match db::specs::insert_new(pool, &spec, Some(editor.actor())).await {
+        Ok(true) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
+        Ok(false) => {
+            render_form_with_errors(
+                &state,
+                loc,
+                theme,
+                editor.role,
+                FormMode::New,
+                SpecForm::from_spec(&spec),
+                vec!["spec-form-error-id-duplicate"],
+            )
+            .await
+        }
         Err(e) => {
             tracing::error!(error = ?e, "save failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response()
@@ -1318,6 +1351,29 @@ async fn update(
     // since-deleted spec). #261
     if base.is_none() {
         return (StatusCode::NOT_FOUND, format!("spec `{id}` not found")).into_response();
+    }
+
+    // Optimistic concurrency (#745): the form carries the version it
+    // was rendered against; if someone saved meanwhile, re-render with
+    // a conflict error instead of silently last-write-winning over
+    // their changes. An empty token (create form / pre-#745 tab) skips
+    // the check.
+    if let Ok(submitted) = form.base_version.trim().parse::<i64>() {
+        let current = db::specs::fetch_version(pool, &id).await.ok().flatten();
+        if current.is_some_and(|v| v != submitted) {
+            let mut stale = form;
+            stale.base_version = current.map(|v| v.to_string()).unwrap_or_default();
+            return render_form_with_errors(
+                &state,
+                loc,
+                theme,
+                editor.role,
+                FormMode::Edit,
+                stale,
+                vec!["spec-form-error-stale"],
+            )
+            .await;
+        }
     }
 
     let spec = match form.into_spec(base.as_ref(), editor.role) {

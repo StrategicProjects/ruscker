@@ -86,6 +86,24 @@ export LC_ALL=C.UTF-8 LANGUAGE=
 sudo apt-get install -y ./ruscker_<version>_amd64.deb
 ```
 
+## Cookies don't carry `Secure` behind my TLS proxy
+
+Since v0.2.5 Ruscker only honours `X-Forwarded-Proto` when
+`server.useForwardHeaders: true` is set (otherwise any client could
+spoof it). Behind a TLS-terminating reverse proxy you need **both**:
+the proxy sending `proxy_set_header X-Forwarded-Proto https;` (or
+`$scheme`) *and* the YAML flag. Check with
+`curl -sI -H "Accept: text/html" https://your-host/app/<id>/ | grep -i set-cookie`
+— the sticky cookie should list `Secure`.
+
+## A Streamlit / Dash / Voilà app is unreachable (connection refused upstream)
+
+Before v0.2.5, `type: streamlit|dash|voila` without an explicit
+`container-port` forwarded to Shiny's 3838 — these frameworks listen on
+8501 / 8050 / 8866, so the proxy hit a closed port. v0.2.5 defaults to
+the framework's port; on older versions (or for a non-standard port)
+set `container-port` explicitly.
+
 ## Users bounce between replicas / lose their session after a restart
 The sticky-session cookie is signed with `RUSCKER_COOKIE_KEY`. If you
 don't set it, Ruscker generates a random key on each start — so every

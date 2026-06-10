@@ -146,8 +146,14 @@ server {
 ```
 
 Set `server.useForwardHeaders: true` in the YAML so Ruscker trusts
-`X-Forwarded-*` (needed for `Secure` cookies and per-client API rate
-limiting).
+`X-Forwarded-*`. **Since v0.2.5 this is required** for cookies to carry
+the `Secure` flag behind a TLS-terminating proxy — without the flag,
+forwarded headers from any client would be spoofable, so Ruscker
+ignores them entirely (cookies are then minted as if on plain HTTP, and
+per-client API rate limiting keys on the TCP peer, i.e. your proxy).
+Both halves are needed: the `proxy_set_header X-Forwarded-Proto`
+above **and** the YAML flag. ShinyProxy-migrated configs usually carry
+the flag already.
 
 > Two Ruscker endpoints stream over **Server-Sent Events** (SSE):
 > the live dashboard (`/admin/dashboard/events`) and the Ruscker log

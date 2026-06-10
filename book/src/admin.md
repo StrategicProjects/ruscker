@@ -74,13 +74,21 @@ without opening the editor (solid = featured).
 
 ![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star (solid amber when featured) next to the edit and duplicate buttons.](images/admin-apps.png)
 
-The add/edit form is organised into three bands so the layout maps to
-intent: **Identity** (id, name, description), a **Metadata & visibility**
-band (the featured flag, access groups/users, subject, logo and cover),
-and a collapsible **Advanced** band for runtime knobs. It has a type
-selector, a **live card preview**, and a **logo picker** that pulls from
-the media library (no need to type `/assets/img/...` by hand). A **"?"
+The add/edit form walks down the page in the order you think about an
+app: **Identity** (id, name, subject), **Kind** (app container /
+presentation / report / package / API / external link), **Description**,
+**Appearance** (card logo via a searchable modal picker over the media
+library, an **accent colour** that tints the card, a **monogram**
+fallback for logo-less cards, and a solid/gradient **cover builder**),
+and **Access & scale** (a Restricted-access toggle with group/user
+pickers, an Autoscaling toggle, and an initial-replicas stepper). A
+**live card preview** on the right updates as you type, and a **"?"
 help popover** on every field explains what it does.
+
+Two editors can have the same app open without trampling each other:
+the form carries the version it was loaded against, and a stale save is
+rejected with a conflict banner (your input intact) instead of silently
+overwriting the other person's changes.
 
 Under the collapsible **Advanced** band, every remaining spec option is
 editable too — so an app can be configured end-to-end from the web UI,
@@ -143,20 +151,29 @@ In the spec form the Registry section is a **credential picker**: type or
 select the name of a stored credential and Ruscker resolves it at spawn.
 There is no need to inline registry passwords in a spec.
 
-### Landing editor
-Customise the public landing without a custom template:
+### Appearance
+Customise the public landing without a custom template. Every control
+is mirrored instantly in a **live portal preview** on the right:
 
-![Landing editor: section cards for the header (title, subtitle, Show Featured carousel toggle) and appearance (header + per-theme colours), with a live portal preview pane on the right.](images/admin-landing-editor.png)
+![Appearance editor: control cards for header, branding, catalog layout and visible sections on the left, with a live portal preview pane on the right.](images/admin-appearance.png)
 
-
+- **Header & branding** — header style presets, a solid/gradient
+  background builder, brand-colour swatches per theme, a default theme
+  (light / dark / auto) for first-time visitors, and the header logo's
+  mode, size and margin.
+- **Catalog** — grid, list or sections layout; comfortable or compact
+  density; a default **card-cover** builder (auto / solid / gradient)
+  for cards without their own cover; toggles for the search box and
+  filter chips.
 - **Colours + intro** — header background/foreground, a per-locale
-  intro paragraph.
+  intro paragraph, and an editable footer.
 - **SEO & sharing** — page title, meta description, `og:image`, with a
   live Google-style **search-result preview** that updates as you type.
   The landing `<head>` emits `description` + `og:*` + `twitter:card`.
-- **Analytics & custom code** — paste a provider snippet (Plausible,
-  Matomo, GA…) and list its origins; Ruscker widens **only the landing's**
-  CSP so the script can load. The custom-CSS and analytics/HTML fields are
+- **Analytics & custom code** — pick a provider (GA4 / Plausible /
+  Matomo) and paste just the site key — Ruscker builds the snippet and
+  widens **only the landing's** CSP for that provider's origins. A raw
+  HTML field remains as the escape hatch for anything else. The custom-CSS and analytics/HTML fields are
   **syntax-highlighted code editors** (the custom HTML blocks editor too).
 - **Logos** — add logos to the landing **header** or **footer** slot.
   Each logo has its own **alignment** (left / center / right), an optional
@@ -176,6 +193,9 @@ declare CSP origins for any third-party content it embeds.
 > only paste HTML you trust.
 
 ### Disk
+
+![Disk panel: a storage hero with a stacked usage bar, above panels listing Ruscker-managed containers and images with remove and prune actions.](images/admin-disk.png)
+
 Storage at a glance (Admin-only). A usage hero shows host disk used /
 total with a percentage and a stacked bar split into Ruscker images,
 other used, and free. Below it, two panels list the Ruscker-managed
@@ -184,6 +204,9 @@ so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
 
 ### Logs
+
+![Logs viewer: a terminal-style live stream with colour-coded levels and a toolbar with pause, level chips, an app filter and download.](images/admin-logs.png)
+
 The server log stream, live over Server-Sent Events. Lines are colour-
 coded by level (error / warn / info / debug), with a level dropdown, a
 free-text filter, and a pause/resume control. A download link grabs the
@@ -191,7 +214,9 @@ current buffer.
 
 ### Audit log
 Every admin mutation (spec/image/credential/landing/block changes,
-imports) is recorded with actor, action, target and timestamp.
+imports) is recorded with actor, action, target and timestamp — and
+since v0.2.5 the dashboard's destructive **replica stop/restart**
+actions are too.
 
 ## Config vs. database
 

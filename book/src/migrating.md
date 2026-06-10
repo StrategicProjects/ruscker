@@ -113,6 +113,26 @@ production) keeps ShinyProxy reachable while Ruscker takes the root:
 Because Ruscker uses the **same `/app/{spec}` URL scheme**, existing
 bookmarks keep working after the cutover.
 
+## After the cutover: read the startup warnings
+
+Since v0.2.5 `ruscker serve` runs the same validation as
+`ruscker validate` at boot and logs every finding. A migrated config
+typically produces a few `is set but has no effect` warnings —
+ShinyProxy fields Ruscker parses but doesn't honour
+(`server.secure-cookies`, `proxy.heartbeat-rate`, `hide-navbar`, …).
+They're harmless, but each one is configured intent that is *not*
+happening, so review them once: the
+[validation-warnings reference](configuration.md#validation-warnings)
+says what to do for each. Two to know about:
+
+- `server.secure-cookies` does nothing — the `Secure` flag comes from
+  `server.useForwardHeaders` + your proxy's `X-Forwarded-Proto`
+  (see [Deploying](deploying.md)).
+- `type: streamlit | dash | voila` specs without a `container-port`
+  now default to the framework's well-known port (8501 / 8050 / 8866)
+  instead of Shiny's 3838 — apps that previously needed an explicit
+  port "just work"; an explicit `container-port`/`port:` still wins.
+
 ## What Ruscker adds
 
 Beyond parity, you also get: a real admin panel (no more hand-editing

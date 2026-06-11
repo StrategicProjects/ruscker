@@ -195,15 +195,26 @@ body {
 /* Brand-color swatch row (appearance editor, ruscker-06): quick-pick
    accent presets. The active swatch gets a ring; clicking sets the
    light/dark accent. */
-.brand-swatches { display: flex; flex-wrap: wrap; gap: 10px; }
+.brand-swatches { display: flex; flex-wrap: wrap; gap: 12px; }
+/* Handoff sizing (#798): big rounded squares; the active one shows a
+   check instead of a halo ring; a trailing "+" tile wraps a native
+   colour input for a custom accent. */
 .brand-swatch {
-  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  width: 52px; height: 52px; border-radius: 14px; cursor: pointer;
   border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
   padding: 0; transition: transform 0.1s ease, box-shadow 0.15s ease;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .brand-swatch:hover { transform: translateY(-1px); }
-.brand-swatch.is-active {
-  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px currentColor;
+.brand-swatch .ti { font-size: 18px; color: #fff; opacity: 0; transition: opacity 0.1s ease; }
+.brand-swatch.is-active .ti { opacity: 1; }
+.brand-swatch--custom {
+  position: relative; overflow: hidden;
+  background: var(--color-teal-800, #085041);
+}
+.brand-swatch--custom .ti { opacity: 1; }
+.brand-swatch--custom input[type="color"] {
+  position: absolute; inset: 0; opacity: 0; cursor: pointer; border: 0; padding: 0;
 }
 
 /* Appearance: portal header background presets (ruscker-06). A custom
@@ -2108,6 +2119,25 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   background: none; border: 0; cursor: pointer; padding: 2px 0;
 }
 .grad-add-link:hover { text-decoration: underline; }
+
+/* Theme & colors palette panels, handoff reskin (#798). */
+.palette-preview {
+  position: relative; height: 56px; border-radius: 12px;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; padding: 0 12px;
+}
+.palette-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.palette-line { height: 6px; width: 34%; border-radius: 3px; opacity: 0.75; }
+.palette-line--soft { width: 18%; opacity: 0.3; }
+.palette-aa {
+  margin-left: auto; padding: 4px 10px; border-radius: 8px;
+  color: #fff; font-size: 12.5px; font-weight: 600; line-height: 1.2;
+}
+.palette-field label {
+  display: block; font-size: 12.5px; color: var(--text-muted); margin-bottom: 5px;
+}
+.palette-input { display: flex; align-items: center; gap: 10px; }
+.palette-input .spec-form-input { flex: 1; min-width: 0; background: var(--surface); }
 
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */

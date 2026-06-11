@@ -15,7 +15,7 @@ use axum::{
     extract::{Form, State},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use ruscker_config::LandingCustomization;
@@ -31,7 +31,9 @@ use crate::theme::Theme;
 use crate::AppState;
 
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/admin/landing", get(index).post(save))
+    Router::new()
+        .route("/admin/landing", get(index).post(save))
+        .route("/admin/landing/appearance/reset", post(reset_appearance))
 }
 
 #[derive(Template)]
@@ -332,6 +334,68 @@ async fn save(
             .await
         }
     }
+}
+
+/// `POST /admin/landing/appearance/reset` — restore the portal's
+/// default look (#783). Resets the STYLE knobs only: header preset/
+/// background/text colour, per-theme palettes, default theme, card
+/// cover style + default cover, catalog layout/density, and the logo
+/// mode/size/margin. Content and identity survive: title/subtitle/
+/// footer, the logos list, intro texts, SEO/analytics, custom CSS and
+/// HTML blocks are untouched. Confirmed client-side via `data-confirm`;
+/// audited as `landing.appearance_reset` on top of the update's own row.
+async fn reset_appearance(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let mut lc = match db::landing::fetch(pool).await {
+        Ok(lc) => lc,
+        Err(err) => {
+            tracing::error!(error = ?err, "landing fetch for reset failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    lc.header_preset = None;
+    lc.header_bg = None;
+    lc.header_fg = None;
+    lc.theme_colors = Default::default();
+    lc.default_theme = None;
+    lc.card_cover = None;
+    lc.card_cover_default = None;
+    lc.catalog_layout = None;
+    lc.catalog_density = None;
+    lc.logo_mode = None;
+    lc.logo_size = None;
+    lc.logo_margin = None;
+    if let Err(err) = db::landing::update(pool, &lc, Some(admin.actor())).await {
+        tracing::error!(error = ?err, "appearance reset failed");
+        return render(
+            &state,
+            loc,
+            theme,
+            Some(LandingForm::from_customization(&lc)),
+            false,
+            Some(err.to_string()),
+        )
+        .await;
+    }
+    if let Err(err) = db::audit::record(
+        pool,
+        admin.actor(),
+        "landing.appearance_reset",
+        "landing",
+        None,
+    )
+    .await
+    {
+        tracing::warn!(error = ?err, "audit appearance reset failed");
+    }
+    render(&state, loc, theme, None, true, None).await
 }
 
 async fn render(

@@ -9,6 +9,37 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.7 — 2026-06-11
+
+Polish from v0.2.6 field testing — four operator reports, all fixed.
+
+**Apps list**
+
+- **Archiving no longer reorders the table (#780).** The archive toggle
+  used to stamp the app's "updated" time, so the row jumped to the top
+  of the list (which sorts by recency). Archiving is a visibility flip,
+  not an edit — the row now stays exactly where it was. Version history
+  and auditing are kept (with distinct archive/unarchive audit actions).
+
+**Appearance editor**
+
+- **Header background is now one explicit choice (#782): Preset, Solid
+  or Gradient.** Previously a custom background silently overrode the
+  flat/soft/bold presets, making them look broken. Picking Preset
+  clears the custom background (and remembers it, in case you switch
+  back); the preview reacts immediately.
+- **Per-theme header colours (#784).** The light and dark themes can
+  now each have their own header background (solid or gradient) and
+  text colour — before, one value served both. Leaving the dark side
+  blank inherits the light values, so existing setups render unchanged.
+  The portal switches instantly with the visitor's theme toggle.
+- **"Restore defaults" button (#783).** One click (with confirmation)
+  returns the portal to its original look — colours, theme, header
+  style, covers and layout. Titles, logos, intro texts, SEO, custom CSS
+  and HTML blocks are preserved.
+
+---
+
 ## v0.2.6 — 2026-06-11
 
 Admin usability release: faster app management from the Apps list and a

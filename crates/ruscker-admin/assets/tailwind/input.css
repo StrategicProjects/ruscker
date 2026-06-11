@@ -2064,6 +2064,15 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   color: var(--color-teal-600);
   border: 1px solid color-mix(in srgb, var(--color-teal-600) 35%, transparent);
 }
+/* Inherited state of the pill (#800): neutral outline. */
+.own-pill--inherit {
+  background: var(--surface); color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+.cover-inherit-line {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text-faint); padding: 4px 2px 8px;
+}
 .cover-theme-panel {
   background: var(--surface-soft); border: 1px solid var(--border-soft);
   border-radius: 12px; padding: 12px;

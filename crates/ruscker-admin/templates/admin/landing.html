@@ -518,9 +518,13 @@
           <div>
             <div class="cover-panel-head">
               <span><i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}</span>
-              <button type="button" class="own-pill" x-show="form.card_cover_default_dark" x-cloak
-                      @click="form.card_cover_default_dark = ''"
-                      title="{{ self.t("admin-landing-header-dark-inherit-help") }}">{{ self.t("admin-landing-cover-own") }}</button>
+              {# Inherited ⇄ Own toggle (#800): labels ride data-* and are
+                 picked via dataset — never inside the JS expression. #}
+              <button type="button" class="own-pill" :class="coverDarkOwn ? '' : 'own-pill--inherit'"
+                      data-l-own="{{ self.t("admin-landing-cover-own") }}"
+                      data-l-inherited="{{ self.t("admin-landing-cover-inherited") }}"
+                      @click="toggleCoverDarkOwn()"
+                      x-text="coverDarkOwn ? $el.dataset.lOwn : $el.dataset.lInherited"></button>
             </div>
             <div class="cover-theme-panel">
               <div class="cover-preview" :style="'background:' + (form.card_cover_default_dark || form.card_cover_default || 'var(--surface-soft)')">
@@ -531,8 +535,13 @@
                   <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
                 </svg>
               </div>
+              {# HERDADO — just the inherited preview + a note, no controls. #}
+              <div class="cover-inherit-line" x-show="!coverDarkOwn">
+                <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
+                {{ self.t("admin-landing-cover-inherits-line") }}
+              </div>
               {# SOLID #}
-              <div class="cover-stop-row" x-show="coverDefMode === 'solid'" x-cloak>
+              <div class="cover-stop-row" x-show="coverDarkOwn && coverDefMode === 'solid'" x-cloak>
                 <input type="color" class="cover-swatch" :value="form.card_cover_default_dark || form.card_cover_default || '#161616'"
                        @input="form.card_cover_default_dark = $event.target.value">
                 <input type="text" x-model="form.card_cover_default_dark"
@@ -541,7 +550,7 @@
               </div>
               {# GRADIENT — only writes the dark value when touched, so
                  untouched stays "inherit the light cover". #}
-              <div x-show="coverDefMode === 'gradient'" x-cloak style="display:flex;flex-direction:column;gap:10px">
+              <div x-show="coverDarkOwn && coverDefMode === 'gradient'" x-cloak style="display:flex;flex-direction:column;gap:10px">
                 <div class="cover-grad-row">
                   <div class="seg-control seg-control--contrast">
                     <button type="button" :class="{ 'is-active': coverDefGradDark.type === 'linear' }" @click="coverDefGradDark.type = 'linear'; applyCoverDefDark()">
@@ -576,7 +585,6 @@
                   <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
                 </button>
               </div>
-              <div class="spec-form-help">{{ self.t("admin-landing-header-dark-inherit-help") }}</div>
             </div>
           </div>
         </div>
@@ -1256,6 +1264,30 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   // Dark-theme default cover (#790): its own builder; only writes the
   // value when touched, so untouched stays "inherit the light cover".
   coverDefGradDark: window.ruscker.gradientParse(initial.card_cover_default_dark) || window.ruscker.gradientDefault(),
+  // Explicit Inherited ⇄ Own state for the dark panel (#800): the pill
+  // toggles it; Inherited clears the value (stashed for the way back),
+  // Own restores the stash or seeds one so the controls edit something.
+  coverDarkOwn: !!((initial.card_cover_default_dark || '').trim()),
+  _coverDarkStash: null,
+  toggleCoverDarkOwn() {
+    if (this.coverDarkOwn) {
+      this._coverDarkStash = this.form.card_cover_default_dark;
+      this.form.card_cover_default_dark = '';
+      this.coverDarkOwn = false;
+      return;
+    }
+    this.coverDarkOwn = true;
+    const isGrad = (v) => /^(linear|radial)-gradient\(/.test((v || '').trim());
+    if (this._coverDarkStash && (this.coverDefMode === 'gradient') === isGrad(this._coverDarkStash)) {
+      this.form.card_cover_default_dark = this._coverDarkStash;
+      this.coverDefGradDark = window.ruscker.gradientParse(this._coverDarkStash) || this.coverDefGradDark;
+      this._coverDarkStash = null;
+    } else if (this.coverDefMode === 'gradient') {
+      this.applyCoverDefDark();
+    } else {
+      this.form.card_cover_default_dark = this.form.card_cover_default || '#161616';
+    }
+  },
   applyCoverDef() {
     this.form.card_cover_default = window.ruscker.gradientCss(this.coverDefGrad);
   },
@@ -1312,13 +1344,27 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   setCoverDefMode(mode) {
     this.coverDefMode = mode;
     const isGrad = (v) => /^(linear|radial)-gradient\(/.test((v || '').trim());
-    if (mode === 'auto') { this.form.card_cover_default = ''; this.form.card_cover_default_dark = ''; return; }
-    if (mode === 'gradient') {
-      this.applyCoverDef();
-      if (this.form.card_cover_default_dark && !isGrad(this.form.card_cover_default_dark)) this.form.card_cover_default_dark = '';
+    if (mode === 'auto') {
+      this.form.card_cover_default = '';
+      this.form.card_cover_default_dark = '';
+      this.coverDarkOwn = false;
       return;
     }
-    if (isGrad(this.form.card_cover_default_dark)) this.form.card_cover_default_dark = '';
+    if (mode === 'gradient') {
+      this.applyCoverDef();
+      // An Own dark side follows the mode switch (its builder re-emits);
+      // an inherited one stays empty.
+      if (this.coverDarkOwn) this.applyCoverDefDark();
+      else this.form.card_cover_default_dark = '';
+      return;
+    }
+    if (this.coverDarkOwn) {
+      if (!this.form.card_cover_default_dark || isGrad(this.form.card_cover_default_dark)) {
+        this.form.card_cover_default_dark = '#161616';
+      }
+    } else {
+      this.form.card_cover_default_dark = '';
+    }
     // 'solid': seed a starting colour so the preview reflects the choice
     // *immediately* (selecting the mode alone left the value empty, so the
     // mock card didn't change until the picker was dragged — #720 follow-up).

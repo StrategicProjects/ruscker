@@ -198,6 +198,9 @@ admin-specs-duplicate = Duplicate
 admin-specs-config-badge = config
 admin-specs-config-defined = Defined in the YAML config — read-only here; edit the file
 admin-specs-delete = Delete
+admin-specs-archive = Archive — hide the card from the portal
+admin-specs-unarchive = Unarchive — show the card on the portal again
+admin-specs-delete-confirm = Delete this application? Its containers will be stopped and the configuration removed. This cannot be undone.
 
 # Spec form (new / edit)
 spec-form-title-new = New app

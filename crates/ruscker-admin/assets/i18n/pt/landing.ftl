@@ -202,6 +202,9 @@ admin-specs-duplicate = Duplicar
 admin-specs-config-badge = config
 admin-specs-config-defined = Definido no YAML — somente leitura aqui; edite o arquivo
 admin-specs-delete = Apagar
+admin-specs-archive = Arquivar — ocultar o card do portal
+admin-specs-unarchive = Reativar — voltar a exibir o card no portal
+admin-specs-delete-confirm = Excluir esta aplicação? Os contêineres serão parados e a configuração removida. Esta ação não pode ser desfeita.
 
 # Spec form (new / edit)
 spec-form-title-new = Nova aplicação

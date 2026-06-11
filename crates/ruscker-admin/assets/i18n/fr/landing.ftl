@@ -198,6 +198,9 @@ admin-specs-duplicate = Dupliquer
 admin-specs-config-badge = config
 admin-specs-config-defined = Défini dans le YAML — lecture seule ici; modifiez le fichier
 admin-specs-delete = Supprimer
+admin-specs-archive = Archiver — masquer la carte du portail
+admin-specs-unarchive = Réactiver — réafficher la carte sur le portail
+admin-specs-delete-confirm = Supprimer cette application ? Ses conteneurs seront arrêtés et la configuration supprimée. Cette action est irréversible.
 
 # Spec form (new / edit)
 spec-form-title-new = Nouvelle application

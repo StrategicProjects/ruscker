@@ -9,6 +9,49 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.6 — 2026-06-11
+
+Admin usability release: faster app management from the Apps list and a
+clearer Appearance editor.
+
+**Apps list (#775)**
+
+- **Archive / unarchive an app in one click.** The Actions column gained
+  an archive toggle: an archived (inactive) app keeps its configuration,
+  history and audit trail, but its card leaves the public portal until
+  it's reactivated. No more opening the editor just to hide an app.
+- **Delete from the list**, with a confirmation dialog. Same behaviour as
+  the editor's delete: the app's containers are stopped and the action is
+  audited. Apps defined in the YAML config remain read-only (the file is
+  their source) — deleting a database app whose id also exists in the
+  YAML brings it back as a read-only config row, by design.
+
+**Appearance editor (#776)**
+
+- **One "Logos" section.** The main header logo (mark / symbol-only /
+  custom) now carries its own inline image picker — previously the
+  "Custom" mode had no picker and the image had to be configured in a
+  separate "Header/footer logos" section that silently fed it. The modes
+  are now truthful: switching away from Custom really brings the built-in
+  mark back, and switching back restores the picked image. Additional
+  logos (header center/right, footer) live right below.
+- **Header style in one place**: preset (flat/soft/bold), background
+  colour or gradient, and text colour together — they were split across
+  two sections.
+- **Catalog cards in one place**: cover style + the default cover builder.
+- **Theme & colors in one place**: default theme, brand-colour quick
+  picks and the light/dark palettes together.
+
+**Fixed**
+
+- **Duplicated logo in the Portal preview (#777).** With a custom header
+  logo set, moving the logo-size slider made the built-in mark reappear
+  next to it ("two logos in the top-left"). The preview now removes the
+  mark outright when a logo is shown, and mirrors the real portal's
+  rendering exactly.
+
+---
+
 ## v0.2.5 — 2026-06-10
 
 **Audit release.** A full bug / security / UX audit of the codebase

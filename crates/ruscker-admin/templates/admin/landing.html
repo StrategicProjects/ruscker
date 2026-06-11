@@ -29,6 +29,16 @@
       <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-landing-subtitle") }}</p>
     </div>
     <div class="flex items-center gap-2">
+      {# Reset to the default look (#783): style knobs only — content,
+         logos, SEO, CSS and HTML blocks survive (the confirm says so).
+         data-confirm rides the global capture-phase submit listener. #}
+      <form method="post" action="{{ base }}/admin/landing/appearance/reset" style="display:inline"
+            data-confirm="{{ self.t("admin-landing-reset-confirm") }}">
+        <button type="submit" class="admin-nav-link" title="{{ self.t("admin-landing-reset-help") }}">
+          <i class="ti ti-restore" aria-hidden="true"></i>
+          {{ self.t("admin-landing-reset") }}
+        </button>
+      </form>
       <a href="{{ base }}/" target="_blank" class="admin-nav-link" title="{{ self.t("admin-landing-open-portal") }}">
         <i class="ti ti-external-link" aria-hidden="true"></i>
         {{ self.t("admin-landing-open-portal") }}

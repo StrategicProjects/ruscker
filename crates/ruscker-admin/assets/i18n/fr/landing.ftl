@@ -329,6 +329,9 @@ admin-landing-subtitle = Configurez l'apparence du portail public pour les visit
 admin-landing-scope-help = Ces options (couleurs, textes d'intro, SEO, blocs personnalisés) s'appliquent à la page d'accueil publique en direct — enregistrées ici, affichées à la prochaine visite, sans redémarrage. C'est un ensemble fixe de réglages, pas un éditeur de CSS arbitraire.
 admin-landing-open-portal = Ouvrir le portail
 admin-landing-save = Enregistrer
+admin-landing-reset = Rétablir le défaut
+admin-landing-reset-help = Ramène l'apparence du portail aux valeurs d'origine
+admin-landing-reset-confirm = Rétablir l'apparence par défaut ? Couleurs, thème, style d'en-tête, couvertures et disposition reviennent à l'origine. Titres, logos, textes, SEO, CSS personnalisé et blocs HTML sont conservés.
 admin-landing-saved = Paramètres enregistrés. Rechargez le portail public pour voir.
 admin-landing-header-bg = Couleur de fond personnalisée
 admin-landing-bg-help = Vide = utilise la couleur par défaut du thème (clair/sombre).

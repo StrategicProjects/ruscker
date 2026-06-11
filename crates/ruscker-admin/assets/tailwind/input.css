@@ -2056,10 +2056,14 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .cover-panel-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 8px; font-size: 13.5px; font-weight: 600;
+  /* Fixed head height so the Light/Dark panels align with or without
+     the state pill (#800 polish). */
+  min-height: 20px;
 }
 .cover-panel-head .ti { margin-right: 4px; }
 .own-pill {
-  font: inherit; font-size: 11.5px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  font: inherit; font-size: 11px; line-height: 1.2; padding: 1px 9px;
+  border-radius: 999px; cursor: pointer;
   background: color-mix(in srgb, var(--color-teal-600) 12%, var(--surface));
   color: var(--color-teal-600);
   border: 1px solid color-mix(in srgb, var(--color-teal-600) 35%, transparent);
@@ -2070,9 +2074,10 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   border-color: var(--border-strong);
 }
 .cover-inherit-line {
-  display: flex; align-items: center; gap: 7px;
-  font-size: 13px; color: var(--text-faint); padding: 4px 2px 8px;
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--text-faint); padding: 2px 2px 6px;
 }
+.cover-inherit-line .ti { font-size: 13px; }
 .cover-theme-panel {
   background: var(--surface-soft); border: 1px solid var(--border-soft);
   border-radius: 12px; padding: 12px;

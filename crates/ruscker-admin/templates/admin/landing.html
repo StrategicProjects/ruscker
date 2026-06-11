@@ -66,9 +66,13 @@
 
   <div class="spec-form-layout">
 
-    {# ── LEFT: form ────────────────────────────────────────── #}
+    {# ── LEFT: form + the blocks editor below it. The blocks card has
+       its own <form>s, so it can't live INSIDE the landing form — the
+       wrapper div keeps both in the same grid column at the same width
+       (#808). #}
+    <div class="spec-form-fields">
     <form id="landing-form" method="post" action="{{ base }}/admin/landing"
-          class="spec-form-fields" autocomplete="off">
+          autocomplete="off">
 
       {# Scope note (#350): everything here is applied to the public
          landing live (saved to the DB, rendered on the next view) — no
@@ -921,6 +925,11 @@
 
     </form>
 
+    {# Custom HTML blocks editor, folded in from the old standalone tab
+       (#242) — same column/width as the form cards (#808). #}
+    {% include "admin/_blocks_editor.html" %}
+    </div>
+
     {# ── RIGHT: live preview ──────────────────────────────── #}
     <aside class="spec-form-preview" style="top:96px">
       <div class="editor-card editor-card--preview">
@@ -1115,8 +1124,6 @@
   </template>
 </div>
 
-{# Custom HTML blocks editor, folded in from the old standalone tab (#242). #}
-{% include "admin/_blocks_editor.html" %}
 
 {# Syntax highlighting for the CSS / analytics-HTML editors (#623). #}
 {% include "admin/_code_editor.html" %}

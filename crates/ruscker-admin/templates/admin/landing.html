@@ -411,11 +411,13 @@
         </div>
       </section>
 
-      {# ── Card: Catalog cards — cover style + the default cover painted
-         behind cards with no per-app cover (#776: cover knobs used to be
-         split off under "Background & gradients"). #}
+      {# ── Card: Catalog cards, handoff layout (#796): a high-contrast
+         mode bar (Auto/Solid/Gradient), an Auto explainer showing the
+         real per-kind tints, and per-theme cover panels with a live
+         preview, an angle dial and handoff-style stop rows. Same fields
+         and builder state as #790 — this is a pure reskin. #}
       <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-cards-card") }}</div>
+        <div class="form-section__title"><i class="ti ti-photo" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-cards-card") }}</div>
         {# `card_cover` (Tinted/Gradient overlay) lost its control (#789 —
            redundant + confusing next to the default-cover builder), but
            the stored value still round-trips so existing portals render
@@ -424,123 +426,158 @@
         <input type="hidden" name="card_cover_default" :value="form.card_cover_default">
         <input type="hidden" name="card_cover_default_dark" :value="form.card_cover_default_dark">
 
-        {# Default cover colour/gradient (#720): the base painted behind
-           cards that have no per-app cover/accent. "Auto" keeps the
-           per-kind tint; Solid / Gradient set a default for the catalog —
-           per theme since #790 (dark inherits light until set). #}
         <div class="spec-form-field">
           <label class="spec-form-label">{{ self.t("admin-landing-card-cover-default") }}</label>
-          <div class="grad-modes" role="tablist">
-            <button type="button" class="grad-mode" :class="coverDefMode === 'auto' ? 'is-active' : ''"
-                    @click="setCoverDefMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
-            <button type="button" class="grad-mode" :class="coverDefMode === 'solid' ? 'is-active' : ''"
-                    @click="setCoverDefMode('solid')">{{ self.t("admin-grad-solid") }}</button>
-            <button type="button" class="grad-mode" :class="coverDefMode === 'gradient' ? 'is-active' : ''"
-                    @click="setCoverDefMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          <div class="seg-control seg-control--full seg-control--contrast cover-mode-bar" role="group">
+            <button type="button" :class="{ 'is-active': coverDefMode === 'auto' }" @click="setCoverDefMode('auto')">
+              <i class="ti ti-book" aria-hidden="true"></i>
+              <span class="cover-mode-label">{{ self.t("admin-landing-cover-auto") }}<small>{{ self.t("admin-landing-cover-auto-sub") }}</small></span>
+            </button>
+            <button type="button" :class="{ 'is-active': coverDefMode === 'solid' }" @click="setCoverDefMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+            <button type="button" :class="{ 'is-active': coverDefMode === 'gradient' }" @click="setCoverDefMode('gradient')">
+              <i class="ti ti-focus-2" aria-hidden="true"></i> {{ self.t("admin-grad-gradient") }}
+            </button>
           </div>
-
-          {# AUTO — nothing to set; the per-kind tint stays the fallback. #}
-          <div class="spec-form-help" x-show="coverDefMode === 'auto'">{{ self.t("admin-landing-card-cover-default-auto-help") }}</div>
         </div>
 
-        {# CUSTOM — per-theme columns (#790), same pattern as the header. #}
+        {# AUTO — explainer + the REAL per-kind tints (same classes the
+           portal cards use), with the kind's accent as a dot. #}
+        <div x-show="coverDefMode === 'auto'">
+          <div class="spec-form-help" style="margin-bottom:10px">{{ self.t("admin-landing-card-cover-default-auto-help") }}</div>
+          <div class="cover-auto-samples">
+            <div class="cover-auto-sample"><span class="cover-auto-swatch tint-app"><i style="background:#10b981"></i></span><span>{{ self.t("type-app") }}</span></div>
+            <div class="cover-auto-sample"><span class="cover-auto-swatch tint-api"><i style="background:#0e7490"></i></span><span>{{ self.t("type-api") }}</span></div>
+            <div class="cover-auto-sample"><span class="cover-auto-swatch tint-package"><i style="background:#26547c"></i></span><span>{{ self.t("type-package") }}</span></div>
+            <div class="cover-auto-sample"><span class="cover-auto-swatch tint-report"><i style="background:#ef476f"></i></span><span>{{ self.t("type-report") }}</span></div>
+          </div>
+        </div>
+
+        {# CUSTOM — themed panels (#790 fields): light is the base; the
+           dark one wears an "Own" pill when it carries its own value
+           (click the pill to fall back to inheriting). #}
         <div class="grid grid-cols-2 gap-3" x-show="coverDefMode !== 'auto'" x-cloak>
-          <div class="spec-form-field">
-            <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("theme-light") }}</div>
-            {# SOLID #}
-            <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
-              <input type="color" :value="form.card_cover_default || '#0f6e56'"
-                     @input="form.card_cover_default = $event.target.value">
-              <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
-                     class="spec-form-input spec-form-input--mono">
+          <div>
+            <div class="cover-panel-head">
+              <span><i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}</span>
             </div>
-            {# GRADIENT — same builder component as the header background. #}
-            <div class="grad-builder" x-show="coverDefMode === 'gradient'" x-cloak>
-              <div class="grad-row">
-                <select class="theme-select" x-model="coverDefGrad.type" @change="applyCoverDef()">
-                  <option value="linear">{{ self.t("admin-grad-linear") }}</option>
-                  <option value="radial">{{ self.t("admin-grad-radial") }}</option>
-                </select>
-                <label class="grad-angle" x-show="coverDefGrad.type === 'linear'">
-                  <span x-text="coverDefGrad.angle + '°'"></span>
-                  <input type="range" min="0" max="360" step="5"
-                         x-model.number="coverDefGrad.angle" @input="applyCoverDef()">
-                </label>
+            <div class="cover-theme-panel">
+              <div class="cover-preview" :style="'background:' + (form.card_cover_default || 'var(--surface-soft)')">
+                <span class="cover-chip"><i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}</span>
+                <svg viewBox="0 0 80 80" width="30" height="30" aria-hidden="true">
+                  <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+                  <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+                  <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+                </svg>
               </div>
-              <template x-for="(stop, i) in coverDefGrad.stops" :key="i">
-                <div class="grad-stop">
-                  <input type="color" x-model="stop.color" @input="applyCoverDef()">
-                  <input type="number" min="0" max="100" class="grad-pos"
-                         x-model.number="stop.pos" @input="applyCoverDef()">
-                  <span class="grad-pos-unit">%</span>
-                  <button type="button" class="admin-nav-link" @click="removeCoverDefStop(i)"
-                          x-show="coverDefGrad.stops.length > 2"
-                          title="{{ self.t("admin-grad-remove-stop") }}">
-                    <i class="ti ti-x" aria-hidden="true"></i>
+              {# SOLID #}
+              <div class="cover-stop-row" x-show="coverDefMode === 'solid'" x-cloak>
+                <input type="color" class="cover-swatch" :value="form.card_cover_default || '#0f6e56'"
+                       @input="form.card_cover_default = $event.target.value">
+                <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
+                       class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+              </div>
+              {# GRADIENT #}
+              <div x-show="coverDefMode === 'gradient'" x-cloak style="display:flex;flex-direction:column;gap:10px">
+                <div class="cover-grad-row">
+                  <div class="seg-control seg-control--contrast">
+                    <button type="button" :class="{ 'is-active': coverDefGrad.type === 'linear' }" @click="coverDefGrad.type = 'linear'; applyCoverDef()">
+                      <i class="ti ti-arrow-right" aria-hidden="true"></i> {{ self.t("admin-grad-linear") }}
+                    </button>
+                    <button type="button" :class="{ 'is-active': coverDefGrad.type === 'radial' }" @click="coverDefGrad.type = 'radial'; applyCoverDef()">
+                      <i class="ti ti-focus-2" aria-hidden="true"></i> {{ self.t("admin-grad-radial") }}
+                    </button>
+                  </div>
+                  {# Angle dial: drag or click around it to rotate. #}
+                  <button type="button" class="angle-dial" x-show="coverDefGrad.type === 'linear'"
+                          @pointerdown.prevent="dialStart($event, coverDefGrad, 'applyCoverDef')">
+                    <span x-text="(coverDefGrad.angle | 0) + '°'"></span>
+                    <i class="angle-dial__dot" :style="'transform: rotate(' + (coverDefGrad.angle | 0) + 'deg)'" aria-hidden="true"></i>
                   </button>
                 </div>
-              </template>
-              <button type="button" class="admin-nav-link grad-add" @click="addCoverDefStop()"
-                      x-show="coverDefGrad.stops.length < 4">
-                <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
-              </button>
-              <input type="text" x-model="form.card_cover_default" readonly
-                     class="spec-form-input spec-form-input--mono grad-output">
+                <template x-for="(stop, i) in coverDefGrad.stops" :key="i">
+                  <div class="cover-stop-row">
+                    <input type="color" class="cover-swatch" x-model="stop.color" @input="applyCoverDef()">
+                    <label class="cover-pos">
+                      <input type="number" min="0" max="100" x-model.number="stop.pos" @input="applyCoverDef()">
+                      <span>%</span>
+                    </label>
+                    <button type="button" class="admin-nav-link" @click="removeCoverDefStop(i)"
+                            x-show="coverDefGrad.stops.length > 2"
+                            title="{{ self.t("admin-grad-remove-stop") }}">
+                      <i class="ti ti-x" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </template>
+                <button type="button" class="grad-add-link" @click="addCoverDefStop()"
+                        x-show="coverDefGrad.stops.length < 4">
+                  <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+                </button>
+              </div>
             </div>
           </div>
-          <div class="spec-form-field">
-            <div class="spec-form-label" style="margin-bottom:6px">
-              🌙 {{ self.t("theme-dark") }}
-              <button type="button" class="admin-nav-link" x-show="form.card_cover_default_dark"
+          <div>
+            <div class="cover-panel-head">
+              <span><i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}</span>
+              <button type="button" class="own-pill" x-show="form.card_cover_default_dark" x-cloak
                       @click="form.card_cover_default_dark = ''"
-                      title="{{ self.t("admin-landing-header-dark-inherit") }}">
-                <i class="ti ti-x" aria-hidden="true"></i>
-              </button>
+                      title="{{ self.t("admin-landing-header-dark-inherit-help") }}">{{ self.t("admin-landing-cover-own") }}</button>
             </div>
-            {# SOLID #}
-            <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
-              <input type="color" :value="form.card_cover_default_dark || form.card_cover_default || '#161616'"
-                     @input="form.card_cover_default_dark = $event.target.value">
-              <input type="text" x-model="form.card_cover_default_dark"
-                     placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
-                     class="spec-form-input spec-form-input--mono">
-            </div>
-            {# GRADIENT — only writes the dark value when touched, so
-               untouched stays "inherit the light cover". #}
-            <div class="grad-builder" x-show="coverDefMode === 'gradient'" x-cloak>
-              <div class="grad-row">
-                <select class="theme-select" x-model="coverDefGradDark.type" @change="applyCoverDefDark()">
-                  <option value="linear">{{ self.t("admin-grad-linear") }}</option>
-                  <option value="radial">{{ self.t("admin-grad-radial") }}</option>
-                </select>
-                <label class="grad-angle" x-show="coverDefGradDark.type === 'linear'">
-                  <span x-text="coverDefGradDark.angle + '°'"></span>
-                  <input type="range" min="0" max="360" step="5"
-                         x-model.number="coverDefGradDark.angle" @input="applyCoverDefDark()">
-                </label>
+            <div class="cover-theme-panel">
+              <div class="cover-preview" :style="'background:' + (form.card_cover_default_dark || form.card_cover_default || 'var(--surface-soft)')">
+                <span class="cover-chip"><i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}</span>
+                <svg viewBox="0 0 80 80" width="30" height="30" aria-hidden="true">
+                  <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+                  <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+                  <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+                </svg>
               </div>
-              <template x-for="(stop, i) in coverDefGradDark.stops" :key="i">
-                <div class="grad-stop">
-                  <input type="color" x-model="stop.color" @input="applyCoverDefDark()">
-                  <input type="number" min="0" max="100" class="grad-pos"
-                         x-model.number="stop.pos" @input="applyCoverDefDark()">
-                  <span class="grad-pos-unit">%</span>
-                  <button type="button" class="admin-nav-link" @click="removeCoverDefStopDark(i)"
-                          x-show="coverDefGradDark.stops.length > 2"
-                          title="{{ self.t("admin-grad-remove-stop") }}">
-                    <i class="ti ti-x" aria-hidden="true"></i>
+              {# SOLID #}
+              <div class="cover-stop-row" x-show="coverDefMode === 'solid'" x-cloak>
+                <input type="color" class="cover-swatch" :value="form.card_cover_default_dark || form.card_cover_default || '#161616'"
+                       @input="form.card_cover_default_dark = $event.target.value">
+                <input type="text" x-model="form.card_cover_default_dark"
+                       placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
+                       class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
+              </div>
+              {# GRADIENT — only writes the dark value when touched, so
+                 untouched stays "inherit the light cover". #}
+              <div x-show="coverDefMode === 'gradient'" x-cloak style="display:flex;flex-direction:column;gap:10px">
+                <div class="cover-grad-row">
+                  <div class="seg-control seg-control--contrast">
+                    <button type="button" :class="{ 'is-active': coverDefGradDark.type === 'linear' }" @click="coverDefGradDark.type = 'linear'; applyCoverDefDark()">
+                      <i class="ti ti-arrow-right" aria-hidden="true"></i> {{ self.t("admin-grad-linear") }}
+                    </button>
+                    <button type="button" :class="{ 'is-active': coverDefGradDark.type === 'radial' }" @click="coverDefGradDark.type = 'radial'; applyCoverDefDark()">
+                      <i class="ti ti-focus-2" aria-hidden="true"></i> {{ self.t("admin-grad-radial") }}
+                    </button>
+                  </div>
+                  <button type="button" class="angle-dial" x-show="coverDefGradDark.type === 'linear'"
+                          @pointerdown.prevent="dialStart($event, coverDefGradDark, 'applyCoverDefDark')">
+                    <span x-text="(coverDefGradDark.angle | 0) + '°'"></span>
+                    <i class="angle-dial__dot" :style="'transform: rotate(' + (coverDefGradDark.angle | 0) + 'deg)'" aria-hidden="true"></i>
                   </button>
                 </div>
-              </template>
-              <button type="button" class="admin-nav-link grad-add" @click="addCoverDefStopDark()"
-                      x-show="coverDefGradDark.stops.length < 4">
-                <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
-              </button>
-              <input type="text" x-model="form.card_cover_default_dark" readonly
-                     placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
-                     class="spec-form-input spec-form-input--mono grad-output">
+                <template x-for="(stop, i) in coverDefGradDark.stops" :key="i">
+                  <div class="cover-stop-row">
+                    <input type="color" class="cover-swatch" x-model="stop.color" @input="applyCoverDefDark()">
+                    <label class="cover-pos">
+                      <input type="number" min="0" max="100" x-model.number="stop.pos" @input="applyCoverDefDark()">
+                      <span>%</span>
+                    </label>
+                    <button type="button" class="admin-nav-link" @click="removeCoverDefStopDark(i)"
+                            x-show="coverDefGradDark.stops.length > 2"
+                            title="{{ self.t("admin-grad-remove-stop") }}">
+                      <i class="ti ti-x" aria-hidden="true"></i>
+                    </button>
+                  </div>
+                </template>
+                <button type="button" class="grad-add-link" @click="addCoverDefStopDark()"
+                        x-show="coverDefGradDark.stops.length < 4">
+                  <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+                </button>
+              </div>
+              <div class="spec-form-help">{{ self.t("admin-landing-header-dark-inherit-help") }}</div>
             </div>
-            <div class="spec-form-help">{{ self.t("admin-landing-header-dark-inherit-help") }}</div>
           </div>
         </div>
       </section>
@@ -1228,6 +1265,29 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       this.coverDefGrad.stops.splice(i, 1);
       this.applyCoverDef();
     }
+  },
+  // Angle dial (#796): drag (or click) around the dial to rotate the
+  // gradient — pointer math against the dial centre, snapped to 5°
+  // like the old slider. CSS gradient angles are clockwise from the
+  // top, atan2 is from the +x axis, hence the +90.
+  dialStart(e, grad, apply) {
+    const el = e.currentTarget;
+    const move = (ev) => {
+      const r = el.getBoundingClientRect();
+      const dx = ev.clientX - (r.left + r.width / 2);
+      const dy = ev.clientY - (r.top + r.height / 2);
+      let a = Math.round((Math.atan2(dy, dx) * 180 / Math.PI + 90) / 5) * 5;
+      if (a < 0) a += 360;
+      grad.angle = a % 360;
+      this[apply]();
+    };
+    move(e);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   },
   setCoverDefMode(mode) {
     this.coverDefMode = mode;

@@ -56,7 +56,7 @@ pub(crate) fn grouped_blocks(blocks: &[LandingBlock]) -> Vec<SlotGroup> {
 /// The standalone blocks list page was folded into the Portal page
 /// (#242); the route stays so old links/bookmarks still resolve.
 async fn index(_: RequireAdmin) -> Response {
-    Redirect::to("/admin/landing").into_response()
+    Redirect::to("/admin/landing#blocks").into_response()
 }
 
 // ── Form (new / edit) ────────────────────────────────────────────
@@ -197,7 +197,7 @@ async fn create(
         return no_db();
     };
     match landing_blocks::insert(pool, &form.into_input(), Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/landing").into_response(),
+        Ok(_) => Redirect::to("/admin/landing#blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "create block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
@@ -215,7 +215,7 @@ async fn update(
         return no_db();
     };
     match landing_blocks::update(pool, &id, &form.into_input(), Some(admin.actor())).await {
-        Ok(true) => Redirect::to("/admin/landing").into_response(),
+        Ok(true) => Redirect::to("/admin/landing#blocks").into_response(),
         Ok(false) => (StatusCode::NOT_FOUND, "block not found").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "update block failed");
@@ -233,7 +233,7 @@ async fn delete(
         return no_db();
     };
     match landing_blocks::delete(pool, &id, Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/landing").into_response(),
+        Ok(_) => Redirect::to("/admin/landing#blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "delete block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
@@ -255,7 +255,7 @@ async fn move_block(
         _ => return (StatusCode::BAD_REQUEST, "dir must be up|down").into_response(),
     };
     match landing_blocks::move_block(pool, &id, up, Some(admin.actor())).await {
-        Ok(_) => Redirect::to("/admin/landing").into_response(),
+        Ok(_) => Redirect::to("/admin/landing#blocks").into_response(),
         Err(e) => {
             tracing::error!(error = ?e, id, "move block failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()

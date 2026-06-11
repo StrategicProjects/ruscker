@@ -6,7 +6,7 @@
    POST routes are unchanged (create/update/delete/move/reorder all
    redirect back to /admin/landing). Own Alpine root — it sits outside
    the landing form's x-data. #}
-<section class="editor-card mt-6" x-data="{ editing: null, creating: false }">
+<section class="editor-card mt-6" id="blocks" x-data="{ editing: null, creating: false }">
   <div class="flex items-start justify-between gap-4 mb-1">
     <div>
       <div class="form-section__title" style="margin-bottom:4px"><i class="ti ti-code" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-blocks-title") }}</div>

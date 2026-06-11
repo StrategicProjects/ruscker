@@ -117,6 +117,11 @@ pub struct LandingForm {
     pub theme_dark_accent: String,
     pub header_bg: String,
     pub header_fg: String,
+    // Dark-theme header colours (#784); blank ⇒ inherit the light values.
+    #[serde(default)]
+    pub header_bg_dark: String,
+    #[serde(default)]
+    pub header_fg_dark: String,
     pub intro: String,
     pub intro_pt: String,
     pub intro_en: String,
@@ -171,6 +176,8 @@ impl LandingForm {
             theme_dark_accent: s(&tc.dark.accent),
             header_bg: lc.header_bg.clone().unwrap_or_default(),
             header_fg: lc.header_fg.clone().unwrap_or_default(),
+            header_bg_dark: lc.header_bg_dark.clone().unwrap_or_default(),
+            header_fg_dark: lc.header_fg_dark.clone().unwrap_or_default(),
             intro: lc.intro.clone().unwrap_or_default(),
             intro_pt: g("pt"),
             intro_en: g("en"),
@@ -245,6 +252,8 @@ impl LandingForm {
             theme_colors,
             header_bg: empty_to_none(self.header_bg),
             header_fg: empty_to_none(self.header_fg),
+            header_bg_dark: empty_to_none(self.header_bg_dark),
+            header_fg_dark: empty_to_none(self.header_fg_dark),
             intro: empty_to_none(self.intro),
             intro_locales,
             seo_title: empty_to_none(self.seo_title),
@@ -363,6 +372,8 @@ async fn reset_appearance(
     lc.header_preset = None;
     lc.header_bg = None;
     lc.header_fg = None;
+    lc.header_bg_dark = None;
+    lc.header_fg_dark = None;
     lc.theme_colors = Default::default();
     lc.default_theme = None;
     lc.card_cover = None;

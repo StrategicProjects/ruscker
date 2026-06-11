@@ -236,15 +236,38 @@
 
       </section>
 
-      {# ── Card: Header style — preset + background + text colour, every
-         header knob in one place (#776: the preset used to live under
-         "Background & gradients" while the colours sat two cards away in
-         "Appearance"). #}
+      {# ── Card: Header style. The background is ONE explicit choice —
+         Preset | Solid | Gradient (#782: a custom background overrides
+         the preset on the portal, so presenting both as independent
+         knobs made the preset look dead) — and the custom modes carry
+         per-theme values (#784: light is the base, dark inherits it
+         until set). #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-header-style-card") }}</div>
         <input type="hidden" name="header_preset" :value="form.header_preset">
+        {# Canonical submitted values — the pickers/builders below edit
+           these. Visible inputs carry no `name` so the light and dark
+           editors can't fight over one field. #}
+        <input type="hidden" name="header_bg" :value="form.header_bg">
+        <input type="hidden" name="header_bg_dark" :value="form.header_bg_dark">
+
         <div class="spec-form-field">
-          <label class="spec-form-label">{{ self.t("admin-landing-header-bg-preset") }}</label>
+          <label class="spec-form-label">{{ self.t("admin-landing-header-bg") }}</label>
+          <div class="grad-modes" role="tablist">
+            <button type="button" class="grad-mode" :class="bgMode === 'preset' ? 'is-active' : ''"
+                    @click="setBgMode('preset')">{{ self.t("admin-landing-bgmode-preset") }}</button>
+            <button type="button" class="grad-mode" :class="bgMode === 'solid' ? 'is-active' : ''"
+                    @click="setBgMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+            <button type="button" class="grad-mode" :class="bgMode === 'gradient' ? 'is-active' : ''"
+                    @click="setBgMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-bgmode-help") }}</div>
+        </div>
+
+        {# PRESET — the built-in tints. Selecting this mode cleared the
+           custom background (stashed for the way back), so the choice
+           below is what actually paints. #}
+        <div class="spec-form-field" x-show="bgMode === 'preset'">
           <div class="seg-control" role="group">
             <button type="button" :class="{ 'is-active': (form.header_preset || 'soft') === 'flat' }" @click="form.header_preset = 'flat'">{{ self.t("admin-landing-preset-flat") }}</button>
             <button type="button" :class="{ 'is-active': (form.header_preset || 'soft') === 'soft' }" @click="form.header_preset = 'soft'">{{ self.t("admin-landing-preset-soft") }}</button>
@@ -253,88 +276,139 @@
           <div class="spec-form-help">{{ self.t("admin-landing-header-bg-preset-help") }}</div>
         </div>
 
-      <div class="grid grid-cols-2 gap-3">
-        <div class="spec-form-field">
-          <label class="spec-form-label">{{ self.t("admin-landing-header-bg") }}</label>
-
-          {# Mode toggle: solid color vs. gradient builder. #}
-          <div class="grad-modes" role="tablist">
-            <button type="button" class="grad-mode" :class="bgMode === 'solid' ? 'is-active' : ''"
-                    @click="setBgMode('solid')">{{ self.t("admin-grad-solid") }}</button>
-            <button type="button" class="grad-mode" :class="bgMode === 'gradient' ? 'is-active' : ''"
-                    @click="setBgMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
-          </div>
-
-          {# SOLID — the original color + hex inputs. #}
-          <div class="color-input" x-show="bgMode === 'solid'">
-            <input type="color" x-model="form.header_bg"
-                   :value="form.header_bg || '#fafaf7'">
-            <input type="text" name="header_bg" x-model="form.header_bg"
-                   placeholder="#0f6e56"
-                   :disabled="bgMode !== 'solid'"
-                   class="spec-form-input spec-form-input--mono">
-            <button type="button" @click="form.header_bg = ''"
-                    class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
-              <i class="ti ti-x" aria-hidden="true"></i>
-            </button>
-          </div>
-
-          {# GRADIENT — builder. The submitted value still lives in
-             a (read-only-ish) text input named header_bg, kept in
-             sync by applyGrad(). #}
-          <div class="grad-builder" x-show="bgMode === 'gradient'" x-cloak>
-            <div class="grad-row">
-              <select class="theme-select" x-model="grad.type" @change="applyGrad()">
-                <option value="linear">{{ self.t("admin-grad-linear") }}</option>
-                <option value="radial">{{ self.t("admin-grad-radial") }}</option>
-              </select>
-              <label class="grad-angle" x-show="grad.type === 'linear'">
-                <span x-text="grad.angle + '°'"></span>
-                <input type="range" min="0" max="360" step="5"
-                       x-model.number="grad.angle" @input="applyGrad()">
-              </label>
+        {# CUSTOM — per-theme columns (#784). #}
+        <div class="grid grid-cols-2 gap-3" x-show="bgMode !== 'preset'" x-cloak>
+          <div class="spec-form-field">
+            <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("theme-light") }}</div>
+            {# SOLID #}
+            <div class="color-input" x-show="bgMode === 'solid'">
+              <input type="color" x-model="form.header_bg"
+                     :value="form.header_bg || '#fafaf7'">
+              <input type="text" x-model="form.header_bg" placeholder="#0f6e56"
+                     class="spec-form-input spec-form-input--mono">
             </div>
-            <template x-for="(stop, i) in grad.stops" :key="i">
-              <div class="grad-stop">
-                <input type="color" x-model="stop.color" @input="applyGrad()">
-                <input type="number" min="0" max="100" class="grad-pos"
-                       x-model.number="stop.pos" @input="applyGrad()">
-                <span class="grad-pos-unit">%</span>
-                <button type="button" class="admin-nav-link" @click="removeStop(i)"
-                        x-show="grad.stops.length > 2"
-                        title="{{ self.t("admin-grad-remove-stop") }}">
-                  <i class="ti ti-x" aria-hidden="true"></i>
-                </button>
+            {# GRADIENT #}
+            <div class="grad-builder" x-show="bgMode === 'gradient'" x-cloak>
+              <div class="grad-row">
+                <select class="theme-select" x-model="grad.type" @change="applyGrad()">
+                  <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+                  <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+                </select>
+                <label class="grad-angle" x-show="grad.type === 'linear'">
+                  <span x-text="grad.angle + '°'"></span>
+                  <input type="range" min="0" max="360" step="5"
+                         x-model.number="grad.angle" @input="applyGrad()">
+                </label>
               </div>
-            </template>
-            <button type="button" class="admin-nav-link grad-add" @click="addStop()"
-                    x-show="grad.stops.length < 4">
-              <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
-            </button>
-            {# The canonical submitted value; in gradient mode it's
-               driven by applyGrad(), shown read-only as feedback. #}
-            <input type="text" name="header_bg" x-model="form.header_bg" readonly
-                   :disabled="bgMode !== 'gradient'"
-                   class="spec-form-input spec-form-input--mono grad-output">
+              <template x-for="(stop, i) in grad.stops" :key="i">
+                <div class="grad-stop">
+                  <input type="color" x-model="stop.color" @input="applyGrad()">
+                  <input type="number" min="0" max="100" class="grad-pos"
+                         x-model.number="stop.pos" @input="applyGrad()">
+                  <span class="grad-pos-unit">%</span>
+                  <button type="button" class="admin-nav-link" @click="removeStop(i)"
+                          x-show="grad.stops.length > 2"
+                          title="{{ self.t("admin-grad-remove-stop") }}">
+                    <i class="ti ti-x" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </template>
+              <button type="button" class="admin-nav-link grad-add" @click="addStop()"
+                      x-show="grad.stops.length < 4">
+                <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+              </button>
+              <input type="text" x-model="form.header_bg" readonly
+                     class="spec-form-input spec-form-input--mono grad-output">
+            </div>
           </div>
+          <div class="spec-form-field">
+            <div class="spec-form-label" style="margin-bottom:6px">
+              🌙 {{ self.t("theme-dark") }}
+              <button type="button" class="admin-nav-link" x-show="form.header_bg_dark"
+                      @click="form.header_bg_dark = ''"
+                      title="{{ self.t("admin-landing-header-dark-inherit") }}">
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+            {# SOLID #}
+            <div class="color-input" x-show="bgMode === 'solid'">
+              <input type="color" :value="form.header_bg_dark || '#161616'"
+                     @input="form.header_bg_dark = $event.target.value">
+              <input type="text" x-model="form.header_bg_dark"
+                     placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            {# GRADIENT — its own builder; only writes header_bg_dark when
+               touched, so untouched stays "inherit the light value". #}
+            <div class="grad-builder" x-show="bgMode === 'gradient'" x-cloak>
+              <div class="grad-row">
+                <select class="theme-select" x-model="gradDark.type" @change="applyGradDark()">
+                  <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+                  <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+                </select>
+                <label class="grad-angle" x-show="gradDark.type === 'linear'">
+                  <span x-text="gradDark.angle + '°'"></span>
+                  <input type="range" min="0" max="360" step="5"
+                         x-model.number="gradDark.angle" @input="applyGradDark()">
+                </label>
+              </div>
+              <template x-for="(stop, i) in gradDark.stops" :key="i">
+                <div class="grad-stop">
+                  <input type="color" x-model="stop.color" @input="applyGradDark()">
+                  <input type="number" min="0" max="100" class="grad-pos"
+                         x-model.number="stop.pos" @input="applyGradDark()">
+                  <span class="grad-pos-unit">%</span>
+                  <button type="button" class="admin-nav-link" @click="removeStopDark(i)"
+                          x-show="gradDark.stops.length > 2"
+                          title="{{ self.t("admin-grad-remove-stop") }}">
+                    <i class="ti ti-x" aria-hidden="true"></i>
+                  </button>
+                </div>
+              </template>
+              <button type="button" class="admin-nav-link grad-add" @click="addStopDark()"
+                      x-show="gradDark.stops.length < 4">
+                <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+              </button>
+              <input type="text" x-model="form.header_bg_dark" readonly
+                     placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
+                     class="spec-form-input spec-form-input--mono grad-output">
+            </div>
+            <div class="spec-form-help">{{ self.t("admin-landing-header-dark-inherit-help") }}</div>
+          </div>
+        </div>
+        <div class="spec-form-help" x-show="bgMode !== 'preset'" x-cloak>{{ self.t("admin-landing-bg-help") }}</div>
 
-          <div class="spec-form-help">{{ self.t("admin-landing-bg-help") }}</div>
-        </div>
-        <div class="spec-form-field">
-          <label class="spec-form-label">{{ self.t("admin-landing-header-fg") }}</label>
-          <div class="color-input">
-            <input type="color" x-model="form.header_fg"
-                   :value="form.header_fg || '#1a1a1a'">
-            <input type="text" name="header_fg" x-model="form.header_fg"
-                   placeholder="#ffffff"
-                   class="spec-form-input spec-form-input--mono">
-            <button type="button" @click="form.header_fg = ''"
-                    class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
-              <i class="ti ti-x" aria-hidden="true"></i>
-            </button>
+        {# Text colour — per theme; applies over preset and custom alike. #}
+        <div class="grid grid-cols-2 gap-3">
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-header-fg") }} · ☀️ {{ self.t("theme-light") }}</label>
+            <div class="color-input">
+              <input type="color" x-model="form.header_fg"
+                     :value="form.header_fg || '#1a1a1a'">
+              <input type="text" name="header_fg" x-model="form.header_fg"
+                     placeholder="#ffffff"
+                     class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.header_fg = ''"
+                      class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
+          </div>
+          <div class="spec-form-field">
+            <label class="spec-form-label">{{ self.t("admin-landing-header-fg") }} · 🌙 {{ self.t("theme-dark") }}</label>
+            <div class="color-input">
+              <input type="color" :value="form.header_fg_dark || '#f0f0f0'"
+                     @input="form.header_fg_dark = $event.target.value">
+              <input type="text" name="header_fg_dark" x-model="form.header_fg_dark"
+                     placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
+                     class="spec-form-input spec-form-input--mono">
+              <button type="button" @click="form.header_fg_dark = ''"
+                      class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
+                <i class="ti ti-x" aria-hidden="true"></i>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
       </section>
 
       {# ── Card: Catalog cards — cover style + the default cover painted
@@ -954,15 +1028,21 @@ window.ruscker.landingForm = (initial, logoImages) => ({
     }
     this.form.logo_mode = mode;
   },
-  // Header-background editing mode + gradient builder sub-state.
-  bgMode: window.ruscker.bgMode(initial.header_bg || ''),
-  // Seed the builder from the saved gradient (not the default) so editing
-  // a saved gradient modifies it in place instead of wiping it (#720).
+  // Header-background editing mode: 'preset' (the built-in tints — no
+  // custom bg, #782) vs 'solid'/'gradient' (custom, per-theme #784).
+  bgMode: (initial.header_bg || '').trim()
+    ? window.ruscker.bgMode(initial.header_bg)
+    : 'preset',
+  // Seed the builders from the saved gradients (not the default) so
+  // editing a saved gradient modifies it in place (#720). gradDark only
+  // writes header_bg_dark when touched — untouched means "inherit".
   grad: window.ruscker.gradientParse(initial.header_bg) || window.ruscker.gradientDefault(),
-  // Recompute header_bg from the gradient builder. Called on any
-  // builder control change while in gradient mode.
+  gradDark: window.ruscker.gradientParse(initial.header_bg_dark) || window.ruscker.gradientDefault(),
   applyGrad() {
     this.form.header_bg = window.ruscker.gradientCss(this.grad);
+  },
+  applyGradDark() {
+    this.form.header_bg_dark = window.ruscker.gradientCss(this.gradDark);
   },
   addStop() {
     if (this.grad.stops.length < 4) {
@@ -976,17 +1056,53 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       this.applyGrad();
     }
   },
-  // Switching to gradient mode seeds header_bg from the builder so
-  // the preview updates immediately. 'solid' mirrors the v0.2.2 seed
-  // fix the cover builders got (#746): keep an existing solid hex,
-  // replace a gradient with a seeded colour — the old `header_bg = ''`
-  // both left the preview inert until the picker was dragged AND
-  // silently wiped a saved gradient the moment Solid was clicked.
+  addStopDark() {
+    if (this.gradDark.stops.length < 4) {
+      this.gradDark.stops.push({ color: '#1d9e75', pos: 50 });
+      this.applyGradDark();
+    }
+  },
+  removeStopDark(i) {
+    if (this.gradDark.stops.length > 2) {
+      this.gradDark.stops.splice(i, 1);
+      this.applyGradDark();
+    }
+  },
+  // Switching modes is now EXCLUSIVE (#782): 'preset' stashes + clears
+  // the custom backgrounds so the preset tints actually paint (a custom
+  // bg overrides them on the portal); coming back restores the stash.
+  // 'solid' keeps an existing hex but replaces a gradient with a seeded
+  // colour (the #746 seed fix); 'gradient' re-applies the builder so the
+  // preview updates immediately.
+  _bgStash: null,
   setBgMode(mode) {
+    if (mode === this.bgMode) return;
+    if (mode === 'preset') {
+      this._bgStash = { bg: this.form.header_bg, dark: this.form.header_bg_dark };
+      this.form.header_bg = '';
+      this.form.header_bg_dark = '';
+      this.bgMode = mode;
+      return;
+    }
+    if (this.bgMode === 'preset' && this._bgStash) {
+      this.form.header_bg = this._bgStash.bg;
+      this.form.header_bg_dark = this._bgStash.dark;
+      this._bgStash = null;
+      this.grad = window.ruscker.gradientParse(this.form.header_bg) || this.grad;
+      this.gradDark = window.ruscker.gradientParse(this.form.header_bg_dark) || this.gradDark;
+    }
     this.bgMode = mode;
-    if (mode === 'gradient') { this.applyGrad(); return; }
-    const c = (this.form.header_bg || '').trim();
-    if (!c || /^(linear|radial)-gradient\(/.test(c)) this.form.header_bg = '#0f6e56';
+    const isGrad = (v) => /^(linear|radial)-gradient\(/.test((v || '').trim());
+    if (mode === 'gradient') {
+      this.applyGrad();
+      // dark: keep a saved gradient, drop a now-mismatched solid, and
+      // leave empty alone (inherit).
+      if (this.form.header_bg_dark && !isGrad(this.form.header_bg_dark)) this.form.header_bg_dark = '';
+      return;
+    }
+    // solid
+    if (!this.form.header_bg || isGrad(this.form.header_bg)) this.form.header_bg = '#0f6e56';
+    if (isGrad(this.form.header_bg_dark)) this.form.header_bg_dark = '';
   },
 
   // ── Default card-cover builder (#720) — a parallel solid/gradient
@@ -1077,9 +1193,14 @@ window.ruscker.landingForm = (initial, logoImages) => ({
 
   // Header background: a custom header-bg wins; otherwise the preset tint
   // (same gradients as input.css .lp-hdr-*), over the themed surface.
+  // Per-theme (#784): when the preview shows the dark theme, the dark
+  // values apply, inheriting the light ones when unset — mirroring the
+  // portal's build_header_style cascade.
   pvHeaderStyle() {
     const f = this.form;
-    let bg = f.header_bg;
+    const dark = this.pvTheme() === 'dark';
+    let bg = dark ? (f.header_bg_dark || f.header_bg) : f.header_bg;
+    const fg = dark ? (f.header_fg_dark || f.header_fg) : f.header_fg;
     if (!bg) {
       const p = f.header_preset || 'soft';
       bg = p === 'flat'
@@ -1088,7 +1209,7 @@ window.ruscker.landingForm = (initial, logoImages) => ({
           ? 'linear-gradient(120deg, color-mix(in srgb, #0f6e56 17%, var(--surface)), color-mix(in srgb, #5dcaa5 12%, var(--surface)))'
           : 'linear-gradient(180deg, color-mix(in srgb, #0f6e56 7%, var(--surface)), var(--surface))';
     }
-    return `background:${bg};` + (f.header_fg ? `color:${f.header_fg};` : '');
+    return `background:${bg};` + (fg ? `color:${fg};` : '');
   },
 
   // Mock card cover: the default cover (#720) when set, else the accent

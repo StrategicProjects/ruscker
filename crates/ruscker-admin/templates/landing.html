@@ -32,8 +32,12 @@
 
 {% block content %}
 
-<header class="border-b border-[color:var(--border)] lp-hdr-{{ header_preset }}"
-        {% if !header_style.is_empty() %}style="{{ header_style }}"{% endif %}>
+{# Custom header colours arrive as CSS rules on #portal-hdr (not an
+   inline style) so the dark theme can carry its own values — the theme
+   switches client-side via data-theme, which inline styles can't see
+   (#784). #}
+{% if !header_style.is_empty() %}<style>{{ header_style|safe }}</style>{% endif %}
+<header id="portal-hdr" class="border-b border-[color:var(--border)] lp-hdr-{{ header_preset }}">
   <div class="max-w-6xl mx-auto px-6 py-5 flex items-center justify-between gap-6 relative">
     <div class="flex items-center gap-3">
       {# Header-left identity (#468, revised #701 follow-up). The brand

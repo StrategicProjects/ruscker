@@ -2027,6 +2027,88 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 }
 .layout-tile.is-active .ti { color: var(--color-teal-600); }
 
+/* Catalog-cards cover editor, handoff reskin (#796). */
+.cover-mode-bar button { padding: 12px; gap: 7px; }
+.cover-mode-label { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.15; }
+.cover-mode-label small { font-size: 10.5px; opacity: 0.65; font-weight: 400; }
+.cover-auto-samples { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.cover-auto-sample {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-muted);
+}
+.cover-auto-swatch {
+  width: 100%; height: 56px; min-height: 56px; border-radius: 10px;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+}
+.cover-auto-swatch i { width: 10px; height: 10px; border-radius: 50%; display: block; }
+.cover-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px; font-size: 13.5px; font-weight: 600;
+}
+.cover-panel-head .ti { margin-right: 4px; }
+.own-pill {
+  font: inherit; font-size: 11.5px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--color-teal-600) 12%, var(--surface));
+  color: var(--color-teal-600);
+  border: 1px solid color-mix(in srgb, var(--color-teal-600) 35%, transparent);
+}
+.cover-theme-panel {
+  background: var(--surface-soft); border: 1px solid var(--border-soft);
+  border-radius: 12px; padding: 12px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.cover-preview {
+  position: relative; height: 96px; min-height: 96px; border-radius: 10px;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+}
+.cover-chip {
+  position: absolute; top: 8px; left: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; padding: 2px 8px; border-radius: 999px;
+  background: var(--surface); color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.cover-stop-row { display: flex; align-items: center; gap: 10px; }
+.cover-swatch {
+  width: 34px; height: 34px; flex: none; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px; background: none;
+}
+input[type="color"].cover-swatch::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radius: 6px; }
+.cover-pos {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 8px; font-size: 12.5px;
+}
+.cover-pos input {
+  width: 42px; border: 0; background: transparent; color: inherit;
+  font-family: var(--font-mono, monospace); font-size: 12.5px; text-align: right;
+}
+.cover-pos span { color: var(--text-faint); }
+.cover-grad-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.angle-dial {
+  position: relative; width: 46px; height: 46px; flex: none;
+  border-radius: 50%; border: 1px solid var(--border); background: var(--surface);
+  cursor: grab; touch-action: none;
+  font-family: inherit; font-size: 10.5px; color: var(--text-muted);
+  display: flex; align-items: center; justify-content: center;
+}
+.angle-dial:active { cursor: grabbing; }
+.angle-dial__dot { position: absolute; inset: 0; pointer-events: none; }
+.angle-dial__dot::after {
+  content: ''; position: absolute; top: 3px; left: 50%;
+  width: 6px; height: 6px; margin-left: -3px; border-radius: 50%;
+  background: var(--color-teal-600);
+}
+.grad-add-link {
+  display: inline-flex; align-items: center; gap: 5px; width: fit-content;
+  font-family: inherit; font-size: 13px; color: var(--color-teal-600);
+  background: none; border: 0; cursor: pointer; padding: 2px 0;
+}
+.grad-add-link:hover { text-decoration: underline; }
+
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */
 .editor-topbar {

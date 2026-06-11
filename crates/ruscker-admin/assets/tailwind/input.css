@@ -1997,6 +1997,35 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .seg-control button + button { border-left: 0.5px solid var(--border, rgba(120,120,120,0.25)); }
 .seg-control button.is-active { background: var(--color-teal-600); color: #fff; }
 .seg-control .ti { font-size: 16px; }
+/* Full-width segmented bar (the catalog-density control, #794): two
+   equal halves; the active one flips to high-contrast (text-on-bg, so
+   it reads in both themes — the handoff shows black-on-white). */
+.seg-control--full { display: flex; width: 100%; }
+.seg-control--full button { flex: 1; }
+.seg-control--contrast button.is-active { background: var(--text); color: var(--bg); }
+
+/* Catalog-layout option tiles (#794, design handoff): big icon-over-
+   label choices; the active one reads as a card outlined in the brand
+   teal on the plain surface. */
+.layout-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.layout-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 18px 12px; cursor: pointer;
+  background: var(--surface-soft); color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 10px;
+  font-family: inherit; font-size: 13.5px; line-height: 1.2;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+.layout-tile .ti { font-size: 22px; }
+.layout-tile:hover { color: var(--text); border-color: var(--border-strong); }
+.layout-tile.is-active {
+  background: var(--surface); color: var(--text);
+  /* border-color + an inset ring instead of a thicker border, so the
+     tile doesn't grow a pixel and shift its neighbours when selected. */
+  border-color: var(--color-teal-600);
+  box-shadow: inset 0 0 0 1px var(--color-teal-600);
+}
+.layout-tile.is-active .ti { color: var(--color-teal-600); }
 
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */

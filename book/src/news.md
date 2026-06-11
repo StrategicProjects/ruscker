@@ -9,6 +9,40 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.9 — 2026-06-11
+
+The Appearance editor reaches the design handoff, end to end — built
+card-by-card with the operator reviewing each screen live.
+
+**Appearance editor, handoff layouts**
+
+- **Catalog layout (#794):** Grid/List/Sections as large icon tiles
+  (active outlined in the brand teal) with the density control as a
+  full-width high-contrast bar.
+- **Catalog cards (#796, #800):** one high-contrast mode bar — Auto
+  (type colour) | Solid | Gradient. Auto explains itself and shows the
+  real per-type tints; Solid/Gradient open per-theme panels with a live
+  cover preview, a draggable angle dial and handoff-style colour stops.
+  The dark panel carries an explicit **Inherited ⇄ Own** pill — inherit
+  shows just the preview and a note; own opens the controls (your work
+  is kept when toggling).
+- **Theme & colors (#798):** full-width default-theme bar, large brand
+  swatches (check on the active one, a "+" tile for a custom accent
+  applied to both themes) and per-theme palette panels with a live
+  mini-preview of background, text and accent.
+- **The Featured-carousel toggle moved into Visible sections** — it is
+  a portal section like search and filters.
+
+**Fixed**
+
+- **Initial colour states now tell the truth (#792):** empty pickers no
+  longer contradict their placeholders; dark-side pickers show the
+  light value they inherit; the brand swatch matching the effective
+  accent starts selected. Also fixes colour pickers that could render
+  black when a value was cleared.
+
+---
+
 ## v0.2.8 — 2026-06-11
 
 Second round of v0.2.7 field-testing feedback.

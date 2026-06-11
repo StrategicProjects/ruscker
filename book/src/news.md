@@ -9,6 +9,32 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.8 — 2026-06-11
+
+Second round of v0.2.7 field-testing feedback.
+
+**Apps list**
+
+- **Archiving no longer reloads the page (#787).** The archive toggle
+  now updates the row in place (state pill + icon) — no navigation, so
+  the page keeps its scroll position.
+
+**Appearance editor**
+
+- **Per-theme default card cover (#790).** The catalog's default cover
+  (solid or gradient) can now differ between the light and dark themes,
+  dark inheriting light when unset. The portal switches covers
+  instantly with the visitor's theme toggle.
+- **Theme switch on the Portal preview (#790).** A ☀️/🌙 toggle on the
+  preview pane lets you inspect both themes without changing the saved
+  default theme — every preview control follows it.
+- **The "Card covers: Tinted | Gradient" control was removed (#789).**
+  It only toggled a subtle overlay on tinted covers and was confusing
+  next to the default-cover builder. Saved values keep rendering as
+  before; "Restore defaults" clears them.
+
+---
+
 ## v0.2.7 — 2026-06-11
 
 Polish from v0.2.6 field testing — four operator reports, all fixed.

@@ -2062,7 +2062,7 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 }
 .cover-panel-head .ti { margin-right: 4px; }
 .own-pill {
-  font: inherit; font-size: 11px; line-height: 1.2; padding: 1px 9px;
+  font: inherit; font-size: 10.5px; line-height: 1.15; padding: 1px 8px;
   border-radius: 999px; cursor: pointer;
   background: color-mix(in srgb, var(--color-teal-600) 12%, var(--surface));
   color: var(--color-teal-600);
@@ -2073,11 +2073,13 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   background: var(--surface); color: var(--text-muted);
   border-color: var(--border-strong);
 }
+/* Same type size as the "+ add colour" link so the two panels read on
+   one scale (#800 polish round 2). */
 .cover-inherit-line {
   display: flex; align-items: center; gap: 6px;
-  font-size: 11.5px; color: var(--text-faint); padding: 2px 2px 6px;
+  font-size: 13px; color: var(--text-faint); padding: 2px 2px 6px;
 }
-.cover-inherit-line .ti { font-size: 13px; }
+.cover-inherit-line .ti { font-size: 14px; }
 .cover-theme-panel {
   background: var(--surface-soft); border: 1px solid var(--border-soft);
   border-radius: 12px; padding: 12px;

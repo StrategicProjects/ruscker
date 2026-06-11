@@ -77,14 +77,21 @@ async fn toggle_featured(
     .into_response()
 }
 
+/// JSON returned by the archive toggle (#787) — the new state, so the
+/// row's pill + button repaint in place.
+#[derive(serde::Serialize)]
+struct StateToggleResult {
+    state: &'static str,
+}
+
 /// `POST /admin/specs/{id}/state/toggle` — archive/unarchive a spec from
 /// the Apps table (#775): flips `template-properties.state` between
 /// `active` and `inactive`. An inactive app keeps its config, history and
 /// audit trail, but its card leaves the public portal (the landing hides
 /// inactive cards behind the status filter and makes them non-clickable).
-/// Editor-gated; a plain form POST + redirect, so the reloaded page
-/// repaints the state pill — archiving is rare enough that the
-/// optimistic-fetch machinery the featured star needs would be overkill.
+/// Editor-gated; returns the new state as JSON for the in-place fetch
+/// toggle (#787 — the original form POST + redirect reloaded the page
+/// and threw the scroll back to the top).
 async fn toggle_state(
     editor: RequireEditor,
     State(state): State<AppState>,
@@ -111,7 +118,10 @@ async fn toggle_state(
         tracing::error!(id, error = ?e, "save state toggle failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }
-    Redirect::to("/admin/specs").into_response()
+    Json(StateToggleResult {
+        state: if next_active { "active" } else { "inactive" },
+    })
+    .into_response()
 }
 
 /// One row out of the `specs` table, picked for the list view.

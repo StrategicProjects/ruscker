@@ -9,6 +9,34 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.10 — 2026-06-11
+
+Live-testing round on the portal content tools.
+
+**Public landing**
+
+- **The intro paragraph now fills the row (#805)** — justified, with
+  per-language hyphenation — instead of capping at a narrow column and
+  ragging right. It also gained a stable `.landing-intro` class as the
+  hook for operator CSS.
+
+**Appearance editor**
+
+- **HTML blocks reach the handoff layout, with inline editing (#806).**
+  The blocks card matches the other cards: slot headings with count
+  badges, rows with drag handle / active pill / arrows / pencil /
+  trash, dashed empty states — and the pencil (or "+ New block") opens
+  the editor right there: name, a Top|Bottom position segment, the dark
+  HTML editor, CSP origins, an active switch, delete and Done. No more
+  navigating away.
+- **Block actions return you to the blocks section (#808)** instead of
+  the top of the page, and the card sits in the form column at the same
+  width as its neighbours.
+- **Custom CSS card** follows its mockup: the caution note above the
+  dark editor.
+
+---
+
 ## v0.2.9 — 2026-06-11
 
 The Appearance editor reaches the design handoff, end to end — built

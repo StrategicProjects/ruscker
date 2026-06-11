@@ -1,81 +1,195 @@
-{# Custom HTML blocks editor — folded into the Portal page (#242).
-   Included from admin/landing.html, so `self` is the LandingPage and
-   `groups` is its Vec<SlotGroup>. Reachable POST routes still live
-   under /admin/blocks (the form pages, create/update/delete/move/
-   reorder); only the standalone list page was dropped. #}
-<section class="mt-10 pt-8 border-t border-[color:var(--border)]">
-  <div class="flex items-end justify-between mb-5">
+{# Custom HTML blocks editor — folded into the Portal page (#242),
+   handoff layout with INLINE editing (#806): the pencil (or the
+   new-block button) expands a panel right here instead of navigating
+   to /admin/blocks/new|{id}. Included from admin/landing.html, so
+   `self` is the LandingPage and `groups` is its Vec<SlotGroup>. The
+   POST routes are unchanged (create/update/delete/move/reorder all
+   redirect back to /admin/landing). Own Alpine root — it sits outside
+   the landing form's x-data. #}
+<section class="editor-card mt-6" x-data="{ editing: null, creating: false }">
+  <div class="flex items-start justify-between gap-4 mb-1">
     <div>
-      <h2 class="text-lg font-medium tracking-tight">{{ self.t("admin-blocks-title") }}</h2>
-      <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-blocks-subtitle") }}</p>
+      <div class="form-section__title" style="margin-bottom:4px"><i class="ti ti-code" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-blocks-title") }}</div>
+      <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-blocks-subtitle") }}</p>
     </div>
-    <a href="{{ base }}/admin/blocks/new"
-       class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm bg-[#0f6e56] text-white hover:bg-[#0c5a47]">
+    <button type="button" class="admin-login-btn" style="padding:8px 14px;font-size:13px"
+            @click="creating = !creating; editing = null">
       <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-blocks-new") }}
-    </a>
+    </button>
   </div>
 
-  <p class="text-xs text-[color:var(--text-faint)] mb-4">
+  <p class="text-xs text-[color:var(--text-faint)] mt-3 mb-1">
     <i class="ti ti-arrows-move" aria-hidden="true"></i> {{ self.t("admin-blocks-drag-hint") }}
   </p>
 
-  {% for g in groups %}
-    <section class="mb-6">
-      <h3 class="text-xs font-medium uppercase tracking-wide text-[color:var(--text-muted)] mb-2">
-        {% if g.slot == "top" %}{{ self.t("admin-blocks-slot-top") }}{% else %}{{ self.t("admin-blocks-slot-bottom") }}{% endif %}
-      </h3>
+  {# Inline CREATE panel (#806) — same fields the edit panel carries;
+     a fresh block starts enabled, in the top slot. #}
+  <div class="block-edit-panel" x-show="creating" x-cloak>
+    <form method="post" action="{{ base }}/admin/blocks" x-data="{ slot: 'top' }">
+      <input type="hidden" name="slot" :value="slot">
+      <div class="block-edit-grid">
+        <div>
+          <label class="spec-form-label">{{ self.t("admin-blocks-title-label") }}</label>
+          <input type="text" name="title" class="spec-form-input"
+                 placeholder="{{ self.t("admin-blocks-title-placeholder") }}">
+        </div>
+        <div>
+          <label class="spec-form-label">{{ self.t("admin-blocks-position") }}</label>
+          <div class="seg-control seg-control--full seg-control--contrast" role="group">
+            <button type="button" :class="{ 'is-active': slot === 'top' }" @click="slot = 'top'">{{ self.t("admin-blocks-pos-top") }}</button>
+            <button type="button" :class="{ 'is-active': slot === 'bottom' }" @click="slot = 'bottom'">{{ self.t("admin-blocks-pos-bottom") }}</button>
+          </div>
+        </div>
+      </div>
+      <label class="spec-form-label" style="margin-top:10px">{{ self.t("admin-blocks-html") }}</label>
+      <div class="code-editor-wrap" data-mode="html">
+        <pre class="code-editor-pre" aria-hidden="true"></pre>
+        <textarea name="html" rows="7" class="code-editor-ta" spellcheck="false"
+                  placeholder="&lt;!-- HTML injetado neste slot --&gt;"></textarea>
+      </div>
+      <div class="block-edit-grid" style="margin-top:10px">
+        <div>
+          <label class="spec-form-label">{{ self.t("admin-blocks-origins") }}</label>
+          <input type="text" name="csp_origins" class="spec-form-input spec-form-input--mono"
+                 placeholder="https://example.com">
+          <div class="spec-form-help">{{ self.t("admin-blocks-origins-help") }}</div>
+        </div>
+        <div>
+          <label class="spec-form-check" style="cursor:pointer;gap:10px;margin-top:22px">
+            <span class="switch">
+              <input type="checkbox" name="enabled" value="1" checked>
+              <span class="switch__track"><span class="switch__dot"></span></span>
+            </span>
+            <span>{{ self.t("admin-blocks-enabled-label") }}</span>
+          </label>
+        </div>
+      </div>
+      <div class="block-edit-footer">
+        <button type="button" class="admin-nav-link" @click="creating = false">{{ self.t("admin-blocks-cancel") }}</button>
+        <button type="submit" class="admin-login-btn" style="padding:8px 16px;font-size:13px">
+          <i class="ti ti-check" aria-hidden="true"></i> {{ self.t("admin-blocks-done") }}
+        </button>
+      </div>
+    </form>
+  </div>
 
-      <div class="block-list" data-slot="{{ g.slot }}">
-        {% for b in g.blocks %}
-        <div class="block-row" draggable="true" data-id="{{ b.id }}">
+  {% for g in groups %}
+    <div class="block-slot-head">
+      {% if g.slot == "top" %}{{ self.t("admin-blocks-slot-top") }}{% else %}{{ self.t("admin-blocks-slot-bottom") }}{% endif %}
+      <span class="block-count">{{ g.blocks.len() }}</span>
+    </div>
+
+    <div class="block-list" data-slot="{{ g.slot }}">
+      {% for b in g.blocks %}
+      <div class="block-item" data-id="{{ b.id }}">
+        <div class="block-row" draggable="true">
           <i class="ti ti-grip-vertical block-grip" aria-hidden="true"></i>
           <span class="block-row-title">
             {% if b.title.is_empty() %}<span class="text-[color:var(--text-faint)]">—</span>{% else %}{{ b.title }}{% endif %}
           </span>
           {% if b.enabled %}
-            <span class="text-xs text-[#0f6e56] whitespace-nowrap">● {{ self.t("admin-blocks-enabled") }}</span>
+            <span class="block-pill block-pill--on">{{ self.t("admin-blocks-enabled") }}</span>
           {% else %}
-            <span class="text-xs text-[color:var(--text-faint)] whitespace-nowrap">○ {{ self.t("admin-blocks-disabled") }}</span>
+            <span class="block-pill block-pill--off">{{ self.t("admin-blocks-disabled") }}</span>
           {% endif %}
           <span class="block-row-actions whitespace-nowrap">
             <form method="post" action="{{ base }}/admin/blocks/{{ b.id }}/move/up" class="inline">
-              <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-1"
-                      title="{{ self.t("admin-blocks-move-up") }}" aria-label="{{ self.t("admin-blocks-move-up") }}">
+              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-blocks-move-up") }}" aria-label="{{ self.t("admin-blocks-move-up") }}">
                 <i class="ti ti-arrow-up" aria-hidden="true"></i>
               </button>
             </form>
             <form method="post" action="{{ base }}/admin/blocks/{{ b.id }}/move/down" class="inline">
-              <button type="submit" class="text-[color:var(--text-faint)] hover:text-[color:var(--text)] mr-3"
-                      title="{{ self.t("admin-blocks-move-down") }}" aria-label="{{ self.t("admin-blocks-move-down") }}">
+              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-blocks-move-down") }}" aria-label="{{ self.t("admin-blocks-move-down") }}">
                 <i class="ti ti-arrow-down" aria-hidden="true"></i>
               </button>
             </form>
-            <a href="{{ base }}/admin/blocks/{{ b.id }}" class="text-[color:var(--text-muted)] hover:text-[color:var(--text)] mr-3">{{ self.t("admin-blocks-edit") }}</a>
+            <button type="button" class="admin-nav-link" :class="editing === '{{ b.id }}' ? 'block-act-on' : ''"
+                    @click="editing = (editing === '{{ b.id }}' ? null : '{{ b.id }}'); creating = false"
+                    title="{{ self.t("admin-blocks-edit") }}" aria-label="{{ self.t("admin-blocks-edit") }}">
+              <i class="ti ti-pencil" aria-hidden="true"></i>
+            </button>
+            {# The delete form doubles as the target of the panel's
+               "Delete block" button (form= attribute — forms can't nest). #}
             <form method="post" action="{{ base }}/admin/blocks/{{ b.id }}/delete" class="inline"
-                  data-confirm="{{ self.t("admin-blocks-delete-confirm") }}">
-              <button type="submit" class="text-[color:var(--text-faint)] hover:text-red-500">{{ self.t("admin-blocks-delete") }}</button>
+                  id="block-del-{{ b.id }}" data-confirm="{{ self.t("admin-blocks-delete-confirm") }}">
+              <button type="submit" class="dash-action dash-action--danger"
+                      title="{{ self.t("admin-blocks-delete") }}" aria-label="{{ self.t("admin-blocks-delete") }}">
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
             </form>
           </span>
         </div>
-        {% else %}
-        <p class="text-sm text-[color:var(--text-faint)] py-3 px-2">{{ self.t("admin-blocks-slot-empty") }}</p>
-        {% endfor %}
+
+        {# Inline EDIT panel (#806). #}
+        <div class="block-edit-panel" x-show="editing === '{{ b.id }}'" x-cloak>
+          <form method="post" action="{{ base }}/admin/blocks/{{ b.id }}" x-data="{ slot: '{{ b.slot }}' }">
+            <input type="hidden" name="slot" :value="slot">
+            <div class="block-edit-grid">
+              <div>
+                <label class="spec-form-label">{{ self.t("admin-blocks-title-label") }}</label>
+                <input type="text" name="title" value="{{ b.title }}" class="spec-form-input"
+                       placeholder="{{ self.t("admin-blocks-title-placeholder") }}">
+              </div>
+              <div>
+                <label class="spec-form-label">{{ self.t("admin-blocks-position") }}</label>
+                <div class="seg-control seg-control--full seg-control--contrast" role="group">
+                  <button type="button" :class="{ 'is-active': slot === 'top' }" @click="slot = 'top'">{{ self.t("admin-blocks-pos-top") }}</button>
+                  <button type="button" :class="{ 'is-active': slot === 'bottom' }" @click="slot = 'bottom'">{{ self.t("admin-blocks-pos-bottom") }}</button>
+                </div>
+              </div>
+            </div>
+            <label class="spec-form-label" style="margin-top:10px">{{ self.t("admin-blocks-html") }}</label>
+            <div class="code-editor-wrap" data-mode="html">
+              <pre class="code-editor-pre" aria-hidden="true"></pre>
+              <textarea name="html" rows="7" class="code-editor-ta" spellcheck="false"
+                        placeholder="&lt;!-- HTML injetado neste slot --&gt;">{{ b.html }}</textarea>
+            </div>
+            <div class="block-edit-grid" style="margin-top:10px">
+              <div>
+                <label class="spec-form-label">{{ self.t("admin-blocks-origins") }}</label>
+                <input type="text" name="csp_origins" value="{{ b.csp_origins }}"
+                       class="spec-form-input spec-form-input--mono" placeholder="https://example.com">
+                <div class="spec-form-help">{{ self.t("admin-blocks-origins-help") }}</div>
+              </div>
+              <div>
+                <label class="spec-form-check" style="cursor:pointer;gap:10px;margin-top:22px">
+                  <span class="switch">
+                    <input type="checkbox" name="enabled" value="1" {% if b.enabled %}checked{% endif %}>
+                    <span class="switch__track"><span class="switch__dot"></span></span>
+                  </span>
+                  <span>{{ self.t("admin-blocks-enabled-label") }}</span>
+                </label>
+              </div>
+            </div>
+            <div class="block-edit-footer">
+              <button type="submit" form="block-del-{{ b.id }}" class="admin-nav-link">
+                <i class="ti ti-trash" aria-hidden="true"></i> {{ self.t("admin-blocks-delete-block") }}
+              </button>
+              <button type="submit" class="admin-login-btn" style="padding:8px 16px;font-size:13px">
+                <i class="ti ti-check" aria-hidden="true"></i> {{ self.t("admin-blocks-done") }}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </section>
+      {% else %}
+      <p class="block-empty">{{ self.t("admin-blocks-slot-empty") }}</p>
+      {% endfor %}
+    </div>
   {% endfor %}
 </section>
 
 <script>
-// Drag-and-drop reorder, scoped per slot. On drop we read the slot's
-// DOM order and POST it server-side; the ↑/↓ buttons remain as an
-// accessible, JS-free fallback. (fetch is base-path-aware via the
-// #173 runtime shim, so the bare path resolves under /box too.)
+// Drag-and-drop reorder, scoped per slot. The draggable handle is the
+// .block-row, but the moved unit is its .block-item wrapper (row +
+// inline panel travel together, #806). On drop we read the slot's DOM
+// order and POST it; the ↑/↓ buttons remain as an accessible fallback.
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.block-list').forEach((list) => {
     let dragEl = null;
 
     list.addEventListener('dragstart', (e) => {
-      dragEl = e.target.closest('.block-row');
+      dragEl = e.target.closest('.block-item');
       if (dragEl) { dragEl.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; }
     });
 
@@ -96,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function afterElement(list, y) {
-    const rows = [...list.querySelectorAll('.block-row:not(.dragging)')];
+    const rows = [...list.querySelectorAll('.block-item:not(.dragging)')];
     let best = { offset: -Infinity, el: null };
     for (const row of rows) {
       const box = row.getBoundingClientRect();
@@ -108,7 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function persist(list) {
     const slot = list.dataset.slot;
-    const ids = [...list.querySelectorAll('.block-row')].map((r) => r.dataset.id);
+    const ids = [...list.querySelectorAll('.block-item')].map((r) => r.dataset.id);
     fetch('{{ base }}/admin/blocks/reorder', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

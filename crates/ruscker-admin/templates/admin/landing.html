@@ -103,34 +103,45 @@
 
       </section>
 
-      {# ── Card: Brand color — quick-pick accent presets (sets the
-         light + dark accent; fine-tune in Appearance below). #}
+      {# ── Card: Logos — the header brand + the extra per-slot logos,
+         unified (#776). The MAIN logo *is* the first header-left entry of
+         `logos` — exactly what the portal's brand_logo_view() renders,
+         sized by the slider below. The old split ("Logo" with no picker
+         vs "Header/footer logos" silently feeding it) is gone; the modes
+         are truthful: leaving Custom stashes that entry, coming back
+         restores it. #}
       <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-brand-color") }}</div>
-        <div class="spec-form-field">
-          <div class="brand-swatches">
-            {% for c in ["#0f6e56", "#2563eb", "#1e3a5f", "#10b981", "#ec4899", "#8b5cf6"] %}
-            <button type="button" class="brand-swatch" style="background:{{ c }};color:{{ c }}"
-                    :class="{ 'is-active': (form.theme_light_accent || '').toLowerCase() === '{{ c }}' }"
-                    @click="form.theme_light_accent = '{{ c }}'; form.theme_dark_accent = '{{ c }}'"
-                    aria-label="{{ c }}"></button>
-            {% endfor %}
-          </div>
-          <div class="spec-form-help">{{ self.t("admin-landing-brand-color-help") }}</div>
-        </div>
-      </section>
-
-      {# ── Card: Logo — header brand presentation + size/margin. #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-logo-card") }}</div>
+        <div class="form-section__title">{{ self.t("admin-landing-logos-card") }}</div>
         <input type="hidden" name="logo_mode" :value="form.logo_mode">
         <input type="hidden" name="logo_size" :value="form.logo_size">
         <input type="hidden" name="logo_margin" :value="form.logo_margin">
+        {# All logos (main + additional) submit as one hidden JSON field. #}
+        <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
+
+        <div class="spec-form-section-title">{{ self.t("admin-landing-logo-main") }}</div>
         <div class="spec-form-field">
           <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': (form.logo_mode || 'mark') === 'mark' }" @click="form.logo_mode = 'mark'">{{ self.t("admin-landing-logo-mode-mark") }}</button>
-            <button type="button" :class="{ 'is-active': form.logo_mode === 'symbol' }" @click="form.logo_mode = 'symbol'">{{ self.t("admin-landing-logo-mode-symbol") }}</button>
-            <button type="button" :class="{ 'is-active': form.logo_mode === 'custom' }" @click="form.logo_mode = 'custom'">{{ self.t("admin-landing-logo-mode-custom") }}</button>
+            <button type="button" :class="{ 'is-active': (form.logo_mode || 'mark') === 'mark' }" @click="setLogoMode('mark')">{{ self.t("admin-landing-logo-mode-mark") }}</button>
+            <button type="button" :class="{ 'is-active': form.logo_mode === 'symbol' }" @click="setLogoMode('symbol')">{{ self.t("admin-landing-logo-mode-symbol") }}</button>
+            <button type="button" :class="{ 'is-active': form.logo_mode === 'custom' }" @click="setLogoMode('custom')">{{ self.t("admin-landing-logo-mode-custom") }}</button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-logo-main-help") }}</div>
+        </div>
+        {# Custom mode: pick the image right here — no second section to
+           hunt for. Gallery picker + editable path, same row pattern as
+           the additional logos below. #}
+        <div class="spec-form-field" x-show="form.logo_mode === 'custom'" x-cloak>
+          <label class="spec-form-label">{{ self.t("admin-landing-logo-image") }}</label>
+          <div class="landing-logo-image-row">
+            <img :src="assetUrl(mainLogoUrl())" alt="" class="landing-logo-thumb" x-show="mainLogoUrl()" style="flex:none">
+            <button type="button" class="admin-login-btn landing-logo-pick"
+                    @click="openImagePicker((v) => setMainLogoUrl(v), mainLogoUrl())">
+              <i class="ti ti-photo" aria-hidden="true"></i>
+              {{ self.t("spec-form-choose-image") }}
+            </button>
+            <input type="text" :value="mainLogoUrl()" @input="setMainLogoUrl($event.target.value)"
+                   placeholder="/assets/img/logo.png"
+                   class="spec-form-input spec-form-input--mono" style="flex:1;min-width:0">
           </div>
         </div>
         <div class="spec-form-field">
@@ -141,16 +152,14 @@
           <label class="spec-form-label">{{ self.t("admin-landing-logo-margin") }} · <span x-text="(form.logo_margin || '8') + 'px'"></span></label>
           <input type="range" min="0" max="40" step="1" x-model="form.logo_margin" style="width:100%">
         </div>
-      </section>
 
-      {# ── Card: Header / footer logos (#468). #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-logos") }}</div>
+        <div class="spec-form-section-title">{{ self.t("admin-landing-logos-extra") }}</div>
+        <div class="spec-form-help" style="margin-bottom:8px">{{ self.t("admin-landing-logos-extra-help") }}</div>
       <div class="spec-form-field">
-        {# Submitted as one hidden JSON field; the rows below edit the array. #}
-        <input type="hidden" name="logos_json" :value="JSON.stringify(logos)">
         <template x-for="(logo, i) in logos" :key="i">
-          <div class="landing-logo-card">
+          {# The main (first header-left) row is managed above — hidden
+             here so the same logo isn't editable in two places. #}
+          <div class="landing-logo-card" x-show="i !== mainLogoIndex()">
             <div class="landing-logo-card__head">
               {# Preview thumbnail, or a placeholder icon when no URL yet. #}
               <img :src="assetUrl(logo.url)" alt="" class="landing-logo-thumb" x-show="logo.url">
@@ -174,19 +183,22 @@
                       title="{{ self.t("admin-landing-clear") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
             </div>
             <div class="landing-logo-card__grid">
-              {# Slot — segmented pill (header / footer). #}
+              {# Slot — segmented pill (header / footer). Header-left is
+                 reserved for the main logo above, so switching a left-
+                 aligned row to the header bumps it to the right. #}
               <div class="landing-logo-field">
                 <label>{{ self.t("admin-landing-logo-slot-label") }}</label>
                 <div class="seg-control" role="group">
-                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'">{{ self.t("admin-landing-logo-header") }}</button>
+                  <button type="button" :class="{ 'is-active': logo.slot === 'header' }" @click="logo.slot = 'header'; if (logo.align === 'left') logo.align = 'right'">{{ self.t("admin-landing-logo-header") }}</button>
                   <button type="button" :class="{ 'is-active': logo.slot === 'footer' }" @click="logo.slot = 'footer'">{{ self.t("admin-landing-logo-footer") }}</button>
                 </div>
               </div>
-              {# Alignment — segmented icon pill (left / center / right). #}
+              {# Alignment — segmented icon pill. Left only offered in the
+                 footer (the header's left slot is the main logo's). #}
               <div class="landing-logo-field">
                 <label>{{ self.t("admin-landing-logo-align-label") }}</label>
                 <div class="seg-control" role="group">
-                  <button type="button" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
+                  <button type="button" x-show="logo.slot === 'footer'" :class="{ 'is-active': logo.align === 'left' }" @click="logo.align = 'left'" title="{{ self.t("admin-landing-logo-left") }}"><i class="ti ti-align-left" aria-hidden="true"></i></button>
                   <button type="button" :class="{ 'is-active': logo.align === 'center' }" @click="logo.align = 'center'" title="{{ self.t("admin-landing-logo-center") }}"><i class="ti ti-align-center" aria-hidden="true"></i></button>
                   <button type="button" :class="{ 'is-active': logo.align === 'right' }" @click="logo.align = 'right'" title="{{ self.t("admin-landing-logo-right") }}"><i class="ti ti-align-right" aria-hidden="true"></i></button>
                 </div>
@@ -207,19 +219,20 @@
           </div>
         </template>
         <button type="button" class="admin-nav-link mt-2"
-                @click="logos.push({ url: '', slot: 'header', align: 'left', link: null, height: 32, margin: null })">
+                @click="logos.push({ url: '', slot: 'header', align: 'right', link: null, height: 32, margin: null })">
           <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-landing-logo-add") }}
         </button>
       </div>
 
       </section>
 
-      {# ── Card: Background — header preset + card cover style. #}
+      {# ── Card: Header style — preset + background + text colour, every
+         header knob in one place (#776: the preset used to live under
+         "Background & gradients" while the colours sat two cards away in
+         "Appearance"). #}
       <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-background") }}</div>
+        <div class="form-section__title">{{ self.t("admin-landing-header-style-card") }}</div>
         <input type="hidden" name="header_preset" :value="form.header_preset">
-        <input type="hidden" name="card_cover" :value="form.card_cover">
-        <input type="hidden" name="card_cover_default" :value="form.card_cover_default">
         <div class="spec-form-field">
           <label class="spec-form-label">{{ self.t("admin-landing-header-bg-preset") }}</label>
           <div class="seg-control" role="group">
@@ -229,80 +242,6 @@
           </div>
           <div class="spec-form-help">{{ self.t("admin-landing-header-bg-preset-help") }}</div>
         </div>
-        <div class="spec-form-field">
-          <label class="spec-form-label">{{ self.t("admin-landing-card-covers") }}</label>
-          <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': (form.card_cover || 'tinted') === 'tinted' }" @click="form.card_cover = 'tinted'">{{ self.t("admin-landing-cover-tinted") }}</button>
-            <button type="button" :class="{ 'is-active': form.card_cover === 'gradient' }" @click="form.card_cover = 'gradient'">{{ self.t("admin-landing-cover-gradient") }}</button>
-          </div>
-        </div>
-
-        {# Default cover colour/gradient (#720): the base painted behind
-           cards that have no per-app cover/accent. "Auto" keeps the
-           per-kind tint; solid / gradient set one default for the catalog
-           so the operator no longer has to edit every app to change it. #}
-        <div class="spec-form-field">
-          <label class="spec-form-label">{{ self.t("admin-landing-card-cover-default") }}</label>
-          <div class="grad-modes" role="tablist">
-            <button type="button" class="grad-mode" :class="coverDefMode === 'auto' ? 'is-active' : ''"
-                    @click="setCoverDefMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
-            <button type="button" class="grad-mode" :class="coverDefMode === 'solid' ? 'is-active' : ''"
-                    @click="setCoverDefMode('solid')">{{ self.t("admin-grad-solid") }}</button>
-            <button type="button" class="grad-mode" :class="coverDefMode === 'gradient' ? 'is-active' : ''"
-                    @click="setCoverDefMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
-          </div>
-
-          {# AUTO — nothing to set; the per-kind tint stays the fallback. #}
-          <div class="spec-form-help" x-show="coverDefMode === 'auto'">{{ self.t("admin-landing-card-cover-default-auto-help") }}</div>
-
-          {# SOLID #}
-          <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
-            <input type="color" x-model="form.card_cover_default" :value="form.card_cover_default || '#0f6e56'">
-            <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
-                   class="spec-form-input spec-form-input--mono">
-          </div>
-
-          {# GRADIENT — same builder component as the header background. #}
-          <div class="grad-builder" x-show="coverDefMode === 'gradient'" x-cloak>
-            <div class="grad-row">
-              <select class="theme-select" x-model="coverDefGrad.type" @change="applyCoverDef()">
-                <option value="linear">{{ self.t("admin-grad-linear") }}</option>
-                <option value="radial">{{ self.t("admin-grad-radial") }}</option>
-              </select>
-              <label class="grad-angle" x-show="coverDefGrad.type === 'linear'">
-                <span x-text="coverDefGrad.angle + '°'"></span>
-                <input type="range" min="0" max="360" step="5"
-                       x-model.number="coverDefGrad.angle" @input="applyCoverDef()">
-              </label>
-            </div>
-            <template x-for="(stop, i) in coverDefGrad.stops" :key="i">
-              <div class="grad-stop">
-                <input type="color" x-model="stop.color" @input="applyCoverDef()">
-                <input type="number" min="0" max="100" class="grad-pos"
-                       x-model.number="stop.pos" @input="applyCoverDef()">
-                <span class="grad-pos-unit">%</span>
-                <button type="button" class="admin-nav-link" @click="removeCoverDefStop(i)"
-                        x-show="coverDefGrad.stops.length > 2"
-                        title="{{ self.t("admin-grad-remove-stop") }}">
-                  <i class="ti ti-x" aria-hidden="true"></i>
-                </button>
-              </div>
-            </template>
-            <button type="button" class="admin-nav-link grad-add" @click="addCoverDefStop()"
-                    x-show="coverDefGrad.stops.length < 4">
-              <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
-            </button>
-            <input type="text" x-model="form.card_cover_default" readonly
-                   class="spec-form-input spec-form-input--mono grad-output">
-          </div>
-        </div>
-      </section>
-
-      {# ── Card: Appearance — header colours + per-theme palettes. #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-card-appearance") }}</div>
-
-      <div class="spec-form-section-title">{{ self.t("admin-landing-colors") }}</div>
 
       <div class="grid grid-cols-2 gap-3">
         <div class="spec-form-field">
@@ -386,6 +325,122 @@
           </div>
         </div>
       </div>
+      </section>
+
+      {# ── Card: Catalog cards — cover style + the default cover painted
+         behind cards with no per-app cover (#776: cover knobs used to be
+         split off under "Background & gradients"). #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-cards-card") }}</div>
+        <input type="hidden" name="card_cover" :value="form.card_cover">
+        <input type="hidden" name="card_cover_default" :value="form.card_cover_default">
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-card-covers") }}</label>
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': (form.card_cover || 'tinted') === 'tinted' }" @click="form.card_cover = 'tinted'">{{ self.t("admin-landing-cover-tinted") }}</button>
+            <button type="button" :class="{ 'is-active': form.card_cover === 'gradient' }" @click="form.card_cover = 'gradient'">{{ self.t("admin-landing-cover-gradient") }}</button>
+          </div>
+        </div>
+
+        {# Default cover colour/gradient (#720): the base painted behind
+           cards that have no per-app cover/accent. "Auto" keeps the
+           per-kind tint; solid / gradient set one default for the catalog
+           so the operator no longer has to edit every app to change it. #}
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-card-cover-default") }}</label>
+          <div class="grad-modes" role="tablist">
+            <button type="button" class="grad-mode" :class="coverDefMode === 'auto' ? 'is-active' : ''"
+                    @click="setCoverDefMode('auto')">{{ self.t("spec-form-cover-auto") }}</button>
+            <button type="button" class="grad-mode" :class="coverDefMode === 'solid' ? 'is-active' : ''"
+                    @click="setCoverDefMode('solid')">{{ self.t("admin-grad-solid") }}</button>
+            <button type="button" class="grad-mode" :class="coverDefMode === 'gradient' ? 'is-active' : ''"
+                    @click="setCoverDefMode('gradient')">{{ self.t("admin-grad-gradient") }}</button>
+          </div>
+
+          {# AUTO — nothing to set; the per-kind tint stays the fallback. #}
+          <div class="spec-form-help" x-show="coverDefMode === 'auto'">{{ self.t("admin-landing-card-cover-default-auto-help") }}</div>
+
+          {# SOLID #}
+          <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
+            <input type="color" x-model="form.card_cover_default" :value="form.card_cover_default || '#0f6e56'">
+            <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
+                   class="spec-form-input spec-form-input--mono">
+          </div>
+
+          {# GRADIENT — same builder component as the header background. #}
+          <div class="grad-builder" x-show="coverDefMode === 'gradient'" x-cloak>
+            <div class="grad-row">
+              <select class="theme-select" x-model="coverDefGrad.type" @change="applyCoverDef()">
+                <option value="linear">{{ self.t("admin-grad-linear") }}</option>
+                <option value="radial">{{ self.t("admin-grad-radial") }}</option>
+              </select>
+              <label class="grad-angle" x-show="coverDefGrad.type === 'linear'">
+                <span x-text="coverDefGrad.angle + '°'"></span>
+                <input type="range" min="0" max="360" step="5"
+                       x-model.number="coverDefGrad.angle" @input="applyCoverDef()">
+              </label>
+            </div>
+            <template x-for="(stop, i) in coverDefGrad.stops" :key="i">
+              <div class="grad-stop">
+                <input type="color" x-model="stop.color" @input="applyCoverDef()">
+                <input type="number" min="0" max="100" class="grad-pos"
+                       x-model.number="stop.pos" @input="applyCoverDef()">
+                <span class="grad-pos-unit">%</span>
+                <button type="button" class="admin-nav-link" @click="removeCoverDefStop(i)"
+                        x-show="coverDefGrad.stops.length > 2"
+                        title="{{ self.t("admin-grad-remove-stop") }}">
+                  <i class="ti ti-x" aria-hidden="true"></i>
+                </button>
+              </div>
+            </template>
+            <button type="button" class="admin-nav-link grad-add" @click="addCoverDefStop()"
+                    x-show="coverDefGrad.stops.length < 4">
+              <i class="ti ti-plus" aria-hidden="true"></i> {{ self.t("admin-grad-add-stop") }}
+            </button>
+            <input type="text" x-model="form.card_cover_default" readonly
+                   class="spec-form-input spec-form-input--mono grad-output">
+          </div>
+        </div>
+      </section>
+
+      {# ── Card: Theme & colors — default theme, brand quick-picks and
+         the per-theme palettes together (#776: the swatches and the
+         default-theme picker were stranded in their own cards while the
+         palettes they feed sat under "Appearance"). #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-theme-card") }}</div>
+        <input type="hidden" name="default_theme" :value="form.default_theme">
+        {# Default theme — what a cookieless visitor gets first (their own
+           toggle still overrides it). #}
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-default-theme") }}</label>
+          <div class="seg-control" role="group">
+            <button type="button" :class="{ 'is-active': form.default_theme === 'light' }" @click="form.default_theme = 'light'">
+              <i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}
+            </button>
+            <button type="button" :class="{ 'is-active': form.default_theme === 'dark' }" @click="form.default_theme = 'dark'">
+              <i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}
+            </button>
+            <button type="button" :class="{ 'is-active': form.default_theme !== 'light' && form.default_theme !== 'dark' }" @click="form.default_theme = 'auto'">
+              <i class="ti ti-device-desktop" aria-hidden="true"></i> {{ self.t("theme-auto") }}
+            </button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-default-theme-help") }}</div>
+        </div>
+        {# Brand colour quick-picks — set both themes' accent at once;
+           fine-tune per theme below. #}
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-brand-color") }}</label>
+          <div class="brand-swatches">
+            {% for c in ["#0f6e56", "#2563eb", "#1e3a5f", "#10b981", "#ec4899", "#8b5cf6"] %}
+            <button type="button" class="brand-swatch" style="background:{{ c }};color:{{ c }}"
+                    :class="{ 'is-active': (form.theme_light_accent || '').toLowerCase() === '{{ c }}' }"
+                    @click="form.theme_light_accent = '{{ c }}'; form.theme_dark_accent = '{{ c }}'"
+                    aria-label="{{ c }}"></button>
+            {% endfor %}
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-brand-color-help") }}</div>
+        </div>
 
       {# ── Per-theme colors (#475). Blank ⇒ keep the theme default. #}
       <div class="spec-form-section-title">{{ self.t("admin-landing-theme-colors") }}</div>
@@ -447,27 +502,6 @@
         </div>
       </div>
 
-      </section>
-
-      {# ── Card: Default theme — the portal theme a cookieless visitor
-         gets first (their own toggle still overrides it). #}
-      <section class="editor-card">
-        <div class="form-section__title">{{ self.t("admin-landing-default-theme") }}</div>
-        <input type="hidden" name="default_theme" :value="form.default_theme">
-        <div class="spec-form-field">
-          <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': form.default_theme === 'light' }" @click="form.default_theme = 'light'">
-              <i class="ti ti-sun" aria-hidden="true"></i> {{ self.t("theme-light") }}
-            </button>
-            <button type="button" :class="{ 'is-active': form.default_theme === 'dark' }" @click="form.default_theme = 'dark'">
-              <i class="ti ti-moon" aria-hidden="true"></i> {{ self.t("theme-dark") }}
-            </button>
-            <button type="button" :class="{ 'is-active': form.default_theme !== 'light' && form.default_theme !== 'dark' }" @click="form.default_theme = 'auto'">
-              <i class="ti ti-device-desktop" aria-hidden="true"></i> {{ self.t("theme-auto") }}
-            </button>
-          </div>
-          <div class="spec-form-help">{{ self.t("admin-landing-default-theme-help") }}</div>
-        </div>
       </section>
 
       {# ── Card: Catalog layout — grid/list + density. #}
@@ -684,15 +718,21 @@
                 <img class="lp-logo" :src="assetUrl(logo.url)" :style="'height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'" alt="">
               </template>
               {# Mark steps aside for ANY header logo (not just left) and is
-                 always brand-coloured — mirrors has_any_header_logo (#701). #}
-              <svg class="lp-mark"
-                   x-show="form.logo_mode !== 'custom' && !logos.some(l => l.url && l.slot === 'header')"
-                   :style="'width:' + pvLogoPx() + 'px;height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'"
-                   viewBox="0 0 80 80" aria-hidden="true">
-                <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
-                <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
-                <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
-              </svg>
+                 always brand-coloured — mirrors has_any_header_logo (#701).
+                 x-if, NOT x-show (#777): the mark also carries a `:style`
+                 size binding, and a slider change rewrites the whole style
+                 attribute — wiping the display:none x-show had set, so the
+                 mark reappeared next to a custom logo. x-if removes the
+                 node instead; there's nothing left to un-hide. #}
+              <template x-if="pvShowMark()">
+                <svg class="lp-mark"
+                     :style="'width:' + pvLogoPx() + 'px;height:' + pvLogoPx() + 'px;margin-right:' + pvLogoMarginPx() + 'px'"
+                     viewBox="0 0 80 80" aria-hidden="true">
+                  <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+                  <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+                  <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+                </svg>
+              </template>
               {# Title/subtitle hidden in `symbol` (mark-only) mode. #}
               <div x-show="form.logo_mode !== 'symbol'">
                 {# Live preview (#468): title binds to the form, falling back
@@ -866,6 +906,44 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   logos: (() => {
     try { return JSON.parse(initial.logos_json || '[]'); } catch (_) { return []; }
   })(),
+
+  // ── Unified logo model (#776): the MAIN/brand logo is the first
+  // header-left entry of `logos` — exactly what the portal's
+  // brand_logo_view() renders, sized by the logo_size slider. The
+  // "Main logo" controls above manage that one entry; the additional-
+  // logos list hides it so it isn't editable in two places.
+  init() {
+    // Self-heal a legacy mismatch: a saved header-left logo is what the
+    // portal actually shows whatever logo_mode says (ANY header logo has
+    // hidden the built-in mark since #708) — reflect that in the modes
+    // so "Custom" is selected exactly when a custom logo will render.
+    if (this.mainLogoUrl()) this.form.logo_mode = 'custom';
+  },
+  mainLogoIndex() {
+    return this.logos.findIndex(l => l.slot === 'header' && l.align === 'left');
+  },
+  mainLogoUrl() {
+    const i = this.mainLogoIndex();
+    return i >= 0 ? (this.logos[i].url || '') : '';
+  },
+  setMainLogoUrl(v) {
+    const i = this.mainLogoIndex();
+    if (i >= 0) this.logos[i].url = v;
+    else this.logos.unshift({ url: v, slot: 'header', align: 'left', link: null, height: 32, margin: null });
+  },
+  // Leaving Custom stashes the main entry (so the portal really shows
+  // the mark again); coming back restores the stashed pick.
+  _mainStash: null,
+  setLogoMode(mode) {
+    if (mode !== 'custom') {
+      const i = this.mainLogoIndex();
+      if (i >= 0) this._mainStash = this.logos.splice(i, 1)[0];
+    } else if (this.mainLogoIndex() < 0 && this._mainStash) {
+      this.logos.unshift(this._mainStash);
+      this._mainStash = null;
+    }
+    this.form.logo_mode = mode;
+  },
   // Header-background editing mode + gradient builder sub-state.
   bgMode: window.ruscker.bgMode(initial.header_bg || ''),
   // Seed the builder from the saved gradient (not the default) so editing
@@ -1022,6 +1100,14 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       + (this.form.card_cover === 'gradient'
         ? 'background-image: linear-gradient(135deg, rgba(255,255,255,0.10), rgba(0,0,0,0.16));'
         : '');
+  },
+
+  // Whether the preview shows the built-in mark — mirrors the portal
+  // (templates/landing.html): mode isn't Custom AND no header logo at
+  // all. Lives behind an x-if (#777), see the template comment.
+  pvShowMark() {
+    return (this.form.logo_mode || 'mark') !== 'custom'
+      && !this.logos.some(l => l.url && l.slot === 'header');
   },
 
   // Built-in mark size/margin, scaled down to the mock header (the real

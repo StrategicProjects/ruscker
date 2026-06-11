@@ -498,6 +498,142 @@ pub async fn delete_one(db: &ConfigDb, id: &str, actor: Option<&str>) -> Result<
     }
 }
 
+/// Flip a spec's archive state (`template-properties.state`) WITHOUT
+/// touching `updated_at` (#780). The Apps list sorts by `updated_at`
+/// DESC, so persisting the archive toggle through the plain upsert path
+/// made the row jump to the top of the table. Archiving is a
+/// *visibility flip*, not a content edit — the row should stay where it
+/// was. The `version` still bumps (with a `spec_versions` history row)
+/// so a concurrently-open edit form's optimistic-concurrency check
+/// (#745) catches the change, and the audit log records a distinct
+/// `spec.archive` / `spec.unarchive` action. Returns `false` when the
+/// id isn't a DB spec.
+pub async fn set_state(
+    db: &ConfigDb,
+    id: &str,
+    active: bool,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let now = Utc::now();
+    let target = format!("spec:{id}");
+    let state = if active { "active" } else { "inactive" };
+    let action = if active { "spec.unarchive" } else { "spec.archive" };
+
+    // Rebuild config_json with the new state outside the per-dialect
+    // arms — the serialization is dialect-free.
+    let patch = |json: &str| -> Result<(String, bool)> {
+        let mut spec: Spec =
+            serde_json::from_str(json).with_context(|| format!("deserialize spec {id}"))?;
+        let already = spec.template_properties.is_active() == active;
+        spec.template_properties.set_str("state", state);
+        let out = canonical_json(&spec).with_context(|| format!("serialize spec {id}"))?;
+        Ok((out, already))
+    };
+
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin set_state tx")?;
+            let row: Option<(String, i64)> =
+                sqlx::query_as("SELECT config_json, version FROM specs WHERE id = ?")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .with_context(|| format!("lookup spec {id}"))?;
+            let Some((json, version)) = row else { return Ok(false) };
+            let (config_json, already) = patch(&json)?;
+            if already {
+                return Ok(true); // idempotent — nothing to write
+            }
+            let next_version = version + 1;
+            sqlx::query(
+                "UPDATE specs SET config_json = ?, state = ?, version = ? WHERE id = ?",
+            )
+            .bind(&config_json)
+            .bind(state)
+            .bind(next_version)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set state of {id}"))?;
+            sqlx::query(
+                "INSERT INTO spec_versions (spec_id, version, config_json, changed_at, changed_by)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(id)
+            .bind(next_version)
+            .bind(&config_json)
+            .bind(now)
+            .bind(actor)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("history v{next_version} for {id}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, ?, ?, NULL, ?)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit set_state")?;
+            tx.commit().await.context("commit set_state tx")?;
+            Ok(true)
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin set_state tx")?;
+            let row: Option<(String, i64)> =
+                sqlx::query_as("SELECT config_json, version FROM specs WHERE id = $1")
+                    .bind(id)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .with_context(|| format!("lookup spec {id}"))?;
+            let Some((json, version)) = row else { return Ok(false) };
+            let (config_json, already) = patch(&json)?;
+            if already {
+                return Ok(true);
+            }
+            let next_version = version + 1;
+            sqlx::query(
+                "UPDATE specs SET config_json = $1, state = $2, version = $3 WHERE id = $4",
+            )
+            .bind(&config_json)
+            .bind(state)
+            .bind(next_version)
+            .bind(id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set state of {id}"))?;
+            sqlx::query(
+                "INSERT INTO spec_versions (spec_id, version, config_json, changed_at, changed_by)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(id)
+            .bind(next_version)
+            .bind(&config_json)
+            .bind(now)
+            .bind(actor)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("history v{next_version} for {id}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, NULL, $4)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit set_state")?;
+            tx.commit().await.context("commit set_state tx")?;
+            Ok(true)
+        }
+    }
+}
+
 pub(crate) async fn upsert_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     spec: &Spec,
@@ -836,38 +972,72 @@ container-image: a:1").unwrap();
         assert!(v2 > v1, "a save must bump the version ({v1} → {v2})");
     }
 
-    // #775: the Apps-list archive toggle flips `template-properties.state`
-    // and saves through `upsert_one` — both readers must agree afterwards:
-    // the list view reads the `state` COLUMN, the landing reads
-    // `is_active()` off the deserialized spec.
+    // #775/#780: the Apps-list archive toggle persists through
+    // `set_state` — both readers must agree afterwards (the list view
+    // reads the `state` COLUMN, the landing reads `is_active()` off the
+    // deserialized spec), and `updated_at` must NOT move: the list sorts
+    // by it, so the upsert path made an archived row jump to the top of
+    // the table (#780).
     #[tokio::test]
-    async fn state_flip_updates_column_and_roundtrips() {
+    async fn set_state_flips_without_touching_updated_at() {
         let pool = open_memory().await.unwrap();
         let db = ConfigDb::Sqlite(pool.clone());
-        let mut spec: Spec =
+        let spec: Spec =
             serde_yaml_ng::from_str("id: app
 container-image: a:1").unwrap();
         insert_new(&db, &spec, None).await.unwrap();
+        let (ts0, v0): (DateTime<Utc>, i64) =
+            sqlx::query_as("SELECT updated_at, version FROM specs WHERE id = 'app'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
 
-        spec.template_properties.set_str("state", "inactive");
-        upsert_one(&db, &spec, Some("admin")).await.unwrap();
+        assert!(set_state(&db, "app", false, Some("admin")).await.unwrap());
 
-        let (col,): (String,) = sqlx::query_as("SELECT state FROM specs WHERE id = 'app'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let (col, ts1, v1): (String, DateTime<Utc>, i64) =
+            sqlx::query_as("SELECT state, updated_at, version FROM specs WHERE id = 'app'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
         assert_eq!(col, "inactive", "list view reads the column");
+        assert_eq!(ts1, ts0, "archive must not move updated_at (#780)");
+        assert_eq!(v1, v0 + 1, "stale-edit protection still bumps version");
         let back = fetch_one(&db, "app").await.unwrap().expect("still there");
         assert!(!back.template_properties.is_active(), "landing reads the spec");
 
-        // …and back to active.
-        spec.template_properties.set_str("state", "active");
-        upsert_one(&db, &spec, Some("admin")).await.unwrap();
-        let (col,): (String,) = sqlx::query_as("SELECT state FROM specs WHERE id = 'app'")
+        // Distinct audit action, tagged with the actor.
+        let (action, actor): (String, Option<String>) = sqlx::query_as(
+            "SELECT action, actor FROM audit_log WHERE target = 'spec:app'
+              ORDER BY id DESC LIMIT 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(action, "spec.archive");
+        assert_eq!(actor.as_deref(), Some("admin"));
+
+        // …and back to active; idempotent re-apply writes nothing new.
+        assert!(set_state(&db, "app", true, Some("admin")).await.unwrap());
+        let (col, ts2): (String, DateTime<Utc>) =
+            sqlx::query_as("SELECT state, updated_at FROM specs WHERE id = 'app'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(col, "active");
+        assert_eq!(ts2, ts0);
+        let (v2,): (i64,) = sqlx::query_as("SELECT version FROM specs WHERE id = 'app'")
             .fetch_one(&pool)
             .await
             .unwrap();
-        assert_eq!(col, "active");
+        assert!(set_state(&db, "app", true, Some("admin")).await.unwrap());
+        let (v3,): (i64,) = sqlx::query_as("SELECT version FROM specs WHERE id = 'app'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(v3, v2, "same-state re-apply is a no-op");
+
+        // Unknown id → false.
+        assert!(!set_state(&db, "ghost", false, None).await.unwrap());
     }
 
     fn fixture_yaml() -> String {
@@ -1083,6 +1253,47 @@ container-image: a:1").unwrap();
                 .await
                 .unwrap();
         assert_eq!(history, 0, "cascade cleared history");
+    }
+
+    // #780: the Postgres arm of `set_state` — same invariants as the
+    // SQLite twin (state flips, updated_at frozen, version bumps).
+    // Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn set_state_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pool = crate::db::open_pg(&url).await.unwrap();
+        sqlx::query("DELETE FROM specs WHERE id = 'set-state-pg'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let db = ConfigDb::Postgres(pool.clone());
+
+        let spec: Spec =
+            serde_yaml_ng::from_str("id: set-state-pg
+container-image: a:1").unwrap();
+        insert_new(&db, &spec, None).await.unwrap();
+        let (ts0, v0): (DateTime<Utc>, i64) =
+            sqlx::query_as("SELECT updated_at, version FROM specs WHERE id = 'set-state-pg'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+        assert!(set_state(&db, "set-state-pg", false, Some("admin")).await.unwrap());
+
+        let (col, ts1, v1): (String, DateTime<Utc>, i64) = sqlx::query_as(
+            "SELECT state, updated_at, version FROM specs WHERE id = 'set-state-pg'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(col, "inactive");
+        assert_eq!(ts1, ts0, "archive must not move updated_at (#780)");
+        assert_eq!(v1, v0 + 1);
+        let back = fetch_one(&db, "set-state-pg").await.unwrap().expect("there");
+        assert!(!back.template_properties.is_active());
     }
 
     // The full `import_all` transaction (specs + landing + blocks +

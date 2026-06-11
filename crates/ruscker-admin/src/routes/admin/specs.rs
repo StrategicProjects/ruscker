@@ -93,7 +93,7 @@ async fn toggle_state(
     let Some(db) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    let mut spec = match crate::db::specs::fetch_one(db, &id).await {
+    let spec = match crate::db::specs::fetch_one(db, &id).await {
         Ok(Some(s)) => s,
         Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
         Err(e) => {
@@ -101,15 +101,13 @@ async fn toggle_state(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
-    let next = if spec.template_properties.is_active() {
-        "inactive"
-    } else {
-        "active"
-    };
-    spec.template_properties.set_str("state", next);
-    // `upsert_one` derives the `state` column from `template-properties`
-    // and writes the audit row with the actor, same as the spec form.
-    if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(editor.actor())).await {
+    let next_active = !spec.template_properties.is_active();
+    // `set_state`, not `upsert_one` (#780): the list sorts by
+    // `updated_at` DESC and the upsert path stamps it, so archiving made
+    // the row jump to the top of the table. The dedicated writer leaves
+    // `updated_at` alone (a visibility flip is not a content edit) while
+    // still bumping the version and auditing archive/unarchive.
+    if let Err(e) = crate::db::specs::set_state(db, &id, next_active, Some(editor.actor())).await {
         tracing::error!(id, error = ?e, "save state toggle failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }

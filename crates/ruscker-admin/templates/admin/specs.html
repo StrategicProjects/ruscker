@@ -222,18 +222,33 @@
             {# Archive toggle (#775): active ⇄ inactive without opening the
                editor. An inactive app keeps everything (config, history,
                containers can be restarted later) but its card leaves the
-               public portal — the landing hides inactive cards by default. #}
-            <form method="post" action="{{ base }}/admin/specs/{{ spec.id }}/state/toggle" style="display:inline">
-              {% if spec.state == "active" %}
-              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-specs-archive") }}">
-                <i class="ti ti-archive" aria-hidden="true"></i>
-              </button>
-              {% else %}
-              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-specs-unarchive") }}">
-                <i class="ti ti-archive-off" aria-hidden="true"></i>
-              </button>
-              {% endif %}
-            </form>
+               public portal — the landing hides inactive cards by default.
+               In-place fetch like the featured star (#787): the original
+               form POST + redirect reloaded the page and threw the scroll
+               to the top. The response repaints the row's state pill and
+               this button's icon/tooltip; titles ride data-* (never
+               localized strings inside the JS handler — template_lint). #}
+            <button type="button" class="admin-nav-link" x-data="{ busy: false }"
+                    data-toggle-url="{{ base }}/admin/specs/{{ spec.id }}/state/toggle"
+                    data-title-archive="{{ self.t("admin-specs-archive") }}"
+                    data-title-unarchive="{{ self.t("admin-specs-unarchive") }}"
+                    :disabled="busy"
+                    title="{% if spec.state == "active" %}{{ self.t("admin-specs-archive") }}{% else %}{{ self.t("admin-specs-unarchive") }}{% endif %}"
+                    @click="busy = true;
+                            fetch($el.dataset.toggleUrl, { method: 'POST' })
+                              .then(r => r.ok ? r.json() : Promise.reject())
+                              .then(d => {
+                                const pill = $el.closest('tr').querySelector('[class*=pill-state-]');
+                                if (pill) { pill.className = 'pill pill-state-' + d.state; pill.textContent = d.state; }
+                                $el.querySelector('i').className =
+                                  d.state === 'active' ? 'ti ti-archive' : 'ti ti-archive-off';
+                                $el.title = d.state === 'active'
+                                  ? $el.dataset.titleArchive : $el.dataset.titleUnarchive;
+                              })
+                              .catch(() => {})
+                              .finally(() => { busy = false })">
+              <i class="ti {% if spec.state == "active" %}ti-archive{% else %}ti-archive-off{% endif %}" aria-hidden="true"></i>
+            </button>
             {# Delete (#775): same handler the edit form uses (stops the
                app's containers, audits). The confirm rides `data-confirm`
                + the global capture-phase submit listener in _layout.html —

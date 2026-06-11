@@ -905,16 +905,17 @@
 
       {# ── Card: Advanced — custom CSS. #}
       <section class="editor-card">
-        <div class="form-section__title"><i class="ti ti-code" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-style") }}</div>
+        <div class="form-section__title"><i class="ti ti-brand-css3" style="margin-right:6px;vertical-align:-2px" aria-hidden="true"></i>{{ self.t("admin-landing-style") }}</div>
+      {# Handoff layout (#806): the caution line ABOVE the dark editor,
+         no separate label. #}
       <div class="spec-form-field">
-        <label class="spec-form-label">{{ self.t("admin-landing-custom-css") }}</label>
+        <p class="text-xs text-[color:var(--text-muted)]" style="margin-bottom:8px">{{ self.t("admin-landing-custom-css-help") }}</p>
         <div class="code-editor-wrap" data-mode="css">
           <pre class="code-editor-pre" aria-hidden="true"></pre>
           <textarea name="custom_css" rows="6" x-model="form.custom_css" spellcheck="false"
-                    placeholder=".rcard { border-radius: 6px } &#10;:root { --color-link: #1d9e75 }"
+                    placeholder="/* CSS aplicado ao portal p&#250;blico */&#10;.rcard { border-radius: 14px; }"
                     class="code-editor-ta">{{ form.custom_css }}</textarea>
         </div>
-        <div class="spec-form-help">{{ self.t("admin-landing-custom-css-help") }}</div>
       </div>
       </section>
 

@@ -1752,14 +1752,53 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 }
 
 /* Custom landing blocks — draggable reorder rows, one list per slot. */
-.block-list { min-height: 10px; }
+/* Blocks editor, handoff reskin (#806): rows as bordered boxes with a
+   status pill; slot headings carry a count badge; the inline edit
+   panel is a soft inset card. */
+.block-list { display: flex; flex-direction: column; gap: 8px; min-height: 10px; }
 .block-row {
   display: flex; align-items: center; gap: 12px;
-  padding: 8px;
-  border-top: 0.5px solid var(--border);
+  padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px;
   background: var(--surface);
 }
-.block-row:last-child { border-bottom: 0.5px solid var(--border); }
+.block-item.dragging { opacity: 0.55; }
+.block-slot-head {
+  display: flex; align-items: center; gap: 8px;
+  margin: 16px 0 8px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: var(--text-muted);
+}
+.block-count {
+  min-width: 20px; text-align: center; padding: 1px 7px;
+  border-radius: 999px; background: var(--surface-soft);
+  border: 1px solid var(--border);
+  font-size: 11px; font-weight: 600; color: var(--text-muted);
+}
+.block-empty {
+  border: 1.5px dashed var(--border-strong); border-radius: 10px;
+  padding: 14px 16px; font-size: 13px; font-style: italic;
+  color: var(--text-faint); background: var(--surface-soft);
+}
+.block-pill {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.block-pill::before { content: ''; width: 8px; height: 8px; border-radius: 50%; }
+.block-pill--on { color: var(--color-teal-600); }
+.block-pill--on::before { background: #10b981; }
+.block-pill--off { color: var(--text-faint); }
+.block-pill--off::before { background: var(--border-strong); }
+.block-act-on { background: var(--surface-soft); border-radius: 8px; }
+.block-edit-panel {
+  background: var(--surface-soft); border: 1px solid var(--border-soft);
+  border-radius: 12px; padding: 14px; margin-top: 6px;
+}
+.block-edit-grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 14px; align-items: start; }
+.block-edit-footer {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: 12px;
+}
 .block-grip { color: var(--text-faint); cursor: grab; }
 .block-row.dragging { opacity: 0.45; }
 .block-row-title {

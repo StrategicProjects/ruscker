@@ -646,20 +646,31 @@
 
       </section>
 
-      {# ── Card: Catalog layout — grid/list + density. #}
+      {# ── Card: Catalog layout — grid/list/sections as the handoff's
+         big option tiles (icon over label, active outlined in teal) with
+         the density bar full-width below (#794). #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
         <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
         <input type="hidden" name="catalog_density" :value="form.catalog_density">
         <div class="spec-form-field">
-          <div class="seg-control" role="group">
-            <button type="button" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">{{ self.t("admin-landing-layout-grid") }}</button>
-            <button type="button" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">{{ self.t("admin-landing-layout-list") }}</button>
-            <button type="button" :class="{ 'is-active': form.catalog_layout === 'sections' }" @click="form.catalog_layout = 'sections'">{{ self.t("admin-landing-layout-sections") }}</button>
+          <div class="layout-tiles" role="group">
+            <button type="button" class="layout-tile" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">
+              <i class="ti ti-layout-grid" aria-hidden="true"></i>
+              <span>{{ self.t("admin-landing-layout-grid") }}</span>
+            </button>
+            <button type="button" class="layout-tile" :class="{ 'is-active': form.catalog_layout === 'list' }" @click="form.catalog_layout = 'list'">
+              <i class="ti ti-list" aria-hidden="true"></i>
+              <span>{{ self.t("admin-landing-layout-list") }}</span>
+            </button>
+            <button type="button" class="layout-tile" :class="{ 'is-active': form.catalog_layout === 'sections' }" @click="form.catalog_layout = 'sections'">
+              <i class="ti ti-layout-rows" aria-hidden="true"></i>
+              <span>{{ self.t("admin-landing-layout-sections") }}</span>
+            </button>
           </div>
         </div>
         <div class="spec-form-field">
-          <div class="seg-control" role="group">
+          <div class="seg-control seg-control--full seg-control--contrast" role="group">
             <button type="button" :class="{ 'is-active': (form.catalog_density || 'comfortable') === 'comfortable' }" @click="form.catalog_density = 'comfortable'">{{ self.t("admin-landing-density-comfortable") }}</button>
             <button type="button" :class="{ 'is-active': form.catalog_density === 'compact' }" @click="form.catalog_density = 'compact'">{{ self.t("admin-landing-density-compact") }}</button>
           </div>

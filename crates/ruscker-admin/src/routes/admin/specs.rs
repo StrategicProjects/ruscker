@@ -36,6 +36,7 @@ pub fn routes() -> Router<AppState> {
             "/admin/specs/{id}/featured/toggle",
             post(toggle_featured),
         )
+        .route("/admin/specs/{id}/state/toggle", post(toggle_state))
         .layer(DefaultBodyLimit::max(IMPORT_BODY_LIMIT))
 }
 
@@ -74,6 +75,45 @@ async fn toggle_featured(
         featured: now_featured,
     })
     .into_response()
+}
+
+/// `POST /admin/specs/{id}/state/toggle` — archive/unarchive a spec from
+/// the Apps table (#775): flips `template-properties.state` between
+/// `active` and `inactive`. An inactive app keeps its config, history and
+/// audit trail, but its card leaves the public portal (the landing hides
+/// inactive cards behind the status filter and makes them non-clickable).
+/// Editor-gated; a plain form POST + redirect, so the reloaded page
+/// repaints the state pill — archiving is rare enough that the
+/// optimistic-fetch machinery the featured star needs would be overkill.
+async fn toggle_state(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let mut spec = match crate::db::specs::fetch_one(db, &id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+        Err(e) => {
+            tracing::error!(id, error = ?e, "fetch spec for state toggle failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let next = if spec.template_properties.is_active() {
+        "inactive"
+    } else {
+        "active"
+    };
+    spec.template_properties.set_str("state", next);
+    // `upsert_one` derives the `state` column from `template-properties`
+    // and writes the audit row with the actor, same as the spec form.
+    if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(editor.actor())).await {
+        tracing::error!(id, error = ?e, "save state toggle failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
+    }
+    Redirect::to("/admin/specs").into_response()
 }
 
 /// One row out of the `specs` table, picked for the list view.

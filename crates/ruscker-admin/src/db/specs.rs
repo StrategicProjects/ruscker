@@ -836,6 +836,40 @@ container-image: a:1").unwrap();
         assert!(v2 > v1, "a save must bump the version ({v1} → {v2})");
     }
 
+    // #775: the Apps-list archive toggle flips `template-properties.state`
+    // and saves through `upsert_one` — both readers must agree afterwards:
+    // the list view reads the `state` COLUMN, the landing reads
+    // `is_active()` off the deserialized spec.
+    #[tokio::test]
+    async fn state_flip_updates_column_and_roundtrips() {
+        let pool = open_memory().await.unwrap();
+        let db = ConfigDb::Sqlite(pool.clone());
+        let mut spec: Spec =
+            serde_yaml_ng::from_str("id: app
+container-image: a:1").unwrap();
+        insert_new(&db, &spec, None).await.unwrap();
+
+        spec.template_properties.set_str("state", "inactive");
+        upsert_one(&db, &spec, Some("admin")).await.unwrap();
+
+        let (col,): (String,) = sqlx::query_as("SELECT state FROM specs WHERE id = 'app'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(col, "inactive", "list view reads the column");
+        let back = fetch_one(&db, "app").await.unwrap().expect("still there");
+        assert!(!back.template_properties.is_active(), "landing reads the spec");
+
+        // …and back to active.
+        spec.template_properties.set_str("state", "active");
+        upsert_one(&db, &spec, Some("admin")).await.unwrap();
+        let (col,): (String,) = sqlx::query_as("SELECT state FROM specs WHERE id = 'app'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(col, "active");
+    }
+
     fn fixture_yaml() -> String {
         std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
         std::fs::read_to_string("../../examples/application.yml").unwrap()

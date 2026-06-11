@@ -219,6 +219,31 @@
                title="{{ self.t("admin-specs-duplicate") }}">
               <i class="ti ti-copy" aria-hidden="true"></i>
             </a>
+            {# Archive toggle (#775): active ⇄ inactive without opening the
+               editor. An inactive app keeps everything (config, history,
+               containers can be restarted later) but its card leaves the
+               public portal — the landing hides inactive cards by default. #}
+            <form method="post" action="{{ base }}/admin/specs/{{ spec.id }}/state/toggle" style="display:inline">
+              {% if spec.state == "active" %}
+              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-specs-archive") }}">
+                <i class="ti ti-archive" aria-hidden="true"></i>
+              </button>
+              {% else %}
+              <button type="submit" class="admin-nav-link" title="{{ self.t("admin-specs-unarchive") }}">
+                <i class="ti ti-archive-off" aria-hidden="true"></i>
+              </button>
+              {% endif %}
+            </form>
+            {# Delete (#775): same handler the edit form uses (stops the
+               app's containers, audits). The confirm rides `data-confirm`
+               + the global capture-phase submit listener in _layout.html —
+               never an inline JS handler (tests/template_lint.rs). #}
+            <form method="post" action="{{ base }}/admin/specs/{{ spec.id }}/delete" style="display:inline"
+                  data-confirm="{{ self.t("admin-specs-delete-confirm") }}">
+              <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-specs-delete") }}">
+                <i class="ti ti-trash" aria-hidden="true"></i>
+              </button>
+            </form>
           </td>
           {% endif %}
         </tr>

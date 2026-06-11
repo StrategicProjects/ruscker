@@ -278,16 +278,18 @@ Status: living document. Tracks the Phase 5 security audit
   truncated to 16 bytes (128-bit forgery resistance) over the
   signed payload (`ruscker_proxy::sticky`). 128 bits is far past
   brute-forceable within a session window.
-- **[accepted limitation]** Upstream is always `127.0.0.1:<port>`
-  — not an SSRF vector while the operator can't point a spec at
-  an external host.
+- **[accepted limitation]** The upstream is always a
+  Ruscker-spawned container's published port — `127.0.0.1:<port>` on
+  the local daemon, or `host:<port>` for a configured `proxy.hosts`
+  entry — never an operator-typed URL, so it isn't an SSRF vector.
 - **[accepted limitation]** Container labels (`ruscker.spec_id`,
   …) are trusted by `list()`. A manually-created container could
   forge them; acceptable because the operator owns the host.
-- **[deferred]** Add `proxy-connection` (legacy HTTP/1.0) to the
+- **[implemented]** `proxy-connection` (legacy HTTP/1.0) is in the
   hop-by-hop strip list.
-- **[deferred]** WS pump backpressure — a slow client can
-  accumulate frames. Bound the channel with a drop policy.
+- **[implemented]** WS pump isolation — each direction runs as an
+  independent task (a slow client only backpressures its own
+  producer), with an idle watchdog and a drain grace on close.
 - **[implemented]** `X-Forwarded-For` is normalized on the forward
   (#744, v0.2.5) — in trusted mode (§7) the real peer IP is appended
   to the inbound chain; untrusted, the spoofable client value is
@@ -421,8 +423,10 @@ Admin) at `/admin/users`.
 - Set `RUSCKER_COOKIE_KEY` explicitly in prod — without it the
   sticky key is randomized per process, invalidating all sessions
   on restart.
-- Rotate `RUSCKER_ADMIN_TOKEN` if you suspect cookie exfiltration
-  (the cookie holds the token literally — §2).
+- Rotate `RUSCKER_ADMIN_TOKEN` if it may have leaked (it is a
+  break-glass bearer). The admin *cookie* never contains the token —
+  it carries an opaque server-side session id (§2), revocable by
+  logout or restart.
 
 ### Backups
 

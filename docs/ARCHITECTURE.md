@@ -175,16 +175,19 @@ rewrite — only the redirect `Location` header (`prefix_base_path`).
   `ReplicaRegistry`; the replica-*picking* logic lives next to the
   proxy in `ruscker-admin::routes::proxy::{pick_replica,
   pick_accepting}`, where the seat reservation has to be atomic)
-- `ruscker-core::session` (types only — `SessionStore` trait is async,
-  but the trait def is pure)
+- the trait *definitions* in `ruscker-core` (`ContainerBackend`, …)
+  are pure; the async `SessionStore` trait + its in-memory/Postgres
+  impls live in `ruscker-admin::sessions`
 
 ### I/O layer (async + tokio)
 
 - `ruscker-docker` — talks to Docker
-- `ruscker-proxy` — listens on a TCP socket
-- `ruscker-admin` — listens on another TCP socket
-- `ruscker-cli` — synchronous main, spawns tokio runtime for I/O
-  commands
+- `ruscker-proxy` — sticky-cookie + WebSocket helpers (a library; it
+  owns no socket)
+- `ruscker-admin` — builds the single axum router (landing + admin +
+  proxy routes)
+- `ruscker-cli` — owns the one TCP listener and the tokio runtime,
+  serving `ruscker-admin`'s router
 
 ## State and persistence
 
@@ -209,19 +212,17 @@ for git versioning, but the running config lives in SQLite.
 - **First boot, no DB**: Bootstrap from `application.yml` if present;
   otherwise create empty DB.
 - **Subsequent boots**: Load from DB. The YAML is optional.
-- **YAML changes detected** (via inotify/polling): Show diff in admin,
-  let operator apply.
 
 ## Concurrency model
 
 - One tokio runtime, multi-threaded by default.
 - The proxy accepts connections on one task per connection, handlers
   use `tower` middleware stack.
-- Container lifecycle (`ContainerBackend::spawn`, `stop`) runs in a
-  dedicated task; admin/proxy request it via a channel and await the
-  result.
+- Container spawns are direct `ContainerBackend` calls, serialized
+  per spec by a coalescing mutex (`state.spawn_locks`) so concurrent
+  visitors to a cold app produce one container, not N.
 - The auto-scaler runs as a periodic task (every 10s).
-- The session-purger runs as a periodic task (every 60s).
+- The session-purger runs as a periodic task (every 5s).
 - `DashMap` for in-memory state (lock-free reads, sharded writes).
 
 ## Security boundary
@@ -244,9 +245,11 @@ for git versioning, but the running config lives in SQLite.
   `credentials.password_enc` via AES-GCM with a master key from
   `RUSCKER_MASTER_KEY` env var.
 - Session cookie signing: HMAC-SHA256 with key from
-  `RUSCKER_COOKIE_KEY` env var (auto-generated on first run if
-  missing).
-- TLS: rustls with cert paths in config. Optional but recommended.
+  `RUSCKER_COOKIE_KEY` env var (randomized per process when unset —
+  set it explicitly to keep sessions across restarts and across HA
+  instances).
+- TLS: terminated by the reverse proxy in front (Ruscker never
+  terminates TLS itself — see `docs/SECURITY.md` §7/§9).
 
 ## Deployment shapes
 

@@ -496,8 +496,9 @@ A request over the limit gets `429 Too Many Requests` with a
 **Client identity.** The "client" is the caller's IP. When the
 operator opts into forwarded headers
 (`server.useForwardHeaders: true`, or a `forward-headers-strategy`
-other than `none`), the left-most `X-Forwarded-For` address is used
-— the right choice when Ruscker sits behind a reverse proxy.
+other than `none`), the **right-most** parseable `X-Forwarded-For`
+address is used — the entry appended by the trusted proxy, which a
+client can't spoof (the left-most slot is client-controlled).
 Otherwise the real TCP peer is used: `X-Forwarded-For` is **not**
 trusted unless opted in, since a direct client could otherwise spoof
 it to dodge the limit.
@@ -547,9 +548,9 @@ applied) and flagged by `ruscker validate`.
 |---|---|---|---|
 | `min-replicas` | u32 | `1` | Always running |
 | `max-replicas` | u32 | `5` (≥ `min-replicas`) | Per-container apps auto-scale to up to 5 independent replicas by default; set explicitly to raise/lower |
-| `scale-up-threshold` | float | `0.8` | scale up when pool utilization exceeds this (enforced, #333) |
-| `scale-down-threshold` | float | `0.3` | only retire idle replicas while utilization is below this (enforced, #333) |
-| `scale-down-grace` | s | `300` | idle-grace before retiring a replica (enforced, #333) |
+| `scale-up-threshold` | float | unset | scale up when pool utilization exceeds this; unset ⇒ the built-in saturation rule (enforced, #333) |
+| `scale-down-threshold` | float | unset | only retire idle replicas while utilization is below this; unset ⇒ the built-in idle rule (enforced, #333) |
+| `scale-down-grace` | s | unset | idle-grace before retiring a replica; unset ⇒ the global ~30 s grace (enforced, #333) |
 | `drain-timeout` | s | `60` | grace for in-flight sessions on a `max-lifetime` recycle (enforced, #335) |
 | `routing-strategy` | enum | varies | See below |
 | `concurrent-requests-per-replica` | u32 | `100` | API-only — per-replica in-flight cap the scaler scales on (enforced, #336) |
@@ -575,7 +576,7 @@ applied) and flagged by `ruscker validate`.
   for Shiny, Streamlit, Dash, Voilà.
 - `round-robin` — cycle through replicas. Default for API.
 - `weighted-random` — random with weights = remaining seats. Not yet
-  implemented (falls back to round-robin).
+  implemented (falls back to least-connections).
 - `resource-aware` — pick based on CPU/mem load. Requires phase 4
   metrics. Falls back to least-connections.
 
@@ -691,9 +692,7 @@ non-zero — the recommended pre-flight when migrating.
 These ShinyProxy fields are accepted by the parser but currently
 ignored:
 
-- `proxy.specs[*].kubernetes-*` — Kubernetes backend, phase 6
-- `proxy.specs[*].port` — explicit upstream port (Ruscker uses
-  `api.port` for APIs, auto-detects for Shiny)
+- `proxy.specs[*].kubernetes-*` — Kubernetes backend (out of scope)
 - `proxy.specs[*].minimum-seats-available` — pre-warm pool (planned)
 - `proxy.specs[*].labels`, `proxy.specs[*].network-connections` — phase
   3.5

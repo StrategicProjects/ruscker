@@ -7,7 +7,7 @@ with an existing ShinyProxy.
 ## 1. Install and configure
 
 ```sh
-sudo apt install ./ruscker_<version>_amd64.deb
+sudo apt install ./ruscker_<version>-1_amd64.deb
 ```
 
 Manage your **apps, landing page and users in the admin panel** at
@@ -104,7 +104,8 @@ TCP path.)
 next. `anti-affinity: true` keeps a spec's replicas on distinct hosts,
 falling back gracefully when every eligible host already runs it.
 `max-containers` caps a host; if all hosts are full a spawn fails and
-the scaler retries. The dashboard's **Host** column shows where each
+the scaler retries. The dashboard shows the host inline next to each
+replica's container id, so you can see where each
 replica landed.
 
 **Validating it.** A gated integration test exercises spawn + spread +
@@ -128,7 +129,8 @@ server {
 
     # Media-library / card-image uploads. nginx defaults to 1 MB, which
     # silently 413s any larger image before it reaches Ruscker (the admin
-    # "upload doesn't work" symptom). Ruscker itself accepts up to 12 MB.
+    # "upload doesn't work" symptom). Ruscker accepts images up to
+    # 10 MB (12 MB request limit, allowing multipart overhead).
     client_max_body_size 16m;
 
     location / {
@@ -337,11 +339,12 @@ re-logs in the user only when the pinned node falls over.
 
 [#161]: https://github.com/StrategicProjects/ruscker/issues/161
 
-> Today the running proxy reads its spec list from the YAML
-> (`--config`), so deploy the same `application.yml` to every instance;
-> the Postgres catalog backs the **admin UI**. Seed a fresh Postgres
-> catalog from YAML with `ruscker import --config-db-url postgres://…`
-> (idempotent, same as the SQLite `--db` import).
+> With `--config-db-url`, the proxy, landing and scaler all resolve
+> specs **from the shared Postgres catalog first** (YAML is the union
+> fallback for ids not in the DB) — an admin edit on one instance is
+> served live by every instance. Seed a fresh Postgres catalog from
+> YAML with `ruscker import --config-db-url postgres://…` (idempotent,
+> same as the SQLite `--db` import).
 
 [ha]: https://github.com/StrategicProjects/ruscker/tree/main/examples/ha
 
@@ -400,7 +403,7 @@ State lives in two places:
 Build the new `.deb`, copy it over, and reinstall keeping your config:
 
 ```sh
-sudo dpkg -i --force-confold ruscker_<version>_amd64.deb
+sudo dpkg -i --force-confold ruscker_<version>-1_amd64.deb
 sudo systemctl restart ruscker
 ```
 

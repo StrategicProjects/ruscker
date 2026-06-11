@@ -35,7 +35,8 @@ struct StickySession {
 ```
 
 Signed with HMAC-SHA256 using a key from `RUSCKER_COOKIE_KEY` env var
-(auto-generated and persisted on first run if missing).
+(randomized per process when unset — set it explicitly to keep
+sessions across restarts).
 
 On every incoming request:
 

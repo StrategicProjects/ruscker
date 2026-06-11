@@ -80,9 +80,9 @@ sits in the low tens of megabytes:
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
 
-> **~540 MB → ~14 MB idle** — measured on a real production deployment,
-> the same machine serving the same apps. A real 31-spec config migrated
-> with **no unsupported features**, and apps spawn on demand.
+> **~14 MB idle** — measured on a real production deployment serving a
+> real 31-spec config, with apps spawning on demand. (The JVM-based
+> proxy it replaced on the same machine sat at ~540 MB.)
 
 What's in the box:
 
@@ -231,7 +231,7 @@ validator flags any plaintext secret it finds.
 ruscker/
 ├── crates/
 │   ├── ruscker-config/   # YAML schema + parsing + validation (pure)
-│   ├── ruscker-core/     # traits, types, routing, replica registry (pure)
+│   ├── ruscker-core/     # traits, types, replica registry (pure)
 │   ├── ruscker-docker/   # Docker backend (bollard)
 │   ├── ruscker-proxy/    # sticky cookie + WebSocket pump
 │   ├── ruscker-admin/    # landing + admin + proxy routes (axum/askama)

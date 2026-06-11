@@ -77,6 +77,11 @@ with the JVM.
 
 ## Stability constraints
 
+> Amendment (2026-06): MSRV has since moved to **1.85**
+> (`rust-version` in the workspace `Cargo.toml`; toolchain pinned via
+> `rust-toolchain.toml`) and the dependency pins below were lifted as
+> the ecosystem stabilized. The decision and rationale stand.
+
 - **MSRV** (Minimum Supported Rust Version): 1.75. This is what
   Ubuntu 24.04 ships, and we want a no-rustup install path.
 - **Edition**: 2021. Edition 2024 is not yet stable on MSRV.

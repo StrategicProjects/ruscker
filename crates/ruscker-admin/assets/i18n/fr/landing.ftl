@@ -723,12 +723,13 @@ admin-landing-portal-subtitle-help = La ligne sous le titre. Laissez vide pour l
 admin-landing-footer = Pied de page
 admin-landing-footer-help = Texte du pied de page du portail. Vide affiche la version et la marque.
 admin-landing-default-theme = Thème par défaut
-admin-landing-default-theme-help = Le thème initial pour un nouveau visiteur. Il peut toujours en changer.
+admin-landing-default-theme-help = Le thème initial pour qui n'a jamais choisi. Le visiteur peut toujours changer.
 admin-landing-visible-sections = Sections visibles
 admin-landing-show-search = Barre de recherche
 admin-landing-show-filters = Filtres d'accès (public/restreint)
 admin-landing-brand-color = Couleur de marque
-admin-landing-brand-color-help = Un raccourci pour l'accent (clair et sombre). Réglage fin dans Apparence.
+admin-landing-brand-custom = Couleur personnalisée
+admin-landing-brand-color-help = Raccourci pour l'accent (clair et sombre). Réglage fin ci-dessous.
 admin-landing-logo-mode-mark = Marque + nom
 admin-landing-logo-mode-symbol = Symbole seul
 admin-landing-logo-mode-custom = Personnalisé
@@ -756,7 +757,7 @@ admin-landing-density-compact = Compact
 
 
 admin-landing-theme-colors = Couleurs par thème
-admin-landing-theme-colors-help = Recolorez les thèmes clair et sombre du portail public. Vide : garde la valeur par défaut.
+admin-landing-theme-colors-help = Recolore les thèmes clair et sombre du portail public. Vide, garde le défaut.
 admin-landing-theme-light = Thème clair
 admin-landing-theme-dark = Thème sombre
 admin-landing-theme-bg = Fond

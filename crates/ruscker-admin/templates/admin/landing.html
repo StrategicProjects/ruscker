@@ -282,8 +282,8 @@
             <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("theme-light") }}</div>
             {# SOLID #}
             <div class="color-input" x-show="bgMode === 'solid'">
-              <input type="color" x-model="form.header_bg"
-                     :value="form.header_bg || '#fafaf7'">
+              <input type="color" :value="form.header_bg || '#0f6e56'"
+                     @input="form.header_bg = $event.target.value">
               <input type="text" x-model="form.header_bg" placeholder="#0f6e56"
                      class="spec-form-input spec-form-input--mono">
             </div>
@@ -332,7 +332,7 @@
             </div>
             {# SOLID #}
             <div class="color-input" x-show="bgMode === 'solid'">
-              <input type="color" :value="form.header_bg_dark || '#161616'"
+              <input type="color" :value="form.header_bg_dark || form.header_bg || '#161616'"
                      @input="form.header_bg_dark = $event.target.value">
               <input type="text" x-model="form.header_bg_dark"
                      placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
@@ -383,10 +383,10 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-header-fg") }} · ☀️ {{ self.t("theme-light") }}</label>
             <div class="color-input">
-              <input type="color" x-model="form.header_fg"
-                     :value="form.header_fg || '#1a1a1a'">
+              <input type="color" :value="form.header_fg || '#1a1a1a'"
+                     @input="form.header_fg = $event.target.value">
               <input type="text" name="header_fg" x-model="form.header_fg"
-                     placeholder="#ffffff"
+                     placeholder="#1a1a1a"
                      class="spec-form-input spec-form-input--mono">
               <button type="button" @click="form.header_fg = ''"
                       class="admin-nav-link" title="{{ self.t("admin-landing-clear") }}">
@@ -397,7 +397,7 @@
           <div class="spec-form-field">
             <label class="spec-form-label">{{ self.t("admin-landing-header-fg") }} · 🌙 {{ self.t("theme-dark") }}</label>
             <div class="color-input">
-              <input type="color" :value="form.header_fg_dark || '#f0f0f0'"
+              <input type="color" :value="form.header_fg_dark || form.header_fg || '#f0f0f0'"
                      @input="form.header_fg_dark = $event.target.value">
               <input type="text" name="header_fg_dark" x-model="form.header_fg_dark"
                      placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
@@ -449,7 +449,8 @@
             <div class="spec-form-label" style="margin-bottom:6px">☀️ {{ self.t("theme-light") }}</div>
             {# SOLID #}
             <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
-              <input type="color" x-model="form.card_cover_default" :value="form.card_cover_default || '#0f6e56'">
+              <input type="color" :value="form.card_cover_default || '#0f6e56'"
+                     @input="form.card_cover_default = $event.target.value">
               <input type="text" x-model="form.card_cover_default" placeholder="#0f6e56"
                      class="spec-form-input spec-form-input--mono">
             </div>
@@ -498,7 +499,7 @@
             </div>
             {# SOLID #}
             <div class="color-input" x-show="coverDefMode === 'solid'" x-cloak>
-              <input type="color" :value="form.card_cover_default_dark || '#161616'"
+              <input type="color" :value="form.card_cover_default_dark || form.card_cover_default || '#161616'"
                      @input="form.card_cover_default_dark = $event.target.value">
               <input type="text" x-model="form.card_cover_default_dark"
                      placeholder="{{ self.t("admin-landing-header-dark-inherit") }}"
@@ -575,7 +576,7 @@
           <div class="brand-swatches">
             {% for c in ["#0f6e56", "#2563eb", "#1e3a5f", "#10b981", "#ec4899", "#8b5cf6"] %}
             <button type="button" class="brand-swatch" style="background:{{ c }};color:{{ c }}"
-                    :class="{ 'is-active': (form.theme_light_accent || '').toLowerCase() === '{{ c }}' }"
+                    :class="{ 'is-active': (form.theme_light_accent || '#0f6e56').toLowerCase() === '{{ c }}' }"
                     @click="form.theme_light_accent = '{{ c }}'; form.theme_dark_accent = '{{ c }}'"
                     aria-label="{{ c }}"></button>
             {% endfor %}

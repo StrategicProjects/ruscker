@@ -96,8 +96,12 @@
       x-data="ruscker.landing()" x-cloak>
 
   {% if !intro.is_empty() %}
-    {# Operator-authored intro (per landing-customization.intro). #}
-    <p class="text-sm text-[color:var(--text-muted)] leading-relaxed mb-5 max-w-3xl">
+    {# Operator-authored intro (per landing-customization.intro). A
+       stable class (#805) instead of utility soup: full container
+       width, justified with per-language hyphenation — it used to cap
+       at max-w-3xl and rag right, wasting the row. The class is also
+       the operator's CSS hook. #}
+    <p class="landing-intro">
       {{ intro }}
     </p>
   {% endif %}

@@ -2155,6 +2155,16 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 .palette-input { display: flex; align-items: center; gap: 10px; }
 .palette-input .spec-form-input { flex: 1; min-width: 0; background: var(--surface); }
 
+/* Operator intro paragraph on the public landing (#805): full
+   container width, justified with hyphenation — <html lang> picks the
+   dictionary, so each locale breaks words correctly. Also the stable
+   hook for operator custom CSS. */
+.landing-intro {
+  font-size: 0.875rem; line-height: 1.625; margin-bottom: 20px;
+  color: var(--text-muted);
+  text-align: justify; hyphens: auto; overflow-wrap: break-word;
+}
+
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */
 .editor-topbar {

@@ -330,15 +330,6 @@ async fn index(
             }),
         None => state.config.proxy.landing_customization.clone(),
     };
-    // Portal-wide default cover (#720): cards without their own
-    // `cover`/`accent` inherit the appearance editor's default (a solid
-    // colour or gradient) instead of the per-kind tint. Applied here,
-    // after `lc` resolves, so it's a no-op on no-DB / "Auto" deployments.
-    if let Some(default_cover) = lc.effective_card_cover_default() {
-        for card in &mut cards {
-            card.apply_default_cover(default_cover, &state.base_path);
-        }
-    }
 
     // Sanitize the header colours through the same charset guard as the
     // per-theme palette (#720 audit P5): the editor is Admin-only, but a
@@ -469,7 +460,37 @@ async fn index(
 
     // Per-theme color overrides (#475) → a small `<style>` setting the
     // theme CSS variables for light / dark / OS-auto.
-    let theme_style = build_theme_style(&lc.theme_colors);
+    let mut theme_style = build_theme_style(&lc.theme_colors);
+    // Portal-wide default cover (#720; per-theme #790): CSS rules on
+    // `.rcover-bg.rcover-default` — the class the template gives a
+    // cover-less card — instead of the old per-card inline style, so the
+    // dark value follows the client-side theme toggle. The 2-class
+    // selector deliberately TIES the `.cover-gradient .rcover-bg`
+    // overlay's specificity and wins by source order (this <style> comes
+    // after the stylesheet), mirroring the inline behaviour: an explicit
+    // default cover shows as-is, no overlay (the v0.2.3 grey-wash rule).
+    // Values are admin-authored CSS, gated by the same breakout guard a
+    // per-app cover gets and base-prefixed for embedded url(/assets/…).
+    {
+        let guard = |v: Option<&str>| {
+            v.map(str::trim)
+                .filter(|c| !c.is_empty() && crate::view_model::is_safe_cover_value(c))
+                .map(|c| crate::view_model::prefix_css_asset_urls(c, &state.base_path))
+        };
+        let light = guard(lc.effective_card_cover_default());
+        let dark = guard(lc.effective_card_cover_default_dark());
+        if let Some(l) = &light {
+            theme_style.push_str(&format!(".rcover-bg.rcover-default{{background:{l};}}"));
+        }
+        if let Some(d) = &dark {
+            theme_style.push_str(&format!(
+                "@media (prefers-color-scheme:dark){{:root:not([data-theme=\"light\"]) .rcover-bg.rcover-default{{background:{d};}}}}"
+            ));
+            theme_style.push_str(&format!(
+                ":root[data-theme=\"dark\"] .rcover-bg.rcover-default{{background:{d};}}"
+            ));
+        }
+    }
 
     // Operator default theme for a cookieless visitor: when the request
     // carries no explicit light/dark choice (Auto), honor the configured

@@ -315,22 +315,6 @@ impl<'a> CardCtx<'a> {
         }
     }
 
-    /// Apply a portal-wide default cover (#720) to a card that has no
-    /// `cover`/`accent` of its own; cards that already resolved a cover
-    /// (explicit `cover` or synthesized from `accent`) are left untouched.
-    /// `css` is admin-authored CSS (a solid colour or a gradient) set in
-    /// the appearance editor; `base` prefixes any embedded
-    /// `url(/assets/…)` so it resolves under `--base-path` — the same
-    /// treatment an explicit per-app cover gets in [`Self::from_spec`].
-    /// A blank `css` is a no-op, so the per-kind tint stays the fallback.
-    pub fn apply_default_cover(&mut self, css: &str, base: &str) {
-        if self.cover.is_none() {
-            let css = css.trim();
-            if !css.is_empty() {
-                self.cover = Some(prefix_css_asset_urls(css, base));
-            }
-        }
-    }
 }
 
 /// Prefix the portal `base` path onto a root-absolute asset URL
@@ -353,7 +337,7 @@ fn prefix_asset_url(value: &str, base: &str) -> String {
 /// untouched. Mirrors the client-side `coverStyle` helper exactly —
 /// only `/assets/` URLs are rewritten, so a protocol-relative
 /// `url(//cdn/…)` is left alone (#294/#270).
-fn prefix_css_asset_urls(value: &str, base: &str) -> String {
+pub(crate) fn prefix_css_asset_urls(value: &str, base: &str) -> String {
     if base.is_empty() {
         return value.to_string();
     }
@@ -377,7 +361,7 @@ fn prefix_css_asset_urls(value: &str, base: &str) -> String {
 /// `url('/assets/img/…')`). Quotes are fine here — Askama
 /// entity-escapes them in the attribute, and inside CSS they can
 /// only open a string, never terminate the declaration.
-fn is_safe_cover_value(s: &str) -> bool {
+pub(crate) fn is_safe_cover_value(s: &str) -> bool {
     !s.trim().is_empty()
         && !s
             .chars()
@@ -616,33 +600,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_default_cover_fills_only_uncovered_cards() {
-        // #720: a portal-wide default cover fills cards with no cover of
-        // their own; a blank default is a no-op (kind tint stays).
-        let plain = spec_with_tp("  subject: x\n");
-        let mut card = CardCtx::from_spec(&plain, "");
-        assert_eq!(card.cover, None);
-        card.apply_default_cover("#123456", "");
-        assert_eq!(card.cover.as_deref(), Some("#123456"));
-
-        // A blank default leaves the card on the kind tint.
-        let mut card2 = CardCtx::from_spec(&plain, "");
-        card2.apply_default_cover("  ", "");
-        assert_eq!(card2.cover, None);
-
-        // A card with its own cover is never overwritten by the default.
-        let owned = spec_with_tp("  cover: \"#abcdef\"\n");
-        let mut card3 = CardCtx::from_spec(&owned, "");
-        card3.apply_default_cover("#123456", "");
-        assert_eq!(card3.cover.as_deref(), Some("#abcdef"));
-
-        // `url(/assets/…)` in the default is base-path prefixed, like an
-        // explicit per-app cover.
-        let mut card4 = CardCtx::from_spec(&plain, "/box");
-        card4.apply_default_cover("url('/assets/img/bg.png') center / cover", "/box");
+    fn cover_guard_and_url_prefix_still_serve_the_default_cover() {
+        // #790: the default cover is now emitted as CSS rules (see
+        // routes/landing.rs) — these are the two helpers that gate and
+        // base-prefix the admin-authored value on the way into <style>.
+        assert!(is_safe_cover_value("linear-gradient(135deg, #111 0%, #222 100%)"));
+        assert!(is_safe_cover_value("url('/assets/img/bg.png') center / cover"));
+        assert!(!is_safe_cover_value("#123456} body{display:none"));
         assert_eq!(
-            card4.cover.as_deref(),
-            Some("url('/box/assets/img/bg.png') center / cover")
+            prefix_css_asset_urls("url('/assets/img/bg.png') center / cover", "/box"),
+            "url('/box/assets/img/bg.png') center / cover"
         );
     }
 

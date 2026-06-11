@@ -415,6 +415,12 @@ pub struct LandingCustomization {
     #[serde(default, rename = "card-cover-default")]
     pub card_cover_default: Option<String>,
 
+    /// DARK-theme default card cover (#790). `card-cover-default` alone
+    /// applied identically to both themes; this overrides it when the
+    /// visitor is on the dark theme. None ⇒ inherit the light value.
+    #[serde(default, rename = "card-cover-default-dark")]
+    pub card_cover_default_dark: Option<String>,
+
     /// Public portal catalog layout: `"grid"` (default), `"list"` or
     /// `"sections"` (grouped by type). Admin-managed.
     #[serde(default, rename = "catalog-layout")]
@@ -629,6 +635,13 @@ impl LandingCustomization {
     /// (the editor's "Auto"). Blank strings collapse to `None` (#720).
     pub fn effective_card_cover_default(&self) -> Option<&str> {
         self.card_cover_default
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+    /// Dark-theme default cover (#790); `None` ⇒ inherit the light one.
+    pub fn effective_card_cover_default_dark(&self) -> Option<&str> {
+        self.card_cover_default_dark
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())

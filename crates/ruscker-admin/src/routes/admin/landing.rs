@@ -104,6 +104,9 @@ pub struct LandingForm {
     pub header_preset: String,
     pub card_cover: String,
     pub card_cover_default: String,
+    // Dark-theme default cover (#790); blank ⇒ inherit the light value.
+    #[serde(default)]
+    pub card_cover_default_dark: String,
     pub catalog_layout: String,
     pub catalog_density: String,
     pub analytics_provider: String,
@@ -164,6 +167,7 @@ impl LandingForm {
             header_preset: lc.header_preset.clone().unwrap_or_default(),
             card_cover: lc.card_cover.clone().unwrap_or_default(),
             card_cover_default: lc.card_cover_default.clone().unwrap_or_default(),
+            card_cover_default_dark: lc.card_cover_default_dark.clone().unwrap_or_default(),
             catalog_layout: lc.catalog_layout.clone().unwrap_or_default(),
             catalog_density: lc.catalog_density.clone().unwrap_or_default(),
             analytics_provider: lc.analytics_provider.clone().unwrap_or_default(),
@@ -245,6 +249,7 @@ impl LandingForm {
             header_preset: empty_to_none(self.header_preset),
             card_cover: empty_to_none(self.card_cover),
             card_cover_default: empty_to_none(self.card_cover_default),
+            card_cover_default_dark: empty_to_none(self.card_cover_default_dark),
             catalog_layout: empty_to_none(self.catalog_layout),
             catalog_density: empty_to_none(self.catalog_density),
             analytics_provider: empty_to_none(self.analytics_provider),
@@ -378,6 +383,7 @@ async fn reset_appearance(
     lc.default_theme = None;
     lc.card_cover = None;
     lc.card_cover_default = None;
+    lc.card_cover_default_dark = None;
     lc.catalog_layout = None;
     lc.catalog_density = None;
     lc.logo_mode = None;

@@ -343,6 +343,16 @@ pub struct LandingCustomization {
     #[serde(default, rename = "header-fg")]
     pub header_fg: Option<String>,
 
+    /// DARK-theme header background (#784). `header-bg` alone applied
+    /// identically to both themes; this overrides it when the visitor
+    /// is on the dark theme. None ⇒ inherit `header-bg`.
+    #[serde(default, rename = "header-bg-dark")]
+    pub header_bg_dark: Option<String>,
+
+    /// DARK-theme header text colour (#784). None ⇒ inherit `header-fg`.
+    #[serde(default, rename = "header-fg-dark")]
+    pub header_fg_dark: Option<String>,
+
     /// Portal title shown in the header. Blank ⇒ falls back to
     /// `proxy.title`, then the localized `landing-title` default (#468).
     #[serde(default)]

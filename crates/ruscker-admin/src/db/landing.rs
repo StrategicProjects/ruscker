@@ -27,6 +27,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
     struct Row {
         header_bg: Option<String>,
         header_fg: Option<String>,
+        header_bg_dark: Option<String>,
+        header_fg_dark: Option<String>,
         intro: Option<String>,
         intro_locales_json: String,
         seo_title: Option<String>,
@@ -55,7 +57,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         analytics_provider: Option<String>,
         analytics_key: Option<String>,
     }
-    let sql = "SELECT header_bg, header_fg, intro, intro_locales_json,
+    let sql = "SELECT header_bg, header_fg, header_bg_dark, header_fg_dark,
+                intro, intro_locales_json,
                 seo_title, seo_description, og_image,
                 analytics_html, analytics_origins, custom_css, logos_json,
                 title, subtitle, theme_colors_json, show_highlights, footer,
@@ -91,6 +94,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
             Ok(LandingCustomization {
                 header_bg: r.header_bg,
                 header_fg: r.header_fg,
+                header_bg_dark: r.header_bg_dark,
+                header_fg_dark: r.header_fg_dark,
                 intro: r.intro,
                 intro_locales,
                 seo_title: r.seo_title,
@@ -196,7 +201,8 @@ pub(crate) async fn update_in_tx(
                 logo_mode = ?, logo_size = ?, logo_margin = ?,
                 header_preset = ?, card_cover = ?, card_cover_default = ?,
                 catalog_layout = ?, catalog_density = ?,
-                analytics_provider = ?, analytics_key = ?, updated_at = ?
+                analytics_provider = ?, analytics_key = ?,
+                header_bg_dark = ?, header_fg_dark = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -228,6 +234,8 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))
     .bind(none_if_empty(&lc.analytics_key))
+    .bind(none_if_empty(&lc.header_bg_dark))
+    .bind(none_if_empty(&lc.header_fg_dark))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -272,7 +280,8 @@ pub(crate) async fn update_in_tx_pg(
                 card_cover = $24, card_cover_default = $25,
                 catalog_layout = $26, catalog_density = $27,
                 analytics_provider = $28, analytics_key = $29,
-                updated_at = $30
+                header_bg_dark = $30, header_fg_dark = $31,
+                updated_at = $32
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -304,6 +313,8 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.catalog_density))
     .bind(none_if_empty(&lc.analytics_provider))
     .bind(none_if_empty(&lc.analytics_key))
+    .bind(none_if_empty(&lc.header_bg_dark))
+    .bind(none_if_empty(&lc.header_fg_dark))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -450,6 +461,27 @@ mod tests {
         assert_eq!(got.catalog_layout.as_deref(), Some("list"));
         assert_eq!(got.catalog_density.as_deref(), Some("compact"));
         assert_eq!(got.analytics_provider.as_deref(), Some("plausible"));
+    }
+
+    // #784: the dark theme's own header colours round-trip; unset stays
+    // None (→ the portal inherits the light values).
+    #[tokio::test]
+    async fn per_theme_header_roundtrips() {
+        let pool = open_memory().await.unwrap();
+        let lc = LandingCustomization {
+            header_bg: Some("linear-gradient(135deg, #ffffff 0%, #eeeeee 100%)".into()),
+            header_bg_dark: Some("linear-gradient(135deg, #111111 0%, #222222 100%)".into()),
+            header_fg_dark: Some("#f0f0f0".into()),
+            ..Default::default()
+        };
+        update(&ConfigDb::Sqlite(pool.clone()), &lc, Some("admin")).await.unwrap();
+        let got = fetch(&ConfigDb::Sqlite(pool.clone())).await.unwrap();
+        assert_eq!(
+            got.header_bg_dark.as_deref(),
+            Some("linear-gradient(135deg, #111111 0%, #222222 100%)")
+        );
+        assert_eq!(got.header_fg_dark.as_deref(), Some("#f0f0f0"));
+        assert!(got.header_fg.is_none(), "unset light fg stays None");
     }
 
     #[tokio::test]

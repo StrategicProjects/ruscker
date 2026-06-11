@@ -57,9 +57,12 @@ struct LandingPage<'a> {
     /// `<style>` body setting the theme CSS variables from the operator's
     /// per-theme color overrides (#475). Empty ⇒ no `<style>` emitted.
     theme_style: String,
-    /// Inline `style="..."` value for the `<header>` element when
-    /// the operator set a custom background color. Empty string ⇒
-    /// no override.
+    /// CSS rules painting the `#portal-hdr` element from the operator's
+    /// custom header colours — per theme since #784 (`header-bg-dark` /
+    /// `header-fg-dark` override in dark contexts; unset inherits the
+    /// light values). CSS rather than an inline `style` because the
+    /// theme toggles client-side via `data-theme`, which an inline
+    /// style can't react to. Empty string ⇒ no override.
     header_style: String,
     /// Effective page title — `landing-customization.seo-title` when
     /// set, otherwise the localized `landing-title`. Drives both the
@@ -345,12 +348,14 @@ async fn index(
     // it only drops values that could break out of the declaration.
     let header_bg = sanitize_css_color(&lc.header_bg);
     let header_fg = sanitize_css_color(&lc.header_fg);
-    let header_style = match (&header_bg, &header_fg) {
-        (Some(bg), Some(fg)) => format!("background: {bg}; color: {fg};"),
-        (Some(bg), None) => format!("background: {bg};"),
-        (None, Some(fg)) => format!("color: {fg};"),
-        (None, None) => String::new(),
-    };
+    let header_bg_dark = sanitize_css_color(&lc.header_bg_dark);
+    let header_fg_dark = sanitize_css_color(&lc.header_fg_dark);
+    let header_style = build_header_style(
+        header_bg.as_deref(),
+        header_fg.as_deref(),
+        header_bg_dark.as_deref(),
+        header_fg_dark.as_deref(),
+    );
     let intro = lc
         .intro_locales
         .get(loc.code())
@@ -648,6 +653,43 @@ fn sanitize_css_color(s: &Option<String>) -> Option<String> {
 /// base, which also covers OS-auto-light); dark values land on both the
 /// explicit `[data-theme="dark"]` and the OS-auto-dark media query —
 /// mirroring the cascade in `input.css`. Empty when nothing is set.
+/// Build the `<style>` rules for the operator's custom header colours
+/// (#784). Light values land on `#portal-hdr` directly (and, with no
+/// dark override, also serve the dark theme — the pre-#784 behaviour);
+/// dark values override under the explicit `[data-theme="dark"]` and
+/// the OS-auto-dark media query, mirroring `build_theme_style`'s
+/// cascade. Inputs are already `sanitize_css_color`-guarded.
+fn build_header_style(
+    bg: Option<&str>,
+    fg: Option<&str>,
+    bg_dark: Option<&str>,
+    fg_dark: Option<&str>,
+) -> String {
+    fn decl(bg: Option<&str>, fg: Option<&str>) -> String {
+        let mut s = String::new();
+        if let Some(b) = bg {
+            s.push_str(&format!("background:{b};"));
+        }
+        if let Some(f) = fg {
+            s.push_str(&format!("color:{f};"));
+        }
+        s
+    }
+    let light = decl(bg, fg);
+    let dark = decl(bg_dark, fg_dark);
+    let mut css = String::new();
+    if !light.is_empty() {
+        css.push_str(&format!("#portal-hdr{{{light}}}"));
+    }
+    if !dark.is_empty() {
+        css.push_str(&format!(
+            "@media (prefers-color-scheme:dark){{:root:not([data-theme=\"light\"]) #portal-hdr{{{dark}}}}}"
+        ));
+        css.push_str(&format!(":root[data-theme=\"dark\"] #portal-hdr{{{dark}}}"));
+    }
+    css
+}
+
 fn build_theme_style(tc: &ruscker_config::ThemeColors) -> String {
     fn vars(p: &ruscker_config::ThemePalette) -> String {
         let mut s = String::new();

@@ -169,6 +169,8 @@ proxy:
     # Branding — CSS colors applied to the landing header
     header-bg: "#0f6e56"               # any CSS color
     header-fg: "#ffffff"               # contrast override when bg is dark
+    header-bg-dark: "#10312b"          # dark-theme header bg (blank = inherit header-bg)
+    header-fg-dark: "#f0f0f0"          # dark-theme header text (blank = inherit header-fg)
 
     # Intro paragraph between header and filters
     intro: "Welcome to the portal."    # single-language fallback
@@ -220,6 +222,8 @@ Field reference:
 |---|---|---|---|
 | `header-bg` | CSS color | none | Header background. Match your brand's primary color. |
 | `header-fg` | CSS color | none | Header text — set when `header-bg` is dark and the default loses contrast. |
+| `header-bg-dark` | CSS color | none | Dark-theme header background. Unset inherits `header-bg`. |
+| `header-fg-dark` | CSS color | none | Dark-theme header text. Unset inherits `header-fg`. |
 | `intro` | string | none | Plain text (no HTML); single-language fallback. |
 | `intro-locales` | map | `{}` | Locale code → intro string. Wins over `intro` for matching locales. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |

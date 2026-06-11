@@ -224,6 +224,8 @@ Field reference:
 | `header-fg` | CSS color | none | Header text — set when `header-bg` is dark and the default loses contrast. |
 | `header-bg-dark` | CSS color | none | Dark-theme header background. Unset inherits `header-bg`. |
 | `header-fg-dark` | CSS color | none | Dark-theme header text. Unset inherits `header-fg`. |
+| `card-cover-default` | CSS value | none | Default cover (solid/gradient) painted behind catalog cards that have no per-app `cover`/`accent`. Unset keeps the per-kind tint. |
+| `card-cover-default-dark` | CSS value | none | Dark-theme default card cover. Unset inherits `card-cover-default`. |
 | `intro` | string | none | Plain text (no HTML); single-language fallback. |
 | `intro-locales` | map | `{}` | Locale code → intro string. Wins over `intro` for matching locales. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |

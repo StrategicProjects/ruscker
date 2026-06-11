@@ -52,6 +52,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         header_preset: Option<String>,
         card_cover: Option<String>,
         card_cover_default: Option<String>,
+        card_cover_default_dark: Option<String>,
         catalog_layout: Option<String>,
         catalog_density: Option<String>,
         analytics_provider: Option<String>,
@@ -64,7 +65,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 title, subtitle, theme_colors_json, show_highlights, footer,
                 default_theme, show_search, show_filters, logo_mode,
                 logo_size, logo_margin, header_preset, card_cover,
-                card_cover_default, catalog_layout, catalog_density,
+                card_cover_default, card_cover_default_dark,
+                catalog_layout, catalog_density,
                 analytics_provider, analytics_key
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
@@ -125,6 +127,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 header_preset: r.header_preset,
                 card_cover: r.card_cover,
                 card_cover_default: r.card_cover_default,
+                card_cover_default_dark: r.card_cover_default_dark,
                 catalog_layout: r.catalog_layout,
                 catalog_density: r.catalog_density,
                 analytics_provider: r.analytics_provider,
@@ -202,7 +205,8 @@ pub(crate) async fn update_in_tx(
                 header_preset = ?, card_cover = ?, card_cover_default = ?,
                 catalog_layout = ?, catalog_density = ?,
                 analytics_provider = ?, analytics_key = ?,
-                header_bg_dark = ?, header_fg_dark = ?, updated_at = ?
+                header_bg_dark = ?, header_fg_dark = ?,
+                card_cover_default_dark = ?, updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -236,6 +240,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.analytics_key))
     .bind(none_if_empty(&lc.header_bg_dark))
     .bind(none_if_empty(&lc.header_fg_dark))
+    .bind(none_if_empty(&lc.card_cover_default_dark))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -281,7 +286,7 @@ pub(crate) async fn update_in_tx_pg(
                 catalog_layout = $26, catalog_density = $27,
                 analytics_provider = $28, analytics_key = $29,
                 header_bg_dark = $30, header_fg_dark = $31,
-                updated_at = $32
+                card_cover_default_dark = $32, updated_at = $33
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -315,6 +320,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.analytics_key))
     .bind(none_if_empty(&lc.header_bg_dark))
     .bind(none_if_empty(&lc.header_fg_dark))
+    .bind(none_if_empty(&lc.card_cover_default_dark))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -482,6 +488,7 @@ mod tests {
         );
         assert_eq!(got.header_fg_dark.as_deref(), Some("#f0f0f0"));
         assert!(got.header_fg.is_none(), "unset light fg stays None");
+        assert!(got.card_cover_default_dark.is_none());
     }
 
     #[tokio::test]

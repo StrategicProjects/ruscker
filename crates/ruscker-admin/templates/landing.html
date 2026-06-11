@@ -132,7 +132,7 @@
           <div class="rcover">
             {% match card.cover %}
               {% when Some with (cover) %}<div class="rcover-bg" style="background: {{ cover }};"></div>
-              {% when None %}<div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+              {% when None %}<div class="rcover-bg tint-{{ card.display_type.key() }} rcover-default"></div>
             {% endmatch %}
             {% match card.logo %}{% when Some with (logo) %}
               <img src="{{ logo }}" alt="" loading="lazy" onerror="this.style.display='none'"
@@ -309,7 +309,7 @@
             {% when Some with (cover) %}
               <div class="rcover-bg" style="background: {{ cover }};"></div>
             {% when None %}
-              <div class="rcover-bg tint-{{ card.display_type.key() }}"></div>
+              <div class="rcover-bg tint-{{ card.display_type.key() }} rcover-default"></div>
           {% endmatch %}
           {% match card.logo %}{% when Some with (logo) %}
             {# #187 finding F2: hide the <img> if the referenced asset

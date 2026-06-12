@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.12 — 2026-06-12
+
+**Public landing**
+
+- **The intro paragraph understands inline Markdown (#812):**
+  `**bold**`, `*italic*` and `[links](https://…)` — in the default
+  text and in every per-locale variant. It is intentionally tiny and
+  safe: input is HTML-escaped before the rewrites, so raw HTML always
+  renders as visible text; unmatched markers stay literal, which keeps
+  every existing plain-text intro rendering exactly as before; links
+  are restricted to http(s). The Appearance preview renders the same
+  subset live as you type, and the page meta description uses the
+  marker-free reading.
+
+---
+
 ## v0.2.11 — 2026-06-11
 
 **Groups page**

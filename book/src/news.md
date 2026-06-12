@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.11 — 2026-06-11
+
+**Groups page**
+
+- **Public apps render as logo chips (#809).** Each open app shows as a
+  rounded chip — its logo on a square tinted with the catalog's
+  per-type colour (the same palette the portal cards use), the app
+  name and a green globe. Clicking still opens the app's editor.
+
+---
+
 ## v0.2.10 — 2026-06-11
 
 Live-testing round on the portal content tools.

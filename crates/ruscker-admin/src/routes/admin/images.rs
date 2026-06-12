@@ -73,9 +73,9 @@ struct ImagesPage<'a> {
     refs: String,
     /// Set on successful upload — drives a one-shot toast.
     flash_uploaded: Option<String>,
-    /// Set when the upload REPLACED an existing image with the same
-    /// filename (#815) — drives the "replaced" note.
-    flash_replaced: bool,
+    /// The originally-requested name when the upload was auto-renamed to
+    /// avoid overwriting an existing image — drives the "renamed" note.
+    flash_renamed: Option<String>,
     flash_error: Option<String>,
 }
 
@@ -155,7 +155,7 @@ async fn index(
         };
         state.locales.t(loc, key, None)
     });
-    render_index(&state, loc, theme, editor.role, None, false, flash_error).await
+    render_index(&state, loc, theme, editor.role, None, None, flash_error).await
 }
 
 async fn render_index(
@@ -164,7 +164,7 @@ async fn render_index(
     theme: Theme,
     role: Role,
     flash_uploaded: Option<String>,
-    flash_replaced: bool,
+    flash_renamed: Option<String>,
     flash_error: Option<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
@@ -212,7 +212,7 @@ async fn render_index(
         images,
         refs,
         flash_uploaded,
-        flash_replaced,
+        flash_renamed,
         flash_error,
     };
     super::render(&page)
@@ -233,7 +233,7 @@ async fn upload(
     // through everything and pick the first one whose field_name
     // matches; other fields (CSRF token, etc.) are ignored.
     let mut last_uploaded_name: Option<String> = None;
-    let mut last_replaced = false;
+    let mut last_renamed_from: Option<String> = None;
     let mut last_error: Option<String> = None;
 
     loop {
@@ -261,7 +261,7 @@ async fn upload(
             continue; // empty file input — nothing chosen
         }
 
-        let processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
             Ok(p) => p,
             Err(err) => {
                 tracing::warn!(error = ?err, filename, "rejecting upload");
@@ -269,25 +269,28 @@ async fn upload(
                 continue;
             }
         };
-        // Same name ⇒ REPLACE the stored image (#815). Re-uploading a
-        // file under an existing name means "update it" — the old
-        // auto-rename to `logo-2.webp` kept every spec/landing reference
-        // pointing at the stale image (the reported bug).
-        // `db::images::insert` swaps the row in one transaction; the
-        // thumb/digest invalidation below changes the ETag, and
-        // `/assets/img` serves max-age=60 + must-revalidate, so the new
-        // bytes show on the next revalidation. The flash tells the
-        // operator a replacement happened.
-        let replaced = db::images::filename_taken(pool, &processed.filename)
-            .await
-            .unwrap_or(false);
+        // Don't silently overwrite a same-named image: pick a free name
+        // (`logo.webp` → `logo-2.webp`) so both are kept, and tell the
+        // operator it was renamed. The import path keeps exact names.
+        let desired = processed.filename.clone();
+        let unique = match db::images::unique_filename(pool, &desired).await {
+            Ok(u) => u,
+            Err(err) => {
+                tracing::error!(error = ?err, "unique filename failed");
+                last_error = Some(format!("save: {err}"));
+                continue;
+            }
+        };
+        if unique != desired {
+            processed.filename = unique.clone();
+            last_renamed_from = Some(desired);
+        }
         let stored_name = processed.filename.clone();
         match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_id) => {
                 // Drop any cached thumbnail keyed by this filename (#301).
                 crate::routes::assets::invalidate_thumb(&stored_name);
                 last_uploaded_name = Some(stored_name);
-                last_replaced = replaced;
             }
             Err(err) => {
                 tracing::error!(error = ?err, "image insert failed");
@@ -302,7 +305,7 @@ async fn upload(
         theme,
         editor.role,
         last_uploaded_name,
-        last_replaced,
+        last_renamed_from,
         last_error,
     )
     .await
@@ -361,14 +364,19 @@ async fn upload_inline(
         if bytes.is_empty() {
             continue;
         }
-        let processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
             Ok(p) => p,
             Err(err) => return inline_err(StatusCode::UNPROCESSABLE_ENTITY, err.to_string()),
         };
-        // Same name ⇒ REPLACE (#815), like the Media page: the insert
-        // swaps the row and the invalidation below refreshes the
-        // thumb/ETag, so the picker (and every existing reference)
-        // shows the new bytes.
+        // Auto-rename on collision so we never overwrite an existing image;
+        // the JSON returns the actual stored name, which the picker uses.
+        match db::images::unique_filename(pool, &processed.filename).await {
+            Ok(u) => processed.filename = u,
+            Err(err) => {
+                tracing::error!(error = ?err, "inline unique filename failed");
+                return inline_err(StatusCode::INTERNAL_SERVER_ERROR, "save failed");
+            }
+        }
         let name = processed.filename.clone();
         return match db::images::insert(pool, processed, Some(editor.actor())).await {
             Ok(_) => {

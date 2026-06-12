@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.17 — 2026-06-12
+
+**Images**
+
+- **Force a re-pull of an already-present image (#824).** The app
+  form's Pull button only appeared when the image was missing, so a
+  locally-cached image couldn't be refreshed from the UI. It now also
+  shows when the image is present, as **"Update image"** — re-pulling
+  from the registry. Use it after re-publishing the same tag with new
+  bytes (or a corrected CPU architecture); the next launch runs the
+  freshly-pulled image.
+
+---
+
 ## v0.2.16 — 2026-06-12
 
 **Diagnostics**

@@ -1965,7 +1965,17 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 }
 .image-picker-tile:hover { border-color: var(--border-strong); }
 .image-picker-tile.is-sel { border-color: #0f6e56; }
+.image-picker-tile { position: relative; }
 .image-picker-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* Filename caption over the tile's bottom edge (#818): with look-alike
+   logos the name is the only reliable differentiator. */
+.image-picker-name {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  padding: 2px 5px; font-size: 9.5px; line-height: 1.3; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  color: var(--text-muted); pointer-events: none;
+}
 .image-picker-tile.is-builtin img { object-fit: contain; padding: 8px; }
 /* Logo galleries (spec form): logos have intentional whitespace, so fit
    them whole instead of cropping. */

@@ -1,9 +1,10 @@
 # Roadmap
 
-> **Status: Phases 0–5 shipped — `v0.1.0` is out and production-ready.**
-> Phases 6–8 below are optional and demand-driven. For the narrative,
-> up-to-date version with a timeline diagram, see the
-> [Roadmap chapter](https://strategicprojects.github.io/ruscker/roadmap.html)
+> **Status: Phases 0–7 shipped and running in production**, followed by
+> the v0.2.x polish series (the v0.2.5 audit release and the
+> admin design-handoff sprint). Phase 8 is optional and demand-driven.
+> For the narrative, up-to-date version with a timeline diagram, see
+> the [Roadmap chapter](https://strategicprojects.github.io/ruscker/roadmap.html)
 > on the docs site. The phase checklists below are the original
 > planning detail (they predate v0.1.0; treat the per-item boxes as
 > historical scope, not live status).

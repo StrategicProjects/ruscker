@@ -101,8 +101,10 @@
        width, justified with per-language hyphenation — it used to cap
        at max-w-3xl and rag right, wasting the row. The class is also
        the operator's CSS hook. #}
+    {# Pre-rendered by the inline-Markdown subset (#812) — escape-first
+       in crate::markdown, so |safe never sees raw operator HTML. #}
     <p class="landing-intro">
-      {{ intro }}
+      {{ intro|safe }}
     </p>
   {% endif %}
 

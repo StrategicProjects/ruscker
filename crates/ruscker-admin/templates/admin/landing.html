@@ -1004,8 +1004,12 @@
         </div>
 
         <div class="landing-preview-body">
+          {# x-html, fed by pvIntroHtml() — the client mirror of the
+             server's inline-Markdown subset (#812); it escapes the raw
+             text before the three rewrites, so typed HTML shows as
+             text here exactly like on the portal. #}
           <p class="landing-preview-intro"
-             x-text="previewIntro() || $el.dataset.placeholder"
+             x-html="pvIntroHtml() || $el.dataset.placeholder"
              data-placeholder="{{ self.t("admin-landing-preview-empty") }}"
              :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
           {# Search pill + filter chips honour the Visible-sections toggles. #}
@@ -1385,6 +1389,19 @@ window.ruscker.landingForm = (initial, logoImages) => ({
   /// Resolve the intro shown in the preview given the admin's
   /// own locale: prefer the per-locale field, fall back to the
   /// default. Mirrors the server-side resolution in routes/landing.rs.
+  // Client mirror of crate::markdown::render_inline (#812): escape
+  // first, then links → bold → italic. Keep the two in sync.
+  mdInline(t) {
+    const esc = (t || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return esc
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+        '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  },
+  pvIntroHtml() { return this.mdInline(this.previewIntro()); },
   previewIntro() {
     const code = "{{ locale.code() }}";
     const per = { pt: this.form.intro_pt, en: this.form.intro_en, es: this.form.intro_es, fr: this.form.intro_fr };

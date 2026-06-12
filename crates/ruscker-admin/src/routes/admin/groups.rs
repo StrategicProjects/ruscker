@@ -33,10 +33,25 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/groups/members/remove", post(remove_member))
 }
 
-/// One app reference inside a group (id + display name).
+/// One app reference inside a group — id, display name, plus the card
+/// logo and display-type key so the chips can carry the catalog's
+/// per-type tint (#809).
 struct AppRef {
     id: String,
     name: String,
+    logo: Option<String>,
+    kind: &'static str,
+}
+
+impl AppRef {
+    fn from_spec(s: &ruscker_config::Spec) -> Self {
+        Self {
+            id: s.id.clone(),
+            name: s.display_name.clone().unwrap_or_else(|| s.id.clone()),
+            logo: s.template_properties.get_str("logo").map(str::to_string),
+            kind: crate::view_model::DisplayType::from_spec(s).key(),
+        }
+    }
 }
 
 /// A derived group with its members and the apps it gates.
@@ -130,7 +145,14 @@ async fn index(
             members: members.into_iter().collect(),
             apps: apps
                 .into_iter()
-                .map(|(id, name)| AppRef { id, name })
+                .map(|(id, name)| {
+                    // Resolve back to the spec for logo + type (#809);
+                    // admin page, the linear scan is fine.
+                    match specs.iter().find(|s| s.id == id) {
+                        Some(s) => AppRef::from_spec(s),
+                        None => AppRef { id, name, logo: None, kind: "app" },
+                    }
+                })
                 .collect(),
         })
         .collect();
@@ -140,10 +162,7 @@ async fn index(
     let mut public_apps: Vec<AppRef> = specs
         .iter()
         .filter(|s| s.is_open())
-        .map(|s| AppRef {
-            id: s.id.clone(),
-            name: s.display_name.clone().unwrap_or_else(|| s.id.clone()),
-        })
+        .map(AppRef::from_spec)
         .collect();
     public_apps.sort_by(|a, b| a.name.cmp(&b.name));
 

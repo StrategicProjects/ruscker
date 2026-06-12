@@ -1119,6 +1119,10 @@
           <button type="button" :title="name" @click="pickImage('/assets/img/' + name)"
                   class="image-picker-tile" :class="pickerSelected('/assets/img/' + name) ? 'is-sel' : ''">
             <img :src="assetUrl('/assets/img/' + name) + '?thumb'" :alt="name" loading="lazy">
+            {# Visible filename (#818): with look-alike logos (logo.webp
+               vs logo-2.webp after a same-name upload) the hover title
+               wasn't enough to tell tiles apart. #}
+            <span class="image-picker-name" x-text="name"></span>
           </button>
         </template>
       </div>

@@ -95,7 +95,8 @@ What's in the box:
   form, including API/scaling/resource/lifecycle settings, with inline
   help, plus one-click archive/restore from the list), image/media
   library, encrypted credentials store, a landing-page editor with a
-  live preview (per-theme light/dark styling, logos, intros, SEO,
+  live preview (per-theme light/dark styling, logos, Markdown-enabled
+  per-locale intros, SEO,
   social meta, analytics, custom HTML blocks), an audit log, **user
   accounts with Viewer / Editor / Admin roles**, and a live SSE
   dashboard (CPU/memory sparklines, live-follow logs, stop/restart).

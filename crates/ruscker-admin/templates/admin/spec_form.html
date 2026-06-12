@@ -339,13 +339,21 @@
                 <i class="ti ti-search" aria-hidden="true"></i>
                 {{ self.t("spec-form-image-check") }}
               </button>
-              {# Pull on demand (#498 slice B) — offered once a check says the
-                 image is absent (but a name is typed). Streams progress below. #}
+              {# Pull on demand (#498 slice B). Offered after a check, for
+                 BOTH absent (download) and present (re-pull / update,
+                 #824): a `:latest` re-published with new bytes — or a
+                 different CPU architecture — needs a forced re-pull,
+                 which `pull_image` does (it always contacts the registry,
+                 no local short-circuit). Present ⇒ "Update image". #}
               <button type="button" class="admin-login-btn" style="padding:7px 11px;font-size:12px;white-space:nowrap"
-                      x-show="imageCheck.status === 'absent'" x-cloak
-                      @click="pullImage()" :disabled="pull.running">
-                <i class="ti ti-cloud-download" aria-hidden="true"></i>
-                {{ self.t("spec-form-image-pull") }}
+                      x-show="imageCheck.status === 'absent' || imageCheck.status === 'present'" x-cloak
+                      @click="pullImage()" :disabled="pull.running"
+                      :title="imageCheck.status === 'present' ? $el.dataset.repullTip : ''"
+                      data-pull="{{ self.t("spec-form-image-pull") }}"
+                      data-repull="{{ self.t("spec-form-image-repull") }}"
+                      data-repull-tip="{{ self.t("spec-form-image-repull-help") }}">
+                <i class="ti" :class="imageCheck.status === 'present' ? 'ti-refresh' : 'ti-cloud-download'" aria-hidden="true"></i>
+                <span x-text="imageCheck.status === 'present' ? $el.parentElement.dataset.repull : $el.parentElement.dataset.pull"></span>
               </button>
             </div>
             <div class="spec-form-help" x-show="imageCheck.loading || imageCheck.status" x-cloak style="margin-top:5px">

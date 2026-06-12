@@ -93,11 +93,12 @@ What's in the box:
   applies per-container CPU/memory limits, and reaps idle ones.
 - **Admin panel** — full apps CRUD (every spec field editable from the
   form, including API/scaling/resource/lifecycle settings, with inline
-  help), image/media library, encrypted credentials store, a
-  landing-page editor (colors, intros, SEO, social meta, analytics,
-  custom HTML blocks), an audit log, **user accounts with Viewer /
-  Editor / Admin roles**, and a live SSE dashboard (CPU/memory
-  sparklines, live-follow logs, stop/restart).
+  help, plus one-click archive/restore from the list), image/media
+  library, encrypted credentials store, a landing-page editor with a
+  live preview (per-theme light/dark styling, logos, intros, SEO,
+  social meta, analytics, custom HTML blocks), an audit log, **user
+  accounts with Viewer / Editor / Admin roles**, and a live SSE
+  dashboard (CPU/memory sparklines, live-follow logs, stop/restart).
 - **Operations** — `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
   body-size limits, an opt-in Prometheus `/metrics` endpoint, and
@@ -106,12 +107,12 @@ What's in the box:
   hardened `systemd` unit, static musl tarballs, a Homebrew tap, and
   cosign-signed release artifacts.
 
-300+ unit + integration tests run green on `cargo test` (no Docker
+400+ unit + integration tests run green on `cargo test` (no Docker
 required); extra feature-gated suites exercise a real Docker daemon
 (`docker-it`) and a full proxy + WebSocket end-to-end run (`e2e`).
 
 <p align="center">
-  <img src="book/src/images/admin-apps.png" alt="The admin Apps table: each spec row with kind/state, and a featured star in the Actions column to toggle landing-page highlighting inline." width="860">
+  <img src="book/src/images/admin-apps.png" alt="The admin Apps table: each spec row with kind/state, and an Actions column with the featured star, edit, duplicate, archive and delete controls." width="860">
   <br><em>Apps catalogue — every spec field editable from the web UI, no YAML.</em>
 </p>
 

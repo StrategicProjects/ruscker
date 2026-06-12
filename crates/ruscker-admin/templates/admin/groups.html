@@ -133,8 +133,21 @@
   <span class="text-xs text-[color:var(--text-faint)] font-normal">· {{ public_apps.len() }}</span>
 </div>
 <p class="text-xs text-[color:var(--text-faint)] mb-2">{{ self.t("admin-groups-public-help") }}</p>
-<div class="group-pills">
-  {% for a in public_apps %}<a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="group-pill"><i class="ti ti-app-window" aria-hidden="true"></i> {{ a.name }}</a>{% endfor %}
+{# Logo chips with the catalog's per-type tint behind the thumb (#809):
+   the tint colour IS the type cue — same palette as the portal cards. #}
+<div class="app-chips">
+  {% for a in public_apps %}
+  <a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="app-chip" title="{{ a.name }}">
+    <span class="app-chip__thumb tint-{{ a.kind }}">
+      {% match a.logo %}
+        {% when Some with (l) %}<img src="{% if l.starts_with("http") %}{{ l }}{% else %}{{ base }}{{ l }}{% endif %}" alt="" loading="lazy" onerror="this.style.display='none'">
+        {% when None %}<i class="ti ti-app-window" aria-hidden="true"></i>
+      {% endmatch %}
+    </span>
+    <span class="app-chip__name">{{ a.name }}</span>
+    <i class="ti ti-world app-chip__globe" aria-hidden="true"></i>
+  </a>
+  {% endfor %}
 </div>
 {% endif %}
 

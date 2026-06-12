@@ -2272,6 +2272,28 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 }
 .group-pill:hover { border-color: var(--color-teal-600); background: var(--surface); }
 .group-pill .ti { font-size: 13px; color: var(--text-muted); }
+
+/* Public-app chips on the Groups page (#809): logo thumb on the
+   catalog's per-type tint (the colour cue), name, green globe. */
+.app-chips { display: flex; flex-wrap: wrap; gap: 10px; }
+.app-chip {
+  display: inline-flex; align-items: center; gap: 9px;
+  padding: 7px 12px 7px 8px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; text-decoration: none;
+  font-size: 13.5px; color: var(--text);
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.app-chip:hover { border-color: var(--color-teal-600); box-shadow: var(--shadow-sm); }
+.app-chip__thumb {
+  width: 30px; height: 30px; min-height: 30px; flex: none;
+  border-radius: 8px; border: 0.5px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.app-chip__thumb img { width: 22px; height: 22px; object-fit: contain; }
+.app-chip__thumb .ti { font-size: 15px; color: var(--text-muted); }
+.app-chip__globe { font-size: 15px; color: var(--color-teal-600); }
 .group-empty { font-size: 12px; color: var(--text-faint); font-style: italic; }
 
 /* Featured-star toggle in the Apps table (#521). */

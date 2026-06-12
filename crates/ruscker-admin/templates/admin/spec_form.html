@@ -362,6 +362,60 @@
               <span x-text="pull.line" class="spec-form-input--mono" style="opacity:0.75"></span>
             </div>
           </div>
+
+          {# Registry — pulling private images. Lives right under the
+             image field (#820: that's where "does this image need a
+             login?" is asked — it used to hide in Advanced). Unified
+             on the credential
+             store (#351): pick a SAVED credential here; create/manage them
+             on the Credentials page (where the password can be a literal —
+             AES-encrypted — or a `${VAR}` env-ref). The inline
+             domain/username/password from imported ShinyProxy YAML are
+             preserved as hidden fields (back-compat, no data loss on save)
+             but no longer edited here — a named credential takes
+             precedence anyway. #}
+          <div class="spec-form-subsection">{{ self.t("spec-form-registry-section") }}</div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
+              {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
+            </div>
+            {% if credential_names.is_empty() %}
+              {# No saved credentials — guide the operator instead of a mute
+                 field (#504). A hidden input preserves any existing value
+                 (e.g. a later-deleted credential) so a save doesn't drop it. #}
+              <div class="spec-form-empty-hint">
+                <i class="ti ti-info-circle" aria-hidden="true"></i>
+                {{ self.t("spec-form-registry-none") }}
+              </div>
+              <input type="hidden" name="docker_registry_credential" value="{{ form.docker_registry_credential }}">
+            {% else %}
+              <select id="f-reg-cred" name="docker_registry_credential" class="spec-form-input theme-select">
+                <option value=""{% if form.docker_registry_credential.is_empty() %} selected{% endif %}>{{ self.t("spec-form-registry-none-option") }}</option>
+                {% for name in credential_names %}
+                  <option value="{{ name }}"{% if self.cred_selected(name) %} selected{% endif %}>{{ name }}</option>
+                {% endfor %}
+                {# A set-but-unknown value (deleted / imported) stays selectable. #}
+                {% if !self.cred_known() %}
+                  <option value="{{ form.docker_registry_credential }}" selected>{{ form.docker_registry_credential }} ({{ self.t("spec-form-registry-missing") }})</option>
+                {% endif %}
+              </select>
+            {% endif %}
+            <div class="spec-form-help">
+              {{ self.t("spec-form-registry-help") }}
+              <a href="{{ base }}/admin/credentials" target="_blank" rel="noopener" class="hover:underline">
+                {{ self.t("admin-nav-credentials") }}
+                <i class="ti ti-external-link" aria-hidden="true" style="font-size:11px"></i>
+              </a>
+            </div>
+          </div>
+          {# Back-compat: keep inline registry creds from imported YAML so a
+             save doesn't drop them (domain/username preserved verbatim;
+             blank password keeps the stored one, #260). No longer editable
+             here — migrate to a saved credential above. #}
+          <input type="hidden" name="docker_registry_domain" value="{{ form.docker_registry_domain }}">
+          <input type="hidden" name="docker_registry_username" value="{{ form.docker_registry_username }}">
+          <input type="hidden" name="docker_registry_password" value="">
         </section>
       </template>
 
@@ -688,56 +742,6 @@
             <div class="spec-form-help">{{ self.t("spec-form-container-cmd-help") }}</div>
           </div>
 
-          {# Registry — pulling private images. Unified on the credential
-             store (#351): pick a SAVED credential here; create/manage them
-             on the Credentials page (where the password can be a literal —
-             AES-encrypted — or a `${VAR}` env-ref). The inline
-             domain/username/password from imported ShinyProxy YAML are
-             preserved as hidden fields (back-compat, no data loss on save)
-             but no longer edited here — a named credential takes
-             precedence anyway. #}
-          <div class="spec-form-subsection">{{ self.t("spec-form-registry-section") }}</div>
-          <div class="spec-form-field">
-            <div class="spec-form-label-row">
-              <label for="f-reg-cred" class="spec-form-label">{{ self.t("spec-form-registry-credential") }}</label>
-              {% call help(self.t("spec-help-registry-credential")) %}{% endcall %}
-            </div>
-            {% if credential_names.is_empty() %}
-              {# No saved credentials — guide the operator instead of a mute
-                 field (#504). A hidden input preserves any existing value
-                 (e.g. a later-deleted credential) so a save doesn't drop it. #}
-              <div class="spec-form-empty-hint">
-                <i class="ti ti-info-circle" aria-hidden="true"></i>
-                {{ self.t("spec-form-registry-none") }}
-              </div>
-              <input type="hidden" name="docker_registry_credential" value="{{ form.docker_registry_credential }}">
-            {% else %}
-              <select id="f-reg-cred" name="docker_registry_credential" class="spec-form-input theme-select">
-                <option value=""{% if form.docker_registry_credential.is_empty() %} selected{% endif %}>{{ self.t("spec-form-registry-none-option") }}</option>
-                {% for name in credential_names %}
-                  <option value="{{ name }}"{% if self.cred_selected(name) %} selected{% endif %}>{{ name }}</option>
-                {% endfor %}
-                {# A set-but-unknown value (deleted / imported) stays selectable. #}
-                {% if !self.cred_known() %}
-                  <option value="{{ form.docker_registry_credential }}" selected>{{ form.docker_registry_credential }} ({{ self.t("spec-form-registry-missing") }})</option>
-                {% endif %}
-              </select>
-            {% endif %}
-            <div class="spec-form-help">
-              {{ self.t("spec-form-registry-help") }}
-              <a href="{{ base }}/admin/credentials" target="_blank" rel="noopener" class="hover:underline">
-                {{ self.t("admin-nav-credentials") }}
-                <i class="ti ti-external-link" aria-hidden="true" style="font-size:11px"></i>
-              </a>
-            </div>
-          </div>
-          {# Back-compat: keep inline registry creds from imported YAML so a
-             save doesn't drop them (domain/username preserved verbatim;
-             blank password keeps the stored one, #260). No longer editable
-             here — migrate to a saved credential above. #}
-          <input type="hidden" name="docker_registry_domain" value="{{ form.docker_registry_domain }}">
-          <input type="hidden" name="docker_registry_username" value="{{ form.docker_registry_username }}">
-          <input type="hidden" name="docker_registry_password" value="">
           {% if !form.docker_registry_domain.is_empty() || !form.docker_registry_username.is_empty() %}
           <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-registry-inline-note") }}</div>
           {% endif %}

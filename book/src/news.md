@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.16 — 2026-06-12
+
+**Diagnostics**
+
+- **A container that crashes on boot now says why (#823).** When an app
+  container dies during startup — a bad config, an unreachable
+  database, a missing mounted file, or an image built for the wrong
+  CPU architecture — Docker drops its port bindings, and the spawn used
+  to fail with the cryptic "no port binding for 8000/tcp". The error
+  now names the exit code and appends the container's own log tail (the
+  app's stack trace), so the cause is right there in the dashboard logs;
+  a container that's still running but isn't listening on the expected
+  port is reported as exactly that.
+
+---
+
 ## v0.2.15 — 2026-06-12
 
 **Private images**

@@ -575,6 +575,47 @@ mod tests {
     use crate::db::open_memory;
     use ruscker_config::Config;
 
+    // The IMPORT path keeps exact filenames and relies on `insert`
+    // replacing a prior same-name row (the upload handlers, by
+    // contrast, auto-rename on collision — keep-both semantics, #815).
+    #[tokio::test]
+    async fn same_filename_insert_replaces_bytes() {
+        let db = ConfigDb::Sqlite(crate::db::open_memory().await.unwrap());
+        let mk = |bytes: &[u8]| crate::images::Processed {
+            filename: "logo.webp".into(),
+            mime_type: "image/webp".into(),
+            bytes: bytes.to_vec(),
+            width: None,
+            height: None,
+        };
+        insert(&db, mk(b"OLD"), Some("admin")).await.unwrap();
+        insert(&db, mk(b"NEW"), Some("admin")).await.unwrap();
+        let (_mime, bytes) = fetch_by_filename(&db, "logo.webp").await.unwrap().unwrap();
+        assert_eq!(bytes, b"NEW", "import re-run wins");
+        assert_eq!(
+            list_all(&db).await.unwrap().iter().filter(|i| i.filename == "logo.webp").count(),
+            1
+        );
+    }
+
+    // #815 (final semantics): `unique_filename` hands the upload
+    // handlers a free name so a colliding upload KEEPS BOTH images.
+    #[tokio::test]
+    async fn unique_filename_steps_around_collisions() {
+        let db = ConfigDb::Sqlite(crate::db::open_memory().await.unwrap());
+        assert_eq!(unique_filename(&db, "logo.webp").await.unwrap(), "logo.webp");
+        let mk = || crate::images::Processed {
+            filename: "logo.webp".into(),
+            mime_type: "image/webp".into(),
+            bytes: b"A".to_vec(),
+            width: None,
+            height: None,
+        };
+        insert(&db, mk(), None).await.unwrap();
+        assert_eq!(unique_filename(&db, "logo.webp").await.unwrap(), "logo-2.webp");
+    }
+
+
     async fn insert_image(db: &ConfigDb, id: &str, filename: &str) {
         let ConfigDb::Sqlite(pool) = db else {
             return;

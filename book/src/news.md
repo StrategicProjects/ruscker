@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.13 — 2026-06-12
+
+**Media & pickers**
+
+- **Same-name uploads keep both images, visibly (#815).** Uploading a
+  file whose name already exists stores it under a free name
+  (`logo.webp` → `logo-2.webp`) — the existing image and everything
+  referencing it stay untouched. That was already the behaviour; what
+  was missing was telling them apart afterwards: the image-picker
+  tiles (app form and Appearance) now show a **filename caption**, so
+  the renamed upload is unmistakable next to its look-alike. Inline
+  uploads keep auto-selecting the renamed file for you.
+
+---
+
 ## v0.2.12 — 2026-06-12
 
 **Public landing**

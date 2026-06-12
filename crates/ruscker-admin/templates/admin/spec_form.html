@@ -390,7 +390,12 @@
               </div>
               <input type="hidden" name="docker_registry_credential" value="{{ form.docker_registry_credential }}">
             {% else %}
-              <select id="f-reg-cred" name="docker_registry_credential" class="spec-form-input theme-select">
+              {# x-model so a freshly-picked credential reaches the
+                 on-demand Pull button immediately (#822): without it
+                 `form.docker_registry_credential` stayed at the loaded
+                 value, so a Pull before saving went anonymous → 404 on a
+                 private image, and only worked after a save+reload. #}
+              <select id="f-reg-cred" name="docker_registry_credential" x-model="form.docker_registry_credential" class="spec-form-input theme-select">
                 <option value=""{% if form.docker_registry_credential.is_empty() %} selected{% endif %}>{{ self.t("spec-form-registry-none-option") }}</option>
                 {% for name in credential_names %}
                   <option value="{{ name }}"{% if self.cred_selected(name) %} selected{% endif %}>{{ name }}</option>

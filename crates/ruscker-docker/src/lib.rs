@@ -822,13 +822,18 @@ impl ContainerBackend for LocalDockerBackend {
             serveraddress: canonical_server_address(c.server_address.as_deref()),
             ..Default::default()
         });
+        // Ride the auth context on the streamed error line too (#822):
+        // the spawn pull already does, but the editor's Pull button
+        // (this path) didn't — "denied — anonymous" vs "— authenticated
+        // as …" tells a dropped credential from a rejected one.
+        let auth = auth_desc(creds);
         let stream = self
             .docker
             .create_image(Some(opts), None, bollard_creds)
-            .map(|ev| match ev {
+            .map(move |ev| match ev {
                 Ok(info) => {
                     if let Some(err) = info.error_detail {
-                        return format!("error: {}", err.message.unwrap_or_default());
+                        return format!("error: {} — {auth}", err.message.unwrap_or_default());
                     }
                     let id = info.id.unwrap_or_default();
                     let status = info.status.unwrap_or_default();

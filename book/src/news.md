@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.15 — 2026-06-12
+
+**Private images**
+
+- **A picked registry credential now applies to the on-demand Pull
+  immediately (#822).** The credential selector wasn't bound to the
+  form's live state, so the editor's "Pull" button used an empty
+  credential until the app was saved and reloaded — a private image
+  pulled anonymously and failed with "404: pull access denied", then
+  worked after a save. The selector is now bound, so the chosen
+  credential is used right away. The Pull error line also names how it
+  authenticated (anonymous vs. the user/registry), matching the
+  launch-time pull.
+
+---
+
 ## v0.2.14 — 2026-06-12
 
 **Private images**

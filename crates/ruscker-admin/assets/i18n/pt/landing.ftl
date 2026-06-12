@@ -349,7 +349,7 @@ admin-landing-clear = Limpar
 admin-landing-intro = Texto introdutório (padrão)
 admin-landing-intro-default = Padrão (fallback para todos os idiomas)
 admin-landing-intro-default-placeholder = Bem-vindo ao portal…
-admin-landing-intro-help = Texto exibido entre o cabeçalho e os filtros. Vazio = sem texto.
+admin-landing-intro-help = Mostrado acima do catálogo. Aceita **negrito**, *itálico* e [links](https://…) — sem HTML.
 admin-landing-intro-locales = Texto introdutório por idioma
 admin-landing-intro-pt = Português
 admin-landing-intro-en = Inglês

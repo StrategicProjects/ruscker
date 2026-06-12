@@ -200,7 +200,10 @@ blocks:
 - **Visible sections** — toggles for the search box, the filter chips
   and the *Featured* carousel.
 - **Content** — a per-locale intro paragraph (rendered full-width and
-  justified on the portal) and the footer text.
+  justified on the portal) and the footer text. The intro understands
+  an inline slice of Markdown — `**bold**`, `*italic*` and
+  `[links](https://…)` — never raw HTML; the preview renders it the
+  same way.
 - **SEO & sharing** — page title, meta description, `og:image`, with a
   live Google-style **search-result preview** that updates as you type.
   The landing `<head>` emits `description` + `og:*` + `twitter:card`.

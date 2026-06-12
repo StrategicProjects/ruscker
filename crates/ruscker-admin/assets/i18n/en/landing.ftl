@@ -345,7 +345,7 @@ admin-landing-clear = Clear
 admin-landing-intro = Intro text (default)
 admin-landing-intro-default = Default (fallback for all languages)
 admin-landing-intro-default-placeholder = Welcome to the portal…
-admin-landing-intro-help = Rendered between the header and the filters. Empty = no text.
+admin-landing-intro-help = Shown above the catalog. Accepts **bold**, *italic* and [links](https://…) — no HTML.
 admin-landing-intro-locales = Intro text per language
 admin-landing-intro-pt = Portuguese
 admin-landing-intro-en = English

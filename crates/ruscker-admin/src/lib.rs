@@ -31,6 +31,7 @@ pub mod i18n;
 pub mod images;
 pub mod leader;
 pub mod logbuf;
+pub mod markdown;
 pub mod metrics_cache;
 pub mod ratelimit;
 pub mod routes;

@@ -42,8 +42,10 @@ struct LandingPage<'a> {
     /// the `<select>` filter at the top of the landing.
     subjects: Vec<&'a str>,
     counts: CardCounts,
-    /// Resolved per-locale intro text, or empty string when no
-    /// `landing-customization.intro` is configured.
+    /// Resolved per-locale intro, rendered through the inline-Markdown
+    /// subset (#812: **bold**, *italic*, [links] — escape-first, see
+    /// `crate::markdown`). Empty string when no intro is configured;
+    /// emitted with `|safe`.
     intro: String,
     /// Header title — `landing-customization.title` override, else
     /// `proxy.title`, else the localized `landing-title` (#468).
@@ -364,7 +366,10 @@ async fn index(
     };
     let page_title =
         not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
-    let seo_description = not_blank(&lc.seo_description).unwrap_or_else(|| intro.clone());
+    // The meta-description fallback wants PLAIN text — strip the
+    // Markdown markers instead of leaking `**` into the tag (#812).
+    let seo_description = not_blank(&lc.seo_description)
+        .unwrap_or_else(|| crate::markdown::strip_inline(&intro));
     // Social-share image with an auto-default chain: the explicit
     // `og-image` wins; otherwise the operator's header-left brand logo
     // (the one that replaces the Ruscker mark) is reused so a shared link
@@ -515,7 +520,7 @@ async fn index(
         type_chips,
         subjects,
         counts,
-        intro,
+        intro: crate::markdown::render_inline(&intro),
         header_title,
         header_subtitle,
         // Footer override (blank ⇒ the default version+wordmark lockup).

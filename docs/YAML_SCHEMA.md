@@ -226,8 +226,8 @@ Field reference:
 | `header-fg-dark` | CSS color | none | Dark-theme header text. Unset inherits `header-fg`. |
 | `card-cover-default` | CSS value | none | Default cover (solid/gradient) painted behind catalog cards that have no per-app `cover`/`accent`. Unset keeps the per-kind tint. |
 | `card-cover-default-dark` | CSS value | none | Dark-theme default card cover. Unset inherits `card-cover-default`. |
-| `intro` | string | none | Plain text (no HTML); single-language fallback. |
-| `intro-locales` | map | `{}` | Locale code → intro string. Wins over `intro` for matching locales. |
+| `intro` | string | none | Single-language fallback. Inline Markdown only — `**bold**`, `*italic*`, `[links](https://…)`; no HTML. |
+| `intro-locales` | map | `{}` | Locale code → intro string (same inline Markdown). Wins over `intro` for matching locales. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |
 | `seo-description` | string | resolved intro | `<meta name="description">` + `og:description`. |
 | `og-image` | path / URL | none | `og:image` for social-share. |

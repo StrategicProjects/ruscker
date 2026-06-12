@@ -2203,6 +2203,8 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   color: var(--text-muted);
   text-align: justify; hyphens: auto; overflow-wrap: break-word;
 }
+.landing-intro a { color: var(--color-teal-600); text-decoration: underline; }
+.landing-intro a:hover { color: var(--color-teal-400); }
 
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */

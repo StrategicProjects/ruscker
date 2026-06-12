@@ -379,18 +379,17 @@ impl LocalDockerBackend {
         let bollard_creds = creds.map(|c| bollard::auth::DockerCredentials {
             username: Some(c.username.clone()),
             password: Some(c.password.clone()),
-            serveraddress: c.server_address.clone(),
+            serveraddress: canonical_server_address(c.server_address.as_deref()),
             ..Default::default()
         });
-        tracing::info!(
-            image,
-            with_creds = bollard_creds.is_some(),
-            registry = ?creds.and_then(|c| c.server_address.as_deref()),
-            "pulling image"
-        );
+        let auth = auth_desc(creds);
+        tracing::info!(image, auth = %auth, "pulling image");
         let mut stream = self.docker.create_image(Some(opts), None, bollard_creds);
         while let Some(event) = stream.next().await {
-            event.map_err(|e| backend_err("pull image", e))?;
+            // The auth context rides in the error: "pull access denied"
+            // with `anonymous` vs `authenticated as …` is the difference
+            // between a missing credential and a wrong one (#820).
+            event.map_err(|e| backend_err(&format!("pull image ({auth})"), e))?;
         }
         Ok(())
     }
@@ -820,7 +819,7 @@ impl ContainerBackend for LocalDockerBackend {
         let bollard_creds = creds.map(|c| bollard::auth::DockerCredentials {
             username: Some(c.username.clone()),
             password: Some(c.password.clone()),
-            serveraddress: c.server_address.clone(),
+            serveraddress: canonical_server_address(c.server_address.as_deref()),
             ..Default::default()
         });
         let stream = self
@@ -1194,6 +1193,56 @@ fn state_from_docker(s: Option<&str>) -> ReplicaState {
     }
 }
 
+
+/// The registry address the Docker daemon should see for a pull.
+///
+/// Docker Hub is special: `docker login` records it as
+/// `https://index.docker.io/v1/` and daemons match `X-Registry-Auth`
+/// against that exact string — a bare `docker.io` (what an operator
+/// naturally types in the credential's Registry field) can be treated
+/// as a *different* registry and the credential silently ignored,
+/// degrading the pull to anonymous: a private image then fails with
+/// "404: pull access denied" even though the credential is valid
+/// (#820). Map the Hub aliases (and the empty value, which the
+/// credential store documents as "Docker Hub") to the canonical
+/// address; any other registry passes through verbatim.
+fn canonical_server_address(addr: Option<&str>) -> Option<String> {
+    const HUB: &str = "https://index.docker.io/v1/";
+    let Some(a) = addr.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Some(HUB.to_string());
+    };
+    let bare = a
+        .trim_start_matches("https://")
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .trim_end_matches("/v1")
+        .trim_end_matches('/');
+    if matches!(
+        bare,
+        "docker.io" | "index.docker.io" | "registry-1.docker.io"
+            | "hub.docker.com" | "registry.hub.docker.com"
+    ) {
+        Some(HUB.to_string())
+    } else {
+        Some(a.to_string())
+    }
+}
+
+/// Operator-facing description of how a pull authenticates — rides in
+/// the pull error so "credential ignored / not attached" is diagnosable
+/// from the splash message alone (#820).
+fn auth_desc(creds: Option<&ruscker_core::RegistryCredentials>) -> String {
+    match creds {
+        Some(c) => format!(
+            "authenticated as {} @ {}",
+            c.username,
+            canonical_server_address(c.server_address.as_deref())
+                .unwrap_or_else(|| "Docker Hub".into())
+        ),
+        None => "anonymous".to_string(),
+    }
+}
+
 fn backend_err(op: &str, e: bollard::errors::Error) -> CoreError {
     CoreError::Backend(format!("{op}: {e}"))
 }
@@ -1229,6 +1278,32 @@ fn apply_limits(host_config: &mut HostConfig, limits: &ruscker_core::ResourceLim
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hub_aliases_normalize_to_the_v1_index(){
+        let hub = Some("https://index.docker.io/v1/".to_string());
+        for a in [None, Some(""), Some("  "), Some("docker.io"), Some("https://docker.io"),
+                  Some("index.docker.io"), Some("registry-1.docker.io/"),
+                  Some("hub.docker.com"), Some("https://index.docker.io/v1/")] {
+            assert_eq!(canonical_server_address(a), hub, "alias {a:?}");
+        }
+        assert_eq!(
+            canonical_server_address(Some("registry.example.com")),
+            Some("registry.example.com".to_string()),
+            "non-Hub registries pass through"
+        );
+    }
+
+    #[test]
+    fn auth_desc_names_user_and_registry() {
+        assert_eq!(auth_desc(None), "anonymous");
+        let c = ruscker_core::RegistryCredentials {
+            username: "milkway".into(),
+            password: "x".into(),
+            server_address: Some("docker.io".into()),
+        };
+        assert_eq!(auth_desc(Some(&c)), "authenticated as milkway @ https://index.docker.io/v1/");
+    }
 
     #[test]
     fn state_from_docker_maps_common_values() {

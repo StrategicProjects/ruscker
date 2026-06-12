@@ -9,6 +9,27 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.14 — 2026-06-12
+
+**Private images**
+
+- **Docker Hub credentials now apply reliably (#820).** The stored
+  credential's registry field was handed to the Docker daemon verbatim
+  (`docker.io`, or empty) — but daemons match credentials against the
+  canonical `https://index.docker.io/v1/` address, and on a mismatch
+  silently pulled anonymously, so a private image failed with
+  "404: pull access denied" despite a valid credential. Hub aliases are
+  now normalized to the canonical address on every pull; other
+  registries pass through unchanged.
+- **Pull errors say how they authenticated.** A failed spawn pull now
+  reads "pull image (authenticated as user @ registry)" — or
+  "(anonymous)" — so a missing, ignored or wrong credential is
+  diagnosable straight from the error message.
+- **The registry credential picker moved next to the Docker image
+  field** in the app form (it used to hide under Advanced).
+
+---
+
 ## v0.2.13 — 2026-06-12
 
 **Media & pickers**

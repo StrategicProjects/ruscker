@@ -400,14 +400,36 @@ impl LocalDockerBackend {
             .inspect_container(container_id, None)
             .await
             .map_err(|e| backend_err("inspect container", e))?;
-        let bindings = info
+        let bindings = match info
             .network_settings
             .as_ref()
             .and_then(|ns| ns.ports.as_ref())
             .and_then(|p| p.get(port_key).cloned())
-            .ok_or_else(|| {
-                CoreError::Backend(format!("no port binding for {port_key} on {container_id}"))
-            })?;
+        {
+            Some(b) => b,
+            None => {
+                // A missing binding almost always means the container
+                // already DIED before publishing the port — when a
+                // container stops, Docker drops its port bindings, so the
+                // bare "no port binding" was a misleading symptom of a
+                // boot crash (#823). Turn it into a real diagnosis: name
+                // the exit code and append the container's log tail (the
+                // app's own stack trace — bad config, unreachable DB,
+                // missing mounted file…), the same enrichment a readiness
+                // failure already gets.
+                let headline = match container_exit_code(&self.docker, container_id).await {
+                    Some(code) => format!(
+                        "container exited (code {code}) before publishing {port_key} — \
+                         likely a startup crash; see the log below"
+                    ),
+                    None => format!(
+                        "{port_key} is not published on the container (is the app \
+                         listening on that port inside the container?)"
+                    ),
+                };
+                return Err(readiness_failure(self, container_id, headline).await);
+            }
+        };
         let port_str = bindings
             .as_ref()
             .and_then(|v| v.first())
@@ -1577,6 +1599,55 @@ mod tests {
             leftovers.is_empty(),
             "failed spawn left containers behind: {leftovers:?}"
         );
+    }
+
+    /// #823: a container that dies INSTANTLY (no `sleep` — the crash the
+    /// operator hit) loses its port binding before the inspect at step 4,
+    /// so the old code reported the misleading "no port binding for
+    /// 8000/tcp". The spawn error must now name the exit code AND carry
+    /// the boot log instead.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn instant_crash_reports_exit_code_and_log_not_no_port_binding() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "alpine:latest".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        // Publishes :8000, never listens, prints a diagnostic and exits
+        // non-zero IMMEDIATELY — like aurora_config() not finding
+        // /app/data/config.yml.
+        let req = ruscker_core::SpawnRequest::new("itest-instant", &image)
+            .with_port(8000)
+            .with_cmd(vec![
+                "sh".into(),
+                "-c".into(),
+                "echo 'FATAL: cannot read /app/data/config.yml'; exit 3".into(),
+            ]);
+        let err = backend
+            .spawn_request(&req)
+            .await
+            .expect_err("an instantly-crashing container must fail the spawn");
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("no port binding"),
+            "still reporting the misleading symptom: {msg}"
+        );
+        assert!(
+            msg.contains("exited (code 3)"),
+            "exit code missing from error: {msg}"
+        );
+        assert!(
+            msg.contains("config.yml"),
+            "boot log tail missing from error: {msg}"
+        );
+        // Self-cleaning: the failed spawn reaps its own container (#733).
+        let leftovers: Vec<_> = backend
+            .list_managed_containers()
+            .await
+            .expect("list managed")
+            .into_iter()
+            .filter(|c| c.spec_id.as_deref() == Some("itest-instant"))
+            .collect();
+        assert!(leftovers.is_empty(), "left containers behind: {leftovers:?}");
     }
 
     /// #453 part B: the disk-panel methods see a live replica + its image

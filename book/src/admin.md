@@ -72,7 +72,16 @@ has a **featured star** next to the actions: click it to toggle whether
 the app appears in the landing page's *Featured* carousel, inline,
 without opening the editor (solid = featured).
 
-![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star (solid amber when featured) next to the edit and duplicate buttons.](images/admin-apps.png)
+The Actions column also carries an **archive toggle** and a **delete**
+button. Archiving deactivates the app in place — its card leaves the
+public portal but the configuration, history and audit trail stay, and
+one more click brings it back. The toggle updates the row right where
+it is (no reload, no scroll jump, and the row keeps its position in the
+list — archiving doesn't count as an "update"). Delete asks for
+confirmation, stops the app's containers and is audited; apps defined
+in the `serve --config` YAML stay read-only here.
+
+![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star, edit and duplicate buttons, the archive toggle and a delete button.](images/admin-apps.png)
 
 The add/edit form walks down the page in the order you think about an
 app: **Identity** (id, name, subject), **Kind** (app container /
@@ -123,6 +132,11 @@ with its members and the apps it gates, and lets you edit them in place:
 Edits touch the database-managed users and apps. An app defined in the
 `serve --config` YAML stays read-only here (edit the file for those).
 
+Below the groups, **Public apps** lists every ungated app as a logo
+chip — the thumbnail sits on the catalog's per-type tint colour, so the
+app's kind reads at a glance — with a globe mark; clicking a chip opens
+that app's editor.
+
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
@@ -153,40 +167,59 @@ There is no need to inline registry passwords in a spec.
 
 ### Appearance
 Customise the public landing without a custom template. Every control
-is mirrored instantly in a **live portal preview** on the right:
+is mirrored instantly in a **live portal preview** on the right — the
+preview has its own **☀️/🌙 switch** so you can inspect both themes
+without changing the saved default, and the action bar carries a
+**"Restore defaults"** button (with confirmation) that resets the
+styling while keeping titles, logos, texts, SEO, custom CSS and HTML
+blocks:
 
-![Appearance editor: control cards for header, branding, catalog layout and visible sections on the left, with a live portal preview pane on the right.](images/admin-appearance.png)
+![Appearance editor: control cards for header texts, logos, header style, catalog cards, theme and layout on the left, with a live portal preview pane (with its own light/dark switch) on the right.](images/admin-appearance.png)
 
-- **Header & branding** — header style presets, a solid/gradient
-  background builder, brand-colour swatches per theme, a default theme
-  (light / dark / auto) for first-time visitors, and the header logo's
-  mode, size and margin.
-- **Catalog** — grid, list or sections layout; comfortable or compact
-  density; a default **card-cover** builder (auto / solid / gradient)
-  for cards without their own cover; toggles for the search box and
-  filter chips.
-- **Colours + intro** — header background/foreground, a per-locale
-  intro paragraph, and an editable footer.
+- **Header** — the portal title, subtitle and footer texts.
+- **Logos** — the **main header logo** in one place: built-in mark,
+  symbol-only, or a custom image picked right there from the Media
+  library, sized by its own sliders. Additional logos go in the header
+  centre/right or the footer, each with alignment, an optional
+  click-through link and a height.
+- **Header style** — the background is one explicit choice: **Preset**
+  (flat / soft / bold tints), **Solid** or **Gradient** — and the
+  custom modes carry separate **light and dark values** (dark inherits
+  light until you set it). Text colour is per-theme too.
+- **Catalog cards** — the default cover behind cards that have no
+  cover of their own: **Auto** keeps each type's tint colour (zero
+  configuration), or paint a **solid / gradient** per theme, with a
+  live cover preview, a draggable **angle dial** and an explicit
+  *Inherited ⇄ Own* pill on the dark side.
+- **Theme & colors** — the default theme (light / dark / auto) for
+  first-time visitors, brand-colour quick swatches (plus a custom
+  pick), and full light/dark palettes with a live mini-preview of
+  background, text and accent.
+- **Catalog layout** — grid, list or sections as large icon tiles,
+  plus a comfortable/compact density bar.
+- **Visible sections** — toggles for the search box, the filter chips
+  and the *Featured* carousel.
+- **Content** — a per-locale intro paragraph (rendered full-width and
+  justified on the portal) and the footer text.
 - **SEO & sharing** — page title, meta description, `og:image`, with a
   live Google-style **search-result preview** that updates as you type.
   The landing `<head>` emits `description` + `og:*` + `twitter:card`.
 - **Analytics & custom code** — pick a provider (GA4 / Plausible /
   Matomo) and paste just the site key — Ruscker builds the snippet and
   widens **only the landing's** CSP for that provider's origins. A raw
-  HTML field remains as the escape hatch for anything else. The custom-CSS and analytics/HTML fields are
-  **syntax-highlighted code editors** (the custom HTML blocks editor too).
-- **Logos** — add logos to the landing **header** or **footer** slot.
-  Each logo has its own **alignment** (left / center / right), an optional
-  **click-through link**, and a **height** in pixels. Multiple logos
-  sharing a slot and alignment render side by side. Images come from the
-  Media library — pick one with the same modal picker used in the spec
-  form.
+  HTML field remains as the escape hatch for anything else. The
+  custom-CSS and analytics/HTML fields are **syntax-highlighted code
+  editors** (the custom HTML blocks editor too).
 
 ### Blocks
 Custom HTML blocks rendered in the landing `top` (after the header) and
-`bottom` (after the card grid) slots. Create/edit/delete, enable/
-disable, and reorder within a slot with the ↑/↓ buttons. Each block can
-declare CSP origins for any third-party content it embeds.
+`bottom` (after the card grid) slots, edited **inline** at the bottom
+of the Appearance page: "+ New block" (or a row's pencil) expands the
+editor right there — name, a Top/Bottom position switch, a
+syntax-highlighted HTML editor, CSP origins for any third-party content
+it embeds, and an active toggle. Rows reorder by drag-and-drop or the
+↑/↓ buttons, each slot shows a block counter, and after saving you land
+back at the blocks section.
 
 > Block and analytics HTML is rendered **verbatim** on the public
 > landing. It's admin-only input — the intentional escape hatch — so

@@ -147,10 +147,18 @@ Every image can be **deleted** from the gallery; if it is referenced by any
 spec logo/cover or landing logo, the entry shows an **"in use" badge** so
 you know before deleting.
 
+Uploading a file whose name already exists **keeps both images**: the
+new one is stored under a free name (`logo.webp` → `logo-2.webp`) and
+the flash tells you the stored name — nothing that references the
+original changes. The gallery sorts newest-first, so the renamed upload
+is the first tile.
+
 When editing a spec you can open a **modal picker** (search, browse, drag
 and drop, or upload inline without leaving the form) to select a logo or
 cover. A "Choose image" button auto-uploads on file select for a one-click
-flow.
+flow; inline uploads auto-select the stored (possibly renamed) file, and
+every picker tile shows a **filename caption**, so look-alike images are
+easy to tell apart.
 
 ![Media library: a gallery of images with built-in framework logos seeded alongside uploads, each tile showing its filename, size and type.](images/admin-media.png)
 

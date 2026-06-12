@@ -1,10 +1,12 @@
 # Roadmap
 
-Ruscker is at **v0.2.5** — Phases 0 through 7 are done, the proxy is
-production-ready and horizontally scalable, and a full bug / security /
-UX audit of the codebase shipped as v0.2.5 (every finding fixed). Phase
-8 (external auth) is the main optional, demand-driven work left. For
-what changed in each release, see the [release notes](./news.md).
+Phases 0 through 7 are done: the proxy is production-ready and
+horizontally scalable, a full bug / security / UX audit shipped as
+v0.2.5 (every finding fixed), and the v0.2.x series since then has been
+an **operator-driven polish loop** — short releases, each validated
+live on a real deployment before the next. Phase 8 (external auth) is
+the main optional, demand-driven work left. For what changed in each
+release, see the [release notes](./news.md).
 
 ![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-1.0 point releases add demo forks, URL-rewrite modernization, unified credentials, the media library, portal logos, admin UX polish, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
 
@@ -148,9 +150,51 @@ chrome. The social-share **`og:image` auto-defaults** to the header logo
 dashboard streams through reverse proxies** (`X-Accel-Buffering: no`), so
 new containers appear in real time even behind nginx on a subpath mount.
 
+**The design-handoff sprint (v0.2.6 – v0.2.13).** A rapid, live-tested
+series that brought the whole admin to the design handoff and fixed
+what real operation surfaced, in days:
+
+- **Apps list** — archive / restore an app in place (the card leaves
+  the public portal, nothing is lost) and delete with confirmation,
+  right from the table; toggles update the row without a reload or a
+  scroll jump.
+- **Appearance, end to end** — one Logos section with an inline
+  main-logo picker; the header background as an explicit
+  Preset / Solid / Gradient choice; **per-theme (light / dark) values**
+  for the header, the default card covers and the palettes — with a
+  draggable angle dial, Inherited ⇄ Own pills, layout tiles, a
+  light/dark switch on the live preview, and a confirmed
+  "Restore defaults". The HTML-blocks editor gained inline editing.
+- **Landing content** — the intro paragraph fills the row (justified,
+  hyphenated per locale) and understands **inline Markdown** (bold,
+  italic, links — escape-first, never raw HTML).
+- **Media** — same-name uploads keep both images (the new one is
+  renamed and announced), and picker tiles show filename captions so
+  look-alikes can't be confused.
+
 ## Planned (optional)
 
 Demand-driven — Ruscker is complete and useful without it.
+
+### Next up (small, operator-driven)
+Tracked in the GitHub issues; picked up as real usage asks for them:
+
+- **"System" tab** in the admin — a read-only diagnostic view of the
+  effective server configuration (issue #766, decision pending).
+- **Personal highlights** — let each visitor pin their own favourite
+  apps (cookie for anonymous visitors, DB for signed-in ones,
+  issue #519).
+- **Markdown in app descriptions** — the intro already supports the
+  inline subset; extending it to card descriptions is deferred until
+  there's a concrete need (issue #812).
+- **First-party demo images** — fork the remaining showcase demos
+  (Shiny, Shiny for Python, Streamlit, Voilà, R Markdown) into
+  `milkway/ruscker-*-demo` images that serve at the root
+  (issues #389–#397).
+- **Hardening follow-ups** — live end-to-end validation of the
+  WebSocket arc on Shiny/Streamlit (validated against Jupyter today),
+  and a post-drop cooldown for scale-down to finish off the
+  seats=1 long-session flap.
 
 ### Phase 8 — External auth
 OIDC (Keycloak / Auth0 / Google), SAML, and LDAP, plus per-app access

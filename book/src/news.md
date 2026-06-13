@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.19 — 2026-06-13
+
+Fixes for two v0.2.18 features that didn't quite land in real use.
+
+- **Featured carousel: hover expands only the card under the cursor
+  (#828).** A description expanding on hover used to stretch every card
+  in the rail to match; now just the hovered one grows.
+- **Stop/restart progress feedback now actually shows (#828).** The
+  busy state (dimmed row, disabled buttons, spinner) was applied but
+  the navigating form POST made the browser skip painting it. The
+  action now runs without a page navigation, so the feedback appears
+  and stays for the whole operation.
+
+---
+
 ## v0.2.18 — 2026-06-13
 
 **Landing**

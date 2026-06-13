@@ -314,6 +314,44 @@
       + '</div>';
   }
 
+  // ── Stop/restart in-progress feedback (#827). These actions are slow
+  // (drain → SIGTERM → SIGKILL, and restart respawns) and the form POST
+  // only navigates away when the server finishes — leaving the UI
+  // looking frozen for seconds. So on submit we mark the replica busy:
+  // a spinner on the clicked button, the row's buttons disabled, the row
+  // dimmed. The state is keyed by replica id in `applying` so it
+  // survives the SSE rebuild (which fires when the very action changes
+  // the snapshot) — `reapplyBusy()` restores it after each rebuild,
+  // until the POST's redirect reloads the page.
+  var applying = new Map(); // replica_id → 'stop' | 'restart'
+  function markBusy(rowEl, action) {
+    if (!rowEl) return;
+    rowEl.classList.add('is-applying');
+    var cell = rowEl.querySelector('.replica-actions');
+    if (!cell) return;
+    cell.classList.add('is-busy');
+    cell.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+    var form = cell.querySelector('form[action$="/' + action + '"]');
+    var ic = form && form.querySelector('button i');
+    if (ic) ic.className = 'ti ti-loader-2 animate-spin';
+  }
+  function reapplyBusy() {
+    if (!container || !applying.size) return;
+    applying.forEach(function (action, rid) {
+      markBusy(container.querySelector('[data-replica-id="' + CSS.escape(rid) + '"]'), action);
+    });
+  }
+  // Runs after the capture-phase data-confirm listener (#740) in
+  // _layout, so a cancelled confirm (defaultPrevented) is a no-op.
+  document.addEventListener('submit', function (e) {
+    if (e.defaultPrevented) return;
+    var action = (e.target.getAttribute && e.target.getAttribute('action')) || '';
+    var m = action.match(/\/replicas\/([^/]+)\/(stop|restart)$/);
+    if (!m) return;
+    applying.set(decodeURIComponent(m[1]), m[2]);
+    markBusy(e.target.closest('[data-replica-id]'), m[2]);
+  }, false);
+
   function apply(snap) {
     metric('containers', snap.total_containers);
     metric('sessions', snap.total_sessions);
@@ -352,6 +390,7 @@
     }
     container.innerHTML = html;
     refocus(key);
+    reapplyBusy(); // #827: a busy replica stays busy across the rebuild
   }
 
   // Identify a focused element structurally — by its replica row (or

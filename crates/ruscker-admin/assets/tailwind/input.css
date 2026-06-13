@@ -385,6 +385,12 @@ body {
 }
 .replica-actions a:hover, .replica-actions button:hover { background: var(--surface); color: var(--text); }
 .replica-actions .is-danger:hover { color: var(--color-lock, #ef4444); }
+/* Stop/restart in progress (#827): the action's buttons are inert and
+   dimmed (the clicked one shows a spinner), the whole row dims, until
+   the POST's redirect reloads the page. */
+.replica-actions.is-busy button { opacity: 0.45; cursor: progress; }
+.replica-actions.is-busy button:hover { background: none; color: inherit; }
+.replica-row.is-applying { opacity: 0.6; transition: opacity 0.15s ease; }
 
 .metric-cell { font-size: 12px; }
 .metric-cell .v { display: block; }

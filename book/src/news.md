@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.21 — 2026-06-13
+
+- **The hover reveal shows the whole description (#832).** v0.2.20's
+  smoother animation capped the height, so longer descriptions were
+  cut off. The card now expands to the exact length of its text — any
+  size, no clipping — while keeping the smooth ease.
+
+---
+
 ## v0.2.20 — 2026-06-13
 
 - **Smoother card-description reveal on hover (#831).** The expansion

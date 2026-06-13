@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.22 — 2026-06-13
+
+- **The card hover reveal is smooth again (#833).** v0.2.21 fixed the
+  clipping but, while measuring the text height, made the expansion
+  snap open. It now eases open over its full, comfortable curve — full
+  text, any length, smoothly revealed.
+
+---
+
 ## v0.2.21 — 2026-06-13
 
 - **The hover reveal shows the whole description (#832).** v0.2.20's

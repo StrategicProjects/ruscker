@@ -345,11 +345,24 @@
   // _layout, so a cancelled confirm (defaultPrevented) is a no-op.
   document.addEventListener('submit', function (e) {
     if (e.defaultPrevented) return;
-    var action = (e.target.getAttribute && e.target.getAttribute('action')) || '';
+    var f = e.target;
+    var action = (f.getAttribute && f.getAttribute('action')) || '';
     var m = action.match(/\/replicas\/([^/]+)\/(stop|restart)$/);
     if (!m) return;
-    applying.set(decodeURIComponent(m[1]), m[2]);
-    markBusy(e.target.closest('[data-replica-id]'), m[2]);
+    // Do the action over FETCH, not a navigating form POST (#828): a
+    // navigation makes the browser skip the repaint of the busy state we
+    // just applied — so the spinner/dim never showed and the page just
+    // looked frozen. With fetch the page stays put, the feedback paints
+    // and persists for the whole (slow) operation, and we reload once it
+    // resolves to pick up the new state. Same-origin POST ⇒ the
+    // Fetch-Metadata/Origin guard still passes.
+    e.preventDefault();
+    var rid = decodeURIComponent(m[1]);
+    applying.set(rid, m[2]);
+    markBusy(f.closest('[data-replica-id]'), m[2]);
+    fetch(action, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
+      .then(function () { location.reload(); })
+      .catch(function () { location.reload(); });
   }, false);
 
   function apply(snap) {

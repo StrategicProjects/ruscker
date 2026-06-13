@@ -1196,6 +1196,10 @@ input[type="range"]::-moz-range-thumb {
 }
 .highlights-track {
   display: flex; gap: 14px;
+  /* Top-align so a card whose description expands on hover (#825/#828)
+     grows on its own — flex default `stretch` made every card in the
+     rail stretch to the hovered one's new height. */
+  align-items: flex-start;
   transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .highlights-track > .rcard { flex: 0 0 auto; }

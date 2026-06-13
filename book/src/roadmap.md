@@ -172,6 +172,15 @@ what real operation surfaced, in days:
   renamed and announced), and picker tiles show filename captions so
   look-alikes can't be confused.
 
+**Private-image & deploy robustness (v0.2.14 – v0.2.19).** Driven by an
+operator bringing a private Plumber2 app online: Docker Hub credentials
+are normalised so they apply reliably, the credential picker moved
+beside the image field, a force **re-pull** ("Update image") handles a
+re-published tag, and a boot crash now surfaces the container's own
+error + exit code instead of a generic "no port binding". Plus catalog
+cards expand their description on hover, and the dashboard's
+stop/restart actions show in-progress feedback.
+
 ## Planned (optional)
 
 Demand-driven — Ruscker is complete and useful without it.

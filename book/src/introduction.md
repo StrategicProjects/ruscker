@@ -18,7 +18,7 @@ startup**, Ruscker comes fully equipped with an **admin panel**,
 YAML schema, so migration is smooth and configuration is effortless.
 
 <p align="center">
-  <img src="images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters — all served by a single binary." width="860">
+  <img src="images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters — hovering a card reveals its full description — all served by a single binary." width="860">
 </p>
 
 ## How it works

@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.20 — 2026-06-13
+
+- **Smoother card-description reveal on hover (#831).** The expansion
+  used to snap open; it now eases in and out over a comfortable
+  duration, with a small delay so a quick pass of the mouse doesn't
+  trigger it.
+
+---
+
 ## v0.2.19 — 2026-06-13
 
 Fixes for two v0.2.18 features that didn't quite land in real use.

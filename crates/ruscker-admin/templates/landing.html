@@ -556,25 +556,19 @@ window.ruscker.highlights = () => ({
 // the featured rail; the CSS `:hover { max-height: 40em }` rule is the
 // no-JS fallback (shows everything, just not to the exact pixel).
 (function () {
-  function fullHeight(desc) {
-    // scrollHeight under -webkit-line-clamp can report the clamped
-    // height, so measure with the clamp lifted, then restore.
-    var prevClamp = desc.style.webkitLineClamp;
-    var prevMax = desc.style.maxHeight;
-    desc.style.webkitLineClamp = 'unset';
-    desc.style.maxHeight = 'none';
-    var h = desc.scrollHeight;
-    desc.style.webkitLineClamp = prevClamp;
-    desc.style.maxHeight = prevMax;
-    return h;
-  }
   document.addEventListener('mouseover', function (e) {
     var card = e.target.closest && e.target.closest('.rcard');
     if (!card || card.classList.contains('inactive')) return;
     var desc = card.querySelector('.rdesc');
     if (!desc || desc.dataset.open) return;
     desc.dataset.open = '1';
-    desc.style.maxHeight = fullHeight(desc) + 'px';
+    // scrollHeight is the full text height even with the line-clamp
+    // active (the text stays in flow), so read it directly — NOT by
+    // lifting max-height to `none`, which snaps the element to full
+    // height instantly and leaves the transition nothing to animate
+    // (the #832 follow-up bug). Setting the measured px animates from
+    // the clamped height to the exact full height over the CSS curve.
+    desc.style.maxHeight = desc.scrollHeight + 'px';
   });
   document.addEventListener('mouseout', function (e) {
     var card = e.target.closest && e.target.closest('.rcard');

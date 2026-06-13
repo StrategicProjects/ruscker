@@ -1249,14 +1249,22 @@ input[type="range"]::-moz-range-thumb {
   overflow: hidden;
   min-height: calc(1.5em * 2);
   /* Hold the clamped height, then let it grow on hover (#825). The
-     max-height animates; the clamp is dropped so the full text shows. */
+     max-height animates; the clamp is dropped so the full text shows.
+     Collapse uses this (no delay) so leaving feels responsive. */
   max-height: calc(1.5em * 2);
-  transition: max-height 0.25s ease;
+  transition: max-height 0.28s ease;
   margin-bottom: 12px;
 }
 .rcard:hover .rdesc {
   -webkit-line-clamp: unset; line-clamp: unset;
-  max-height: 40em;
+  /* A REALISTIC target (≈9 lines), not 40em (#831): with a huge target
+     the 0.25s duration was spent racing toward 40em, so the real text
+     height was reached in a few ms — the reveal felt like a snap. A
+     close target makes the eased duration the actual reveal time;
+     gentle ease-out + a small open delay so a quick pass-through
+     doesn't fire it. */
+  max-height: 11em;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.08s;
 }
 .rmeta {
   display: flex; align-items: center; justify-content: space-between;

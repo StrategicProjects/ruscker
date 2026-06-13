@@ -9,6 +9,14 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.23 — 2026-06-13
+
+- **The card description also collapses smoothly (#834).** The hover
+  reveal eased open but snapped shut; now it eases closed too, so the
+  open and close are symmetric.
+
+---
+
 ## v0.2.22 — 2026-06-13
 
 - **The card hover reveal is smooth again (#833).** v0.2.21 fixed the

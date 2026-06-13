@@ -9,6 +9,24 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.18 — 2026-06-13
+
+**Landing**
+
+- **Card descriptions expand on hover (#825).** A description clamped to
+  two lines now reveals its full text when you hover the card — it
+  grows downward without disturbing its neighbours.
+
+**Dashboard**
+
+- **Stop/restart now show progress (#827).** These actions take a few
+  seconds (drain, signal, and a respawn for restart) and the page used
+  to look frozen with no feedback. The replica row now dims, its action
+  buttons disable (no accidental double-fire) and the clicked one shows
+  a spinner until the action completes.
+
+---
+
 ## v0.2.17 — 2026-06-12
 
 **Images**

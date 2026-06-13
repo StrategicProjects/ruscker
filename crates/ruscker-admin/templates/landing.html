@@ -547,6 +547,46 @@ window.ruscker.highlights = () => ({
     return 'transform: translateX(' + (-this.page * this.perPage * this.step) + 'px)';
   },
 });
+
+// Hover-reveal a card's full description by animating .rdesc to its
+// EXACT content height (#832). A fixed max-height either snapped (a
+// huge target) or clipped long text (a small one); measuring the real
+// height makes the eased animation land exactly on the full text, any
+// length. Delegated, so it covers the grid, the per-type sections and
+// the featured rail; the CSS `:hover { max-height: 40em }` rule is the
+// no-JS fallback (shows everything, just not to the exact pixel).
+(function () {
+  function fullHeight(desc) {
+    // scrollHeight under -webkit-line-clamp can report the clamped
+    // height, so measure with the clamp lifted, then restore.
+    var prevClamp = desc.style.webkitLineClamp;
+    var prevMax = desc.style.maxHeight;
+    desc.style.webkitLineClamp = 'unset';
+    desc.style.maxHeight = 'none';
+    var h = desc.scrollHeight;
+    desc.style.webkitLineClamp = prevClamp;
+    desc.style.maxHeight = prevMax;
+    return h;
+  }
+  document.addEventListener('mouseover', function (e) {
+    var card = e.target.closest && e.target.closest('.rcard');
+    if (!card || card.classList.contains('inactive')) return;
+    var desc = card.querySelector('.rdesc');
+    if (!desc || desc.dataset.open) return;
+    desc.dataset.open = '1';
+    desc.style.maxHeight = fullHeight(desc) + 'px';
+  });
+  document.addEventListener('mouseout', function (e) {
+    var card = e.target.closest && e.target.closest('.rcard');
+    if (!card) return;
+    // ignore moves that stay inside the same card
+    if (e.relatedTarget && card.contains(e.relatedTarget)) return;
+    var desc = card.querySelector('.rdesc');
+    if (!desc) return;
+    delete desc.dataset.open;
+    desc.style.maxHeight = ''; // back to the CSS clamp height
+  });
+})();
 </script>
 
 {% endblock %}

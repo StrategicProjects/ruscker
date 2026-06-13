@@ -1248,23 +1248,21 @@ input[type="range"]::-moz-range-thumb {
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: calc(1.5em * 2);
-  /* Hold the clamped height, then let it grow on hover (#825). The
-     max-height animates; the clamp is dropped so the full text shows.
-     Collapse uses this (no delay) so leaving feels responsive. */
+  /* Hold the clamped height, then grow on hover (#825). The max-height
+     animates; the clamp is dropped so the full text shows. The eased
+     curve + slow-in/out makes the reveal feel smooth (#831). On hover
+     the script sets the EXACT content height inline (#832) so the
+     animation neither snaps (a huge target) nor clips long text (a
+     small one); the 40em rule below is the no-JS fallback. Collapse
+     drops back here with no delay, so leaving feels responsive. */
   max-height: calc(1.5em * 2);
-  transition: max-height 0.28s ease;
+  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   margin-bottom: 12px;
 }
 .rcard:hover .rdesc {
   -webkit-line-clamp: unset; line-clamp: unset;
-  /* A REALISTIC target (≈9 lines), not 40em (#831): with a huge target
-     the 0.25s duration was spent racing toward 40em, so the real text
-     height was reached in a few ms — the reveal felt like a snap. A
-     close target makes the eased duration the actual reveal time;
-     gentle ease-out + a small open delay so a quick pass-through
-     doesn't fire it. */
-  max-height: 11em;
-  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1) 0.08s;
+  max-height: 40em; /* fallback; the script overrides with the exact px */
+  transition-delay: 0.08s; /* a quick pass-through doesn't fire it */
 }
 .rmeta {
   display: flex; align-items: center; justify-content: space-between;

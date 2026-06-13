@@ -1021,6 +1021,11 @@ input[type="range"]::-moz-range-thumb {
   grid-template-columns: repeat(auto-fill, var(--card-w));
   gap: 14px;
   justify-content: center;
+  /* Top-align so a card whose description expands on hover (#825) grows
+     downward without stretching its same-row neighbours. Every card has
+     the same base height (fixed cover + clamped title/desc), so this is
+     a no-op until a hover. */
+  align-items: start;
 }
 @media (max-width: 320px) {
   :root { --card-w: 100%; }
@@ -1041,6 +1046,13 @@ input[type="range"]::-moz-range-thumb {
 .rcard:hover {
   transform: translateY(-3px);
   border-color: var(--text);
+  /* Above same-row neighbours while the description expands (#825). */
+  z-index: 5;
+}
+/* An inactive card isn't a destination — don't expand its description. */
+.rcard.inactive:hover .rdesc {
+  -webkit-line-clamp: 2; line-clamp: 2;
+  max-height: calc(1.5em * 2);
 }
 .rcard:hover .arrow-go { transform: translateX(3px); color: var(--text); }
 .rcard.inactive { opacity: 0.45; cursor: not-allowed; }
@@ -1226,7 +1238,15 @@ input[type="range"]::-moz-range-thumb {
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: calc(1.5em * 2);
+  /* Hold the clamped height, then let it grow on hover (#825). The
+     max-height animates; the clamp is dropped so the full text shows. */
+  max-height: calc(1.5em * 2);
+  transition: max-height 0.25s ease;
   margin-bottom: 12px;
+}
+.rcard:hover .rdesc {
+  -webkit-line-clamp: unset; line-clamp: unset;
+  max-height: 40em;
 }
 .rmeta {
   display: flex; align-items: center; justify-content: space-between;

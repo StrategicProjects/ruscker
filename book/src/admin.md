@@ -59,7 +59,10 @@ worst replica state, and aggregate sessions / CPU / memory with little
 meters — and expands to the per-replica detail (state, container id,
 uptime, sessions, CPU, memory) with stop / restart / logs actions.
 A toolbar offers an **expand/collapse-all** control. Shows a banner when
-started without `--docker`.
+started without `--docker`. Stop and restart take a few seconds (drain,
+signal, and a respawn for restart), so while one runs the replica row
+dims, its buttons disable to prevent a double-fire, and the clicked
+action shows a spinner.
 
 ![Monitoring dashboard: aggregate cards (containers, apps with replicas, active sessions, memory) above a per-replica table with live CPU sparklines and memory, and per-row stop/restart/logs actions.](images/admin-dashboard.png)
 
@@ -98,6 +101,19 @@ Two editors can have the same app open without trampling each other:
 the form carries the version it was loaded against, and a stale save is
 rejected with a conflict banner (your input intact) instead of silently
 overwriting the other person's changes.
+
+**Private images.** Right under the Docker-image field, a **Check**
+button reports whether the image is already on the host, and a
+**Pull** / **Update image** button fetches (or re-fetches) it on
+demand with live progress — handy after re-publishing the same tag
+(new build, or a corrected CPU architecture). A **credential picker**
+sits next to the image field: pick a saved registry credential and
+Ruscker pulls private images with it. Docker Hub credentials are
+normalised to the canonical registry address so they apply reliably,
+and a pull failure names how it authenticated (anonymous vs. the
+user/registry). If a container crashes on startup, the dashboard and
+logs show the container's own error output and exit code — not a
+generic "no port binding".
 
 Under the collapsible **Advanced** band, every remaining spec option is
 editable too — so an app can be configured end-to-end from the web UI,

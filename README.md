@@ -75,7 +75,9 @@ went through a systematic bug / security / UX audit in June 2026
 (shipped as v0.2.5 with every finding fixed), followed by an
 operator-driven design sprint that brought the entire admin — the
 Appearance editor in particular — to the product's design handoff,
-with per-theme (light/dark) portal styling throughout. Releases are
+with per-theme (light/dark) portal styling throughout, plus a round of
+private-image and deploy-robustness fixes from real production use.
+Releases are
 multi-arch (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
 has the current version. Built for efficiency, Ruscker's idle footprint

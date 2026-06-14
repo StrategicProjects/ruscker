@@ -97,6 +97,14 @@ pickers, an Autoscaling toggle, and an initial-replicas stepper). A
 **live card preview** on the right updates as you type, and a **"?"
 help popover** on every field explains what it does.
 
+When you save a **brand-new** app, a confirmation dialog opens in the
+centre of the screen: it confirms the app was created and asks where to
+go next — **back to the form** to keep editing it, or straight to the
+**apps list**. Editing an existing app just saves in place, with no
+prompt. The dialog is localized in all four interface languages.
+
+![The post-create confirmation: a centred dialog reading "App created — the app was created successfully", with "Back to the form" and "Go to the app list" buttons over the dimmed editor.](images/admin-app-created.png)
+
 Two editors can have the same app open without trampling each other:
 the form carries the version it was loaded against, and a stale save is
 rejected with a conflict banner (your input intact) instead of silently

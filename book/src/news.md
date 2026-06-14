@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.25 — 2026-06-14
+
+- **The post-create confirmation is centred on screen (#835).** v0.2.24's
+  success dialog rendered low and partly hidden — the admin shell's
+  animated `<main>` was acting as its positioning container. It now
+  teleports to the page body, so it sits centred in the viewport.
+
+---
+
 ## v0.2.24 — 2026-06-14
 
 - **Creating an app now confirms the save and asks where to go (#835).**

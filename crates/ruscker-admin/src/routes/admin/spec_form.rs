@@ -970,6 +970,11 @@ struct SpecFormPage<'a> {
     role: Role,
     mode: FormMode,
     form: SpecForm,
+    /// True right after a successful create — `create` redirects to this
+    /// edit form with `?created=1`, and the template then shows a
+    /// confirmation dialog offering "back to the form" vs "go to the apps
+    /// list" (#835). False on a plain edit/new/duplicate render.
+    just_created: bool,
     /// Pre-validation errors (Fluent keys) shown above the form.
     errors: Vec<&'static str>,
     /// Filenames in the media library, for the logo picker. Empty
@@ -1131,6 +1136,7 @@ async fn new_form(
             inject_base_href: "on".into(),
             ..Default::default()
         },
+        just_created: false,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
         subject_suggestions: subject_suggestions(&state).await,
@@ -1140,12 +1146,20 @@ async fn new_form(
     super::render(&page)
 }
 
+/// Query for the edit form. `created=1` is set by the create redirect so
+/// the freshly-created app shows the post-create confirmation (#835).
+#[derive(Debug, Default, Deserialize)]
+struct EditFormQuery {
+    created: Option<String>,
+}
+
 async fn edit_form(
     editor: RequireEditor,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
     Path(id): Path<String>,
+    Query(q): Query<EditFormQuery>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
@@ -1179,6 +1193,7 @@ async fn edit_form(
                 .unwrap_or_default();
             f
         },
+        just_created: q.created.is_some(),
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
         subject_suggestions: subject_suggestions(&state).await,
@@ -1247,6 +1262,7 @@ async fn duplicate_form(
         role: editor.role,
         mode: FormMode::New,
         form,
+        just_created: false,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
         subject_suggestions: subject_suggestions(&state).await,
@@ -1307,7 +1323,12 @@ async fn create(
     // pre-check above is just UX; this is the race-proof gate (the old
     // upsert silently overwrote the loser of a concurrent create).
     match db::specs::insert_new(pool, &spec, Some(editor.actor())).await {
-        Ok(true) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
+        // Land on the new app's edit form with `?created=1` so the page
+        // shows the post-create confirmation (#835): keep editing here, or
+        // jump to the apps list.
+        Ok(true) => {
+            Redirect::to(&format!("/admin/specs/{}/edit?created=1", id)).into_response()
+        }
         Ok(false) => {
             render_form_with_errors(
                 &state,
@@ -1458,6 +1479,7 @@ async fn render_form_with_errors(
         role,
         mode,
         form,
+        just_created: false,
         errors,
         logo_images: logo_filenames(state).await,
         subject_suggestions: subject_suggestions(state).await,

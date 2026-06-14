@@ -17,6 +17,36 @@
 
 {% block content %}
 
+{# Post-create confirmation (#835): after a successful create the operator
+   lands here on the new app's edit form (`?created=1`). Instead of leaving
+   them guessing whether the save took, show a success dialog that confirms
+   it and offers an explicit choice — keep editing this form, or go to the
+   apps list. Its own tiny Alpine island; the button @click toggles only a
+   boolean (no localized string inside a JS handler — that's the #765 trap),
+   and the list action is a plain link. #}
+{% if just_created %}
+<div x-data="{ open: true }" x-show="open" x-cloak
+     class="spec-created-overlay" role="dialog" aria-modal="true"
+     aria-labelledby="spec-created-title"
+     @keydown.escape.window="open = false">
+  <div class="spec-created-modal" @click.outside="open = false">
+    <div class="spec-created-icon" aria-hidden="true"><i class="ti ti-circle-check"></i></div>
+    <h2 id="spec-created-title" class="spec-created-title">{{ self.t("spec-form-created-title") }}</h2>
+    <p class="spec-created-body">{{ self.t("spec-form-created-body") }}</p>
+    <div class="spec-created-actions">
+      <button type="button" class="admin-nav-link" @click="open = false">
+        <i class="ti ti-pencil" aria-hidden="true"></i>
+        {{ self.t("spec-form-created-stay") }}
+      </button>
+      <a href="{{ base }}/admin/specs" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
+        <i class="ti ti-list" aria-hidden="true"></i>
+        {{ self.t("spec-form-created-list") }}
+      </a>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div x-data="ruscker.specForm({{ form_initial_json() }}, {{ logo_images_json() }}, {{ available_groups_json() }})" x-cloak>
 
   {# ── Header ───────────────────────────────────────────────── #}

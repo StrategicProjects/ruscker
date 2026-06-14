@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.24 — 2026-06-14
+
+- **Creating an app now confirms the save and asks where to go (#835).**
+  Saving a brand-new app used to drop you silently onto its edit form,
+  with no sign the save took. It now shows a success dialog that
+  confirms the app was created and offers a clear choice: stay on the
+  form to keep editing, or jump to the apps list. Localized in
+  pt/en/es/fr.
+
+---
+
 ## v0.2.23 — 2026-06-13
 
 - **The card description also collapses smoothly (#834).** The hover

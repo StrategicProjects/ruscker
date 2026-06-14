@@ -25,25 +25,34 @@
    boolean (no localized string inside a JS handler — that's the #765 trap),
    and the list action is a plain link. #}
 {% if just_created %}
-<div x-data="{ open: true }" x-show="open" x-cloak
-     class="spec-created-overlay" role="dialog" aria-modal="true"
-     aria-labelledby="spec-created-title"
-     @keydown.escape.window="open = false">
-  <div class="spec-created-modal" @click.outside="open = false">
-    <div class="spec-created-icon" aria-hidden="true"><i class="ti ti-circle-check"></i></div>
-    <h2 id="spec-created-title" class="spec-created-title">{{ self.t("spec-form-created-title") }}</h2>
-    <p class="spec-created-body">{{ self.t("spec-form-created-body") }}</p>
-    <div class="spec-created-actions">
-      <button type="button" class="admin-nav-link" @click="open = false">
-        <i class="ti ti-pencil" aria-hidden="true"></i>
-        {{ self.t("spec-form-created-stay") }}
-      </button>
-      <a href="{{ base }}/admin/specs" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
-        <i class="ti ti-list" aria-hidden="true"></i>
-        {{ self.t("spec-form-created-list") }}
-      </a>
+<div x-data="{ open: true }">
+  {# Teleported to <body> so the overlay's `position: fixed` resolves
+     against the viewport, not the admin shell's animated
+     `<main class="fade-in">` — its transform is a containing block for
+     fixed descendants, which otherwise centred the dialog inside the long
+     form and pushed it off-screen (same fix as the image picker). #}
+  <template x-teleport="body">
+    <div x-show="open" x-cloak
+         class="spec-created-overlay" role="dialog" aria-modal="true"
+         aria-labelledby="spec-created-title"
+         @keydown.escape.window="open = false" @click.self="open = false">
+      <div class="spec-created-modal">
+        <div class="spec-created-icon" aria-hidden="true"><i class="ti ti-circle-check"></i></div>
+        <h2 id="spec-created-title" class="spec-created-title">{{ self.t("spec-form-created-title") }}</h2>
+        <p class="spec-created-body">{{ self.t("spec-form-created-body") }}</p>
+        <div class="spec-created-actions">
+          <button type="button" class="admin-nav-link" @click="open = false">
+            <i class="ti ti-pencil" aria-hidden="true"></i>
+            {{ self.t("spec-form-created-stay") }}
+          </button>
+          <a href="{{ base }}/admin/specs" class="admin-login-btn" style="padding:6px 12px;font-size:12px">
+            <i class="ti ti-list" aria-hidden="true"></i>
+            {{ self.t("spec-form-created-list") }}
+          </a>
+        </div>
+      </div>
     </div>
-  </div>
+  </template>
 </div>
 {% endif %}
 

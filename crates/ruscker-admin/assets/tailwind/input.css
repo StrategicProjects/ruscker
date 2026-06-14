@@ -1969,6 +1969,33 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   margin-top: 16px;
 }
 
+/* Post-create confirmation dialog (#835): shown once on the new app's edit
+   form, confirms the save and offers "back to the form" vs "go to the apps
+   list". Mirrors the image-picker overlay so it sits above the chrome. */
+.spec-created-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.spec-created-modal {
+  background: var(--surface, #fff); color: var(--text);
+  border-radius: 12px; width: 100%; max-width: 420px;
+  padding: 26px 26px 22px; text-align: center;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  border: 0.5px solid var(--border);
+  animation: fade-in 0.2s ease both;
+}
+.spec-created-icon {
+  font-size: 34px; line-height: 1; color: #0f6e56; margin-bottom: 10px;
+}
+.spec-created-title { font-size: 17px; font-weight: 600; margin: 0 0 6px; }
+.spec-created-body {
+  font-size: 13px; color: var(--text-muted); margin: 0 0 18px; line-height: 1.5;
+}
+.spec-created-actions {
+  display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
+}
+
 /* Image-picker modal (spec-form logo/cover) */
 .image-picker-overlay {
   position: fixed; inset: 0; z-index: 50;

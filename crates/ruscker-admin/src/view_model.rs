@@ -251,12 +251,15 @@ impl<'a> CardCtx<'a> {
         let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
         // The card's access lock reflects the *real* access rule
-        // (`Spec::is_open()` — no `access-groups`/`access-users`), not a
-        // decorative `template-properties.icon` flag. This keeps the
-        // landing badge + the `data-access` filter consistent with the
-        // `/app` + `/api` enforcement guard, which also keys off
-        // `is_open()` (#346).
-        let access_open = spec.is_open();
+        // (`Spec::is_open()` — no `access-groups`/`access-users`), NOT the
+        // legacy decorative `template-properties.icon` flag (#346). It also
+        // honours the explicit `locked` badge (#839): an app whose own
+        // internal auth gates access shows a closed lock without Ruscker
+        // restricting it. Both surfaces — this icon and the `data-access`
+        // filter chip — close when access is restricted OR `locked` is set;
+        // enforcement and landing visibility still key off `access_allows`,
+        // so a bare `locked` app stays open to all through the proxy.
+        let access_open = spec.is_open() && !spec.shows_lock_badge();
         let active = tp.is_active();
         let subject = tp.get_str("subject");
         let logo = tp.get_str("logo").map(|l| prefix_asset_url(l, base));
@@ -638,6 +641,25 @@ mod tests {
             !CardCtx::from_spec(&restricted, "").access_open,
             "access-groups present ⇒ restricted"
         );
+    }
+
+    #[test]
+    fn decorative_locked_flag_closes_the_card_lock_without_restricting() {
+        // #839: the explicit `template-properties.locked` flag closes the
+        // card padlock even though there's NO access list — for an app that
+        // self-authenticates. It must NOT restrict in Ruscker: `is_open()`
+        // (which drives enforcement + landing visibility) stays true.
+        let locked = spec_with_tp("  locked: \"true\"\n");
+        assert!(locked.is_open(), "locked is decorative — stays open for enforcement");
+        assert!(locked.shows_lock_badge(), "the flag is read");
+        assert!(
+            !CardCtx::from_spec(&locked, "").access_open,
+            "locked ⇒ the card shows a closed padlock"
+        );
+
+        // Without the flag (and no access lists) the card is open.
+        let plain = spec_with_tp("  subject: X\n");
+        assert!(CardCtx::from_spec(&plain, "").access_open);
     }
 
     // #745: an explicit cover is sanitized — `accent` already was, but

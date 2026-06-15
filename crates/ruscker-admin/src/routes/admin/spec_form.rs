@@ -291,6 +291,12 @@ pub struct SpecForm {
     /// "Featured" carousel flag (#506) — an HTML checkbox: present ("on")
     /// when checked, absent when not.
     pub featured: String,
+    /// Decorative "requires login" padlock (#839) — an HTML checkbox like
+    /// `featured`: "on" when checked. Stored in `template-properties.locked`;
+    /// closes the card lock without restricting access in Ruscker (the
+    /// wrapped app self-authenticates). Independent of access-groups/users.
+    #[serde(default)]
+    pub locked: String,
     pub logo: String,
     /// Card-cover CSS background (`template-properties.cover`):
     /// a solid color or a gradient string. Empty ⇒ fall back to
@@ -424,6 +430,8 @@ impl SpecForm {
             subject: tp.get_str("subject").map(str::to_string).unwrap_or_default(),
             // Pre-check the "Featured" box from the spec (#506).
             featured: if spec.is_featured() { "on".into() } else { String::new() },
+            // Pre-check the decorative-lock box from the spec (#839).
+            locked: if spec.shows_lock_badge() { "on".into() } else { String::new() },
             logo: tp.get_str("logo").map(str::to_string).unwrap_or_default(),
             cover: tp.get_str("cover").map(str::to_string).unwrap_or_default(),
             accent: tp.get_str("accent").map(str::to_string).unwrap_or_default(),
@@ -587,6 +595,13 @@ impl SpecForm {
         set_or_remove(&mut tp_map, "accent", &self.accent);
         set_or_remove(&mut tp_map, "monogram", &self.monogram);
         set_or_remove(&mut tp_map, "link", &self.link);
+        // Decorative "requires login" padlock (#839): store "true" when the
+        // box is checked, prune otherwise. Independent of the access lists.
+        if self.locked.trim().is_empty() {
+            tp_map.remove("locked");
+        } else {
+            tp_map.insert("locked".into(), YamlValue::String("true".into()));
+        }
 
         let container_image = match dt {
             DisplayType::Package | DisplayType::Link => None,

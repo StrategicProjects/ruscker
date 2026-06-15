@@ -1033,7 +1033,10 @@ input[type="range"]::-moz-range-thumb {
      a no-op until a hover. */
   align-items: start;
 }
-@media (max-width: 320px) {
+/* Phones: let cards fill the width instead of a fixed 256px column
+   centred with dead space either side (#843). Two 256px cards need
+   ~526px, so below that one card per row reads better full-width. */
+@media (max-width: 512px) {
   :root { --card-w: 100%; }
 }
 
@@ -1263,6 +1266,17 @@ input[type="range"]::-moz-range-thumb {
   -webkit-line-clamp: unset; line-clamp: unset;
   max-height: 40em; /* fallback; the script overrides with the exact px */
   transition-delay: 0.08s; /* a quick pass-through doesn't fire it */
+}
+/* Touch devices can't hover, so the reveal never fires — show the whole
+   description up-front instead of a permanently-clamped 2 lines (#843).
+   `hover: none` targets touch devices regardless of width; the width
+   fallback covers narrow screens (and is what's testable in a headless
+   browser, where `hover` isn't reliably emulated). */
+@media (hover: none), (max-width: 640px) {
+  .rdesc {
+    -webkit-line-clamp: unset; line-clamp: unset;
+    max-height: none; overflow: visible;
+  }
 }
 .rmeta {
   display: flex; align-items: center; justify-content: space-between;

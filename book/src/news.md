@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.27 — 2026-06-15
+
+- **Mobile polish: icon-only nav and no sideways scroll (#841).** On
+  phones the admin top nav now shows just the icons (labels stay
+  available to screen readers) on their own row that scrolls
+  horizontally, and the wide data tables + dashboard replica grid scroll
+  inside their own boxes — so no admin page (or the public portal) pushes
+  the page wider than the screen. Desktop is unchanged.
+
+---
+
 ## v0.2.26 — 2026-06-15
 
 - **A decorative "requires login" lock, independent of access lists

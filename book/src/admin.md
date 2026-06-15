@@ -9,6 +9,12 @@ It lives at `/admin`, is gated by a token, and needs a SQLite database
 library, encrypted credentials, and the whole landing page. YAML
 import/export exists for migration and backups, not as a requirement.
 
+The admin panel and the public portal both work on a phone: the top
+navigation collapses to icons, wide tables and the dashboard's replica
+grid scroll inside their cards (rather than stretching the page), and the
+portal's app cards go full-width and show their whole description up front
+— the desktop hover-to-expand isn't needed on touch.
+
 ## Logging in
 
 On first run, set `RUSCKER_ADMIN_TOKEN` (the `.deb` generates one on
@@ -93,9 +99,18 @@ presentation / report / package / API / external link), **Description**,
 library, an **accent colour** that tints the card, a **monogram**
 fallback for logo-less cards, and a solid/gradient **cover builder**),
 and **Access & scale** (a Restricted-access toggle with group/user
-pickers, an Autoscaling toggle, and an initial-replicas stepper). A
-**live card preview** on the right updates as you type, and a **"?"
-help popover** on every field explains what it does.
+pickers, an Access-lock toggle, an Autoscaling toggle, and an
+initial-replicas stepper). A **live card preview** on the right updates
+as you type, and a **"?" help popover** on every field explains what it
+does.
+
+The two access controls are independent. **Restricted access** is real
+enforcement: Ruscker only lets the listed groups/users (and admins) see
+and open the app. **Access lock** is purely a label — it closes the
+card's padlock to signal that the app authenticates on its own (its own
+login screen), without Ruscker restricting anything. So an app that's
+visible to everyone but asks for its own password gets the Access-lock
+toggle and no group list.
 
 When you save a **brand-new** app, a confirmation dialog opens in the
 centre of the screen: it confirms the app was created and asks where to

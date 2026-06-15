@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.26 — 2026-06-15
+
+- **A decorative "requires login" lock, independent of access lists
+  (#839).** The restricted-access toggle only stuck when a group or user
+  was listed, so turning it on while leaving the app public silently
+  reverted on save. There's now a separate **Access lock** toggle that
+  closes the card's padlock to signal that the app authenticates on its
+  own — without restricting anything in Ruscker (the app stays visible to
+  everyone and reachable; its own sign-in does the gating). The real
+  group/user restriction stays as its own control. Localized in
+  pt/en/es/fr.
+
+---
+
 ## v0.2.25 — 2026-06-14
 
 - **The post-create confirmation is centred on screen (#835).** v0.2.24's

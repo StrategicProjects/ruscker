@@ -9,6 +9,17 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.29 — 2026-06-15
+
+- **Mobile fixes: icon-only landing header and aligned table columns
+  (#845).** The public landing header now shows the sign-in control as an
+  icon (no text label) on phones, matching the rest of the chrome. And the
+  admin tables now scroll inside a wrapper while staying real tables, so
+  their columns always line up instead of the first column overlapping the
+  second on narrow screens.
+
+---
+
 ## v0.2.28 — 2026-06-15
 
 - **Mobile portal cards: full width and full description (#843).** On

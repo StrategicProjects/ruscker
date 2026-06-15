@@ -96,6 +96,12 @@
   </button>
 </div>
 
+{# Scroll wrapper (#841): the replica grid has fixed-width columns wider
+   than a phone; this lets the whole grid (header + groups) scroll sideways
+   as ONE unit on mobile so the columns stay aligned and the page doesn't
+   widen. The SSE patcher still targets `#dash-groups` inside it. #}
+<div class="dash-scroll">
+
 {# Column header for the grouped accordion (shares the .replica-row grid). #}
 <div class="dash-cols">
   <span></span>
@@ -167,6 +173,7 @@
   </div>
   {% endfor %}
 </div>
+</div>{# /.dash-scroll #}
 
 {# Tiny SSE patcher. No framework — just EventSource +
    targeted DOM updates. Initial state already came in the

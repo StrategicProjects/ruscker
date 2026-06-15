@@ -1303,7 +1303,10 @@ input[type="range"]::-moz-range-thumb {
   letter-spacing: -0.01em;
   margin-right: 8px;
 }
-.admin-nav-links { display: flex; align-items: center; gap: 2px; }
+/* `flex-wrap` so the ~11-item nav wraps to a second line on a narrow
+   desktop/tablet instead of overflowing horizontally; on mobile the
+   ≤640px block below turns it into a scrollable icon-only row. */
+.admin-nav-links { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; row-gap: 4px; }
 .admin-nav-actions {
   margin-left: auto;
   display: flex; align-items: center; gap: 2px;
@@ -2746,4 +2749,71 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 .brand-mark-inline {
   flex-shrink: 0;
   display: block;
+}
+
+/* ─── Mobile (≤640px): icon-only nav + no horizontal overflow (#841) ──
+   The admin nav has ~11 items; with text labels they overflow a phone.
+   On mobile the nav shows ICONS ONLY (the label stays in the DOM, just
+   visually hidden, so screen readers still announce it) and drops to its
+   own full-width row that scrolls horizontally — so a long menu never
+   widens the viewport. Single-row action bars get `flex-wrap` too. */
+@media (max-width: 640px) {
+  .admin-navbar { gap: 8px; padding: 8px 12px; }
+
+  /* Icons only: visually hide the label but keep it accessible (sr-only
+     pattern — `display:none` would also drop it from the a11y tree).
+     The parent MUST be position:relative so this absolute span is
+     contained by the link: otherwise it positions against the page and
+     the scrolled-out items' 1px labels stick out past the viewport edge,
+     widening the whole page (the +41px overflow this review chased). */
+  .admin-nav-link span,
+  .admin-brand span {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+  }
+  .admin-brand { margin-right: 0; position: relative; }
+  .admin-nav-link { gap: 0; padding: 7px 9px; flex-shrink: 0; position: relative; }
+  .admin-nav-link i { font-size: 16px; }
+
+  /* Nav links to their own full-width row, horizontally scrollable so the
+     menu can never push the page wider than the screen. */
+  .admin-nav-links {
+    order: 3; flex-basis: 100%; width: 100%;
+    /* min-width:0 is essential: a flex item defaults to min-width:auto
+       (its content size), which keeps it wider than the viewport and
+       defeats overflow-x — the row then pushes the whole page sideways.
+       Zeroing it lets the row shrink to the screen and scroll internally. */
+    min-width: 0;
+    flex-wrap: nowrap; gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;            /* Firefox */
+  }
+  .admin-nav-links::-webkit-scrollbar { display: none; }  /* WebKit */
+
+  /* Sticky editor action bar (spec form + landing/appearance editor):
+     wrap the breadcrumb + buttons instead of crushing them. */
+  .editor-topbar { flex-wrap: wrap; align-items: center; gap: 10px; }
+
+  /* Data tables (apps/audit/users/disk/credentials): a wide table would
+     blow out the page sideways. `display:block` turns the table into its
+     own horizontal scroll container — an anonymous table box keeps the
+     columns aligned — so it scrolls inside its card instead of widening
+     the viewport. */
+  .admin-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Dashboard replica grid: its fixed-width columns are wider than a
+     phone. Scroll the header + all app groups together as one unit
+     (min-width keeps the columns from collapsing out of alignment). */
+  .dash-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .dash-scroll .dash-cols,
+  .dash-scroll .app-group { min-width: 600px; }
 }

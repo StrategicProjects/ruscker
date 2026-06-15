@@ -408,7 +408,10 @@ window.ruscker.imagePicker = (filenames) => ({
       input.setAttribute('aria-label', I18N.search);
       input.placeholder = I18N.search;
       wrap.appendChild(input);
-      table.parentNode.insertBefore(wrap, table);
+      // Place the search toolbar ABOVE the scroll box (not inside it), so
+      // it doesn't slide away when the table is scrolled sideways.
+      var anchor = table.closest('.admin-table-scroll') || table;
+      anchor.parentNode.insertBefore(wrap, anchor);
 
       // empty-state row
       var emptyRow = document.createElement('tr');
@@ -461,6 +464,18 @@ window.ruscker.imagePicker = (filenames) => ({
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    // Wrap every admin table in a horizontal-scroll box so a wide table
+    // scrolls inside its card on mobile, with the table kept as
+    // display:table so its columns always line up. (The earlier
+    // display:block trick split thead/tbody into separate column tracks
+    // and could overlap columns with some data — #845.)
+    document.querySelectorAll('table.admin-table').forEach(function (t) {
+      if (t.parentElement && t.parentElement.classList.contains('admin-table-scroll')) return;
+      var box = document.createElement('div');
+      box.className = 'admin-table-scroll';
+      t.parentNode.insertBefore(box, t);
+      box.appendChild(t);
+    });
     document.querySelectorAll('table[data-enhance]').forEach(enhance);
   });
 

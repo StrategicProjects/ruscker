@@ -1610,6 +1610,10 @@ input[type="range"]::-moz-range-thumb {
 .admin-login-footer a:hover { color: var(--text); }
 
 /* ─── Admin apps table ───────────────────────────────────────── */
+/* The admin shell JS wraps every table in this box (#845). It's inert on
+   desktop (the table fits) and scrolls horizontally on mobile, where the
+   table keeps its natural width — so columns never collapse/overlap. */
+.admin-table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .admin-table {
   width: 100%;
   border-collapse: collapse;
@@ -2810,16 +2814,26 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
      wrap the breadcrumb + buttons instead of crushing them. */
   .editor-topbar { flex-wrap: wrap; align-items: center; gap: 10px; }
 
-  /* Data tables (apps/audit/users/disk/credentials): a wide table would
-     blow out the page sideways. `display:block` turns the table into its
-     own horizontal scroll container — an anonymous table box keeps the
-     columns aligned — so it scrolls inside its card instead of widening
-     the viewport. */
-  .admin-table {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  /* Landing header "Sign in" pill → icon only (matches the other chrome
+     icons), so the public header doesn't show a text label on a phone
+     (#845). Label kept for screen readers; position:relative contains the
+     absolute sr-only span. */
+  .chrome-signin span {
+    position: absolute; width: 1px; height: 1px;
+    padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
   }
+  .chrome-signin {
+    width: 32px; padding: 0; gap: 0;
+    justify-content: center; position: relative;
+  }
+
+  /* Data tables: keep their natural column widths and let the wrapper
+     (.admin-table-scroll, added by the admin shell JS) do the scrolling.
+     `width:100%` alone would squeeze the columns until they overlap on a
+     phone — the bug behind "the first column sits over the second" (#845).
+     The table stays display:table so its columns always line up. */
+  .admin-table { min-width: max-content; }
 
   /* Dashboard replica grid: its fixed-width columns are wider than a
      phone. Scroll the header + all app groups together as one unit

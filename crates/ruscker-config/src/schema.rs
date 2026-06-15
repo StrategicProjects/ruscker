@@ -1159,6 +1159,23 @@ impl Spec {
             && self.access_users.as_deref().is_none_or(<[String]>::is_empty)
     }
 
+    /// Decorative "requires login" padlock (#839). Purely informational:
+    /// the operator flags an app whose **own** internal auth gates access
+    /// (e.g. a Shiny app with its own login screen), so the card shows a
+    /// closed lock even though Ruscker itself doesn't restrict it. Stored
+    /// as `template-properties.locked`, completely independent of
+    /// `access-groups`/`access-users` — it does NOT touch the `/app`
+    /// enforcement guard or the landing visibility filter (both key off
+    /// `access_allows`), only the card's lock icon + the public/restricted
+    /// filter chip. So a `locked` app stays visible to everyone and
+    /// reachable through the proxy; the wrapped app decides who gets in.
+    pub fn shows_lock_badge(&self) -> bool {
+        matches!(
+            self.template_properties.get_str("locked"),
+            Some("true" | "on" | "1" | "yes")
+        )
+    }
+
     /// Whether a viewer may see and reach this app (Phase 8 per-app
     /// access). Pure rule, shared by the landing filter and the `/app`
     /// /`/api` enforcement guard so they can't drift:

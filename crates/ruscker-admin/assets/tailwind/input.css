@@ -360,7 +360,12 @@ body {
 }
 .app-group.is-open .app-group__chev { transform: rotate(90deg); }
 .app-group__name { font-weight: 500; font-size: 14px; display: flex; align-items: center; gap: 9px; min-width: 0; }
-.app-group__name > span { min-width: 0; }
+/* The name+id wrapper must be a block with min-width:0 and the name must
+   be block too, or the `.truncate` (ellipsis) can't engage on an inline
+   span — the name then overflows its grid track and overlaps the next
+   column on a narrow screen (#847). */
+.app-group__name > span { min-width: 0; display: block; overflow: hidden; }
+.app-group__name .truncate { display: block; }
 .app-group__id { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); display: block; }
 .app-group__logo {
   width: 30px; height: 30px; border-radius: 8px; flex: none;
@@ -2836,12 +2841,19 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   .admin-table { min-width: max-content; }
 
   /* Dashboard replica grid: its fixed-width columns are wider than a
-     phone. Scroll the header + all app groups together as one unit
-     (min-width keeps the columns from collapsing out of alignment). */
+     phone. Scroll the header + all app groups together as one unit. The
+     `minmax()` floors stop the flexible columns (app name, sessions, cpu)
+     from collapsing so narrow that their content overlaps the next column
+     (#847); the shared min-width keeps the header aligned with the rows. */
   .dash-scroll {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
   .dash-scroll .dash-cols,
-  .dash-scroll .app-group { min-width: 600px; }
+  .dash-scroll .app-group__head,
+  .dash-scroll .replica-row {
+    grid-template-columns: 22px minmax(150px, 1.6fr) 84px 96px minmax(72px, 1fr) minmax(72px, 1fr) 96px 64px;
+  }
+  .dash-scroll .dash-cols,
+  .dash-scroll .app-group { min-width: 720px; }
 }

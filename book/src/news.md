@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.28 — 2026-06-15
+
+- **Mobile portal cards: full width and full description (#843).** On
+  phones the app cards were a narrow fixed-width column with empty space
+  either side, and the description stayed clamped to two lines because the
+  reveal is hover-only. Now the cards fill the screen width and the whole
+  description shows up-front on touch devices. Desktop is unchanged.
+
+---
+
 ## v0.2.27 — 2026-06-15
 
 - **Mobile polish: icon-only nav and no sideways scroll (#841).** On

@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.30 — 2026-06-15
+
+- **Dashboard mobile: the app name no longer overlaps the replicas column
+  (#847).** In the Active Replicas grid on a phone a long app name spilled
+  over the next column; it now ellipsizes cleanly and the columns keep
+  their room and alignment as the grid scrolls inside its card.
+
+---
+
 ## v0.2.29 — 2026-06-15
 
 - **Mobile fixes: icon-only landing header and aligned table columns

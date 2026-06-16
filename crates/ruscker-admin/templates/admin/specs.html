@@ -219,6 +219,34 @@
                title="{{ self.t("admin-specs-duplicate") }}">
               <i class="ti ti-copy" aria-hidden="true"></i>
             </a>
+            {# Update image (#855): force a re-pull of this app's image in
+               place. Containerized kinds only (external/link cards have no
+               image). Starts the pull (POST → job token), then follows the
+               same SSE the form uses until `done`; spinner while running,
+               then a brief ✓/✗ flash. Titles ride data-* (never a localized
+               string inside the JS handler — template_lint). #}
+            {% if spec.kind != "external" %}
+            <button type="button" class="admin-nav-link" x-data="{ busy: false, ok: null }"
+                    data-repull-url="{{ base }}/admin/specs/{{ spec.id }}/repull"
+                    data-events-url="{{ base }}/admin/specs/image-pull/events"
+                    data-title="{{ self.t("admin-specs-update-image") }}"
+                    data-title-running="{{ self.t("admin-specs-update-image-running") }}"
+                    data-title-ok="{{ self.t("admin-specs-update-image-ok") }}"
+                    data-title-fail="{{ self.t("admin-specs-update-image-fail") }}"
+                    :disabled="busy"
+                    :title="busy ? $el.dataset.titleRunning : (ok === true ? $el.dataset.titleOk : (ok === false ? $el.dataset.titleFail : $el.dataset.title))"
+                    @click="busy = true; ok = null;
+                            fetch($el.dataset.repullUrl, { method: 'POST' })
+                              .then(r => r.ok ? r.json() : Promise.reject())
+                              .then(d => {
+                                const es = new EventSource($el.dataset.eventsUrl + '?job=' + encodeURIComponent(d.job));
+                                es.addEventListener('done', () => { es.close(); busy = false; ok = true; setTimeout(() => { ok = null }, 4000); });
+                                es.onerror = () => { es.close(); busy = false; if (ok === null) { ok = false; setTimeout(() => { ok = null }, 6000); } };
+                              })
+                              .catch(() => { busy = false; ok = false; setTimeout(() => { ok = null }, 6000); })">
+              <i class="ti" :class="busy ? 'ti-loader-2 animate-spin' : (ok === true ? 'ti-check' : (ok === false ? 'ti-alert-triangle' : 'ti-cloud-download'))" aria-hidden="true"></i>
+            </button>
+            {% endif %}
             {# Archive toggle (#775): active ⇄ inactive without opening the
                editor. An inactive app keeps everything (config, history,
                containers can be restarted later) but its card leaves the

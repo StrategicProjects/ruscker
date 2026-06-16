@@ -27,6 +27,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/users", get(index).post(create))
         .route("/admin/users/{username}/role", post(set_role))
         .route("/admin/users/{username}/groups", post(set_groups))
+        .route("/admin/users/{username}/profile", post(set_profile))
         .route("/admin/users/{username}/password", post(reset_password))
         .route("/admin/users/{username}/delete", post(delete))
 }
@@ -127,6 +128,13 @@ pub struct CreateForm {
     /// Comma-separated group names; canonicalized in `db::users`.
     #[serde(default)]
     pub groups: String,
+    /// Optional profile fields (#856) — blank ⇒ unset.
+    #[serde(default)]
+    pub setor: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub celular: String,
 }
 
 const MIN_PASSWORD_LEN: usize = 8;
@@ -157,10 +165,68 @@ async fn create(
     )
     .await
     {
-        Ok(()) => redirect_flash("created"),
+        Ok(()) => {
+            // Optional profile fields (#856): only touch them (and emit
+            // an audit row) when the operator actually filled one in.
+            if [&form.setor, &form.email, &form.celular]
+                .iter()
+                .any(|s| !s.trim().is_empty())
+            {
+                if let Err(e) = db::users::update_profile(
+                    pool,
+                    &username,
+                    Some(&form.setor),
+                    Some(&form.email),
+                    Some(&form.celular),
+                    Some(admin.actor()),
+                )
+                .await
+                {
+                    tracing::warn!(error = ?e, %username, "set profile on create failed");
+                }
+            }
+            redirect_flash("created")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "create user failed");
             redirect_flash("exists")
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ProfileForm {
+    #[serde(default)]
+    pub setor: String,
+    #[serde(default)]
+    pub email: String,
+    #[serde(default)]
+    pub celular: String,
+}
+
+async fn set_profile(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Path(username): Path<String>,
+    Form(form): Form<ProfileForm>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    match db::users::update_profile(
+        pool,
+        &username,
+        Some(&form.setor),
+        Some(&form.email),
+        Some(&form.celular),
+        Some(admin.actor()),
+    )
+    .await
+    {
+        Ok(()) => redirect_flash("saved"),
+        Err(e) => {
+            tracing::warn!(error = ?e, %username, "set profile failed");
+            redirect_flash("bad-input")
         }
     }
 }

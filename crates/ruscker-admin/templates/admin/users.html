@@ -68,6 +68,19 @@
       <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
       <input type="text" name="groups" autocapitalize="none" placeholder="{{ self.t("admin-users-groups-placeholder") }}">
     </label>
+    {# Optional profile fields (#856) — all blank-able. #}
+    <label class="admin-login-field" style="margin:0;flex:1 1 140px">
+      <span class="admin-login-label">{{ self.t("admin-users-setor") }}</span>
+      <input type="text" name="setor" placeholder="{{ self.t("admin-users-setor-placeholder") }}">
+    </label>
+    <label class="admin-login-field" style="margin:0;flex:1 1 200px">
+      <span class="admin-login-label">{{ self.t("admin-users-email") }}</span>
+      <input type="email" name="email" autocapitalize="none" placeholder="nome@orgao.gov.br">
+    </label>
+    <label class="admin-login-field" style="margin:0;flex:1 1 150px">
+      <span class="admin-login-label">{{ self.t("admin-users-celular") }}</span>
+      <input type="text" name="celular" autocapitalize="none" placeholder="(81) 90000-0000">
+    </label>
     <button type="submit" class="admin-login-btn" style="width:auto">
       <i class="ti ti-user-plus" aria-hidden="true"></i>
       {{ self.t("admin-users-create") }}
@@ -83,6 +96,7 @@
       <th>{{ self.t("admin-users-col-user") }}</th>
       <th>{{ self.t("admin-users-col-role") }}</th>
       <th>{{ self.t("admin-users-col-groups") }}</th>
+      <th>{{ self.t("admin-users-col-profile") }}</th>
       <th>{{ self.t("admin-users-col-created") }}</th>
       <th class="actions-cell" style="text-align:right" data-nosort>{{ self.t("admin-users-col-actions") }}</th>
     </tr>
@@ -120,6 +134,18 @@
             <input type="text" name="groups" value="{{ u.groups|join(", ") }}" autocapitalize="none"
                    placeholder="{{ self.t("admin-users-groups-placeholder") }}" style="width:160px">
             <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-groups") }}"><i class="ti ti-check"></i></button>
+          </form>
+        </td>
+        {# Profile (#856): setor / e-mail / celular, inline save like groups. #}
+        <td>
+          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/profile" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input type="text" name="setor" value="{{ u.setor.clone().unwrap_or_default() }}"
+                   placeholder="{{ self.t("admin-users-setor") }}" style="width:110px" aria-label="{{ self.t("admin-users-setor") }}">
+            <input type="email" name="email" value="{{ u.email.clone().unwrap_or_default() }}" autocapitalize="none"
+                   placeholder="{{ self.t("admin-users-email") }}" style="width:170px" aria-label="{{ self.t("admin-users-email") }}">
+            <input type="text" name="celular" value="{{ u.celular.clone().unwrap_or_default() }}" autocapitalize="none"
+                   placeholder="{{ self.t("admin-users-celular") }}" style="width:130px" aria-label="{{ self.t("admin-users-celular") }}">
+            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-profile") }}"><i class="ti ti-check"></i></button>
           </form>
         </td>
         <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>

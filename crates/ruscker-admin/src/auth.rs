@@ -83,13 +83,15 @@ impl Role {
     }
 
     /// The page a freshly-logged-in session of this role lands on.
-    /// Editor/Admin → the panel (dashboard). A **Viewer** has no panel
-    /// access (#857) — it logs in to unlock its group's cards on the
-    /// portal, so it lands on the public landing instead.
+    /// A **Viewer** has no panel access (#857) — it logs in to unlock
+    /// its group's cards, so it lands on the public portal.
+    /// **Editor/Admin** land on the **Apps list**, not the dashboard,
+    /// whose live-metrics SSE starves the browser's connection pool on
+    /// an HTTP/1.1 front end (#852); the dashboard is one click away.
     pub fn home(&self) -> &'static str {
         match self {
             Role::Viewer => "/",
-            _ => "/admin/dashboard",
+            _ => "/admin/specs",
         }
     }
 
@@ -707,8 +709,8 @@ mod tests {
         }
         // A Viewer's home is the portal (no panel); operators land on it.
         assert_eq!(Role::Viewer.home(), "/");
-        assert_eq!(Role::Editor.home(), "/admin/dashboard");
-        assert_eq!(Role::Admin.home(), "/admin/dashboard");
+        assert_eq!(Role::Editor.home(), "/admin/specs");
+        assert_eq!(Role::Admin.home(), "/admin/specs");
         // Admin-only sections.
         for sec in ["credentials", "landing", "blocks", "audit"] {
             assert!(!Role::Viewer.can_access_section(sec));

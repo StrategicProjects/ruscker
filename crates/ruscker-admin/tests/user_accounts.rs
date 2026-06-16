@@ -107,7 +107,8 @@ async fn password_login_succeeds_and_wrong_fails() {
     )
     .await;
     assert_eq!(ok_status, StatusCode::SEE_OTHER);
-    assert_eq!(ok_loc, "/admin/dashboard");
+    // Editor lands on the Apps list, not the dashboard (#852).
+    assert_eq!(ok_loc, "/admin/specs");
 
     let (bad_status, _) = post(state, "/admin/login", "username=alice&password=WRONG", None).await;
     assert_eq!(bad_status, StatusCode::UNAUTHORIZED);
@@ -353,9 +354,10 @@ async fn changing_password_lifts_the_guard() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    // Editor's post-change landing is the Apps list now (#852).
     assert_eq!(
         resp.headers().get("location").and_then(|v| v.to_str().ok()),
-        Some("/admin/dashboard")
+        Some("/admin/specs")
     );
     let fresh_cookie = resp
         .headers()

@@ -524,15 +524,31 @@
 
   if (!window.EventSource) return;
   var live = document.getElementById('dash-live');
-  var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/events');
-  es.onopen = function () { if (live) live.classList.remove('is-down'); };
-  es.onmessage = function (e) {
-    if (live) live.classList.remove('is-down');
-    try { apply(JSON.parse(e.data)); } catch (_) { /* ignore */ }
-  };
-  // EventSource auto-reconnects on network errors; we just dim the Live
-  // badge while it's down.
-  es.onerror = function () { if (live) live.classList.add('is-down'); };
+  var es = null;
+  function connect() {
+    if (es) return;
+    es = new EventSource((window.RUSCKER_BASE || '') + '/admin/dashboard/events');
+    es.onopen = function () { if (live) live.classList.remove('is-down'); };
+    es.onmessage = function (e) {
+      if (live) live.classList.remove('is-down');
+      try { apply(JSON.parse(e.data)); } catch (_) { /* ignore */ }
+    };
+    // EventSource auto-reconnects on network errors; we just dim the Live
+    // badge while it's down.
+    es.onerror = function () { if (live) live.classList.add('is-down'); };
+  }
+  function disconnect() {
+    if (es) { es.close(); es = null; }
+    if (live) live.classList.add('is-down');
+  }
+  // Pause the live stream while the tab is hidden (#852): a backgrounded
+  // dashboard tab otherwise holds an HTTP/1.1 connection open, starving
+  // the browser's ~6-per-host pool and stalling navigation in other tabs.
+  // Reconnect (with a fresh snapshot) when the tab is visible again.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) disconnect(); else connect();
+  });
+  if (!document.hidden) connect();
 })();
 
 // Dashboard filter band (#623): live search + state chips over the

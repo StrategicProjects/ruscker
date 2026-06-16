@@ -64,10 +64,11 @@ impl Role {
     /// `landing`, `blocks`, `audit`).
     pub fn can_access_section(&self, section: &str) -> bool {
         match section {
-            // Anyone logged in can view the dashboard.
-            "dashboard" => true,
-            // Editors (and admins) manage apps and media.
-            "specs" | "images" => *self >= Role::Editor,
+            // Dashboard + apps + media: Editor and up. A Viewer is NOT
+            // an admin-panel operator (#857) — it's the portal's
+            // authenticated-end-user role (group-based card visibility,
+            // #155), so it reaches NO admin section.
+            "dashboard" | "specs" | "images" => *self >= Role::Editor,
             // Everything else is admin-only.
             _ => *self == Role::Admin,
         }
@@ -82,14 +83,14 @@ impl Role {
     }
 
     /// The page a freshly-logged-in session of this role lands on.
-    /// Editor/Admin land on the **Apps list** — the main management
-    /// surface — not the dashboard, whose live-metrics SSE starves the
-    /// browser's connection pool on an HTTP/1.1 front end (#852). The
-    /// dashboard stays one click away. A Viewer can only reach the
-    /// dashboard (until #857 moves it to the portal), so it lands there.
+    /// A **Viewer** has no panel access (#857) — it logs in to unlock
+    /// its group's cards, so it lands on the public portal.
+    /// **Editor/Admin** land on the **Apps list**, not the dashboard,
+    /// whose live-metrics SSE starves the browser's connection pool on
+    /// an HTTP/1.1 front end (#852); the dashboard is one click away.
     pub fn home(&self) -> &'static str {
         match self {
-            Role::Viewer => "/admin/dashboard",
+            Role::Viewer => "/",
             _ => "/admin/specs",
         }
     }
@@ -699,16 +700,17 @@ mod tests {
         assert!(Role::Admin > Role::Editor);
         assert!(Role::Editor > Role::Viewer);
 
-        // Dashboard: everyone.
-        for r in [Role::Viewer, Role::Editor, Role::Admin] {
-            assert!(r.can_access_section("dashboard"));
-        }
-        // Apps + media: Editor and up.
-        for sec in ["specs", "images"] {
+        // Dashboard + apps + media: Editor and up — a Viewer reaches no
+        // admin section (#857).
+        for sec in ["dashboard", "specs", "images"] {
             assert!(!Role::Viewer.can_access_section(sec));
             assert!(Role::Editor.can_access_section(sec));
             assert!(Role::Admin.can_access_section(sec));
         }
+        // A Viewer's home is the portal (no panel); operators land on it.
+        assert_eq!(Role::Viewer.home(), "/");
+        assert_eq!(Role::Editor.home(), "/admin/specs");
+        assert_eq!(Role::Admin.home(), "/admin/specs");
         // Admin-only sections.
         for sec in ["credentials", "landing", "blocks", "audit"] {
             assert!(!Role::Viewer.can_access_section(sec));

@@ -135,8 +135,10 @@ impl AccountPasswordPage<'_> {
 
 // ── Handlers ─────────────────────────────────────────────────────
 
-async fn redirect_to_dashboard(_: AdminSession) -> Redirect {
-    Redirect::to("/admin/dashboard")
+async fn redirect_to_dashboard(session: AdminSession) -> Redirect {
+    // A Viewer has no panel (#857) — `/admin` sends it to its home (the
+    // portal), not the dashboard it can't open.
+    Redirect::to(session.role.home())
 }
 
 /// Issue the admin session cookie. 24h lifetime; `Secure` only under
@@ -634,7 +636,9 @@ async fn password_submit(
         .create(session.role, Some(actor.clone()))
         .await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
-    Redirect::to("/admin/dashboard").into_response()
+    // Land on the role's home — a Viewer goes to the portal (#857), not
+    // the dashboard it can't open.
+    Redirect::to(session.role.home()).into_response()
 }
 
 /// Map an `/admin/...` path to the `nav_section` it belongs to, for

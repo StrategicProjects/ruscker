@@ -313,11 +313,15 @@ async fn must_change_user_is_pinned_to_password_page() {
 #[tokio::test]
 async fn changing_password_lifts_the_guard() {
     let (state, pool) = state_with_db().await;
+    // Editor (not Viewer): this test is about the must-change guard
+    // lifting, which is role-agnostic. An Editor's home is the dashboard,
+    // so the post-change landing assertions below stay valid — a Viewer's
+    // home is now the portal (#857), covered separately in rbac.rs.
     ruscker_admin::db::users::create(
         &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
         "bob",
         "bobpass12",
-        Role::Viewer,
+        Role::Editor,
         true,
         &[],
         None,
@@ -326,7 +330,7 @@ async fn changing_password_lifts_the_guard() {
     .unwrap();
     let sid = state
         .admin_sessions
-        .create(Role::Viewer, Some("bob".into()))
+        .create(Role::Editor, Some("bob".into()))
         .await;
     let cookie = format!("{COOKIE_NAME}={sid}");
 
@@ -350,9 +354,10 @@ async fn changing_password_lifts_the_guard() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    // Editor's post-change landing is the Apps list now (#852).
     assert_eq!(
         resp.headers().get("location").and_then(|v| v.to_str().ok()),
-        Some("/admin/dashboard")
+        Some("/admin/specs")
     );
     let fresh_cookie = resp
         .headers()

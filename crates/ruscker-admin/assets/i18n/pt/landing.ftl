@@ -224,6 +224,10 @@ admin-specs-filter-kind-all = Todos os tipos
 admin-specs-filter-state-all = Ativos e inativos
 admin-specs-edit = Editar
 admin-specs-duplicate = Duplicar
+admin-specs-update-image = Atualizar imagem (re-pull)
+admin-specs-update-image-running = Atualizando imagem…
+admin-specs-update-image-ok = Imagem atualizada
+admin-specs-update-image-fail = Falha ao atualizar a imagem
 admin-specs-config-badge = config
 admin-specs-config-defined = Definido no YAML — somente leitura aqui; edite o arquivo
 admin-specs-delete = Apagar
@@ -528,7 +532,7 @@ spec-form-api-docs-path = Caminho dos docs
 spec-form-api-health-path = Caminho de health
 spec-form-api-cors = Habilitar CORS permissivo
 spec-form-min-replicas = Réplicas mín.
-spec-form-max-replicas = Réplicas máx.
+spec-form-max-replicas = Máx. de containers
 spec-form-concurrent = Requisições por réplica
 spec-form-cpu-limit = Limite de CPU
 spec-form-memory-limit = Limite de memória
@@ -552,7 +556,7 @@ spec-help-api-docs-path = Caminho onde a API serve a documentação OpenAPI/Swag
 spec-help-api-health-path = Caminho consultado para readiness antes da réplica entrar no pool. Padrão /__healthz__.
 spec-help-api-cors = Adiciona cabeçalhos CORS permissivos e responde ao preflight. Desligado por padrão.
 spec-help-min-replicas = Containers mantidos sempre quentes — o pool nunca desce abaixo disso. Padrão 0.
-spec-help-max-replicas = Teto até onde o auto-scaler pode subir. Vazio = ilimitado.
+spec-help-max-replicas = Teto rígido — o máximo de containers que o Ruscker roda para este app (o auto-scaler sobe até ele). Vazio = o padrão (5, ou as réplicas iniciais se for maior).
 spec-help-concurrent = Requisições que uma réplica de API atende antes do scaler adicionar outra.
 spec-help-cpu-limit = CPU máxima em núcleos fracionários (ex.: 0,5 = meio núcleo). Vazio = ilimitado.
 spec-help-memory-limit = Memória máxima, ex.: 512m ou 1.5g. Vazio = ilimitado.

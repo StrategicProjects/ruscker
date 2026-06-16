@@ -220,6 +220,10 @@ admin-specs-filter-kind-all = Tous les types
 admin-specs-filter-state-all = Actifs et inactifs
 admin-specs-edit = Modifier
 admin-specs-duplicate = Dupliquer
+admin-specs-update-image = Mettre à jour l'image (re-pull)
+admin-specs-update-image-running = Mise à jour de l'image…
+admin-specs-update-image-ok = Image mise à jour
+admin-specs-update-image-fail = Échec de la mise à jour de l'image
 admin-specs-config-badge = config
 admin-specs-config-defined = Défini dans le YAML — lecture seule ici; modifiez le fichier
 admin-specs-delete = Supprimer
@@ -524,7 +528,7 @@ spec-form-api-docs-path = Chemin des docs
 spec-form-api-health-path = Chemin de santé
 spec-form-api-cors = Activer CORS permissif
 spec-form-min-replicas = Réplicas min.
-spec-form-max-replicas = Réplicas max.
+spec-form-max-replicas = Conteneurs max.
 spec-form-concurrent = Requêtes par réplica
 spec-form-cpu-limit = Limite CPU
 spec-form-memory-limit = Limite mémoire
@@ -548,7 +552,7 @@ spec-help-api-docs-path = Chemin où l'API sert la doc OpenAPI/Swagger. Par déf
 spec-help-api-health-path = Chemin sondé pour la disponibilité avant qu'une réplica rejoigne le pool. Par défaut /__healthz__.
 spec-help-api-cors = Ajoute des en-têtes CORS permissifs et répond au préflight. Désactivé par défaut.
 spec-help-min-replicas = Conteneurs gardés actifs en permanence — le pool ne descend jamais en dessous. Par défaut 0.
-spec-help-max-replicas = Plafond jusqu'auquel l'auto-scaler peut monter. Vide = illimité.
+spec-help-max-replicas = Plafond strict — le maximum de conteneurs que Ruscker exécute pour cette app (l'auto-scaler monte jusqu'à lui). Vide = la valeur par défaut (5, ou les réplicas initiales si supérieur).
 spec-help-concurrent = Requêtes qu'une réplica d'API gère avant que le scaler en ajoute une.
 spec-help-cpu-limit = CPU max en cœurs fractionnaires (ex. 0,5 = un demi-cœur). Vide = illimité.
 spec-help-memory-limit = Mémoire max, ex. 512m ou 1.5g. Vide = illimité.

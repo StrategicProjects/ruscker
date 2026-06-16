@@ -68,9 +68,14 @@
           </div>
           <div class="chrome-popover-sep"></div>
         {% endif %}
+        {# Panel link only for operators (Editor+). A Viewer signs in for
+           portal card visibility (#857), so it sees only change-password
+           + sign-out. #}
+        {% if can_panel %}
         <a class="chrome-popover-item" href="{{ base }}/admin/dashboard">
           <i class="ti ti-layout-dashboard" aria-hidden="true"></i> {{ self.t("chrome-panel") }}
         </a>
+        {% endif %}
         <a class="chrome-popover-item" href="{{ base }}/admin/account/password">
           <i class="ti ti-key" aria-hidden="true"></i> {{ self.t("chrome-change-password") }}
         </a>

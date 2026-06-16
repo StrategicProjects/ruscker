@@ -673,6 +673,11 @@ impl SpecForm {
             //    clears it; an untouched field round-trips. ──────────
             container_port: parse_opt(&self.container_port),
             platform: empty_to_none(&self.platform),
+            // `container-network` has no form input yet (slice 1 wires the
+            // backend + YAML/import path). Preserve the base spec's value
+            // so an import-set network round-trips through an admin edit
+            // instead of being silently wiped. UI input is a follow-up.
+            container_network: base.and_then(|b| b.container_network.clone()),
             container_lifetime: parse_opt(&self.container_lifetime),
             stop_on_logout: checkbox_opt(&self.stop_on_logout),
             container_env: parse_env(&self.container_env),

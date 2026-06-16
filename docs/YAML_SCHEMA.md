@@ -330,6 +330,7 @@ A spec describes one app, API, or external link. Every spec has an
     - R
     - -e
     - shiny::runApp('/app', port=3838, host='0.0.0.0')
+  container-network: ruscker_net      # attach to this Docker network (created if missing)
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
 ```
@@ -350,6 +351,17 @@ created — so an app secret passed this way never lands in the database.
 is an argv list that overrides the image's baked `CMD` (Docker
 `Config.Cmd`); omit it to keep the image default. Both are
 ShinyProxy-compatible and editable per spec.
+
+`container-network` (Ruscker extension) attaches the spec's containers to
+a named Docker network, mapped to the container's `HostConfig.NetworkMode`.
+The backend **creates the network** (a plain user-defined bridge) if it
+doesn't exist yet, so you don't have to pre-create it. Omit it (or leave
+it blank) to use the daemon's default bridge. Use it to isolate Ruscker's
+app containers on their own L2 segment — the published port still binds on
+loopback (`127.0.0.1`), so the proxy reaches the app exactly as before; the
+network only segments app-to-app traffic. ShinyProxy's per-spec
+`network-connections` list maps straight to this single field (Ruscker
+attaches one network; multi-network attach is still deferred).
 
 `access-groups` / `access-users` (ShinyProxy-compatible) scope who can
 **see** an app on the landing and **reach** it at `/app` / `/api`. A spec
@@ -700,12 +712,14 @@ ignored:
 
 - `proxy.specs[*].kubernetes-*` — Kubernetes backend (out of scope)
 - `proxy.specs[*].minimum-seats-available` — pre-warm pool (planned)
-- `proxy.specs[*].labels`, `proxy.specs[*].network-connections` — phase
-  3.5
+- `proxy.specs[*].labels` — custom container labels (phase 3.5)
+- `proxy.specs[*].network-connections` — multi-network attach (phase
+  3.5); map it to the single `container-network` field, which Ruscker
+  creates + attaches
 - `proxy.docker.*` — global docker config (use defaults or env vars)
 
-(`proxy.specs[*].volumes` and `container-env` / `container-cmd` are now
-supported — see "Containerized specs" above.)
+(`proxy.specs[*].volumes`, `container-env` / `container-cmd` and
+`container-network` are now supported — see "Containerized specs" above.)
 
 Setting any of these will produce a startup warning but not an error
 (`serve` runs the same validation `ruscker validate` does and logs

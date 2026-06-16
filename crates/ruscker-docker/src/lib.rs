@@ -18,7 +18,7 @@
 
 use async_trait::async_trait;
 use bollard::models::{
-    ContainerCreateBody, ContainerSummaryStateEnum, HostConfig, PortBinding,
+    ContainerCreateBody, ContainerSummaryStateEnum, HostConfig, NetworkCreateRequest, PortBinding,
 };
 use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, ListContainersOptions, ListImagesOptions,
@@ -221,6 +221,18 @@ impl LocalDockerBackend {
         // up in `inspect` output and confuse operators.
         apply_limits(&mut host_config, &req.limits);
 
+        // Attach to an explicit Docker network if the spec set
+        // `container-network` (phase 3.5). We create the network (a
+        // plain user-defined bridge) when it's missing so the operator
+        // doesn't have to pre-create it. `network_mode` names it on the
+        // container; the published port still binds on `publish_ip`, so
+        // the proxy reaches the app exactly as before — the network only
+        // isolates app-to-app traffic on its own L2 segment.
+        if let Some(network) = req.network.as_deref() {
+            self.ensure_network(network).await?;
+            host_config.network_mode = Some(network.to_string());
+        }
+
         let body = ContainerCreateBody {
             image: Some(req.image.clone()),
             // bollard 0.21 takes a flat Vec<String> here, not a
@@ -392,6 +404,38 @@ impl LocalDockerBackend {
             event.map_err(|e| backend_err(&format!("pull image ({auth})"), e))?;
         }
         Ok(())
+    }
+
+    /// Ensure a user-defined Docker network exists, creating a plain
+    /// bridge when it's missing. Idempotent: an existing network (any
+    /// driver) is left untouched. Called before `create_container` when a
+    /// spec sets `container-network` so operators don't have to
+    /// pre-create the network. Tolerates the create/create race between
+    /// two concurrent spawns by re-inspecting on a create error.
+    async fn ensure_network(&self, name: &str) -> CoreResult<()> {
+        if self.docker.inspect_network(name, None).await.is_ok() {
+            return Ok(());
+        }
+        match self
+            .docker
+            .create_network(NetworkCreateRequest {
+                name: name.to_string(),
+                driver: Some("bridge".to_string()),
+                ..Default::default()
+            })
+            .await
+        {
+            Ok(_) => Ok(()),
+            // A concurrent spawn may have created it between our inspect
+            // and our create — a now-present network means success.
+            Err(e) => {
+                if self.docker.inspect_network(name, None).await.is_ok() {
+                    Ok(())
+                } else {
+                    Err(backend_err("create network", e))
+                }
+            }
+        }
     }
 
     async fn bound_host_port(&self, container_id: &str, port_key: &str) -> CoreResult<u16> {
@@ -1538,6 +1582,43 @@ mod tests {
         assert_eq!(cfg.cmd, Some(cmd), "cmd override not applied");
 
         backend.stop(&replica.id).await.expect("stop");
+    }
+
+    /// `container-network` (phase 3.5): the backend creates the named
+    /// network when it's missing and attaches the container to it.
+    /// Verifies via inspect that the container joined the network, then
+    /// reaps the container + the network so the test is repeatable.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn spawn_attaches_to_named_network() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let net = "ruscker-it-net";
+        let req = ruscker_core::SpawnRequest::new("itest-net", &image)
+            .with_port(80)
+            .with_network(net);
+        let replica = backend.spawn_request(&req).await.expect("spawn");
+
+        let info = backend
+            .docker
+            .inspect_container(&replica.container_id, None)
+            .await
+            .expect("inspect");
+        let networks = info
+            .network_settings
+            .and_then(|ns| ns.networks)
+            .unwrap_or_default();
+        assert!(
+            networks.contains_key(net),
+            "container not attached to `{net}`; joined: {:?}",
+            networks.keys().collect::<Vec<_>>()
+        );
+
+        backend.stop(&replica.id).await.expect("stop");
+        // Best-effort cleanup: the container is gone, so the network can
+        // be removed — keeps the test idempotent across runs.
+        let _ = backend.docker.remove_network(net).await;
     }
 
     /// #550: a container that crashes on startup (e.g. it can't reach its

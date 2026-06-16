@@ -839,6 +839,9 @@ async fn spawn_one(
     if let Some(cmd) = cmd {
         req = req.with_cmd(cmd);
     }
+    if let Some(net) = spec.effective_container_network() {
+        req = req.with_network(net);
+    }
     if let Some(c) = creds {
         req = req.with_creds(c);
     }

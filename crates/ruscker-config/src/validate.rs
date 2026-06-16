@@ -264,7 +264,8 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
     ("labels", "custom container labels are not applied (phase 3.5)"),
     (
         "network-connections",
-        "container network wiring is not implemented (phase 3.5)",
+        "multi-network attach is not implemented — map it to the single \
+         `container-network` field (Ruscker creates + attaches that one)",
     ),
     // NOTE: per-spec env/cmd injection IS now supported — map your
     // ShinyProxy `container-env` / `container-cmd` straight across. They

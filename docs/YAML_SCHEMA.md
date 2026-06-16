@@ -331,6 +331,9 @@ A spec describes one app, API, or external link. Every spec has an
     - -e
     - shiny::runApp('/app', port=3838, host='0.0.0.0')
   container-network: ruscker_net      # attach to this Docker network (created if missing)
+  labels:                             # extra Docker labels stamped on the container
+    team: data                        #   (ShinyProxy-compatible)
+    cost-center: GAPE
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
 ```
@@ -362,6 +365,13 @@ loopback (`127.0.0.1`), so the proxy reaches the app exactly as before; the
 network only segments app-to-app traffic. ShinyProxy's per-spec
 `network-connections` list maps straight to this single field (Ruscker
 attaches one network; multi-network attach is still deferred).
+
+`labels` (ShinyProxy-compatible) is a `NAME: value` map of extra Docker
+labels stamped on the container — useful for external tooling
+(monitoring, log routing, cost attribution). Ruscker merges them onto the
+container's labels at spawn; its own `ruscker.*` labels always win on a
+key collision (they're load-bearing for the registry, reconcile and disk
+panel), so you can't override them. Blank keys are dropped.
 
 `access-groups` / `access-users` (ShinyProxy-compatible) scope who can
 **see** an app on the landing and **reach** it at `/app` / `/api`. A spec
@@ -712,14 +722,14 @@ ignored:
 
 - `proxy.specs[*].kubernetes-*` — Kubernetes backend (out of scope)
 - `proxy.specs[*].minimum-seats-available` — pre-warm pool (planned)
-- `proxy.specs[*].labels` — custom container labels (phase 3.5)
 - `proxy.specs[*].network-connections` — multi-network attach (phase
   3.5); map it to the single `container-network` field, which Ruscker
   creates + attaches
 - `proxy.docker.*` — global docker config (use defaults or env vars)
 
-(`proxy.specs[*].volumes`, `container-env` / `container-cmd` and
-`container-network` are now supported — see "Containerized specs" above.)
+(`proxy.specs[*].volumes`, `container-env` / `container-cmd`,
+`container-network` and `labels` are now supported — see "Containerized
+specs" above.)
 
 Setting any of these will produce a startup warning but not an error
 (`serve` runs the same validation `ruscker validate` does and logs

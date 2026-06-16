@@ -154,6 +154,12 @@ pub struct SpawnRequest {
     /// local backend sets `HostConfig.network_mode` and creates the
     /// network (a user-defined bridge) if it's missing.
     pub network: Option<String>,
+
+    /// Extra Docker labels to stamp on the container (the spec's
+    /// `labels`), as `(key, value)` pairs. The backend merges these onto
+    /// the container's labels; its own `ruscker.*` labels win on a key
+    /// collision. Empty ⇒ only the internal labels.
+    pub labels: Vec<(String, String)>,
 }
 
 impl SpawnRequest {
@@ -171,6 +177,7 @@ impl SpawnRequest {
             env: Vec::new(),
             cmd: None,
             network: None,
+            labels: Vec::new(),
         }
     }
 
@@ -215,6 +222,11 @@ impl SpawnRequest {
 
     pub fn with_network(mut self, network: impl Into<String>) -> Self {
         self.network = Some(network.into());
+        self
+    }
+
+    pub fn with_labels(mut self, labels: Vec<(String, String)>) -> Self {
+        self.labels = labels;
         self
     }
 }

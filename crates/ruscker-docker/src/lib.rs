@@ -204,6 +204,13 @@ impl LocalDockerBackend {
         );
 
         let mut labels = HashMap::new();
+        // Operator-supplied labels (`labels`, #851) go in FIRST so the
+        // internal `ruscker.*` labels below overwrite them on any key
+        // collision — those three are load-bearing (registry / reconcile
+        // / disk panel key off them) and must not be clobbered.
+        for (k, v) in &req.labels {
+            labels.insert(k.clone(), v.clone());
+        }
         labels.insert(LABEL_SPEC_ID.to_string(), req.spec_id.clone());
         labels.insert(LABEL_REPLICA_ID.to_string(), replica_id.to_string());
         labels.insert(LABEL_INNER_PORT.to_string(), inner_port.to_string());
@@ -1619,6 +1626,43 @@ mod tests {
         // Best-effort cleanup: the container is gone, so the network can
         // be removed — keeps the test idempotent across runs.
         let _ = backend.docker.remove_network(net).await;
+    }
+
+    /// `labels` (#851): operator labels are stamped on the container, and
+    /// the internal `ruscker.*` labels win on a key collision (an
+    /// operator can't clobber the load-bearing ones).
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn spawn_stamps_operator_labels_internal_wins() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let req = ruscker_core::SpawnRequest::new("itest-labels", &image)
+            .with_port(80)
+            .with_labels(vec![
+                ("team".to_string(), "data".to_string()),
+                // Attempt to override an internal label — must NOT win.
+                (LABEL_SPEC_ID.to_string(), "hacked".to_string()),
+            ]);
+        let replica = backend.spawn_request(&req).await.expect("spawn");
+
+        let info = backend
+            .docker
+            .inspect_container(&replica.container_id, None)
+            .await
+            .expect("inspect");
+        let labels = info
+            .config
+            .and_then(|c| c.labels)
+            .unwrap_or_default();
+        assert_eq!(labels.get("team").map(String::as_str), Some("data"));
+        // Internal label kept its real value, not the operator's "hacked".
+        assert_eq!(
+            labels.get(LABEL_SPEC_ID).map(String::as_str),
+            Some("itest-labels")
+        );
+
+        backend.stop(&replica.id).await.expect("stop");
     }
 
     /// #550: a container that crashes on startup (e.g. it can't reach its

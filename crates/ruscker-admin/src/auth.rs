@@ -82,9 +82,16 @@ impl Role {
     }
 
     /// The page a freshly-logged-in session of this role lands on.
-    /// The dashboard is visible to every role, so it's home for all.
+    /// Editor/Admin land on the **Apps list** — the main management
+    /// surface — not the dashboard, whose live-metrics SSE starves the
+    /// browser's connection pool on an HTTP/1.1 front end (#852). The
+    /// dashboard stays one click away. A Viewer can only reach the
+    /// dashboard (until #857 moves it to the portal), so it lands there.
     pub fn home(&self) -> &'static str {
-        "/admin/dashboard"
+        match self {
+            Role::Viewer => "/admin/dashboard",
+            _ => "/admin/specs",
+        }
     }
 
     /// Fluent message key for the human-readable role label.

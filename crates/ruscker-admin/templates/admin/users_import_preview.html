@@ -1,0 +1,62 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-users-import-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-users-import-preview-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-users-import-help") }}</p>
+  </div>
+</div>
+
+<table class="admin-table" data-enhance>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>{{ self.t("admin-users-col-user") }}</th>
+      <th>{{ self.t("admin-users-col-role") }}</th>
+      <th>{{ self.t("admin-users-col-groups") }}</th>
+      <th>{{ self.t("admin-users-col-profile") }}</th>
+      <th>{{ self.t("admin-users-import-col-status") }}</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td class="dash-mono text-[color:var(--text-faint)]">{{ r.line_no }}</td>
+        <td class="font-medium">{{ r.username }}</td>
+        <td>{{ self.role_label(r.role) }}</td>
+        <td>
+          {% if !r.groups.is_empty() %}
+          <div class="group-badges">
+            {% for g in r.groups %}<span class="group-badge" data-group="{{ g }}">{{ g }}</span>{% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td class="text-xs text-[color:var(--text-muted)]">
+          {{ r.setor }}{% if !r.email.is_empty() %} · {{ r.email }}{% endif %}{% if !r.celular.is_empty() %} · {{ r.celular }}{% endif %}
+        </td>
+        <td>
+          <span class="pill {% if r.importable() %}pill-state-active{% else %}pill-state-inactive{% endif %}">
+            {{ self.t(r.status_key()) }}
+          </span>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+{# Confirm: the uploaded CSV rides in a hidden textarea (preserves
+   newlines) so the confirm POST re-parses the same content — no second
+   upload. Only the importable rows are created. #}
+<form method="post" action="{{ base }}/admin/users/import/confirm"
+      style="margin-top:16px;display:flex;gap:12px;align-items:center">
+  <textarea name="raw_csv" style="display:none">{{ raw_csv }}</textarea>
+  <button type="submit" class="admin-login-btn" style="width:auto"{% if importable == 0 %} disabled{% endif %}>
+    <i class="ti ti-user-plus" aria-hidden="true"></i>
+    {{ self.t("admin-users-import-confirm") }} ({{ importable }})
+  </button>
+  <a href="{{ base }}/admin/users" class="admin-nav-link">{{ self.t("admin-users-import-cancel") }}</a>
+</form>
+{% endblock %}

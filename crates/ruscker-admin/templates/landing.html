@@ -128,11 +128,10 @@
               aria-label="{{ self.t("highlights-prev") }}"><i class="ti ti-chevron-left" aria-hidden="true"></i></button>
       <div class="highlights-viewport">
         <div class="highlights-track" x-ref="track" :style="trackStyle()">
-      {% for card in cards %}
-        {% if card.featured %}
-        {# An inactive card is not a destination (#746): no href (placeholder
-           link — not a tab stop, not announced as a link), aria-disabled for
-           AT, and the old `href="#"` scroll-to-top click is gone. #}
+      {% for card in highlights %}
+        {# Featured section (#858): the viewer's favorites first, then
+           admin-pinned `featured` cards (built in the handler). An inactive
+           card is not a destination (#746): no href, aria-disabled for AT. #}
         <a class="rcard {% if !card.active %}inactive{% endif %}"
            {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}>
           <div class="rcover">
@@ -150,8 +149,21 @@
               <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
               {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
             </div>
+            {# Per-user favorite star (#858) — replaces the old decorative
+               padlock. Logged-in only; clicking toggles over fetch without
+               navigating the card link. Anonymous visitors see nothing here. #}
             <span class="rlock">
-              <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
+              {% if signed_in_user %}
+              <span class="rstar" role="button" tabindex="0" data-spec="{{ card.id }}"
+                    style="cursor:pointer;display:inline-flex;line-height:0"
+                    x-data="{ on: {{ card.favorited }}, busy: false }" :style="busy ? 'opacity:.5' : ''"
+                    :aria-pressed="on ? 'true' : 'false'"
+                    aria-label="{{ self.t("card-favorite") }}" title="{{ self.t("card-favorite") }}"
+                    @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited}).catch(()=>{on=prev}).finally(()=>{busy=false})"
+                    @keydown.enter.prevent.stop="$el.click()" @keydown.space.prevent.stop="$el.click()">
+                <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : 'currentColor'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+              </span>
+              {% endif %}
             </span>
           </div>
           <div class="rbody">
@@ -173,7 +185,6 @@
             </div>
           </div>
         </a>
-        {% endif %}
       {% endfor %}
         </div>
       </div>
@@ -337,8 +348,20 @@
                compete with the coloured type badge (#507). #}
             {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
           </div>
+          {# Per-user favorite star (#858) — replaces the decorative padlock.
+             Logged-in only; toggles over fetch without navigating the card. #}
           <span class="rlock">
-            <i class="ti ti-{% if card.access_open %}lock-open text-[color:var(--color-lock-open)]{% else %}lock text-[color:var(--color-lock)]{% endif %} text-[12px]" aria-hidden="true"></i>
+            {% if signed_in_user %}
+            <span class="rstar" role="button" tabindex="0" data-spec="{{ card.id }}"
+                  style="cursor:pointer;display:inline-flex;line-height:0"
+                  x-data="{ on: {{ card.favorited }}, busy: false }" :style="busy ? 'opacity:.5' : ''"
+                  :aria-pressed="on ? 'true' : 'false'"
+                  aria-label="{{ self.t("card-favorite") }}" title="{{ self.t("card-favorite") }}"
+                  @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited}).catch(()=>{on=prev}).finally(()=>{busy=false})"
+                  @keydown.enter.prevent.stop="$el.click()" @keydown.space.prevent.stop="$el.click()">
+              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : 'currentColor'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+            </span>
+            {% endif %}
           </span>
         </div>
 

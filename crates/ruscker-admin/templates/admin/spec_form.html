@@ -507,22 +507,8 @@
         </span>
       </label>
 
-      {# Decorative "requires login" lock (#839) — INDEPENDENT of the
-         Ruscker access lists below. It only flips the card padlock to
-         closed, to signal that the wrapped app authenticates internally;
-         it does NOT restrict access in Ruscker (everyone still sees and
-         can reach the app — the app itself asks for the password). #}
-      <label class="toggle-row">
-        <div>
-          <div class="toggle-row__label">{{ self.t("spec-form-locked") }}</div>
-          <div class="toggle-row__hint">{{ self.t("spec-form-locked-hint") }}</div>
-        </div>
-        <span class="switch">
-          <input type="checkbox" name="locked" value="on" x-model="locked"
-                 {% if !form.locked.is_empty() %}checked{% endif %}>
-          <span class="switch__track"><span class="switch__dot"></span></span>
-        </span>
-      </label>
+      {# The decorative "requires login" lock (#839) was removed in #858 —
+         replaced by the per-user favorite star on the landing cards. #}
 
       {# Restricted access (#701) — a toggle over the access lists. Off ⇒
          public (lists cleared); on ⇒ reveal the group/user pickers. This
@@ -1076,11 +1062,6 @@
             {# Live subject ("tema") pill — mirrors the landing card (#507). #}
             <span class="rbadge rbadge--subject" x-show="(form.subject || '').trim()" x-text="form.subject" :title="form.subject" x-cloak></span>
           </div>
-          <span class="rlock">
-            <i class="ti" :class="isOpenAccess()
-                ? 'ti-lock-open text-[color:var(--color-lock-open)]'
-                : 'ti-lock text-[color:var(--color-lock)]'"></i>
-          </span>
         </div>
         <div class="rbody">
           <div class="rtitle" x-text="form.display_name || form.id || '—'"></div>
@@ -1355,15 +1336,6 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
       : this.form.cover;
     return 'background:' + css + ';';
   },
-  // The preview card's lock mirrors the card view (#346/#839): open only
-  // when the decorative `locked` flag is OFF *and* both access lists are
-  // blank; closed when either the operator set the lock or a real
-  // restriction exists. Updates live as the admin edits.
-  isOpenAccess() {
-    return !this.locked
-        && !((this.form.access_groups || '').trim()
-          || (this.form.access_users || '').trim());
-  },
   // (imgUploading / imgError come from the imagePicker mixin.)
   // Advanced starts collapsed by default — even when editing a spec that
   // has advanced config set — so the form opens clean and uncluttered
@@ -1372,9 +1344,6 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // Restricted-access toggle (#701): on when the spec already has any
   // group/user access list; off ⇒ public. Toggling off clears the lists.
   restricted: !((initial.access_groups || '').trim() === '' && (initial.access_users || '').trim() === ''),
-  // Decorative "requires login" lock (#839): independent boolean, drives
-  // only the preview/card padlock. Seeded from the saved `locked` flag.
-  locked: (initial.locked || '').trim() !== '',
   // Autoscaling toggle (#701): on when a max-replicas ceiling above 1 is
   // set. Off ⇒ the ceiling + thresholds are cleared (run at the floor).
   // Autoscaling is "on" when custom thresholds/grace are set — the

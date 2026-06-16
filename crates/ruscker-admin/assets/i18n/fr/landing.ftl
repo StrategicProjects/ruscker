@@ -288,8 +288,6 @@ spec-form-monogram-help = Affiché sur la couverture sans logo.
 spec-form-meta = Accès et échelle
 spec-form-restricted = Accès restreint
 spec-form-restricted-hint = Nécessite une connexion pour ouvrir
-spec-form-locked = Cadenas d'accès
-spec-form-locked-hint = Affiche seulement un cadenas fermé — l'application gère sa propre connexion (sans restriction Ruscker)
 spec-form-initial-replicas = Répliques initiales
 spec-form-autoscaling = Mise à l'échelle automatique
 spec-form-autoscaling-hint = Adapte les répliques à la demande
@@ -807,6 +805,7 @@ admin-landing-theme-accent = Accent
 
 # Featured carousel (#506)
 highlights-title = À la une
+card-favorite = Favori
 spec-form-featured = Mettre cette app en avant
 spec-form-featured-help = Affiche l'app dans le carrousel « À la une » en haut de la landing (si l'option est activée).
 admin-landing-show-highlights = Afficher « À la une »

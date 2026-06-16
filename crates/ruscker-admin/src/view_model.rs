@@ -210,8 +210,14 @@ pub struct CardCtx<'a> {
     /// verbatim from `template-properties.subject` and rendered as-is
     /// in the UI — operators choose their own taxonomy.
     pub subject: Option<&'a str>,
-    /// Highlighted in the landing's "Featured" carousel (#506).
+    /// Highlighted in the landing's "Featured" carousel (#506) —
+    /// admin-pinned, shown to everyone.
     pub featured: bool,
+    /// The current viewer has starred this card (#858). Per-user; set
+    /// after construction from the viewer's favorites (always `false`
+    /// for an anonymous visitor). Drives the star's filled state and the
+    /// favorites-first ordering of the Featured section.
+    pub favorited: bool,
     /// Card logo URL. Stored base-agnostic; a root-absolute value
     /// (e.g. `/assets/img/x.png`) is prefixed with the portal base
     /// path at construction (#294) so it resolves under `--base-path`.
@@ -250,16 +256,12 @@ impl<'a> CardCtx<'a> {
     pub fn from_spec(spec: &'a Spec, base: &str) -> Self {
         let display_type = DisplayType::from_spec(spec);
         let tp = &spec.template_properties;
-        // The card's access lock reflects the *real* access rule
-        // (`Spec::is_open()` — no `access-groups`/`access-users`), NOT the
-        // legacy decorative `template-properties.icon` flag (#346). It also
-        // honours the explicit `locked` badge (#839): an app whose own
-        // internal auth gates access shows a closed lock without Ruscker
-        // restricting it. Both surfaces — this icon and the `data-access`
-        // filter chip — close when access is restricted OR `locked` is set;
-        // enforcement and landing visibility still key off `access_allows`,
-        // so a bare `locked` app stays open to all through the proxy.
-        let access_open = spec.is_open() && !spec.shows_lock_badge();
+        // `access_open` drives the Public/Restricted filter chip and
+        // reflects the *real* access rule (`Spec::is_open()` — no
+        // `access-groups`/`access-users`). The decorative `locked` padlock
+        // (#839) was removed in #858 (replaced by the per-user favorite
+        // star), so this no longer consults `shows_lock_badge`.
+        let access_open = spec.is_open();
         let active = tp.is_active();
         let subject = tp.get_str("subject");
         let logo = tp.get_str("logo").map(|l| prefix_asset_url(l, base));
@@ -307,6 +309,9 @@ impl<'a> CardCtx<'a> {
             active,
             subject,
             featured: spec.is_featured(),
+            // Per-viewer; the landing handler sets it from the user's
+            // favorites after building the cards.
+            favorited: false,
             logo,
             cover,
             monogram,
@@ -644,22 +649,23 @@ mod tests {
     }
 
     #[test]
-    fn decorative_locked_flag_closes_the_card_lock_without_restricting() {
-        // #839: the explicit `template-properties.locked` flag closes the
-        // card padlock even though there's NO access list — for an app that
-        // self-authenticates. It must NOT restrict in Ruscker: `is_open()`
-        // (which drives enforcement + landing visibility) stays true.
+    fn decorative_locked_flag_no_longer_affects_the_card() {
+        // #858 removed the decorative `template-properties.locked` padlock
+        // (replaced by the per-user favorite star). `access_open` now follows
+        // only the real access rule (`is_open()`), so a `locked` flag with no
+        // access list leaves the card OPEN.
         let locked = spec_with_tp("  locked: \"true\"\n");
-        assert!(locked.is_open(), "locked is decorative — stays open for enforcement");
-        assert!(locked.shows_lock_badge(), "the flag is read");
+        assert!(locked.is_open());
         assert!(
-            !CardCtx::from_spec(&locked, "").access_open,
-            "locked ⇒ the card shows a closed padlock"
+            CardCtx::from_spec(&locked, "").access_open,
+            "the decorative locked flag is ignored now"
         );
 
-        // Without the flag (and no access lists) the card is open.
-        let plain = spec_with_tp("  subject: X\n");
-        assert!(CardCtx::from_spec(&plain, "").access_open);
+        // A real access restriction still closes the chip.
+        let restricted = spec_with_tp("");
+        let mut restricted = restricted;
+        restricted.access_groups = Some(vec!["staff".into()]);
+        assert!(!CardCtx::from_spec(&restricted, "").access_open);
     }
 
     // #745: an explicit cover is sanitized — `accent` already was, but

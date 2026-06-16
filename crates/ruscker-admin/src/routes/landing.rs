@@ -6,11 +6,11 @@
 
 use askama::Template;
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::{header, HeaderValue, StatusCode},
     response::{Html, IntoResponse, Response},
-    routing::get,
-    Router,
+    routing::{get, post},
+    Json, Router,
 };
 use fluent_bundle::{FluentArgs, FluentValue};
 
@@ -22,8 +22,34 @@ use crate::view_model::{
 };
 use crate::AppState;
 
+/// `POST /favorite/{spec_id}` — toggle the current user's favorite for a
+/// card (#858). Returns `{ "favorited": bool }`. Needs a real user
+/// account; an anonymous or break-glass-token visitor gets 401 (the star
+/// isn't shown to them anyway).
+async fn toggle_favorite(
+    State(state): State<AppState>,
+    MaybeSession(session): MaybeSession,
+    Path(spec_id): Path<String>,
+) -> Response {
+    let Some(username) = session.and_then(|s| s.actor) else {
+        return (StatusCode::UNAUTHORIZED, "sign in to favorite").into_response();
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    match crate::db::user_favorites::toggle(db, &username, &spec_id).await {
+        Ok(favorited) => Json(serde_json::json!({ "favorited": favorited })).into_response(),
+        Err(e) => {
+            tracing::error!(spec_id, error = ?e, "toggle favorite failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "toggle failed").into_response()
+        }
+    }
+}
+
 pub fn routes() -> Router<AppState> {
-    Router::new().route("/", get(index))
+    Router::new()
+        .route("/favorite/{spec_id}", post(toggle_favorite))
+        .route("/", get(index))
 }
 
 #[derive(Template)]
@@ -104,9 +130,15 @@ struct LandingPage<'a> {
     /// deploy policy from `landing-customization.show-admin-link`
     /// (default true); false hides the admin entrance on public portals.
     show_admin_link: bool,
-    /// Whether the "Featured" carousel may render (#506). The template also
-    /// checks that at least one card is featured via [`Self::has_featured`].
+    /// Whether the "Featured" carousel may render (#506). The template
+    /// also checks the highlight set is non-empty.
     show_highlights: bool,
+    /// The "Featured" section's cards in display order (#858): the
+    /// viewer's favorites first, then admin-pinned `featured` cards.
+    highlights: Vec<CardCtx<'a>>,
+    /// Whether to show the per-card favorite star — only for a logged-in
+    /// user account (#858). Anonymous / token visitors don't get stars.
+    signed_in_user: bool,
     /// Appearance toggles/options (#623 / ruscker-06), resolved to their
     /// effective values. The templates gate elements and pick CSS classes
     /// from these.
@@ -170,10 +202,10 @@ impl<'a> LandingPage<'a> {
     /// whether to render a slot's chrome insert (header-left replaces the
     /// Ruscker mark; header-right sits after the chrome cluster; the
     /// `center` bucket still renders as a separate bar). See #468.
-    /// Any featured card? Gates the "Featured" carousel together with
-    /// `show_highlights` (#506).
+    /// Any card in the "Featured" section? Gates the carousel together
+    /// with `show_highlights` (#506/#858 — favorites ∪ admin-featured).
     fn has_featured(&self) -> bool {
-        self.cards.iter().any(|c| c.featured)
+        !self.highlights.is_empty()
     }
 
     fn has_logos_at(&self, slot: &str, align: &str) -> bool {
@@ -319,6 +351,35 @@ async fn index(
         .map(|spec| CardCtx::from_spec(spec, &state.base_path))
         .collect();
     sort_by_recent(&mut cards);
+
+    // Per-user favorites (#858): mark the viewer's starred cards, then
+    // build the "Featured" order — the viewer's favorites first (in their
+    // stored order), then admin-pinned `featured` cards not already
+    // starred. Anonymous / break-glass-token visitors get no favorites.
+    let favorites: Vec<String> = match (username.as_deref(), state.db.as_ref()) {
+        (Some(user), Some(db)) => crate::db::user_favorites::list(db, user)
+            .await
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    };
+    let fav_set: std::collections::HashSet<&str> =
+        favorites.iter().map(String::as_str).collect();
+    for c in &mut cards {
+        c.favorited = fav_set.contains(c.id);
+    }
+    let mut highlights: Vec<CardCtx<'_>> = Vec::new();
+    for fav_id in &favorites {
+        if let Some(c) = cards.iter().find(|c| c.id == fav_id.as_str()) {
+            highlights.push(c.clone());
+        }
+    }
+    for c in &cards {
+        if c.featured && !c.favorited {
+            highlights.push(c.clone());
+        }
+    }
+    let signed_in_user = username.is_some();
+
     let type_chips = build_type_chips(&cards);
     let subjects = unique_subjects(&cards);
     let counts = CardCounts {
@@ -552,6 +613,8 @@ async fn index(
             .effective_show_admin_link(),
         // Carousel toggle from the DB-backed editor (#506).
         show_highlights: lc.effective_show_highlights(),
+        highlights,
+        signed_in_user,
         // Appearance options (#623 / ruscker-06).
         show_search: lc.effective_show_search(),
         show_filters: lc.effective_show_filters(),

@@ -504,7 +504,7 @@ spec-form-api-docs-path = Docs path
 spec-form-api-health-path = Health path
 spec-form-api-cors = Enable permissive CORS
 spec-form-min-replicas = Min replicas
-spec-form-max-replicas = Max replicas
+spec-form-max-replicas = Max containers
 spec-form-concurrent = Requests per replica
 spec-form-cpu-limit = CPU limit
 spec-form-memory-limit = Memory limit
@@ -528,7 +528,7 @@ spec-help-api-docs-path = Path where the API serves its OpenAPI/Swagger docs. De
 spec-help-api-health-path = Path probed for readiness before a replica joins the pool. Default /__healthz__.
 spec-help-api-cors = Add permissive CORS headers and answer preflight requests. Off by default.
 spec-help-min-replicas = Containers kept warm at all times — the pool never scales below this. Default 0.
-spec-help-max-replicas = Upper bound the auto-scaler may spawn up to. Blank = unlimited.
+spec-help-max-replicas = Hard ceiling — the most containers Ruscker will run for this app (the auto-scaler scales up to it). Blank = the default (5, or the initial replicas if higher).
 spec-help-concurrent = Requests one API replica handles before the scaler adds another.
 spec-help-cpu-limit = Max CPU as fractional cores (e.g. 0.5 = half a core). Blank = unlimited.
 spec-help-memory-limit = Max memory, e.g. 512m or 1.5g. Blank = unlimited.

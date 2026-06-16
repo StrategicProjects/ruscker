@@ -356,6 +356,9 @@ pub struct SpecForm {
     pub container_port: String,
     /// Docker `--platform` (`linux/amd64`) for emulated images.
     pub platform: String,
+    /// Docker network to attach the container to (`container-network`).
+    /// Blank ⇒ the daemon default bridge; created if missing.
+    pub container_network: String,
     /// Soft lifetime cap in minutes (`container-lifetime`).
     pub container_lifetime: String,
     /// Checkbox ("on") ⇒ stop the container when the user logs out.
@@ -498,6 +501,7 @@ impl SpecForm {
             // ── Advanced (new) ──────────────────────────────────
             container_port: spec.container_port.map(|n| n.to_string()).unwrap_or_default(),
             platform: spec.platform.clone().unwrap_or_default(),
+            container_network: spec.container_network.clone().unwrap_or_default(),
             container_lifetime: spec.container_lifetime.map(|n| n.to_string()).unwrap_or_default(),
             stop_on_logout: checkbox(spec.stop_on_logout.unwrap_or(false)),
             // `container-env` shown as sorted `NAME=value` lines.
@@ -673,6 +677,9 @@ impl SpecForm {
             //    clears it; an untouched field round-trips. ──────────
             container_port: parse_opt(&self.container_port),
             platform: empty_to_none(&self.platform),
+            // Advanced field, form is authoritative (pre-filled from the
+            // spec in `from_spec`): blank ⇒ None ⇒ daemon default bridge.
+            container_network: empty_to_none(&self.container_network),
             container_lifetime: parse_opt(&self.container_lifetime),
             stop_on_logout: checkbox_opt(&self.stop_on_logout),
             container_env: parse_env(&self.container_env),

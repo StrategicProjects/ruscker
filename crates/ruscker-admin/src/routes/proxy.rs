@@ -1434,6 +1434,9 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<(Replica
     if let Some(cmd) = spec.container_cmd.clone() {
         req = req.with_cmd(cmd);
     }
+    if let Some(net) = spec.effective_container_network() {
+        req = req.with_network(net);
+    }
     if let Some(c) = creds {
         req = req.with_creds(c);
     }

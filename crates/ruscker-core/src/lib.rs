@@ -148,6 +148,12 @@ pub struct SpawnRequest {
     /// `None` ⇒ the image's baked `CMD` is used; the local backend maps
     /// this to `Config.Cmd`.
     pub cmd: Option<Vec<String>>,
+
+    /// Docker network to attach the container to (the spec's
+    /// `container-network`). `None` ⇒ the daemon's default bridge. The
+    /// local backend sets `HostConfig.network_mode` and creates the
+    /// network (a user-defined bridge) if it's missing.
+    pub network: Option<String>,
 }
 
 impl SpawnRequest {
@@ -164,6 +170,7 @@ impl SpawnRequest {
             platform: None,
             env: Vec::new(),
             cmd: None,
+            network: None,
         }
     }
 
@@ -203,6 +210,11 @@ impl SpawnRequest {
     }
     pub fn with_cmd(mut self, cmd: Vec<String>) -> Self {
         self.cmd = Some(cmd);
+        self
+    }
+
+    pub fn with_network(mut self, network: impl Into<String>) -> Self {
+        self.network = Some(network.into());
         self
     }
 }

@@ -888,6 +888,17 @@ pub struct Spec {
     #[serde(rename = "container-cmd", default)]
     pub container_cmd: Option<Vec<String>>,
 
+    /// Docker network to attach this spec's containers to (Ruscker
+    /// extension). The local Docker backend sets `HostConfig.network_mode`
+    /// and **creates the network** (a plain user-defined bridge) if it
+    /// doesn't exist yet. `None`/whitespace ⇒ the daemon's default bridge.
+    /// Use it to isolate Ruscker's app containers on their own L2 segment
+    /// (e.g. `container-network: ruscker_net`) — the ShinyProxy analogue
+    /// is the per-spec `network-connections` list, which an operator maps
+    /// straight to this single field.
+    #[serde(rename = "container-network", default)]
+    pub container_network: Option<String>,
+
     /// Groups allowed to see and reach this app (ShinyProxy
     /// `access-groups`). A spec with neither `access-groups` nor
     /// `access-users` is **open** (visible to everyone, including
@@ -1299,6 +1310,16 @@ impl Spec {
     /// Whether replicas should prefer distinct hosts (default false).
     pub fn effective_anti_affinity(&self) -> bool {
         self.anti_affinity.unwrap_or(false)
+    }
+
+    /// The Docker network to attach this spec's containers to, trimmed.
+    /// `None` or an all-whitespace value ⇒ the daemon's default bridge
+    /// (the backend leaves `network_mode` unset).
+    pub fn effective_container_network(&self) -> Option<&str> {
+        self.container_network
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
 
     /// Effective routing strategy.
@@ -1895,6 +1916,7 @@ proxy:
             volumes: None,
             container_env: None,
             container_cmd: None,
+            container_network: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1943,6 +1965,7 @@ proxy:
             volumes: None,
             container_env: None,
             container_cmd: None,
+            container_network: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1991,6 +2014,7 @@ proxy:
             volumes: None,
             container_env: None,
             container_cmd: None,
+            container_network: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -2047,6 +2071,20 @@ container-cmd:
         let s = parse_spec("id: a\ncontainer-image: x");
         assert!(s.env_pairs().is_empty());
         assert!(s.container_cmd.is_none());
+    }
+
+    #[test]
+    fn parses_container_network_and_trims() {
+        let s = parse_spec("id: a\ncontainer-image: x\ncontainer-network: ruscker_net");
+        assert_eq!(s.effective_container_network(), Some("ruscker_net"));
+
+        // Whitespace-only ⇒ treated as unset (default bridge).
+        let blank = parse_spec("id: a\ncontainer-image: x\ncontainer-network: '   '");
+        assert_eq!(blank.effective_container_network(), None);
+
+        // Absent ⇒ None.
+        let none = parse_spec("id: a\ncontainer-image: x");
+        assert_eq!(none.effective_container_network(), None);
     }
 
     #[test]

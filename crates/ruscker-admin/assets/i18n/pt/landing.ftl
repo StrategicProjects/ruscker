@@ -561,6 +561,8 @@ spec-form-container-port = Porta do container
 spec-help-container-port = Porta em que o app escuta dentro do container. Em branco = padrão por tipo (3838 para Shiny). Defina para Streamlit (8501), Dash (8050) ou Jupyter (8888).
 spec-form-platform = Plataforma
 spec-help-platform = Plataforma Docker (ex.: linux/amd64) para rodar imagens de outra arquitetura via emulação. Em branco = o daemon escolhe pelo manifesto.
+spec-form-container-network = Rede Docker
+spec-help-container-network = Rede Docker à qual anexar o container (criada se não existir). Em branco = a bridge padrão do daemon. Use para isolar os containers deste app na própria rede.
 spec-form-container-lifetime = Vida útil do container (min)
 spec-help-container-lifetime = Limite suave em minutos antes de reciclar o container. Em branco = sem limite suave.
 spec-form-stop-on-logout = Parar ao sair (logout)

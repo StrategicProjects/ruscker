@@ -605,6 +605,24 @@
       </div>
       </template>
 
+      {# Max containers (#854) — the hard ceiling for this app, always
+         visible (not gated behind the Autoscaling toggle). The scaler
+         never spawns past it even when autoscaling is off. #}
+      <template x-if="needsContainer()">
+      <div class="spec-form-field">
+        <div class="spec-form-label-row">
+          <label for="f-max-rep" class="spec-form-label">{{ self.t("spec-form-max-replicas") }}</label>
+          {% call help(self.t("spec-help-max-replicas")) %}{% endcall %}
+        </div>
+        <div class="stepper">
+          <button type="button" tabindex="-1" @click="form.max_replicas = String(Math.max(1, (parseInt(form.max_replicas, 10) || 1) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
+          <input id="f-max-rep" type="number" name="max_replicas" min="1" placeholder="5"
+                 x-model="form.max_replicas" class="stepper__input">
+          <button type="button" tabindex="-1" @click="form.max_replicas = String((parseInt(form.max_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
+        </div>
+      </div>
+      </template>
+
       <div class="spec-form-field">
         <div class="spec-form-label-row">
           <label for="f-updated" class="spec-form-label">{{ self.t("spec-form-updated") }}</label>
@@ -835,32 +853,21 @@
             </div>
             <span class="switch">
               <input type="checkbox" x-model="autoscaling"
-                     @change="if (!autoscaling) { form.max_replicas = ''; form.scale_up_threshold = ''; form.scale_down_threshold = ''; form.scale_down_grace = ''; }">
+                     @change="if (!autoscaling) { form.scale_up_threshold = ''; form.scale_down_threshold = ''; form.scale_down_grace = ''; }">
               <span class="switch__track"><span class="switch__dot"></span></span>
             </span>
           </label>
           <div x-show="autoscaling" x-cloak>
-          <div class="grid grid-cols-2 gap-3">
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-max-rep" class="spec-form-label">{{ self.t("spec-form-max-replicas") }}</label>
-                {% call help(self.t("spec-help-max-replicas")) %}{% endcall %}
-              </div>
-              <div class="stepper">
-                <button type="button" tabindex="-1" @click="form.max_replicas = String(Math.max(1, (parseInt(form.max_replicas, 10) || 1) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
-                <input id="f-max-rep" type="number" name="max_replicas" min="1" placeholder="5"
-                       x-model="form.max_replicas" class="stepper__input">
-                <button type="button" tabindex="-1" @click="form.max_replicas = String((parseInt(form.max_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
-              </div>
+          {# The ceiling (max containers) is a first-class field up in
+             Access & scale (#854); autoscaling only tunes how it scales
+             toward that cap. #}
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-concurrent" class="spec-form-label">{{ self.t("spec-form-concurrent") }}</label>
+              {% call help(self.t("spec-help-concurrent")) %}{% endcall %}
             </div>
-            <div class="spec-form-field">
-              <div class="spec-form-label-row">
-                <label for="f-concurrent" class="spec-form-label">{{ self.t("spec-form-concurrent") }}</label>
-                {% call help(self.t("spec-help-concurrent")) %}{% endcall %}
-              </div>
-              <input id="f-concurrent" type="number" name="concurrent_requests_per_replica" min="1"
-                     value="{{ form.concurrent_requests_per_replica }}" placeholder="100" class="spec-form-input">
-            </div>
+            <input id="f-concurrent" type="number" name="concurrent_requests_per_replica" min="1"
+                   value="{{ form.concurrent_requests_per_replica }}" placeholder="100" class="spec-form-input">
           </div>
           <div class="grid grid-cols-2 gap-3" style="margin-top:8px">
             <div class="spec-form-field">
@@ -1370,7 +1377,12 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   locked: (initial.locked || '').trim() !== '',
   // Autoscaling toggle (#701): on when a max-replicas ceiling above 1 is
   // set. Off ⇒ the ceiling + thresholds are cleared (run at the floor).
-  autoscaling: (parseInt(initial.max_replicas, 10) || 0) > 1,
+  // Autoscaling is "on" when custom thresholds/grace are set — the
+  // ceiling (max_replicas) is now an always-visible field, not the
+  // toggle's signal (#854).
+  autoscaling: !!((initial.scale_up_threshold || '').toString().trim()
+    || (initial.scale_down_threshold || '').toString().trim()
+    || (initial.scale_down_grace || '').toString().trim()),
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder), or 'legacy' for a saved
   // image cover (`url(...)`) from before image covers were retired —

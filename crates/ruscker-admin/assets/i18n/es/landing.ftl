@@ -524,7 +524,7 @@ spec-form-api-docs-path = Ruta de docs
 spec-form-api-health-path = Ruta de health
 spec-form-api-cors = Habilitar CORS permisivo
 spec-form-min-replicas = Réplicas mín.
-spec-form-max-replicas = Réplicas máx.
+spec-form-max-replicas = Máx. de contenedores
 spec-form-concurrent = Solicitudes por réplica
 spec-form-cpu-limit = Límite de CPU
 spec-form-memory-limit = Límite de memoria
@@ -548,7 +548,7 @@ spec-help-api-docs-path = Ruta donde la API sirve la documentación OpenAPI/Swag
 spec-help-api-health-path = Ruta consultada para readiness antes de que la réplica entre al pool. Por defecto /__healthz__.
 spec-help-api-cors = Añade cabeceras CORS permisivas y responde al preflight. Desactivado por defecto.
 spec-help-min-replicas = Contenedores siempre activos — el pool nunca baja de aquí. Por defecto 0.
-spec-help-max-replicas = Tope hasta donde el auto-escalado puede crecer. Vacío = ilimitado.
+spec-help-max-replicas = Tope rígido — el máximo de contenedores que Ruscker ejecuta para esta app (el auto-escalado crece hasta él). Vacío = el valor por defecto (5, o las réplicas iniciales si es mayor).
 spec-help-concurrent = Solicitudes que atiende una réplica de API antes de que el escalado añada otra.
 spec-help-cpu-limit = CPU máxima en núcleos fraccionarios (p. ej. 0,5 = medio núcleo). Vacío = ilimitado.
 spec-help-memory-limit = Memoria máxima, p. ej. 512m o 1.5g. Vacío = ilimitado.

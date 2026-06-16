@@ -752,6 +752,15 @@
             </div>
             <div class="spec-form-field">
               <div class="spec-form-label-row">
+                <label for="f-cnet" class="spec-form-label">{{ self.t("spec-form-container-network") }}</label>
+                {% call help(self.t("spec-help-container-network")) %}{% endcall %}
+              </div>
+              <input id="f-cnet" type="text" name="container_network"
+                     value="{{ form.container_network }}" placeholder="ruscker_net"
+                     class="spec-form-input spec-form-input--mono">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
                 <label for="f-clife" class="spec-form-label">{{ self.t("spec-form-container-lifetime") }}</label>
                 {% call help(self.t("spec-help-container-lifetime")) %}{% endcall %}
               </div>

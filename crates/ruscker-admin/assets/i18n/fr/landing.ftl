@@ -557,6 +557,8 @@ spec-form-container-port = Port du conteneur
 spec-help-container-port = Port sur lequel l'app écoute dans le conteneur. Vide = défaut par type (3838 pour Shiny). À définir pour Streamlit (8501), Dash (8050) ou Jupyter (8888).
 spec-form-platform = Plateforme
 spec-help-platform = Plateforme Docker (ex. : linux/amd64) pour exécuter une image d'une autre architecture par émulation. Vide = le démon choisit selon le manifeste.
+spec-form-container-network = Réseau Docker
+spec-help-container-network = Réseau Docker auquel rattacher le conteneur (créé s'il n'existe pas). Vide = le bridge par défaut du démon. Permet d'isoler les conteneurs de cette app sur leur propre réseau.
 spec-form-container-lifetime = Durée de vie du conteneur (min)
 spec-help-container-lifetime = Limite souple en minutes avant recyclage du conteneur. Vide = pas de limite souple.
 spec-form-stop-on-logout = Arrêter à la déconnexion

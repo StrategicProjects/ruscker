@@ -557,6 +557,8 @@ spec-form-container-port = Container port
 spec-help-container-port = Port the app listens on inside the container. Blank = per-kind default (3838 for Shiny). Set it for Streamlit (8501), Dash (8050) or Jupyter (8888).
 spec-form-platform = Platform
 spec-help-platform = Docker platform (e.g. linux/amd64) to run a cross-arch image under emulation. Blank = the daemon picks per the manifest.
+spec-form-container-network = Docker network
+spec-help-container-network = Docker network to attach the container to (created if missing). Blank = the daemon's default bridge. Use it to isolate this app's containers on their own network.
 spec-form-container-lifetime = Container lifetime (min)
 spec-help-container-lifetime = Soft cap in minutes before the container is recycled. Blank = no soft cap.
 spec-form-stop-on-logout = Stop on logout

@@ -48,6 +48,7 @@ pub fn routes() -> Router<AppState> {
         // only follows the resulting progress stream (#720 audit P2).
         .route("/admin/specs/image-pull", post(image_pull_start))
         .route("/admin/specs/image-pull/events", get(image_pull_events))
+        .route("/admin/specs/{id}/repull", post(image_repull))
         .route("/admin/specs/{id}", post(update))
         .route("/admin/specs/{id}/delete", post(delete))
 }
@@ -147,8 +148,6 @@ async fn image_pull_start(
     State(state): State<AppState>,
     Form(q): Form<ImagePullQuery>,
 ) -> Response {
-    use futures_util::StreamExt;
-
     let image = q.image.trim().to_string();
     if image.is_empty() || image.contains("${") {
         return (
@@ -157,15 +156,36 @@ async fn image_pull_start(
         )
             .into_response();
     }
-    let Some(backend) = state.backend.clone() else {
-        return (StatusCode::SERVICE_UNAVAILABLE, "Docker backend not connected").into_response();
-    };
     let creds = resolve_pull_creds(&state, &q.credential).await;
-    let mut line_stream = match backend.pull_image(&image, creds.as_ref(), None).await {
+    match start_pull(&state, &image, creds).await {
+        Ok(token) => Json(serde_json::json!({ "job": token })).into_response(),
+        Err(resp) => resp,
+    }
+}
+
+/// Kick off a daemon image pull, park its progress stream under a
+/// one-shot token, and return the token (the follower then opens the
+/// `…/image-pull/events?job=<token>` SSE). Shared by the spec form's
+/// "Update image" and the Apps-list per-row re-pull (#855). On a
+/// start-time failure (backend down, immediate pull error) returns the
+/// error `Response` to bubble up unchanged.
+async fn start_pull(
+    state: &AppState,
+    image: &str,
+    creds: Option<ruscker_core::RegistryCredentials>,
+) -> Result<String, Response> {
+    use futures_util::StreamExt;
+
+    let Some(backend) = state.backend.clone() else {
+        return Err(
+            (StatusCode::SERVICE_UNAVAILABLE, "Docker backend not connected").into_response(),
+        );
+    };
+    let mut line_stream = match backend.pull_image(image, creds.as_ref(), None).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(image, error = ?e, "image pull start failed");
-            return (StatusCode::BAD_GATEWAY, format!("pull failed: {e}")).into_response();
+            return Err((StatusCode::BAD_GATEWAY, format!("pull failed: {e}")).into_response());
         }
     };
     // Drive the pull on a task, forwarding lines into the channel; the
@@ -194,7 +214,56 @@ async fn image_pull_start(
         PULL_JOBS.remove(&sweep);
     });
     tracing::info!(image, job = %token, "image pull started; awaiting follower");
-    Json(serde_json::json!({ "job": token })).into_response()
+    Ok(token)
+}
+
+/// `POST /admin/specs/{id}/repull` — force a re-pull of a DB spec's
+/// image from the Apps list (#855). Resolves the spec's image +
+/// registry creds (same path as spawn), starts the pull, and returns
+/// `{ "job": "<token>" }` for the row to follow over SSE. Editor-gated;
+/// inherits the chrome CSRF guard.
+async fn image_repull(
+    _: RequireEditor,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "database not attached").into_response();
+    };
+    let spec = match crate::db::specs::fetch_one(db, &id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, "no such app").into_response(),
+        Err(e) => {
+            tracing::error!(id, error = ?e, "repull: load spec failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let Some(image) = spec
+        .container_image
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    else {
+        return (
+            StatusCode::BAD_REQUEST,
+            "this app has no container image to update",
+        )
+            .into_response();
+    };
+    if image.contains("${") {
+        return (StatusCode::BAD_REQUEST, "image name still contains ${…}").into_response();
+    }
+    let creds = match crate::routes::proxy::resolve_creds(&state, &spec).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!(id, error = ?e, "repull: credential resolve failed");
+            return (StatusCode::BAD_GATEWAY, format!("credential error: {e}")).into_response();
+        }
+    };
+    match start_pull(&state, image, creds).await {
+        Ok(token) => Json(serde_json::json!({ "job": token })).into_response(),
+        Err(resp) => resp,
+    }
 }
 
 #[derive(Deserialize)]

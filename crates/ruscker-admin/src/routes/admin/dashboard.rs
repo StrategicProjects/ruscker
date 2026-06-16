@@ -353,6 +353,11 @@ async fn index(
     loc: Locale,
     theme: Theme,
 ) -> Response {
+    // A Viewer has no panel access (#857) — it logs in for portal card
+    // visibility, not the dashboard. Send it back to the landing.
+    if !session.role.can_access_section("dashboard") {
+        return Redirect::to("/").into_response();
+    }
     let snap = build_snapshot(&state, loc).await;
     let snapshot_json = json_for_html_script(&snap);
     let page = DashboardPage {
@@ -551,10 +556,15 @@ fn sse_no_buffer_headers() -> [(axum::http::HeaderName, &'static str); 2] {
 }
 
 async fn events(
-    _: AdminSession,
+    session: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
-) -> impl IntoResponse {
+) -> Response {
+    // Same gate as the dashboard page (#857): a Viewer never gets the
+    // live metrics feed.
+    if !session.role.can_access_section("dashboard") {
+        return (StatusCode::FORBIDDEN, "forbidden").into_response();
+    }
     use async_stream::stream;
     let stream = stream! {
         // Emit the first snapshot immediately so the client
@@ -577,7 +587,7 @@ async fn events(
         }
     };
     let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL));
-    (sse_no_buffer_headers(), sse)
+    (sse_no_buffer_headers(), sse).into_response()
 }
 
 /// Per-replica logs page. Fetches the last [`LOGS_TAIL`] lines

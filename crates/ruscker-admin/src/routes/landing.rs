@@ -95,6 +95,11 @@ struct LandingPage<'a> {
     /// Display name of the signed-in viewer (username, or empty for a
     /// break-glass token session). Shown next to the panel link.
     viewer_name: String,
+    /// Whether the signed-in viewer may reach the admin panel (Editor+).
+    /// A **Viewer** logs in only to unlock its group's cards (#155/#857),
+    /// so the header shows just change-password + sign-out — no "Panel"
+    /// link.
+    can_panel: bool,
     /// Whether to render the anonymous "Sign in" entrance (#156). A
     /// deploy policy from `landing-customization.show-admin-link`
     /// (default true); false hides the admin entrance on public portals.
@@ -537,6 +542,7 @@ async fn index(
         blocks_bottom,
         signed_in: session.is_some(),
         viewer_name: username.unwrap_or_default(),
+        can_panel: session.as_ref().map(|s| s.role.can_manage()).unwrap_or(false),
         // Deploy policy from YAML config (not the DB editor): whether
         // anonymous visitors see the "Sign in" entrance (#156).
         show_admin_link: state

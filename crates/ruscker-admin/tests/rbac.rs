@@ -81,16 +81,18 @@ async fn send(state: AppState, method: &str, uri: &str, cookie: Option<&str>) ->
     app.oneshot(req).await.unwrap().status()
 }
 
-// ── Viewer: dashboard only ──────────────────────────────────────────
+// ── Viewer: no panel — portal authenticated-user role (#857) ─────────
 
 #[tokio::test]
-async fn viewer_can_view_dashboard() {
+async fn viewer_redirected_from_dashboard_to_portal() {
     let st = state();
     let c = cookie_for(&st, Role::Viewer).await;
-    // No DB needed for the dashboard render, so this is a clean 200.
+    // A Viewer is NOT a panel operator (#857): it signs in to unlock its
+    // group's cards on the portal, so the dashboard sends it back to the
+    // landing (303) instead of rendering.
     assert_eq!(
         send(st, "GET", "/admin/dashboard", Some(&c)).await,
-        StatusCode::OK
+        StatusCode::SEE_OTHER
     );
 }
 

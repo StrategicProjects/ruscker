@@ -25,6 +25,8 @@
     <i class="ti ti-check" aria-hidden="true"></i>
     {% if flash == "created" %}{{ self.t("admin-users-flash-created") }}
     {% else if flash == "saved" %}{{ self.t("admin-users-flash-saved") }}
+    {% else if flash == "imported" %}
+      {% if let Some((n, sk)) = import_summary %}{{ self.t("admin-users-import-done-prefix") }} {{ n }} · {{ self.t("admin-users-import-skipped-prefix") }} {{ sk }}{% endif %}
     {% else %}{{ self.t("admin-users-flash-deleted") }}{% endif %}
   </div>
 {% endif %}
@@ -87,6 +89,16 @@
     </button>
   </div>
   <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-initial-password-hint") }} · {{ self.t("admin-users-groups-hint") }}</p>
+</form>
+
+{# ── Bulk import from CSV (#862) ────────────────────────────────── #}
+<form method="post" action="{{ base }}/admin/users/import" enctype="multipart/form-data"
+      style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+  <input type="file" name="file" accept=".csv,text/csv" required>
+  <button type="submit" class="admin-nav-link" style="width:auto">
+    <i class="ti ti-file-upload" aria-hidden="true"></i> {{ self.t("admin-users-import") }}
+  </button>
+  <span class="text-xs text-[color:var(--text-faint)]">{{ self.t("admin-users-import-help") }}</span>
 </form>
 
 {# ── Existing users ────────────────────────────────────────────── #}

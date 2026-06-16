@@ -31,6 +31,11 @@ pub struct UserRow {
     pub groups: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub created_by: Option<String>,
+    /// Optional profile fields (#856): department, e-mail, mobile.
+    /// `None`/blank when unset.
+    pub setor: Option<String>,
+    pub email: Option<String>,
+    pub celular: Option<String>,
 }
 
 /// Normalize a username for storage/lookup: trimmed + lowercased.
@@ -130,6 +135,7 @@ pub async fn any_user_exists(db: &ConfigDb) -> Result<bool> {
 /// Map a `(username, role, must_change, created_at, created_by)` tuple
 /// to a [`UserRow`]. An unknown role string falls back to Viewer (the
 /// least-privileged) so a hand-tampered DB can't escalate.
+#[allow(clippy::too_many_arguments)]
 fn row_from(
     id: String,
     username: String,
@@ -138,7 +144,13 @@ fn row_from(
     groups: String,
     created_at: DateTime<Utc>,
     created_by: Option<String>,
+    setor: Option<String>,
+    email: Option<String>,
+    celular: Option<String>,
 ) -> UserRow {
+    // Treat a stored empty string the same as NULL (the form may submit
+    // blanks); keep only non-empty trimmed values.
+    let clean = |s: Option<String>| s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
     UserRow {
         id,
         username,
@@ -149,13 +161,27 @@ fn row_from(
         groups: parse_groups(&groups),
         created_at,
         created_by,
+        setor: clean(setor),
+        email: clean(email),
+        celular: clean(celular),
     }
 }
 
 /// List all users (no hashes), most-recent first.
 pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
-    type Row = (String, String, String, bool, String, DateTime<Utc>, Option<String>);
-    let sql = "SELECT id, username, role, must_change_password, groups, created_at, created_by
+    type Row = (
+        String,
+        String,
+        String,
+        bool,
+        String,
+        DateTime<Utc>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let sql = "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
            FROM users
           ORDER BY created_at DESC, username ASC";
     let rows: Vec<Row> = match db {
@@ -165,24 +191,35 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
     .context("list users")?;
     Ok(rows
         .into_iter()
-        .map(|(id, u, r, m, g, c, by)| row_from(id, u, r, m, g, c, by))
+        .map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce))
         .collect())
 }
 
 /// Fetch one user by (normalized) username, without the hash.
 pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
-    type Row = (String, String, String, bool, String, DateTime<Utc>, Option<String>);
+    type Row = (
+        String,
+        String,
+        String,
+        bool,
+        String,
+        DateTime<Utc>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -190,7 +227,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
         .await,
     }
     .with_context(|| format!("fetch user {username}"))?;
-    Ok(row.map(|(id, u, r, m, g, c, by)| row_from(id, u, r, m, g, c, by)))
+    Ok(row.map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce)))
 }
 
 /// Verify a login. Returns the [`UserRow`] on a correct password,
@@ -211,19 +248,22 @@ pub async fn verify_login(
         String,
         DateTime<Utc>,
         Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
         String,
     );
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -246,8 +286,8 @@ pub async fn verify_login(
         .await
         .context("password verify task")?;
     match row {
-        Some((id, u, r, m, g, c, by, _)) if found && verified => {
-            Ok(Some(row_from(id, u, r, m, g, c, by)))
+        Some((id, u, r, m, g, c, by, se, em, ce, _)) if found && verified => {
+            Ok(Some(row_from(id, u, r, m, g, c, by, se, em, ce)))
         }
         _ => Ok(None),
     }
@@ -533,6 +573,93 @@ pub async fn set_groups(
     Ok(())
 }
 
+/// Replace a user's optional profile fields (#856): setor, e-mail,
+/// celular. A blank value is stored as `NULL` (see [`row_from`]'s clean).
+/// Records the change in the audit log.
+pub async fn update_profile(
+    db: &ConfigDb,
+    username: &str,
+    setor: Option<&str>,
+    email: Option<&str>,
+    celular: Option<&str>,
+    actor: Option<&str>,
+) -> Result<()> {
+    // Normalize "" → NULL so a cleared field round-trips as absent.
+    fn norm(s: Option<&str>) -> Option<&str> {
+        s.map(str::trim).filter(|v| !v.is_empty())
+    }
+    let (setor, email, celular) = (norm(setor), norm(email), norm(celular));
+    let username = normalize_username(username);
+    let now = Utc::now();
+    let target = format!("user:{username}");
+    let diff = serde_json::json!({
+        "setor": setor, "email": email, "celular": celular,
+    })
+    .to_string();
+
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin profile tx")?;
+            let res = sqlx::query(
+                "UPDATE users SET setor = ?, email = ?, celular = ?, updated_at = ? WHERE username = ?",
+            )
+            .bind(setor)
+            .bind(email)
+            .bind(celular)
+            .bind(now)
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set profile for {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!("user {username} not found");
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'user.profile', ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit profile change")?;
+            tx.commit().await.context("commit profile change")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin profile tx")?;
+            let res = sqlx::query(
+                "UPDATE users SET setor = $1, email = $2, celular = $3, updated_at = $4 WHERE username = $5",
+            )
+            .bind(setor)
+            .bind(email)
+            .bind(celular)
+            .bind(now)
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set profile for {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!("user {username} not found");
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'user.profile', $2, $3, $4)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit profile change")?;
+            tx.commit().await.context("commit profile change")?;
+        }
+    }
+    Ok(())
+}
+
 /// Clear the first-login password-change prompt once it's been
 /// answered (whether or not the user actually changed it). No audit —
 /// it's a benign per-user UI flag. `= FALSE` is valid on both backends.
@@ -759,6 +886,45 @@ mod tests {
         assert!(fetch(&p, "carol").await.unwrap().unwrap().groups.is_empty());
         // Unknown user ⇒ error.
         assert!(set_groups(&p, "ghost", &[], Some("a")).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn profile_fields_roundtrip() {
+        let p = pool().await;
+        create(&p, "dora", "pw-dora123", Role::Viewer, false, &[], Some("a"))
+            .await
+            .unwrap();
+        // Absent by default.
+        let u = fetch(&p, "dora").await.unwrap().unwrap();
+        assert_eq!((u.setor, u.email, u.celular), (None, None, None));
+
+        // Set them; blanks/whitespace normalize to None.
+        update_profile(
+            &p,
+            "dora",
+            Some("  GAPE  "),
+            Some("dora@orgao.gov.br"),
+            Some("   "),
+            Some("a"),
+        )
+        .await
+        .unwrap();
+        let u = fetch(&p, "dora").await.unwrap().unwrap();
+        assert_eq!(u.setor.as_deref(), Some("GAPE")); // trimmed
+        assert_eq!(u.email.as_deref(), Some("dora@orgao.gov.br"));
+        assert_eq!(u.celular, None); // whitespace ⇒ NULL
+
+        // Clearing wipes back to None.
+        update_profile(&p, "dora", Some(""), None, None, Some("a"))
+            .await
+            .unwrap();
+        let u = fetch(&p, "dora").await.unwrap().unwrap();
+        assert_eq!((u.setor, u.email, u.celular), (None, None, None));
+
+        // Unknown user ⇒ error.
+        assert!(update_profile(&p, "ghost", Some("x"), None, None, None)
+            .await
+            .is_err());
     }
 
     #[tokio::test]

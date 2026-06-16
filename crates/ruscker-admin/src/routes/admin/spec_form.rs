@@ -680,6 +680,10 @@ impl SpecForm {
             // Advanced field, form is authoritative (pre-filled from the
             // spec in `from_spec`): blank ⇒ None ⇒ daemon default bridge.
             container_network: empty_to_none(&self.container_network),
+            // `labels` (#851) has no form input yet — preserve the base
+            // spec's value so a YAML/import-set label map survives an
+            // admin edit instead of being wiped. UI input is a follow-up.
+            labels: base.and_then(|b| b.labels.clone()),
             container_lifetime: parse_opt(&self.container_lifetime),
             stop_on_logout: checkbox_opt(&self.stop_on_logout),
             container_env: parse_env(&self.container_env),

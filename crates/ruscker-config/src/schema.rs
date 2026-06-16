@@ -899,6 +899,15 @@ pub struct Spec {
     #[serde(rename = "container-network", default)]
     pub container_network: Option<String>,
 
+    /// Extra Docker labels to stamp on the container (ShinyProxy
+    /// `labels`), as a `NAME: value` map. Merged onto the container's
+    /// labels at spawn; Ruscker's own `ruscker.*` labels always win on a
+    /// key collision (the registry / reconcile / disk panel depend on
+    /// them). `None`/empty ⇒ only the internal labels. A `BTreeMap` for a
+    /// deterministic order.
+    #[serde(rename = "labels", default)]
+    pub labels: Option<BTreeMap<String, String>>,
+
     /// Groups allowed to see and reach this app (ShinyProxy
     /// `access-groups`). A spec with neither `access-groups` nor
     /// `access-users` is **open** (visible to everyone, including
@@ -1320,6 +1329,24 @@ impl Spec {
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
+    }
+
+    /// Extra container labels (`labels`) as cleaned `(key, value)`
+    /// pairs — keys trimmed, empty keys dropped. Empty when unset.
+    /// Ruscker's internal `ruscker.*` labels are applied separately by
+    /// the backend and win on a key collision.
+    pub fn effective_labels(&self) -> Vec<(String, String)> {
+        self.labels
+            .as_ref()
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| {
+                        let k = k.trim();
+                        (!k.is_empty()).then(|| (k.to_string(), v.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Effective routing strategy.
@@ -1917,6 +1944,7 @@ proxy:
             container_env: None,
             container_cmd: None,
             container_network: None,
+            labels: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -1966,6 +1994,7 @@ proxy:
             container_env: None,
             container_cmd: None,
             container_network: None,
+            labels: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -2015,6 +2044,7 @@ proxy:
             container_env: None,
             container_cmd: None,
             container_network: None,
+            labels: None,
             access_groups: None,
             access_users: None,
             template_properties: TemplateProperties::default(),
@@ -2085,6 +2115,31 @@ container-cmd:
         // Absent ⇒ None.
         let none = parse_spec("id: a\ncontainer-image: x");
         assert_eq!(none.effective_container_network(), None);
+    }
+
+    #[test]
+    fn parses_labels_map() {
+        let s = parse_spec(
+            "\
+id: a
+container-image: x
+labels:
+  team: data
+  '  ': dropped
+  cost-center: GAPE
+",
+        );
+        // BTreeMap order; blank keys dropped, values kept verbatim.
+        assert_eq!(
+            s.effective_labels(),
+            vec![
+                ("cost-center".to_string(), "GAPE".to_string()),
+                ("team".to_string(), "data".to_string()),
+            ]
+        );
+        // Absent ⇒ empty.
+        let none = parse_spec("id: a\ncontainer-image: x");
+        assert!(none.effective_labels().is_empty());
     }
 
     #[test]

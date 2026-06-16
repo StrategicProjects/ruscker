@@ -1437,6 +1437,10 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<(Replica
     if let Some(net) = spec.effective_container_network() {
         req = req.with_network(net);
     }
+    let labels = spec.effective_labels();
+    if !labels.is_empty() {
+        req = req.with_labels(labels);
+    }
     if let Some(c) = creds {
         req = req.with_creds(c);
     }

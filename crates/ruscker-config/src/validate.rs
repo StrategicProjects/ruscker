@@ -261,7 +261,6 @@ const UNSUPPORTED_SPEC_FIELDS: &[(&str, &str)] = &[
         "minimum-seats-available",
         "pre-warm pool not implemented — use `min-replicas`",
     ),
-    ("labels", "custom container labels are not applied (phase 3.5)"),
     (
         "network-connections",
         "multi-network attach is not implemented — map it to the single \

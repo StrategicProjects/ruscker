@@ -9,6 +9,31 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.34 — 2026-06-17
+
+Admin correctness + performance, from a navigation-focused audit.
+
+- **DB-only apps survive a restart (#907).** A spec created in the admin
+  (not in the YAML) had its running container reconciled after a restart
+  with a seat cap of 0, so it read as permanently full — wrong routing
+  and scaling until it was re-touched. Reconcile now resolves seat caps
+  from the effective catalog (DB + YAML), not the YAML alone. Same root
+  cause fixed for **Duplicate**: duplicating a YAML/config-only app no
+  longer 404s.
+- **Admin tab navigation is lighter.** The effective spec catalog is now
+  cached behind a cheap signature (#902) instead of being rebuilt — and
+  re-deserialized — on every Apps/Disk/Media/Groups/System page load; the
+  Disk panel fetches its Docker/DB inputs concurrently instead of one
+  after another (#904); and the forced-password-change guard no longer
+  does a DB lookup on every admin request (#903). The cache is never
+  stale (any spec write moves the signature) and HA-safe.
+
+> If admin navigation felt slow on an older build, the bigger win is
+> v0.2.31's dashboard-SSE fix (#852) — it stopped a live monitoring tab
+> from holding an HTTP/1.1 connection and stalling other tabs.
+
+---
+
 ## v0.2.33 — 2026-06-17
 
 Admin & portal UX polish, all operator-requested.

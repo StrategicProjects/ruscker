@@ -235,6 +235,14 @@ async fn start_pull(
             return Err((StatusCode::BAD_GATEWAY, format!("pull failed: {e}")).into_response());
         }
     };
+    // Mark the pulled image as Ruscker-managed (#894), so the Disk panel
+    // recognizes it as ours (deletable) even if it never lands on a saved
+    // spec. Best-effort: a provenance write failure must not fail the pull.
+    if let Some(db) = state.db.as_ref() {
+        if let Err(e) = crate::db::ruscker_images::remember(db, &[image.to_string()]).await {
+            tracing::warn!(image, error = ?e, "failed to record pulled image provenance");
+        }
+    }
     // Drive the pull on a task, forwarding lines into the channel; the
     // follower GET drains them. A terminal `Done` lets the follower close.
     // The bounded channel applies backpressure (caps queued memory); the

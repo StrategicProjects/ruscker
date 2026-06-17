@@ -124,17 +124,15 @@
             <td>
               {% if img.in_use() %}
                 <span class="use-badge use-badge--on">{{ self.t("admin-disk-badge-inuse") }}</span>
+              {% else if !img.ruscker_managed %}
+                <span class="use-badge use-badge--off" title="{{ self.t("admin-disk-foreign-hint") }}">{{ self.t("admin-disk-foreign") }}</span>
               {% else %}
                 <span class="use-badge use-badge--off">{{ self.t("admin-disk-unused") }}</span>
               {% endif %}
             </td>
             <td class="tnum" style="text-align:right;font-weight:500">{{ self.human(img.size_bytes) }}</td>
             <td style="text-align:right;white-space:nowrap">
-              {% if img.in_use() %}
-                <span class="text-[color:var(--text-faint)]" title="{{ self.t("admin-disk-in-use-hint") }}">
-                  <i class="ti ti-lock"></i>
-                </span>
-              {% else %}
+              {% if img.removable() %}
                 <form method="post" action="{{ base }}/admin/disk/images/remove" style="display:inline"
                       data-confirm="{{ self.t("admin-disk-remove-image-confirm") }}">
                   <input type="hidden" name="id" value="{{ img.id }}">
@@ -142,6 +140,10 @@
                     <i class="ti ti-trash"></i>
                   </button>
                 </form>
+              {% else %}
+                <span class="text-[color:var(--text-faint)]" title="{% if img.in_use() %}{{ self.t("admin-disk-in-use-hint") }}{% else %}{{ self.t("admin-disk-foreign-hint") }}{% endif %}">
+                  <i class="ti ti-lock"></i>
+                </span>
               {% endif %}
             </td>
           </tr>

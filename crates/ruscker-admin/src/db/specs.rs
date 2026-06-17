@@ -644,6 +644,23 @@ pub(crate) async fn upsert_in_tx(
     let kind = kind_str(spec);
     let state = if spec.template_properties.is_active() { "active" } else { "inactive" };
 
+    // Record this spec's image as Ruscker-managed (#894), in the same tx,
+    // so the Disk panel can later tell our own (deletable) images from a
+    // neighbour's. Idempotent; survives a future delete of this spec.
+    if let Some(img) = spec
+        .container_image
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sqlx::query("INSERT OR IGNORE INTO ruscker_images (image_ref, recorded_at) VALUES (?, ?)")
+            .bind(img)
+            .bind(now)
+            .execute(&mut **tx)
+            .await
+            .with_context(|| format!("record ruscker image for {}", spec.id))?;
+    }
+
     // Check existing
     let existing: Option<(String, i64)> = sqlx::query_as(
         "SELECT config_json, version FROM specs WHERE id = ?",
@@ -747,6 +764,25 @@ pub(crate) async fn upsert_in_tx_pg(
     } else {
         "inactive"
     };
+
+    // Record this spec's image as Ruscker-managed (#894) — see the SQLite
+    // twin. Same tx, idempotent, survives a later delete of this spec.
+    if let Some(img) = spec
+        .container_image
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        sqlx::query(
+            "INSERT INTO ruscker_images (image_ref, recorded_at) VALUES ($1, $2)
+             ON CONFLICT (image_ref) DO NOTHING",
+        )
+        .bind(img)
+        .bind(now)
+        .execute(&mut **tx)
+        .await
+        .with_context(|| format!("record ruscker image for {}", spec.id))?;
+    }
 
     let existing: Option<(String, i64)> =
         sqlx::query_as("SELECT config_json, version FROM specs WHERE id = $1")

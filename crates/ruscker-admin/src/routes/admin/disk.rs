@@ -46,11 +46,23 @@ struct ImageRow {
     used_by_container: bool,
     /// A current spec references it by tag.
     used_by_spec: bool,
+    /// Ruscker has managed this image (a spec referenced it or it was
+    /// pulled here) — provenance from `db::ruscker_images` (#894). A
+    /// `false` here is a neighbour's image (e.g. ShinyProxy's): shown, but
+    /// never offered for removal.
+    ruscker_managed: bool,
 }
 
 impl ImageRow {
     fn in_use(&self) -> bool {
         self.used_by_container || self.used_by_spec
+    }
+
+    /// Safe to offer for removal: not in use **and** a Ruscker image. A
+    /// neighbour's idle image (no Ruscker provenance) is never removable —
+    /// deleting it is irrecoverable on a host that can't re-pull (#894).
+    fn removable(&self) -> bool {
+        !self.in_use() && self.ruscker_managed
     }
 }
 
@@ -218,6 +230,15 @@ async fn index(
     // image as "in use by a spec" so the panel won't offer to remove it.
     let spec_images = spec_image_refs(&state).await;
 
+    // Durable provenance: which images Ruscker has ever managed (#894).
+    // Only these are ever offered for removal — a neighbour's image (e.g.
+    // ShinyProxy's) is shown but never deletable. Missing DB ⇒ empty set ⇒
+    // nothing removable (safe).
+    let ruscker_images = match state.db.as_ref() {
+        Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
+        None => HashSet::new(),
+    };
+
     // The image refs **every** container on the host is built from —
     // not just Ruscker-managed ones (#871) — so an image backing a
     // non-Ruscker container (e.g. ShinyProxy) is never flagged "unused".
@@ -239,15 +260,12 @@ async fn index(
     let images_total_bytes: i64 = images.iter().map(|i| i.size_bytes).sum();
     let images: Vec<ImageRow> = images
         .into_iter()
-        .map(|i| image_row(i, &spec_images, container_images.as_ref()))
+        .map(|i| image_row(i, &spec_images, container_images.as_ref(), &ruscker_images))
         .collect();
-    // When usage is unknown every row is in-use, so this is already 0;
-    // being explicit keeps the prune button hidden and the intent clear.
-    let unused_images_count = if usage_unknown {
-        0
-    } else {
-        images.iter().filter(|r| !r.in_use()).count()
-    };
+    // Count what the "remove all unused" button would actually reclaim:
+    // Ruscker images, not in use. (When usage is unknown nothing is
+    // removable — `removable()` is already false — so this is 0.)
+    let unused_images_count = images.iter().filter(|r| r.removable()).count();
 
     // Host disk usage for the hero. statvfs the filesystem holding the
     // uploaded-images dir when known, else the root — the host disk on a
@@ -350,18 +368,29 @@ fn image_used_by_container(i: &ImageInfo, container_images: Option<&HashSet<Stri
     }
 }
 
-/// An image is safe to reclaim when no managed container is built from it
-/// **and** no current spec references it by tag. Same rule the per-row
-/// remove button uses. (Uses the real container set, not the unreliable
+/// True when Ruscker has managed this image — a spec referenced it or it
+/// was pulled here (`ruscker_images` provenance, #894). Matched by tag;
+/// an untagged/dangling image has no ref to match (the host-safe "Reclaim
+/// space" handles those separately).
+fn image_is_ruscker(i: &ImageInfo, ruscker_images: &HashSet<String>) -> bool {
+    i.tags.iter().any(|t| ruscker_images.contains(t))
+}
+
+/// An image is safe to **remove** when no container is built from it, no
+/// current spec references it by tag, **and** it's a Ruscker image (#894 —
+/// never a neighbour's idle cache). Same rule the per-row button and the
+/// bulk prune use. (Uses the real container set, not the unreliable
 /// `ImageInfo.containers` count — #585.) A `None` container set (listing
-/// failed) makes this `false` for every image — nothing is prunable.
-fn image_unused(
+/// failed) makes this `false` for every image — nothing is removable.
+fn image_removable(
     i: &ImageInfo,
     spec_images: &HashSet<String>,
     container_images: Option<&HashSet<String>>,
+    ruscker_images: &HashSet<String>,
 ) -> bool {
     !image_used_by_container(i, container_images)
         && !i.tags.iter().any(|t| spec_images.contains(t))
+        && image_is_ruscker(i, ruscker_images)
 }
 
 /// Build a display row, resolving the primary tag and the in-use flags.
@@ -369,9 +398,13 @@ fn image_row(
     i: ImageInfo,
     spec_images: &HashSet<String>,
     container_images: Option<&HashSet<String>>,
+    ruscker_images: &HashSet<String>,
 ) -> ImageRow {
     let used_by_spec = i.tags.iter().any(|t| spec_images.contains(t));
     let used_by_container = image_used_by_container(&i, container_images);
+    // A current spec referencing it is itself Ruscker provenance, even if
+    // the durable record somehow missed it.
+    let ruscker_managed = used_by_spec || image_is_ruscker(&i, ruscker_images);
     let name = i
         .tags
         .first()
@@ -391,6 +424,7 @@ fn image_row(
         size_bytes: i.size_bytes,
         used_by_container,
         used_by_spec,
+        ruscker_managed,
         id: i.id,
     }
 }
@@ -460,6 +494,37 @@ async fn remove_image(
     let Some(backend) = state.backend.as_ref() else {
         return redirect("error");
     };
+
+    // The button only renders for a removable image, but a crafted POST
+    // could send any id — so enforce the same rule server-side (#894):
+    // refuse anything not removable (in use, or no Ruscker provenance).
+    // Fail closed if the host inventory can't be read.
+    let images = match backend.list_images().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: list images for remove failed");
+            return redirect("error");
+        }
+    };
+    let container_images: Option<HashSet<String>> = backend
+        .all_container_image_refs()
+        .await
+        .ok()
+        .map(|v| v.into_iter().collect());
+    let spec_images = spec_image_refs(&state).await;
+    let ruscker_images = match state.db.as_ref() {
+        Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
+        None => HashSet::new(),
+    };
+    let ok = images.iter().any(|i| {
+        i.id == form.id
+            && image_removable(i, &spec_images, container_images.as_ref(), &ruscker_images)
+    });
+    if !ok {
+        tracing::warn!(id = %form.id, "disk: refusing to remove an image that is in use, foreign, or unknown");
+        return redirect("error");
+    }
+
     match backend.remove_image(&form.id).await {
         Ok(()) => redirect("removed"),
         Err(e) => {
@@ -471,20 +536,17 @@ async fn remove_image(
     }
 }
 
-/// Remove every **unused** image in one click (#463) — no container is
-/// built from it (on ANY host) **and** no current spec references it.
-/// Never `--force`s, and never runs a host-wide `docker image prune`: it
-/// removes only the exact subset the panel flags as unused.
+/// Remove every **removable** image in one click (#463) — a Ruscker image
+/// (#894 provenance) that no container is built from (on ANY host) and no
+/// current spec references. Never `--force`s, and never runs a host-wide
+/// `docker image prune`: it removes only the exact subset the panel flags.
 ///
-/// Caveat (#892 follow-up): "unused" is about *current use*, not
-/// *provenance*. An image a side-by-side ShinyProxy pulled but isn't
-/// running a container from right now reads as unused and WILL be removed
-/// — which hurts on a host that can't re-pull (offline / CDN-blocked).
-/// Ruscker doesn't yet track which images it pulled, so it can't tell its
-/// own orphans from a neighbour's; tracked as an enhancement. The
-/// container cross-reference (#871) still protects anything actually
-/// running, and the fail-closed in-use signal (#889/multi-host) prevents
-/// deleting an image whose usage can't be determined.
+/// Host-safe by construction: an image with no Ruscker provenance (a
+/// side-by-side ShinyProxy's, say) is never a prune target even when idle,
+/// so it can't be deleted on a host that can't re-pull (offline /
+/// CDN-blocked). The container cross-reference (#871) protects anything
+/// running, and the fail-closed in-use signal (#889/#896) blocks deleting
+/// an image whose usage can't be determined.
 async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Response {
     let Some(backend) = state.backend.as_ref() else {
         return redirect("error");
@@ -497,6 +559,10 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
         }
     };
     let spec_images = spec_image_refs(&state).await;
+    let ruscker_images = match state.db.as_ref() {
+        Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
+        None => HashSet::new(),
+    };
     // ALL host containers (#871) — never prune an image a non-Ruscker
     // container is built from. If the listing FAILS we can't tell what's
     // in use, so abort the whole prune (fail closed) rather than treat
@@ -510,7 +576,7 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
     };
     let unused: Vec<String> = images
         .into_iter()
-        .filter(|i| image_unused(i, &spec_images, Some(&container_images)))
+        .filter(|i| image_removable(i, &spec_images, Some(&container_images), &ruscker_images))
         .map(|i| i.id)
         .collect();
     if unused.is_empty() {
@@ -566,45 +632,67 @@ mod tests {
         }
     }
 
-    /// #463/#585: bulk prune must reclaim only images no container is built
-    /// from and no spec references — using the real container set, not the
-    /// unreliable `ImageInfo.containers` count.
+    /// #463/#585/#894: an image is removable only when no container is
+    /// built from it, no current spec references it, AND it's a Ruscker
+    /// image — never a neighbour's idle cache.
     #[test]
-    fn image_unused_only_when_no_container_and_no_spec() {
+    fn image_removable_requires_no_use_no_spec_and_ruscker_provenance() {
         let catalog: HashSet<String> = ["nginx:alpine".to_string()].into_iter().collect();
         // A live container built from "other:1".
         let in_use: HashSet<String> = ["other:1".to_string()].into_iter().collect();
         let none: HashSet<String> = HashSet::new();
+        // Everything Ruscker has managed (provenance record).
+        let ruscker: HashSet<String> = ["nginx:alpine", "other:1", "leftover:1", "x:1"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
 
-        // Referenced by a spec → in use, never pruned.
-        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog, Some(&none)));
+        // Referenced by a current spec → in use, never removable.
+        assert!(!image_removable(&img(&["nginx:alpine"], 0), &catalog, Some(&none), &ruscker));
         // A live container is built from it → in use (regardless of the
-        // bogus `containers` count, which is -1 in practice).
-        assert!(!image_unused(&img(&["other:1"], -1), &catalog, Some(&in_use)));
-        // No container, not in the catalog → reclaimable.
-        assert!(image_unused(&img(&["leftover:1"], 0), &catalog, Some(&none)));
-        // Dangling (untagged), no container → reclaimable.
-        assert!(image_unused(&img(&[], 0), &catalog, Some(&none)));
-        // `containers == -1` (uncomputed) but nothing actually uses it →
-        // reclaimable; the previous code's reliance on `containers <= 0`
-        // would have agreed here, but it WRONGLY also flagged in-use
-        // images whose count came back -1 (#585) — now caught by `in_use`.
-        assert!(image_unused(&img(&["x:1"], -1), &catalog, Some(&none)));
-        // Matched by image id, not tag → in use.
+        // bogus `containers` count, -1 in practice).
+        assert!(!image_removable(&img(&["other:1"], -1), &catalog, Some(&in_use), &ruscker));
+        // No container, not in the catalog, and Ruscker's → removable.
+        assert!(image_removable(&img(&["leftover:1"], 0), &catalog, Some(&none), &ruscker));
+        assert!(image_removable(&img(&["x:1"], -1), &catalog, Some(&none), &ruscker));
+
+        // #894: a NON-Ruscker image (a neighbour's, e.g. ShinyProxy's) is
+        // never removable even when idle.
+        let foreign: HashSet<String> = HashSet::new();
+        assert!(!image_removable(&img(&["sp/app:1"], 0), &catalog, Some(&none), &foreign));
+
+        // Dangling/untagged → no ref to prove provenance → not removable
+        // here (the host-safe "Reclaim space" handles dangling images).
+        assert!(!image_removable(&img(&[], 0), &catalog, Some(&none), &ruscker));
+
+        // Matched by image id (a container) → in use.
         let by_id: HashSet<String> = ["sha256:abc".to_string()].into_iter().collect();
-        assert!(!image_unused(&img(&["untagged:1"], -1), &catalog, Some(&by_id)));
+        assert!(!image_removable(&img(&["untagged:1"], -1), &catalog, Some(&by_id), &ruscker));
     }
 
-    // #871 follow-up: a FAILED container listing (None) must fail closed —
-    // every image reads as in-use, so nothing is ever offered for removal
-    // or prune. Otherwise a transient Docker error could delete a still-in-
-    // use image (irrecoverable on a host that can't re-pull).
+    // #871/#889 follow-up: a FAILED container listing (None) must fail
+    // closed — nothing is removable, even a Ruscker image. Otherwise a
+    // transient Docker error could delete a still-in-use image
+    // (irrecoverable on a host that can't re-pull).
     #[test]
-    fn unknown_container_set_makes_every_image_in_use() {
+    fn unknown_container_set_blocks_all_removal() {
         let catalog: HashSet<String> = HashSet::new();
-        // Even an image no spec references is in-use when usage is unknown.
+        let ruscker: HashSet<String> = ["anything:1".to_string()].into_iter().collect();
         assert!(image_used_by_container(&img(&["anything:1"], 0), None));
-        assert!(!image_unused(&img(&["anything:1"], 0), &catalog, None));
-        assert!(!image_unused(&img(&[], 0), &catalog, None));
+        assert!(!image_removable(&img(&["anything:1"], 0), &catalog, None, &ruscker));
+    }
+
+    // #894: image_row sets ruscker_managed + removable() from provenance.
+    #[test]
+    fn image_row_marks_provenance_and_removability() {
+        let catalog: HashSet<String> = HashSet::new();
+        let none: HashSet<String> = HashSet::new();
+        let ruscker: HashSet<String> = ["mine:1".to_string()].into_iter().collect();
+
+        let mine = image_row(img(&["mine:1"], 0), &catalog, Some(&none), &ruscker);
+        assert!(mine.ruscker_managed && mine.removable());
+
+        let foreign = image_row(img(&["sp/app:1"], 0), &catalog, Some(&none), &ruscker);
+        assert!(!foreign.ruscker_managed && !foreign.removable());
     }
 }

@@ -185,8 +185,11 @@ async fn render_index(
     // can warn before deleting one that's in use (#433): each spec's logo +
     // cover, and the landing header/footer logos.
     let mut refs = String::new();
-    if let Ok(specs) = db::specs::list_all(pool).await {
-        for s in &specs {
+    {
+        // #902: reuse the cached effective catalog instead of a fresh
+        // full-deserialize just to scrape logo/cover URLs.
+        let specs = crate::catalog::effective_specs_cached(state).await;
+        for s in specs.iter() {
             for key in ["logo", "cover"] {
                 if let Some(v) = s.template_properties.0.get(key).and_then(|v| v.as_str()) {
                     refs.push_str(v);

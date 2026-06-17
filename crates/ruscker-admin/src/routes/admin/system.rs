@@ -75,7 +75,7 @@ async fn index(
         Some(crate::db::ConfigDb::Sqlite(_)) => "sqlite",
         Some(crate::db::ConfigDb::Postgres(_)) => "postgres",
     };
-    let spec_count = crate::catalog::effective_specs(state.db.as_ref(), &state.config)
+    let spec_count = crate::catalog::effective_specs_cached(&state)
         .await
         .len();
     let replica_count = state.replicas.read().await.all().count();

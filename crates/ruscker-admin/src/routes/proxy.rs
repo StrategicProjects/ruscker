@@ -2204,6 +2204,7 @@ mod tests {
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: StdArc::new(dashmap::DashMap::new()),
+            catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

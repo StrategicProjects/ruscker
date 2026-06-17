@@ -125,8 +125,8 @@ async fn index(
     all_users.sort();
 
     // Specs contribute apps (by `access-groups`).
-    let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
-    for s in &specs {
+    let specs = crate::catalog::effective_specs_cached(&state).await;
+    for s in specs.iter() {
         if let Some(groups) = s.access_groups.as_ref() {
             let name = s.display_name.clone().unwrap_or_else(|| s.id.clone());
             for g in groups {

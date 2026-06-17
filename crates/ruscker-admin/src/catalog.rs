@@ -11,10 +11,17 @@
 //! `proxy::find_spec`'s per-id rule for the whole catalog.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use ruscker_config::{Config, Spec};
 
 use crate::db::{self, ConfigDb};
+use crate::AppState;
+
+/// Shared, signature-validated cache of the effective spec catalog for the
+/// admin pages (#902). Lives on [`AppState`]; see [`effective_specs_cached`].
+pub type CatalogCache =
+    Arc<tokio::sync::RwLock<Option<(db::specs::CatalogSignature, Arc<Vec<Spec>>)>>>;
 
 /// Every spec the runtime should act on.
 ///
@@ -51,6 +58,35 @@ pub(crate) async fn effective_specs(db: Option<&ConfigDb>, config: &Config) -> V
             config.proxy.specs.clone()
         }
     }
+}
+
+/// [`effective_specs`] with a signature-validated cache for the admin
+/// pages (#902). Reads the cheap [`db::specs::catalog_signature`]; on a
+/// match against `state.catalog_cache` it returns the cached
+/// `Arc<Vec<Spec>>` and skips the full `list_all` + per-spec
+/// `config_json` deserialize. Any catalog write moves the signature, so
+/// the cache is never stale (and HA-safe — the signature reflects writes
+/// from any node). With no DB, or if the signature query fails, it falls
+/// back to building uncached (never serving stale data).
+pub(crate) async fn effective_specs_cached(state: &AppState) -> Arc<Vec<Spec>> {
+    let Some(db) = state.db.as_ref() else {
+        return Arc::new(effective_specs(None, &state.config).await);
+    };
+    let sig = match db::specs::catalog_signature(db).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = ?e, "catalog signature failed; bypassing cache");
+            return Arc::new(effective_specs(Some(db), &state.config).await);
+        }
+    };
+    if let Some((cached_sig, specs)) = state.catalog_cache.read().await.as_ref() {
+        if *cached_sig == sig {
+            return specs.clone();
+        }
+    }
+    let specs = Arc::new(effective_specs(Some(db), &state.config).await);
+    *state.catalog_cache.write().await = Some((sig, specs.clone()));
+    specs
 }
 
 #[cfg(test)]
@@ -95,5 +131,34 @@ mod tests {
         // DB shadows YAML on the collision.
         let shared = specs.iter().find(|s| s.id == "shared").unwrap();
         assert_eq!(shared.display_name.as_deref(), Some("from-db"));
+    }
+
+    // #902: the catalog signature must move on every write (insert /
+    // update / delete) so the cache it guards is never stale. Also pins
+    // that the dual-dialect aggregate query decodes (count + Σversion +
+    // max updated_at).
+    #[tokio::test]
+    async fn catalog_signature_moves_on_every_write() {
+        let cdb = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let empty = db::specs::catalog_signature(&cdb).await.unwrap();
+        assert_eq!(empty.0, 0, "no specs yet");
+
+        let a: Spec = serde_yaml_ng::from_str("id: a\ncontainer-image: nginx").unwrap();
+        db::specs::upsert_one(&cdb, &a, None).await.unwrap();
+        let after_insert = db::specs::catalog_signature(&cdb).await.unwrap();
+        assert_ne!(after_insert, empty, "insert moved the signature");
+
+        // Update (version bumps) → signature changes.
+        let a2: Spec =
+            serde_yaml_ng::from_str("id: a\ncontainer-image: nginx\ndisplay-name: edited").unwrap();
+        db::specs::upsert_one(&cdb, &a2, None).await.unwrap();
+        let after_update = db::specs::catalog_signature(&cdb).await.unwrap();
+        assert_ne!(after_update, after_insert, "update moved the signature");
+
+        // Delete → signature changes.
+        db::specs::delete_one(&cdb, "a", None).await.unwrap();
+        let after_delete = db::specs::catalog_signature(&cdb).await.unwrap();
+        assert_ne!(after_delete, after_update, "delete moved the signature");
+        assert_eq!(after_delete.0, 0, "back to empty");
     }
 }

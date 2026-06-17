@@ -975,6 +975,23 @@ fn format_warning(w: &Warning) -> String {
         Warning::IgnoredCompatField { field } => {
             format!("`{field}` is set but has no effect in Ruscker — the configured behaviour is NOT applied")
         }
+        Warning::InvalidLabelKey { spec_id, key } => {
+            format!(
+                "spec {spec_id} has an invalid label key `{key}` \
+                 (Docker keys allow only letters, digits, `.`, `_`, `-`) — the container create may be rejected at spawn"
+            )
+        }
+        Warning::ReservedLabelKey { spec_id, key } => {
+            format!(
+                "spec {spec_id} sets the reserved label `{key}` — Ruscker stamps `ruscker.*` itself and overrides it; rename the label"
+            )
+        }
+        Warning::InvalidContainerNetwork { spec_id, value } => {
+            format!(
+                "spec {spec_id} has an invalid container-network `{value}` \
+                 (must start alphanumeric, then letters/digits/`_`/`.`/`-`) — the container create will fail at spawn"
+            )
+        }
     }
 }
 

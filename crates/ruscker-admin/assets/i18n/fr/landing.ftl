@@ -568,6 +568,7 @@ spec-form-inject-base-href = Réécrire le HTML de l'app pour le sous-chemin
 spec-form-inject-base-href-help = Activé par défaut. Ruscker réécrit <base href> et les URL relatives à la racine pour qu'une app qui se croit à la racine du serveur fonctionne sous son sous-chemin /app/. Désactivez uniquement si l'app lit X-Forwarded-Prefix et construit ses propres chemins.
 spec-help-inject-base-href = Ruscker transmet toujours X-Forwarded-Prefix / X-Script-Name (et X-Forwarded-Proto/-Host). Des frameworks comme FastAPI (root_path), Dash et Streamlit peuvent s'auto-router avec — la réécriture HTML devient alors redondante.
 spec-form-error-volume = Chaque volume doit être /hôte:/conteneur (optionnel :ro).
+spec-form-error-network = Nom de réseau Docker invalide (doit commencer par une lettre ou un chiffre, puis lettres/chiffres/_/./-).
 spec-form-error-env = Chaque variable d'environnement doit être NOM=valeur, avec un NOM valide (lettres, chiffres, _ ; commençant par une lettre ou _). Corrigez ou supprimez la ligne invalide.
 admin-nav-logs = Journaux
 admin-proclog-title = Journaux

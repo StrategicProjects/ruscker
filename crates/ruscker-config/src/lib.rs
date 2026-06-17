@@ -50,7 +50,10 @@ pub use schema::{
     LandingCustomization, LandingLogo, Logging, Placement, Proxy, RatePolicy, RoutingStrategy,
     Server, Spec, SpecKind, SpecKindOverride, TemplateProperties, ThemeColors, ThemePalette,
 };
-pub use validate::{is_valid_volume_bind, CompatWarning, ValidationReport, Warning};
+pub use validate::{
+    is_reserved_label_key, is_valid_label_key, is_valid_network_name, is_valid_volume_bind,
+    CompatWarning, ValidationReport, Warning,
+};
 
 use std::path::Path;
 

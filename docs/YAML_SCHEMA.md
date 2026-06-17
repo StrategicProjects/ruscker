@@ -709,6 +709,9 @@ effect, so treat warnings in production logs as action items.
 | invalid scale threshold | `scale-up`/`scale-down` thresholds inverted or out of `0..1` |
 | container fields without image | `seats-per-container` etc. on a spec with no image |
 | invalid rate-limit / max-body-size / cpu / memory / volume | The value doesn't parse, so the intended cap or mount is **not enforced** |
+| invalid label key | A `labels` key uses characters outside `[A-Za-z0-9._-]` — Docker may reject the container create at spawn |
+| reserved label key | A `labels` key in Ruscker's `ruscker.*` namespace — the backend stamps those itself and overrides the value; rename it |
+| invalid container-network | `container-network` isn't a valid Docker network name (`[a-zA-Z0-9][a-zA-Z0-9_.-]*`) — the create fails at spawn |
 | zero seats | `seats-per-container: 0` confuses the auto-scaler |
 | invalid docker host | A `proxy.hosts` entry that will fail to connect at startup |
 | ignored compat field (v0.2.5) | A modeled ShinyProxy field with no runtime effect is set (`server.secure-cookies`, `server.servlet.session.timeout`, `proxy.heartbeat-rate`, `proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`, `logging.file`) |

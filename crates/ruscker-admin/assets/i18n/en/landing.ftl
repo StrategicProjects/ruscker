@@ -568,6 +568,7 @@ spec-form-inject-base-href = Rewrite app HTML for the sub-path
 spec-form-inject-base-href-help = On by default. Ruscker rewrites <base href> and root-relative URLs so an app that assumes it lives at the server root works under its /app/ sub-path. Turn off only if the app reads X-Forwarded-Prefix and builds its own paths.
 spec-help-inject-base-href = Ruscker always forwards X-Forwarded-Prefix / X-Script-Name (plus X-Forwarded-Proto/-Host). Frameworks like FastAPI (root_path), Dash, and Streamlit can self-route from these — then this HTML rewriting is redundant.
 spec-form-error-volume = Each volume must be /host:/container (optionally :ro).
+spec-form-error-network = Invalid Docker network name (must start with a letter or digit, then letters/digits/_/./-).
 spec-form-error-env = Each environment variable must be NAME=value, with a valid NAME (letters, digits, _; starting with a letter or _). Fix or remove the invalid line.
 admin-nav-logs = Logs
 admin-proclog-title = Logs

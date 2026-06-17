@@ -924,6 +924,14 @@ impl SpecForm {
             errs.push("spec-form-error-volume");
         }
 
+        // container-network (when set) must be a valid Docker network name,
+        // else the container create fails at spawn (#892).
+        if !self.container_network.trim().is_empty()
+            && !ruscker_config::is_valid_network_name(self.container_network.trim())
+        {
+            errs.push("spec-form-error-network");
+        }
+
         // container-env: every non-blank line must be `NAME=value` with a
         // valid NAME. A typo'd line (missing `=`, or a key with spaces /
         // bad chars) used to be silently dropped by `parse_env` — turning
@@ -1832,6 +1840,28 @@ proxy:
         assert!(!ok
             .validate(FormMode::New)
             .contains(&"spec-form-error-max-replicas-zero"));
+    }
+
+    // #892: an invalid Docker network name is rejected at save (it would
+    // otherwise fail only at spawn); a valid one and the empty default pass.
+    #[test]
+    fn validate_rejects_bad_container_network() {
+        let mut bad = valid_form();
+        bad.container_network = "not a net".into();
+        assert!(bad
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-network"));
+
+        let mut ok = valid_form();
+        ok.container_network = "ruscker_net".into();
+        assert!(!ok
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-network"));
+
+        // Empty (the default) → daemon default bridge, no error.
+        assert!(!valid_form()
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-network"));
     }
 
     // #874: a pull whose follower never connects (or disconnects) must

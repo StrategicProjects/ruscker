@@ -9,6 +9,32 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.33 — 2026-06-17
+
+Admin & portal UX polish, all operator-requested.
+
+- **Apps action column — grouped buttons.** The action icons are now
+  clustered into logical groups (marker · manage · operate) with thin
+  dividers, and the destructive **Delete** is set apart so it's never
+  clicked by mistake.
+- **"Update image" shows live progress.** The per-row re-pull now shows
+  the current Docker pull step inline (Pulling → Downloading → Extracting
+  → done) instead of just a spinner, so you can follow it.
+- **Users CSV import — localized file picker.** The native file input
+  rendered the browser's own "Choose file" text in the browser language;
+  it's now a styled, localized control matching the YAML import, with the
+  chosen filename shown and the submit gated until a file is picked.
+- **Dashboard replica logos fall back to the monogram.** When a logo file
+  isn't present on the host, the Active Replicas grid now shows the app's
+  monogram initial instead of a blank tile.
+- **Portal public/private filter removed.** With the decorative access
+  lock gone (v0.2.31), the filter no longer distinguished anything a
+  visitor could see (restricted apps are hidden from non-members), so the
+  chips were dropped. Real access enforcement and visibility are
+  unchanged.
+
+---
+
 ## v0.2.32 — 2026-06-17
 
 Disk host-safety hardening — the follow-ups that make "remove unused

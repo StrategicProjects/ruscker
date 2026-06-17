@@ -45,6 +45,9 @@ Status: living document. Tracks the Phase 5 security audit
 - Per-app ACLs and external identity providers (OIDC/SAML/LDAP).
   Coarse RBAC (Viewer/Editor/Admin) exists (§2); fine-grained,
   per-spec authorization is Phase 8.
+- Isolating **untrusted, third-party app code** from the admin on a
+  shared origin. Apps are assumed first-party; multi-tenant hosting of
+  hostile apps needs origin separation (§6.1, roadmap #878).
 - TLS termination (delegated to the reverse proxy).
 
 ---
@@ -261,11 +264,11 @@ Status: living document. Tracks the Phase 5 security audit
   neither `SameSite=Strict` nor the same-origin CSRF guard can stop it
   from issuing credentialed `fetch('/admin/...')` calls. The cookie
   strip (#258) stops the app from *reading* the session, but a
-  same-origin request from the browser still carries it. **If you host
-  third-party / untrusted apps, serve the admin on a separate
-  hostname/origin** (e.g. `admin.example.org` vs `apps.example.org`) so
-  the browser's same-origin policy isolates them. Trusted, first-party
-  apps on one origin are fine.
+  same-origin request from the browser still carries it. **Trusted,
+  first-party apps on one origin are fine; for untrusted / third-party
+  apps, see [§6.1 Hosting untrusted apps](#61-hosting-untrusted-apps-same-origin)**
+  — the host-safety backstops below (#871/#889/#894) bound the blast
+  radius regardless.
 - **[implemented]** Per-app sticky cookies (#731, v0.2.5) — the
   sticky cookie is named `__ruscker_session_{spec}` and scoped with
   `Path={base}/app/{spec}`, so it is only ever sent to its own app:
@@ -300,6 +303,56 @@ Status: living document. Tracks the Phase 5 security audit
   hit aged past the largest configured window, so rotating source
   addresses (one IPv6 /64 is 2^64 of them) can't grow the map without
   bound.
+
+### 6.1 Hosting untrusted apps (same-origin)
+
+Ruscker routes by **path** on a single origin: the portal at `/`, the
+admin at `/admin/*`, and proxied apps at `/app/{spec}/*` all share one
+`scheme://host:port`. A container's web UI is **author-controlled code**;
+when it runs in the browser it is the *same origin* as `/admin`, so its
+JavaScript can issue credentialed `fetch('/admin/...')` requests (the
+browser attaches the admin session cookie on same-origin requests) and
+read same-origin responses. The `SameSite=Strict` cookie and the
+`csrf_guard` only stop *cross*-origin requests, and a synchronizer token
+wouldn't help either — same-origin script can simply read it. **Only a
+separate origin truly isolates an app from the admin.**
+
+**This matters only for untrusted apps.** If every app is first-party
+(authored by your team), there is no hostile script and a shared origin
+is fine — this is the supported posture and what the reference
+deployments use.
+
+**If you must host untrusted / third-party apps**, the options today,
+strongest first:
+
+1. **Don't.** Keep untrusted workloads on a *separate Ruscker instance*
+   (its own host/origin, its own admin) from the one serving your
+   first-party catalog. Two processes, two origins — full isolation, no
+   new code.
+2. **Operational hygiene** on the shared instance: administer from a
+   **separate browser profile** (or after logging out of every app), so
+   no live admin session exists in the browser that opens apps. The
+   attack needs a logged-in admin session in the *same* browser.
+3. **Rely on the backstops.** The Disk panel enforces Ruscker ownership
+   and fails closed (#871/#889/#894), spec edits are audited, and
+   sensitive chrome (credentials, users, volumes) is Admin-only — so a
+   same-origin admin call has a bounded, logged blast radius. This is
+   defense-in-depth, not isolation.
+
+> **Not enough on its own:** simply pointing a second hostname at the
+> same Ruscker via nginx does **not** separate the origins, because
+> Ruscker (path-based) emits app links and `base href` relative to the
+> request origin — the portal cards and the app's own rewritten URLs
+> would still resolve back to a single origin. Real separation needs
+> Ruscker to route apps by **Host** and emit absolute app-origin URLs.
+
+**Roadmap (#878):** a first-class *app origin* — serve `/app/*` (or a
+subdomain per app, `{spec}.apps.example.org`) on a distinct hostname,
+routed by `Host`, so the browser's same-origin policy isolates apps from
+the admin and from each other. The design must account for the
+`context-path` / `--base-path` mount, the forwarded-header trust gate
+(§7), and the per-spec sticky cookie scoping (§6) — which is why it's a
+deliberate feature, not a config flip.
 
 ## 7. TLS, headers & network
 

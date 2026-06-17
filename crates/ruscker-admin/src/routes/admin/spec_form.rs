@@ -122,8 +122,29 @@ enum PullEvent {
 /// parked here under a one-shot token; the follower GET takes the
 /// receiver exactly once.
 struct PullJob {
-    rx: tokio::sync::Mutex<Option<tokio::sync::mpsc::UnboundedReceiver<PullEvent>>>,
+    rx: tokio::sync::Mutex<Option<tokio::sync::mpsc::Receiver<PullEvent>>>,
 }
+
+/// Per-job progress buffer. A bounded channel caps the memory a single
+/// pull can hold even if its follower is slow or never connects: the
+/// producer task applies backpressure at this many queued lines instead
+/// of growing without bound (#874).
+const PULL_CHANNEL_CAP: usize = 256;
+
+/// Ceiling on concurrent daemon pulls. Repeated "Update image" clicks
+/// (or many tabs / scripted hammering) used to each spawn an independent
+/// pull task + daemon stream, which can saturate disk and network — a
+/// light operational DoS (#874). A permit is held for the lifetime of a
+/// pull task; starts beyond the cap are refused with 503 until a slot
+/// frees. Editor-gated, so this is an accidental-hammering guardrail.
+const MAX_CONCURRENT_PULLS: usize = 4;
+
+/// Available pull slots (see [`MAX_CONCURRENT_PULLS`]). Module static,
+/// same pattern as [`PULL_JOBS`]; an owned permit rides into each pull
+/// task and is released when the task ends (success, error, or the
+/// follower disconnecting and dropping the receiver).
+static PULL_SLOTS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PULLS)));
 
 /// In-flight pull jobs keyed by one-shot token (#720 audit P2). A pull is
 /// a side effect, so it's *started* by a CSRF-guarded POST and *followed*
@@ -163,6 +184,21 @@ async fn image_pull_start(
     }
 }
 
+/// Forward a daemon pull's progress lines into the job channel, then a
+/// terminal `Done`. Returns early (cancelling the forward) the moment the
+/// follower disconnects and drops the receiver — `Sender::send` errors on
+/// a bounded channel just as it did on the unbounded one, so a never- or
+/// no-longer-followed pull can't keep the task alive forever (#874).
+async fn forward_pull(mut line_stream: ruscker_core::LogStream, tx: tokio::sync::mpsc::Sender<PullEvent>) {
+    use futures_util::StreamExt;
+    while let Some(line) = line_stream.next().await {
+        if tx.send(PullEvent::Line(line)).await.is_err() {
+            return; // follower disconnected (or job swept)
+        }
+    }
+    let _ = tx.send(PullEvent::Done).await;
+}
+
 /// Kick off a daemon image pull, park its progress stream under a
 /// one-shot token, and return the token (the follower then opens the
 /// `…/image-pull/events?job=<token>` SSE). Shared by the spec form's
@@ -174,14 +210,25 @@ async fn start_pull(
     image: &str,
     creds: Option<ruscker_core::RegistryCredentials>,
 ) -> Result<String, Response> {
-    use futures_util::StreamExt;
-
     let Some(backend) = state.backend.clone() else {
         return Err(
             (StatusCode::SERVICE_UNAVAILABLE, "Docker backend not connected").into_response(),
         );
     };
-    let mut line_stream = match backend.pull_image(image, creds.as_ref(), None).await {
+    // Refuse before touching the daemon if every pull slot is busy, so a
+    // burst of starts can't pile up concurrent pulls (#874).
+    let permit = match PULL_SLOTS.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            tracing::warn!(image, "image pull refused: too many concurrent pulls");
+            return Err((
+                StatusCode::SERVICE_UNAVAILABLE,
+                "too many image pulls in progress; retry shortly",
+            )
+                .into_response());
+        }
+    };
+    let line_stream = match backend.pull_image(image, creds.as_ref(), None).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(image, error = ?e, "image pull start failed");
@@ -190,14 +237,12 @@ async fn start_pull(
     };
     // Drive the pull on a task, forwarding lines into the channel; the
     // follower GET drains them. A terminal `Done` lets the follower close.
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<PullEvent>();
+    // The bounded channel applies backpressure (caps queued memory); the
+    // owned permit is held here and released when the task ends.
+    let (tx, rx) = tokio::sync::mpsc::channel::<PullEvent>(PULL_CHANNEL_CAP);
     tokio::spawn(async move {
-        while let Some(line) = line_stream.next().await {
-            if tx.send(PullEvent::Line(line)).is_err() {
-                return; // follower disconnected
-            }
-        }
-        let _ = tx.send(PullEvent::Done);
+        let _permit = permit;
+        forward_pull(line_stream, tx).await;
     });
     let token = uuid::Uuid::new_v4().to_string();
     PULL_JOBS.insert(
@@ -1787,6 +1832,36 @@ proxy:
         assert!(!ok
             .validate(FormMode::New)
             .contains(&"spec-form-error-max-replicas-zero"));
+    }
+
+    // #874: a pull whose follower never connects (or disconnects) must
+    // not keep its forwarding task alive forever. With the bounded
+    // channel, the producer's `send` errors once the receiver is gone, so
+    // the forwarder returns promptly even with far more lines than the
+    // channel can hold.
+    #[tokio::test]
+    async fn forward_pull_terminates_without_a_follower() {
+        let (tx, rx) = tokio::sync::mpsc::channel::<PullEvent>(2);
+        drop(rx); // no follower ever takes the receiver
+        let lines: ruscker_core::LogStream =
+            Box::pin(futures_util::stream::iter((0..1000).map(|i| format!("layer {i}"))));
+        tokio::time::timeout(std::time::Duration::from_secs(5), forward_pull(lines, tx))
+            .await
+            .expect("forwarder must not hang when nobody is following");
+    }
+
+    // The happy path: every line is delivered, then exactly one terminal
+    // `Done`, then the channel closes.
+    #[tokio::test]
+    async fn forward_pull_delivers_lines_then_done() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PullEvent>(PULL_CHANNEL_CAP);
+        let lines: ruscker_core::LogStream =
+            Box::pin(futures_util::stream::iter(vec!["a".to_string(), "b".to_string()]));
+        forward_pull(lines, tx).await;
+        assert!(matches!(rx.recv().await, Some(PullEvent::Line(l)) if l == "a"));
+        assert!(matches!(rx.recv().await, Some(PullEvent::Line(l)) if l == "b"));
+        assert!(matches!(rx.recv().await, Some(PullEvent::Done)));
+        assert!(rx.recv().await.is_none());
     }
 
     #[test]

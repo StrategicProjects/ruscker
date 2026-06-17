@@ -865,11 +865,14 @@ pub struct Spec {
     pub max_body_size: Option<String>,
 
     /// Bind-mount volumes for the container, in Docker syntax —
-    /// `"/host:/container"` or `"/host:/container:ro"`. ShinyProxy-
-    /// compatible (`volumes:` is a list of such strings). The local
-    /// Docker backend maps these to `HostConfig.binds`. Bind-mounting
-    /// host paths is powerful and admin-only — see SECURITY.md.
-    #[serde(default)]
+    /// `"/host:/container"` or `"/host:/container:ro"`. The YAML key is
+    /// ShinyProxy's **`container-volumes`** (a list of such strings); the
+    /// bare `volumes` is kept as a deserialize alias so older Ruscker
+    /// configs still parse. Using the wrong key was why a real ShinyProxy
+    /// import silently dropped every mount. The local Docker backend maps
+    /// these to `HostConfig.binds`. Bind-mounting host paths is powerful
+    /// and admin-only — see SECURITY.md.
+    #[serde(rename = "container-volumes", alias = "volumes", default)]
     pub volumes: Option<Vec<String>>,
 
     /// Environment variables injected into the container, as a map of
@@ -1573,6 +1576,28 @@ mod max_body_size_tests {
             serde_yaml_ng::from_str("id: y\ncontainer-image: a:1\n").expect("parse");
         assert_eq!(none.effective_max_lifetime_secs(), None);
         assert_eq!(none.effective_container_lifetime_secs(), None);
+    }
+
+    #[test]
+    fn volumes_parse_from_shinyproxy_container_volumes_key() {
+        // Real ShinyProxy configs author bind mounts under
+        // `container-volumes`; a bare `volumes` was never the SP key, so
+        // an import silently dropped every mount. Accept the SP key, and
+        // keep `volumes` as a back-compat alias.
+        let sp: Spec = serde_yaml_ng::from_str(
+            "id: x\ncontainer-image: a:1\ncontainer-volumes:\n  - /srv/data:/data\n  - /srv/www:/www:ro\n",
+        )
+        .expect("parse");
+        assert_eq!(
+            sp.volumes,
+            Some(vec!["/srv/data:/data".into(), "/srv/www:/www:ro".into()])
+        );
+
+        let legacy: Spec = serde_yaml_ng::from_str(
+            "id: y\ncontainer-image: a:1\nvolumes:\n  - /srv/old:/old\n",
+        )
+        .expect("parse");
+        assert_eq!(legacy.volumes, Some(vec!["/srv/old:/old".into()]));
     }
 
     #[test]

@@ -319,7 +319,7 @@ A spec describes one app, API, or external link. Every spec has an
   docker-registry-credential: dockerhub-acme   # OR reference a stored
                                       #   credential by name (Ruscker
                                       #   extension; see below)
-  volumes:                            # bind mounts (ShinyProxy-compatible)
+  container-volumes:                  # bind mounts (ShinyProxy key; `volumes` also accepted)
     - /srv/myapp/data:/data           #   persistent data
     - /srv/myapp/www:/www:ro          #   static assets, read-only
   container-env:                      # env vars injected into the container
@@ -338,9 +338,11 @@ A spec describes one app, API, or external link. Every spec has an
   access-users: [alice]               #   (ShinyProxy-compatible)
 ```
 
-`volumes` is a list of Docker bind specs (`/host:/container`, optionally
-`:ro`/`:rw`), mapped to the container's `HostConfig.binds`. Add as many
-as needed; editable in the admin **Advanced** form (one per line).
+`container-volumes` is a list of Docker bind specs (`/host:/container`,
+optionally `:ro`/`:rw`), mapped to the container's `HostConfig.binds`.
+This is ShinyProxy's key; the bare `volumes` is still accepted as an
+alias for older Ruscker configs. Add as many as needed; editable in the
+admin **Advanced** form (one per line).
 **Bind-mounting host paths is root-equivalent and admin-only** — see
 `SECURITY.md`.
 

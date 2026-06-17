@@ -297,12 +297,18 @@ pub(crate) async fn rename_with_refs(
             if taken.0 > 0 {
                 bail!("filename '{new_filename}' is already taken");
             }
-            sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
+            let res = sqlx::query("UPDATE images SET filename = ? WHERE id = ?")
                 .bind(new_filename)
                 .bind(id)
                 .execute(&mut *tx)
                 .await
                 .context("rename image (sqlite)")?;
+            // The image was deleted out from under us (concurrent delete):
+            // bail so the tx rolls back — never rewrite spec/landing refs to
+            // a filename with no image row (#873).
+            if res.rows_affected() == 0 {
+                bail!("image {id} no longer exists — not rewriting references");
+            }
             audit_sqlite(&mut tx, actor, "image.rename", &target, Some(&diff), now).await?;
             for spec in specs {
                 crate::db::specs::upsert_in_tx(&mut tx, spec, now).await?;
@@ -335,12 +341,15 @@ pub(crate) async fn rename_with_refs(
             if taken.0 > 0 {
                 bail!("filename '{new_filename}' is already taken");
             }
-            sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
+            let res = sqlx::query("UPDATE images SET filename = $1 WHERE id = $2")
                 .bind(new_filename)
                 .bind(id)
                 .execute(&mut *tx)
                 .await
                 .context("rename image (postgres)")?;
+            if res.rows_affected() == 0 {
+                bail!("image {id} no longer exists — not rewriting references");
+            }
             audit_pg(&mut tx, actor, "image.rename", &target, Some(&diff), now).await?;
             for spec in specs {
                 crate::db::specs::upsert_in_tx_pg(&mut tx, spec, now).await?;
@@ -704,6 +713,27 @@ mod tests {
             logo_of(&db, "app").await.as_deref(),
             Some("/assets/img/old.png"),
             "spec ref rolled back — not left pointing at the failed rename"
+        );
+    }
+
+    // #873: the image is deleted out from under the rename (no row to
+    // update). The batch must bail and roll back — NOT rewrite the spec
+    // ref to a filename with no backing image.
+    #[tokio::test]
+    async fn rename_with_refs_bails_when_image_vanished() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let mut spec = spec_with_logo("app", "/assets/img/old.png");
+        crate::db::specs::upsert_one(&db, &spec, None).await.unwrap();
+        spec.template_properties
+            .set_str("logo", "/assets/img/new.png");
+        // No image row with id "ghost" (simulates a concurrent delete).
+        let res =
+            rename_with_refs(&db, "ghost", "new.png", std::slice::from_ref(&spec), None, None).await;
+        assert!(res.is_err(), "rename of a missing image must fail");
+        assert_eq!(
+            logo_of(&db, "app").await.as_deref(),
+            Some("/assets/img/old.png"),
+            "spec ref must NOT be rewritten when the image vanished"
         );
     }
 

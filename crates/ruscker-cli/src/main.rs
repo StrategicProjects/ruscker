@@ -298,12 +298,29 @@ fn cmd_import(
         format!("failed to load config from {}", yaml_path.display())
     })?;
 
-    // Resolve the Media source dir: explicit flag wins, else auto-discover
-    // beside the config the same way `serve` does, so a migrated config's
-    // card logos land in the library with no extra flag.
-    let images_dir = images_dir_override
-        .filter(|p| !p.as_os_str().is_empty())
-        .or_else(|| discover_images_dir(yaml_path, &config));
+    // Resolve the Media source dir, matching the flag's help exactly:
+    //   * an explicit non-empty path is used as-is;
+    //   * an explicit EMPTY value (`--images-dir ""`) skips media import —
+    //     it does NOT fall back to auto-discovery;
+    //   * omitting the flag auto-discovers beside the config like `serve`.
+    // A resolved path that isn't a directory (a typo, or a missing
+    // ShinyProxy assets dir) is warned about and skipped — it must never
+    // abort the spec import.
+    let images_dir = match images_dir_override {
+        Some(p) if p.as_os_str().is_empty() => None,
+        Some(p) => Some(p),
+        None => discover_images_dir(yaml_path, &config),
+    }
+    .filter(|d| {
+        let ok = d.is_dir();
+        if !ok {
+            eprintln!(
+                "note: images dir {} not found — skipping media import",
+                d.display()
+            );
+        }
+        ok
+    });
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()

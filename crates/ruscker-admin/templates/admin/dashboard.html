@@ -134,9 +134,12 @@
       <span class="app-group__chev"><i class="ti ti-chevron-right" aria-hidden="true"></i></span>
       <span class="app-group__name">
         {# Card logo when the spec has one (mirrors the landing + apps
-           list); falls back to the monogram initial. A broken image hides
-           itself, leaving the tile's background. #}
-        <span class="app-group__logo">{% match g.logo %}{% when Some with (l) %}<img src="{{ l }}" alt="" loading="lazy" onerror="this.style.display='none'" style="width:100%;height:100%;object-fit:contain">{% when None %}{{ g.initial }}{% endmatch %}</span>
+           list); falls back to the monogram initial. A broken image (the
+           logo file isn't on this host) falls back to the initial too,
+           instead of hiding to a blank tile — so the column is never empty
+           where a logo failed to load. The initial rides data-* (not a
+           localized string, so no inline-handler i18n trap). #}
+        <span class="app-group__logo" data-initial="{{ g.initial }}">{% match g.logo %}{% when Some with (l) %}<img src="{{ l }}" alt="" loading="lazy" onerror="this.parentElement.textContent=this.parentElement.dataset.initial" style="width:100%;height:100%;object-fit:contain">{% when None %}{{ g.initial }}{% endmatch %}</span>
         <span><span class="truncate">{{ g.display_name }}</span><span class="app-group__id">{{ g.spec_id }}</span></span>
       </span>
       <span class="app-group__replicas"><i class="ti ti-stack-2" aria-hidden="true"></i>{{ g.n }}</span>
@@ -310,8 +313,8 @@
     return '<div class="app-group' + (isOpen ? ' is-open' : '') + '" data-spec-id="' + escapeHtml(g.spec_id) + '">'
       + '<div class="app-group__head" role="button" tabindex="0" aria-expanded="' + (isOpen ? 'true' : 'false') + '">'
         + '<span class="app-group__chev"><i class="ti ti-chevron-right"></i></span>'
-        + '<span class="app-group__name"><span class="app-group__logo">'
-          + (g.logo ? '<img src="' + escapeHtml(g.logo) + '" alt="" loading="lazy" onerror="this.style.display=&apos;none&apos;" style="width:100%;height:100%;object-fit:contain">' : escapeHtml(g.initial))
+        + '<span class="app-group__name"><span class="app-group__logo" data-initial="' + escapeHtml(g.initial) + '">'
+          + (g.logo ? '<img src="' + escapeHtml(g.logo) + '" alt="" loading="lazy" onerror="this.parentElement.textContent=this.parentElement.dataset.initial" style="width:100%;height:100%;object-fit:contain">' : escapeHtml(g.initial))
           + '</span>'
           + '<span><span class="truncate">' + escapeHtml(g.display_name) + '</span>'
           + '<span class="app-group__id">' + escapeHtml(g.spec_id) + '</span></span></span>'

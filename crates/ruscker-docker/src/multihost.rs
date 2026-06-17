@@ -453,6 +453,22 @@ impl ContainerBackend for MultiHostDockerBackend {
         Ok(all)
     }
 
+    async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
+        // Fan out so the disk panel's in-use signal covers every host's
+        // containers (#871). A degraded host is skipped (its images just
+        // aren't protected on that host — same best-effort as the rest).
+        let mut all = Vec::new();
+        for h in &self.hosts {
+            match h.backend.all_container_image_refs().await {
+                Ok(refs) => all.extend(refs),
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "all container image refs on host failed; skipping");
+                }
+            }
+        }
+        Ok(all)
+    }
+
     async fn remove_container(&self, container_id: &str) -> CoreResult<()> {
         // Container ids aren't in the placement map (that's keyed by
         // replica id), so mirror `stop`'s placement-miss path: try every

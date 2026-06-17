@@ -25,6 +25,12 @@ use crate::LocalDockerBackend;
 /// Connection timeout for remote daemons, seconds (bollard default).
 const CONNECT_TIMEOUT: u64 = 120;
 
+/// Per-host budget for a disk-panel fan-out call (#895). One slow or hung
+/// daemon must not stall the admin page for the whole cluster: a host that
+/// doesn't answer within this is treated as a host error (skipped where
+/// the fan-out is tolerant, or fails the call closed where it isn't).
+const HOST_FANOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// Connect to a configured [`Host`], returning a [`LocalDockerBackend`]
 /// wired with the right addressing:
 /// - `unix://` → local daemon, publish + proxy on `127.0.0.1`;
@@ -441,12 +447,26 @@ impl ContainerBackend for MultiHostDockerBackend {
         // host simply doesn't report its containers, and
         // `stopped_replica_ids` treats *absence* as "not stopped" — so a
         // degraded fan-out can never cause a false prune.
+        //
+        // Fanned out concurrently with a per-host timeout (#895) so one
+        // slow daemon doesn't serialize the whole cluster onto the admin
+        // page; a timeout is just another skipped host here (tolerant).
+        let results = futures_util::future::join_all(self.hosts.iter().map(|h| async move {
+            (
+                &h.id,
+                tokio::time::timeout(HOST_FANOUT_TIMEOUT, h.backend.list_managed_containers()).await,
+            )
+        }))
+        .await;
         let mut all = Vec::new();
-        for h in &self.hosts {
-            match h.backend.list_managed_containers().await {
-                Ok(cs) => all.extend(cs),
-                Err(e) => {
-                    tracing::warn!(host = %h.id, error = %e, "list managed containers on host failed; skipping");
+        for (id, res) in results {
+            match res {
+                Ok(Ok(cs)) => all.extend(cs),
+                Ok(Err(e)) => {
+                    tracing::warn!(host = %id, error = %e, "list managed containers on host failed; skipping")
+                }
+                Err(_) => {
+                    tracing::warn!(host = %id, "list managed containers on host timed out; skipping")
                 }
             }
         }
@@ -466,14 +486,33 @@ impl ContainerBackend for MultiHostDockerBackend {
         // the scaler's liveness prune treats an absent host's containers as
         // "not stopped", so a degraded fan-out there can't cause a false
         // prune. The safe failure direction is opposite for the two.
+        //
+        // Concurrent with a per-host timeout (#895); a timed-out host fails
+        // the call closed too (a hung daemon mustn't masquerade as "this
+        // host runs nothing").
+        let results = futures_util::future::join_all(self.hosts.iter().map(|h| async move {
+            (
+                &h.id,
+                tokio::time::timeout(HOST_FANOUT_TIMEOUT, h.backend.all_container_image_refs())
+                    .await,
+            )
+        }))
+        .await;
         let mut all = Vec::new();
-        for h in &self.hosts {
-            let refs = h.backend.all_container_image_refs().await.map_err(|e| {
-                CoreError::Backend(format!(
-                    "host {} container image refs failed: {e}",
-                    h.id
-                ))
-            })?;
+        for (id, res) in results {
+            let refs = match res {
+                Ok(Ok(refs)) => refs,
+                Ok(Err(e)) => {
+                    return Err(CoreError::Backend(format!(
+                        "host {id} container image refs failed: {e}"
+                    )))
+                }
+                Err(_) => {
+                    return Err(CoreError::Backend(format!(
+                        "host {id} container image refs timed out"
+                    )))
+                }
+            };
             all.extend(refs);
         }
         Ok(all)
@@ -512,17 +551,30 @@ impl ContainerBackend for MultiHostDockerBackend {
         // logical entry for the disk panel. Container references sum
         // across hosts (a `-1` "unknown" from any host poisons the sum
         // to `-1`, which the panel treats as in-use — the safe side).
+        // Concurrent with a per-host timeout (#895). Tolerant: a skipped
+        // host just contributes no images — the in-use signal that gates
+        // removal comes from `all_container_image_refs`, which fails closed.
+        let results = futures_util::future::join_all(self.hosts.iter().map(|h| async move {
+            (
+                &h.id,
+                tokio::time::timeout(HOST_FANOUT_TIMEOUT, h.backend.list_images()).await,
+            )
+        }))
+        .await;
         let mut by_id: std::collections::HashMap<String, ImageInfo> =
             std::collections::HashMap::new();
-        for h in &self.hosts {
-            match h.backend.list_images().await {
-                Ok(images) => {
+        for (id, res) in results {
+            match res {
+                Ok(Ok(images)) => {
                     for img in images {
                         merge_image(&mut by_id, img);
                     }
                 }
-                Err(e) => {
-                    tracing::warn!(host = %h.id, error = %e, "list images on host failed; skipping");
+                Ok(Err(e)) => {
+                    tracing::warn!(host = %id, error = %e, "list images on host failed; skipping");
+                }
+                Err(_) => {
+                    tracing::warn!(host = %id, "list images on host timed out; skipping");
                 }
             }
         }

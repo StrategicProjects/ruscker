@@ -164,6 +164,7 @@ pub mod export;
 pub mod images;
 pub mod landing;
 pub mod landing_blocks;
+pub mod ruscker_images;
 pub mod showcase;
 pub mod spec_access;
 pub mod specs;

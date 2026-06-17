@@ -9,6 +9,69 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.31 — 2026-06-17
+
+A migration-and-operations release: the bits that mattered when moving a
+real ShinyProxy install onto Ruscker side by side, plus the host-safety
+hardening that a shared host (ShinyProxy next door) demands.
+
+**ShinyProxy migration fidelity.**
+
+- **Import reads the `container-volumes` key (#886).** A real ShinyProxy
+  config authors bind mounts under `container-volumes` (like
+  `container-env` / `container-cmd` / `container-network`); the schema had
+  named it `volumes` with no rename, so importing silently dropped every
+  mount. The ShinyProxy key is now read; the bare `volumes` stays as an
+  alias for older Ruscker configs.
+- **Import card images into the Media library (#887).** A spec's logo is a
+  reference like `/assets/img/snap_aurora.png`; the YAML never carried the
+  bytes, so a migrated catalog had no logos in the library.
+  `ruscker import --images-dir <dir>` (auto-discovered beside the config
+  like `serve`) now ingests every image, keeping each file's **original
+  name** so the references resolve. Idempotent; `--images-dir ""` skips,
+  a missing dir warns and skips (#891).
+- **Per-spec `container-network` (#850) and custom `labels` (#851)** —
+  create-and-attach a Docker network, and stamp extra labels on the
+  container.
+
+**Host-safety on a shared host.** The Disk panel can now run next to a
+ShinyProxy (or anything else) without ever touching its containers or
+images:
+
+- **Backend enforces Ruscker ownership (#871).** `remove_container`
+  re-inspects and refuses anything without the `ruscker.replica_id`
+  label; the in-use cross-reference is computed against **every** host
+  container, so a non-Ruscker image is never flagged "unused".
+- **Fail closed when Docker can't be queried (#889).** If the container
+  listing fails, every image now reads as in-use (no remove, no prune,
+  warning banner) instead of assuming the host runs nothing — which could
+  otherwise delete an in-use image that can't be re-pulled.
+- **"Reclaim space" button (#869)** — prunes only dangling images + the
+  build cache, never a tagged image or any container.
+
+**Admin features.**
+
+- **Read-only System diagnostics tab (#766)** — version, Docker, DB, paths
+  at a glance (restart shown as a command, not a button).
+- **Bulk user import from CSV with a preview (#862)**, all-or-nothing per
+  row (#875); **optional profile fields** — sector / e-mail / phone (#856).
+- **Viewer is a portal user, not a panel operator (#857)** — Viewers land
+  on the portal and see the cards their groups allow; **per-user favorite
+  star** on cards (#858).
+- **`max-containers` is an always-visible field (#854)** and rejects `0`
+  at save (#877); **"Update image" re-pull** in the Apps list (#855), with
+  the pull stream now bounded and concurrent pulls capped (#874).
+- **Validation warnings for labels + network (#892)** — an invalid label
+  key, a reserved `ruscker.*` key, or a malformed `container-network` are
+  flagged by `validate` and the spec form.
+
+**Fixes.** Dashboard shows the app logo in the replica grid (#870); the
+last-admin guard is atomic at the DB (#872); an image rename rolls back if
+the image vanished (#873); link cards are labelled "Links" (#876); the
+admin lands on Apps and pauses dashboard SSE when the tab is hidden (#852).
+
+---
+
 ## v0.2.30 — 2026-06-15
 
 - **Dashboard mobile: the app name no longer overlaps the replicas column

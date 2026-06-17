@@ -8,6 +8,18 @@
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-disk-title") }}</h1>
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-disk-subtitle") }}</p>
   </div>
+  {# Host-SAFE reclaim (#766 follow-up): dangling images + build cache
+     only — never a tagged image or any container, so a side-by-side
+     ShinyProxy is untouched. Confirm rides data-confirm (global listener). #}
+  {% if available %}
+  <form method="post" action="{{ base }}/admin/disk/reclaim"
+        data-confirm="{{ self.t("admin-disk-reclaim-confirm") }}">
+    <button type="submit" class="admin-login-btn" style="padding:7px 12px;font-size:12px"
+            data-busy="{{ self.t("admin-disk-cleaning") }}" title="{{ self.t("admin-disk-reclaim-hint") }}">
+      <i class="ti ti-trash" aria-hidden="true"></i> {{ self.t("admin-disk-reclaim") }}
+    </button>
+  </form>
+  {% endif %}
 </div>
 
 {# Flash split (#746) — see groups/users: persistent role="alert"

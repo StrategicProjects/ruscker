@@ -884,3 +884,9 @@ admin-system-yes = sí
 admin-system-no = no
 admin-system-restart-title = Reiniciar el servicio
 admin-system-restart-hint = Ruscker no puede reiniciarse de forma segura por sí mismo — ejecuta esto en el host (las solicitudes en curso se drenan con SIGTERM).
+
+# Recuperar espacio en disco (#766)
+admin-disk-reclaim = Recuperar espacio
+admin-disk-reclaim-hint = Limpia imágenes dangling + caché de compilación (seguro — nunca una imagen con tag ni un contenedor).
+admin-disk-reclaim-confirm = ¿Recuperar espacio? Limpia imágenes dangling y la caché de compilación (no se elimina ninguna imagen con tag ni contenedor).
+admin-disk-flash-reclaimed = Espacio recuperado (imágenes dangling + caché de compilación).

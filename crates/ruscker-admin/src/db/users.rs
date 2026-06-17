@@ -458,6 +458,11 @@ pub async fn set_password(
 }
 
 /// Change a user's role.
+/// Postgres advisory-lock key serializing admin-count mutations
+/// (`set_role`/`delete`) so the last-admin guard can't be raced (#872).
+/// SQLite needs no equivalent — its writes already serialize.
+const ADMIN_MUTATION_LOCK: i64 = 0x7275_7363_6b72_0001;
+
 pub async fn set_role(
     db: &ConfigDb,
     username: &str,
@@ -467,33 +472,51 @@ pub async fn set_role(
     let username = normalize_username(username);
     let now = Utc::now();
 
+    // The UPDATE is **conditional** so it can never demote the last admin
+    // (#872): it no-ops when the row is the sole admin and the new role
+    // isn't admin. Combined with SQLite write-serialization / the Postgres
+    // advisory lock below, two concurrent demotions can't both pass.
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin role tx")?;
-            let res = sqlx::query("UPDATE users SET role = ?, updated_at = ? WHERE username = ?")
-                .bind(role.as_str())
-                .bind(now)
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("set role for {username}"))?;
+            let res = sqlx::query(
+                "UPDATE users SET role = ?, updated_at = ? WHERE username = ?
+                   AND (role <> 'admin' OR ? = 'admin'
+                        OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(role.as_str())
+            .bind(now)
+            .bind(&username)
+            .bind(role.as_str())
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set role for {username}"))?;
             if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
+                anyhow::bail!("set role for {username}: no-op (not found, or would strip the last admin)");
             }
             audit(&mut tx, actor, "user.role", &username, &role, now).await?;
             tx.commit().await.context("commit role change")?;
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin role tx")?;
-            let res = sqlx::query("UPDATE users SET role = $1, updated_at = $2 WHERE username = $3")
-                .bind(role.as_str())
-                .bind(now)
-                .bind(&username)
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(ADMIN_MUTATION_LOCK)
                 .execute(&mut *tx)
                 .await
-                .with_context(|| format!("set role for {username}"))?;
+                .context("acquire admin-mutation lock")?;
+            let res = sqlx::query(
+                "UPDATE users SET role = $1, updated_at = $2 WHERE username = $3
+                   AND (role <> 'admin' OR $1 = 'admin'
+                        OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(role.as_str())
+            .bind(now)
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("set role for {username}"))?;
             if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
+                anyhow::bail!("set role for {username}: no-op (not found, or would strip the last admin)");
             }
             audit_pg(&mut tx, actor, "user.role", &username, &role, now).await?;
             tx.commit().await.context("commit role change")?;
@@ -694,13 +717,18 @@ pub async fn delete(db: &ConfigDb, username: &str, actor: Option<&str>) -> Resul
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin user delete")?;
-            let res = sqlx::query("DELETE FROM users WHERE username = ?")
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .with_context(|| format!("delete user {username}"))?;
+            // Conditional so it can never delete the last admin (#872).
+            let res = sqlx::query(
+                "DELETE FROM users WHERE username = ?
+                   AND (role <> 'admin'
+                        OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("delete user {username}"))?;
             if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
+                anyhow::bail!("delete user {username}: no-op (not found, or would strip the last admin)");
             }
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -716,13 +744,22 @@ pub async fn delete(db: &ConfigDb, username: &str, actor: Option<&str>) -> Resul
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin user delete")?;
-            let res = sqlx::query("DELETE FROM users WHERE username = $1")
-                .bind(&username)
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(ADMIN_MUTATION_LOCK)
                 .execute(&mut *tx)
                 .await
-                .with_context(|| format!("delete user {username}"))?;
+                .context("acquire admin-mutation lock")?;
+            let res = sqlx::query(
+                "DELETE FROM users WHERE username = $1
+                   AND (role <> 'admin'
+                        OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("delete user {username}"))?;
             if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
+                anyhow::bail!("delete user {username}: no-op (not found, or would strip the last admin)");
             }
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -942,6 +979,32 @@ mod tests {
         // Promote editor → admin.
         set_role(&p, "ed", Role::Admin, Some("root")).await.unwrap();
         assert_eq!(count_admins(&p).await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn last_admin_guard_is_atomic_at_the_db() {
+        // #872: the conditional UPDATE/DELETE refuses to strip the last
+        // admin even if a handler-level pre-check were raced away.
+        let p = pool().await;
+        create(&p, "root", "rootpw12", Role::Admin, false, &[], None)
+            .await
+            .unwrap();
+        // Sole admin: demote is refused and the row stays admin.
+        assert!(set_role(&p, "root", Role::Viewer, None).await.is_err());
+        assert_eq!(fetch(&p, "root").await.unwrap().unwrap().role, Role::Admin);
+        // Sole admin: delete is refused and the row stays.
+        assert!(delete(&p, "root", None).await.is_err());
+        assert!(fetch(&p, "root").await.unwrap().is_some());
+
+        // With two admins, demoting one works and leaves exactly one…
+        create(&p, "root2", "rootpw34", Role::Admin, false, &[], None)
+            .await
+            .unwrap();
+        set_role(&p, "root2", Role::Editor, None).await.unwrap();
+        assert_eq!(count_admins(&p).await.unwrap(), 1);
+        // …and the remaining sole admin still can't be stripped.
+        assert!(set_role(&p, "root", Role::Viewer, None).await.is_err());
+        assert!(delete(&p, "root", None).await.is_err());
     }
 
     #[tokio::test]

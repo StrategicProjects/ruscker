@@ -809,6 +809,12 @@ impl SpecForm {
         {
             errs.push("spec-form-error-number");
         }
+        // A max-containers ceiling of 0 refuses every spawn (`live >= max`),
+        // so the app can never start. Reject it server-side, not just via
+        // the HTML `min=1` a crafted POST can bypass (#877).
+        if matches!(self.max_replicas.trim().parse::<i64>(), Ok(n) if n <= 0) {
+            errs.push("spec-form-error-max-replicas-zero");
+        }
         // Ports are 1–65535.
         for p in [&self.container_port, &self.api_port] {
             if !p.trim().is_empty()
@@ -1762,6 +1768,25 @@ proxy:
         assert!(f
             .validate(FormMode::New)
             .contains(&"spec-form-error-replica-range"));
+    }
+
+    // #877: a max-containers ceiling of 0 (or negative) refuses every
+    // spawn, so the app could never start — reject it at save instead of
+    // relying on the HTML `min=1` a crafted POST bypasses.
+    #[test]
+    fn validate_rejects_zero_max_replicas() {
+        let mut f = valid_form();
+        f.max_replicas = "0".into();
+        assert!(f
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-max-replicas-zero"));
+
+        // A normal ceiling is fine.
+        let mut ok = valid_form();
+        ok.max_replicas = "3".into();
+        assert!(!ok
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-max-replicas-zero"));
     }
 
     #[test]

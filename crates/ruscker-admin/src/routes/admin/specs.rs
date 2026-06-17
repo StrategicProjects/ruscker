@@ -424,13 +424,13 @@ async fn index(
     // catalog deserializes each spec once — fine here (admin page, not the
     // proxy/dashboard hot path the lean SELECT of #588 protects).
     let meta: std::collections::HashMap<String, (Option<String>, Vec<String>)> =
-        crate::catalog::effective_specs(state.db.as_ref(), &state.config)
+        crate::catalog::effective_specs_cached(&state)
             .await
-            .into_iter()
+            .iter()
             .map(|s| {
                 let logo = s.template_properties.get_str("logo").map(str::to_string);
                 let groups = s.access_groups.clone().unwrap_or_default();
-                (s.id, (logo, groups))
+                (s.id.clone(), (logo, groups))
             })
             .collect();
 

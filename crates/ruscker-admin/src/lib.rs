@@ -182,6 +182,18 @@ pub struct AppState {
     /// explicit invalidation wiring. Shared so every cloned `AppState`
     /// sees the same cache.
     pub spec_cache: Arc<dashmap::DashMap<String, (Arc<ruscker_config::Spec>, std::time::Instant)>>,
+
+    /// Short-circuit cache of the **effective spec catalog** for admin
+    /// pages (#902). The admin tabs (Apps/Disk/Media/Groups/System +
+    /// landing) each rebuilt the full catalog — `list_all` + a
+    /// `config_json` deserialize of every spec — on every navigation.
+    /// This holds the last-built `Arc<Vec<Spec>>` keyed by a cheap catalog
+    /// signature (`db::specs::catalog_signature`: count + Σversion + max
+    /// updated_at); a cache hit skips the deserialize entirely, and any
+    /// write moves the signature so it's never stale (HA-safe — a write on
+    /// any node changes the signature every reader observes). `Arc` so all
+    /// cloned `AppState`s share it in-process while each test gets its own.
+    pub catalog_cache: catalog::CatalogCache,
 }
 
 impl AppState {
@@ -238,6 +250,7 @@ impl AdminServer {
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: Arc::new(dashmap::DashMap::new()),
+            catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
         };
         Ok(Self {
             addr,

@@ -224,6 +224,27 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<Spec>> {
     Ok(out)
 }
 
+/// A cheap fingerprint of the spec catalog, for validating the admin
+/// catalog cache (#902): `(row count, Σ version, max updated_at)`. It
+/// changes on **any** insert / update / delete — `version` bumps on every
+/// upsert, `count` on insert/delete, `updated_at` on every write — yet
+/// reads **no** `config_json`, so it's far cheaper than `list_all`. A
+/// write on any node moves it for every reader, so the cache it guards is
+/// never stale in HA. Cast the SUM to BIGINT so Postgres returns a plain
+/// integer (not NUMERIC) and both dialects decode to `i64`.
+pub type CatalogSignature = (i64, i64, Option<DateTime<Utc>>);
+
+pub async fn catalog_signature(db: &ConfigDb) -> Result<CatalogSignature> {
+    const SQL: &str =
+        "SELECT COUNT(*), CAST(COALESCE(SUM(version), 0) AS BIGINT), MAX(updated_at) FROM specs";
+    let sig: CatalogSignature = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(SQL).fetch_one(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(SQL).fetch_one(pool).await,
+    }
+    .context("catalog signature")?;
+    Ok(sig)
+}
+
 /// Fetch a single spec by id, deserializing `config_json` back to
 /// a [`Spec`]. Returns `None` if no row matches.
 ///

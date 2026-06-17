@@ -348,7 +348,7 @@ async fn index(
 /// image carrying one of these tags is "in use by a spec" and is never
 /// offered for removal.
 async fn spec_image_refs(state: &AppState) -> HashSet<String> {
-    crate::catalog::effective_specs(state.db.as_ref(), &state.config)
+    crate::catalog::effective_specs_cached(state)
         .await
         .iter()
         .filter_map(|s| s.container_image.clone())

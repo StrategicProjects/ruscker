@@ -749,6 +749,7 @@ mod tests {
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: Arc::new(dashmap::DashMap::new()),
+            catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
         }
     }
 

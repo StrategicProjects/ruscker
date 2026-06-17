@@ -442,7 +442,7 @@ async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardS
     // round-trip per spec, which on the 5s SSE tick (× every open tab)
     // hammered the DB (#281). Still DB-first, so a renamed-in-admin spec
     // shows its current name (#275).
-    let catalog = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
+    let catalog = crate::catalog::effective_specs_cached(state).await;
     let name_of: std::collections::HashMap<String, String> = snap
         .iter()
         .map(|r| r.spec_id.clone())

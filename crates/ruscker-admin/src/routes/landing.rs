@@ -344,7 +344,7 @@ async fn index(
     // from disagreeing on what specs exist (an earlier "DB-only when
     // non-empty" rule here hid an admin-deleted spec from the landing
     // while `find_spec` still resolved it from the YAML and spawned it).
-    let owned_specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
+    let owned_specs = crate::catalog::effective_specs_cached(&state).await;
     let mut cards: Vec<CardCtx<'_>> = owned_specs
         .iter()
         .filter(|spec| spec.access_allows(is_admin, username.as_deref(), &groups))

@@ -384,6 +384,13 @@ pub trait ContainerBackend: Send + Sync {
         Ok(0)
     }
 
+    /// The backend's daemon version string for the admin **System** tab
+    /// (#766) — e.g. Docker `"28.5.2"`. `None` ⇒ not a container backend
+    /// or the version couldn't be read (a diagnostic nicety, never fatal).
+    async fn backend_version(&self) -> CoreResult<Option<String>> {
+        Ok(None)
+    }
+
     /// Local images, for the disk panel's "what's eating space" view.
     /// Each carries its size and how many containers reference it (so the
     /// UI can flag "in use" and only offer to remove unused ones).

@@ -33,6 +33,7 @@ pub mod landing;
 pub mod logs;
 pub mod spec_form;
 pub mod specs;
+pub mod system;
 pub mod users;
 
 pub fn routes() -> Router<AppState> {
@@ -63,6 +64,7 @@ pub fn routes() -> Router<AppState> {
         .merge(groups::routes())
         .merge(logs::routes())
         .merge(users::routes())
+        .merge(system::routes())
 }
 
 // ── Templates ────────────────────────────────────────────────────

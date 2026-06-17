@@ -630,7 +630,13 @@ async fn import_confirm(
         {
             Ok(()) => {
                 if !r.setor.is_empty() || !r.email.is_empty() || !r.celular.is_empty() {
-                    let _ = db::users::update_profile(
+                    // #875: don't silently swallow a profile-write failure.
+                    // The user was created but the profile didn't take →
+                    // compensate by removing the half-created account and
+                    // counting the row as skipped, so create+profile is
+                    // effectively all-or-nothing. (A CSV row is never the
+                    // last admin, so the delete guard can't block this.)
+                    if let Err(e) = db::users::update_profile(
                         pool,
                         &r.username,
                         Some(&r.setor),
@@ -638,7 +644,13 @@ async fn import_confirm(
                         Some(&r.celular),
                         Some(admin.actor()),
                     )
-                    .await;
+                    .await
+                    {
+                        tracing::warn!(user = %r.username, error = ?e, "csv import: profile write failed; rolling back the user");
+                        let _ = db::users::delete(pool, &r.username, Some(admin.actor())).await;
+                        skipped += 1;
+                        continue;
+                    }
                 }
                 imported += 1;
             }

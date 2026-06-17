@@ -9,6 +9,37 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.32 — 2026-06-17
+
+Disk host-safety hardening — the follow-ups that make "remove unused
+images" safe to click on a host that runs other containers (a
+side-by-side ShinyProxy) and can't re-pull from the registry.
+
+- **Image removal is now provenance-aware (#894).** The Disk panel only
+  ever removes images **Ruscker has managed** — a ref recorded when a
+  spec referencing it is saved, or when it's explicitly pulled, in a
+  durable table that survives spec deletion. A neighbour's idle image
+  (e.g. ShinyProxy's) shows a "not managed" badge and is never deletable;
+  the per-row remove also enforces this server-side. Dangling images stay
+  the job of the host-safe "Reclaim space" button. Backfilled from the
+  current catalog on upgrade.
+- **Multi-host fails closed (#897).** When a clustered host is
+  unreachable, the in-use signal now fails the call instead of returning
+  a partial inventory — so the panel enters its usage-unknown mode rather
+  than mislabelling an image backing a container on the down host as
+  "unused".
+- **Multi-host disk fan-out is parallel with a per-host timeout (#895).**
+  Several hosts or one slow daemon no longer sum their latencies onto the
+  admin page; a timed-out host is skipped where tolerant and fails closed
+  for the in-use signal.
+- **`ruscker import --images-dir` matches its help (#891 follow-up):** an
+  empty value or a missing directory skips media import instead of
+  auto-discovering or aborting; now covered by tests.
+- **Docs:** `SECURITY.md` gained actionable guidance on hosting untrusted
+  apps on a shared origin (#878) — what isolates them and what doesn't.
+
+---
+
 ## v0.2.31 — 2026-06-17
 
 A migration-and-operations release: the bits that mattered when moving a

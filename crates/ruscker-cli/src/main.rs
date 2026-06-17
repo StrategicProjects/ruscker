@@ -106,6 +106,16 @@ enum Command {
         /// `--db` when both are given.
         #[arg(long, env = "RUSCKER_CONFIG_DB_URL")]
         config_db_url: Option<String>,
+
+        /// Directory of image files (card logos / covers) to ingest into
+        /// the Media library, keeping each file's original name so spec
+        /// `/assets/img/<file>` references resolve. When omitted, it's
+        /// auto-discovered next to the config exactly like `serve`
+        /// (`<config-dir>/assets/img/`, then the ShinyProxy
+        /// `template-path` layout). Pass an empty value or a missing dir
+        /// to skip media import entirely.
+        #[arg(long)]
+        images_dir: Option<PathBuf>,
     },
 
     /// Reconstruct an application.yml from a SQLite admin database
@@ -217,7 +227,8 @@ fn main() -> Result<()> {
             path,
             db,
             config_db_url,
-        } => cmd_import(&path, db, config_db_url),
+            images_dir,
+        } => cmd_import(&path, db, config_db_url, images_dir),
         Command::Export { db } => cmd_export(&db),
         Command::Serve {
             config,
@@ -273,6 +284,7 @@ fn cmd_import(
     yaml_path: &PathBuf,
     db_path: Option<PathBuf>,
     config_db_url: Option<String>,
+    images_dir_override: Option<PathBuf>,
 ) -> Result<()> {
     // Need a destination. Postgres wins if both are given.
     if config_db_url.is_none() && db_path.is_none() {
@@ -286,13 +298,40 @@ fn cmd_import(
         format!("failed to load config from {}", yaml_path.display())
     })?;
 
+    // Resolve the Media source dir: explicit flag wins, else auto-discover
+    // beside the config the same way `serve` does, so a migrated config's
+    // card logos land in the library with no extra flag.
+    let images_dir = images_dir_override
+        .filter(|p| !p.as_os_str().is_empty())
+        .or_else(|| discover_images_dir(yaml_path, &config));
+
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
-    // Returns the import report plus a human label for the destination
-    // (never the raw DSN — it may carry a password).
-    let (report, target) = rt.block_on(async {
+    // Returns the spec import report, the optional media report, and a
+    // human label for the destination (never the raw DSN — it may carry a
+    // password).
+    let (report, media, target) = rt.block_on(async {
+        let run = |db: ruscker_admin::db::ConfigDb| {
+            let config = &config;
+            let images_dir = images_dir.as_deref();
+            async move {
+                let r = ruscker_admin::db::specs::import_all(&db, config).await?;
+                let media = match images_dir {
+                    Some(dir) => Some(
+                        ruscker_admin::db::images::import_dir(&db, dir)
+                            .await
+                            .with_context(|| {
+                                format!("import images from {}", dir.display())
+                            })?,
+                    ),
+                    None => None,
+                };
+                anyhow::Ok((r, media))
+            }
+        };
+
         if let Some(url) = config_db_url {
             if db_path.is_some() {
                 eprintln!("note: both --config-db-url and --db given; using Postgres");
@@ -300,23 +339,17 @@ fn cmd_import(
             let pool = ruscker_admin::db::open_pg(&url)
                 .await
                 .context("connect to the Postgres admin catalog")?;
-            let r = ruscker_admin::db::specs::import_all(
-                &ruscker_admin::db::ConfigDb::Postgres(pool.clone()),
-                &config,
-            )
-            .await?;
+            let (r, media) =
+                run(ruscker_admin::db::ConfigDb::Postgres(pool.clone())).await?;
             pool.close().await;
-            anyhow::Ok((r, "Postgres admin catalog".to_string()))
+            anyhow::Ok((r, media, "Postgres admin catalog".to_string()))
         } else {
             let path = db_path.expect("db_path present");
             let pool = ruscker_admin::db::open(&path).await?;
-            let r = ruscker_admin::db::specs::import_all(
-                &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
-                &config,
-            )
-            .await?;
+            let (r, media) =
+                run(ruscker_admin::db::ConfigDb::Sqlite(pool.clone())).await?;
             pool.close().await;
-            anyhow::Ok((r, path.display().to_string()))
+            anyhow::Ok((r, media, path.display().to_string()))
         }
     })?;
 
@@ -330,6 +363,16 @@ fn cmd_import(
     println!("    created    {:>4}", report.created);
     println!("    updated    {:>4}", report.updated);
     println!("    unchanged  {:>4}", report.unchanged);
+    if let Some(m) = media {
+        println!();
+        println!("  media (from {}):", images_dir.as_deref().unwrap().display());
+        println!("    imported   {:>4}", m.imported);
+        println!("    unchanged  {:>4}", m.unchanged);
+        println!("    skipped    {:>4}", m.skipped);
+    } else {
+        println!();
+        println!("  media: no images dir found (cards fall back to tint covers)");
+    }
     println!();
     println!("  ✓ done. {} specs in the DB.",
         report.created + report.updated + report.unchanged);

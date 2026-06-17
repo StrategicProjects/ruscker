@@ -147,6 +147,47 @@ pub fn process_upload(
     }
 }
 
+/// Build a [`Processed`] for a **migration import**: preserve the
+/// ORIGINAL basename (case + extension) and the raw bytes, so a
+/// ShinyProxy spec's `/assets/img/Snap_Aurora.png` logo reference keeps
+/// resolving once the binary lands in the Media library (the lookup is an
+/// exact, case-sensitive filename match).
+///
+/// This deliberately differs from [`process_upload`], which lowercases
+/// the name and transcodes PNG/JPEG to WebP — that renames the file and
+/// would break the reference, the opposite of what a migration wants. The
+/// operator can re-upload through the admin later to get the WebP
+/// optimization. Only the directory components are stripped (no
+/// traversal); `None` for anything that doesn't sniff as a supported
+/// image, or an oversize file.
+pub fn process_for_import(raw_filename: &str, bytes: Vec<u8>) -> Option<Processed> {
+    if bytes.is_empty() || bytes.len() > MAX_UPLOAD_BYTES {
+        return None;
+    }
+    let kind = SourceKind::detect(&bytes, None)?;
+    // Keep the original basename verbatim — only drop directory parts.
+    let filename = std::path::Path::new(raw_filename)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(str::to_string)?;
+    if filename.is_empty() || filename.starts_with('.') {
+        return None;
+    }
+    let (mime, dims) = match kind {
+        SourceKind::Png => ("image/png", decode_dimensions(&bytes).ok()),
+        SourceKind::Jpeg => ("image/jpeg", decode_dimensions(&bytes).ok()),
+        SourceKind::Webp => ("image/webp", decode_dimensions(&bytes).ok()),
+        SourceKind::Svg => ("image/svg+xml", None),
+    };
+    Some(Processed {
+        filename,
+        mime_type: mime.into(),
+        bytes,
+        width: dims.map(|(w, _)| w),
+        height: dims.map(|(_, h)| h),
+    })
+}
+
 /// Strip any directory components and any leading dots, lowercase
 /// the result. Prevents path-traversal via crafted filenames.
 pub(crate) fn sanitize_basename(name: &str) -> String {
@@ -256,5 +297,38 @@ mod tests {
     fn process_rejects_oversize() {
         let bytes = vec![0u8; MAX_UPLOAD_BYTES + 1];
         assert!(process_upload("x.png", Some("image/png"), bytes).is_err());
+    }
+
+    fn tiny_png() -> Vec<u8> {
+        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([1, 2, 3, 255]),
+        ));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        png
+    }
+
+    #[test]
+    fn process_for_import_preserves_name_and_does_not_transcode() {
+        // A ShinyProxy logo ref is `/assets/img/Snap_Aurora.png`; the
+        // import must keep the exact name + PNG bytes so the (case-
+        // sensitive) Media lookup resolves it. Unlike process_upload,
+        // which would lowercase + rewrite to .webp.
+        let png = tiny_png();
+        let p = super::process_for_import("/etc/sp/assets/img/Snap_Aurora.png", png.clone())
+            .expect("png accepted");
+        assert_eq!(p.filename, "Snap_Aurora.png", "name + case + ext preserved");
+        assert_eq!(p.mime_type, "image/png", "kept as PNG, not transcoded");
+        assert_eq!(p.bytes, png, "bytes untouched");
+        assert_eq!(p.width, Some(2));
+    }
+
+    #[test]
+    fn process_for_import_rejects_non_images_and_dotfiles() {
+        assert!(super::process_for_import("x.png", b"not an image".to_vec()).is_none());
+        assert!(super::process_for_import(".hidden.png", tiny_png()).is_none());
     }
 }

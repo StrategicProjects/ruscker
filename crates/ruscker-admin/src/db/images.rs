@@ -527,6 +527,65 @@ fn delete_diff(filename: Option<&(String,)>) -> serde_json::Value {
     }
 }
 
+/// Outcome of an [`import_dir`] sweep.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ImportImagesReport {
+    /// Newly stored (or changed-bytes) image files.
+    pub imported: usize,
+    /// Already present with identical bytes — left untouched.
+    pub unchanged: usize,
+    /// Not a supported image (or unreadable / oversize) — skipped.
+    pub skipped: usize,
+}
+
+/// Ingest every supported image file in `dir` into the Media library,
+/// preserving each file's ORIGINAL name so spec logo/cover references
+/// (`/assets/img/<file>`) resolve against the DB after a migration —
+/// the gap that left a ShinyProxy import's cards logo-less (the importer
+/// only read the YAML, never the referenced binaries).
+///
+/// Idempotent: a file already stored with identical bytes is counted
+/// `unchanged` and not rewritten, so re-running the import doesn't churn
+/// the audit log. Non-recursive (a ShinyProxy `assets/img` is flat).
+pub async fn import_dir(db: &ConfigDb, dir: &std::path::Path) -> Result<ImportImagesReport> {
+    let mut report = ImportImagesReport::default();
+    let entries = std::fs::read_dir(dir)
+        .with_context(|| format!("read images dir {}", dir.display()))?;
+    // Stable order so the audit log / output reads predictably.
+    let mut paths: Vec<std::path::PathBuf> = entries
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_file())
+        .collect();
+    paths.sort();
+
+    for path in paths {
+        let raw = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(err) => {
+                tracing::warn!(path = %path.display(), error = ?err, "skip unreadable image");
+                report.skipped += 1;
+                continue;
+            }
+        };
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or_default();
+        let Some(processed) = crate::images::process_for_import(name, raw) else {
+            report.skipped += 1;
+            continue;
+        };
+        // Idempotency: skip when the same filename already holds the same
+        // bytes (re-import after the first run is then a no-op).
+        if let Some((_, existing)) = fetch_by_filename(db, &processed.filename).await? {
+            if existing == processed.bytes {
+                report.unchanged += 1;
+                continue;
+            }
+        }
+        insert(db, processed, Some("import")).await?;
+        report.imported += 1;
+    }
+    Ok(report)
+}
+
 #[cfg(all(test, feature = "postgres-it"))]
 mod pg_tests {
     use super::*;
@@ -758,5 +817,55 @@ mod tests {
             Some("/assets/img/ruscker-mark.svg"),
             "spec logo reset to the default mark"
         );
+    }
+
+    fn tiny_png(rgba: [u8; 4]) -> Vec<u8> {
+        let img = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba(rgba),
+        ));
+        let mut png = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        png
+    }
+
+    // The migration gap: image files in a ShinyProxy `assets/img` dir
+    // land in the Media library under their original names, idempotently,
+    // and a card's `/assets/img/<file>` reference then resolves.
+    #[tokio::test]
+    async fn import_dir_ingests_preserving_names_and_is_idempotent() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let dir = std::env::temp_dir().join("ruscker-import-dir-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let png = tiny_png([10, 20, 30, 255]);
+        std::fs::write(dir.join("Snap_Aurora.png"), &png).unwrap();
+        std::fs::write(dir.join("notes.txt"), b"not an image").unwrap();
+
+        let r = import_dir(&db, &dir).await.unwrap();
+        assert_eq!(r.imported, 1, "the PNG");
+        assert_eq!(r.skipped, 1, "the .txt");
+
+        // The exact name (incl. case) is what a spec logo ref resolves.
+        let (mime, bytes) = fetch_by_filename(&db, "Snap_Aurora.png")
+            .await
+            .unwrap()
+            .expect("stored under its original name");
+        assert_eq!(mime, "image/png");
+        assert_eq!(bytes, png);
+
+        // Re-running is a no-op (same bytes → unchanged, no audit churn).
+        let again = import_dir(&db, &dir).await.unwrap();
+        assert_eq!(again.imported, 0);
+        assert_eq!(again.unchanged, 1);
+
+        // Changed bytes on the same name re-import.
+        std::fs::write(dir.join("Snap_Aurora.png"), tiny_png([99, 0, 0, 255])).unwrap();
+        let changed = import_dir(&db, &dir).await.unwrap();
+        assert_eq!(changed.imported, 1);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -838,6 +838,31 @@ impl ContainerBackend for LocalDockerBackend {
         Ok(self.docker.version().await.ok().and_then(|v| v.version))
     }
 
+    async fn reclaim_space(&self) -> CoreResult<u64> {
+        let mut bytes: i64 = 0;
+        // `prune_images(None)` removes ONLY dangling (untagged) images —
+        // orphan layers, never a tagged image or a container's image. No
+        // `dangling:false` filter, so it can't behave like `image prune -a`.
+        match self
+            .docker
+            .prune_images(None::<bollard::query_parameters::PruneImagesOptions>)
+            .await
+        {
+            Ok(r) => bytes += r.space_reclaimed.unwrap_or(0),
+            Err(e) => tracing::warn!(error = %e, "reclaim: prune dangling images failed"),
+        }
+        // Build cache (unreferenced layers from past builds).
+        match self
+            .docker
+            .prune_build(None::<bollard::query_parameters::PruneBuildOptions>)
+            .await
+        {
+            Ok(r) => bytes += r.space_reclaimed.unwrap_or(0),
+            Err(e) => tracing::warn!(error = %e, "reclaim: prune build cache failed"),
+        }
+        Ok(bytes.max(0) as u64)
+    }
+
     async fn list_images(&self) -> CoreResult<Vec<ImageInfo>> {
         let images = self
             .docker

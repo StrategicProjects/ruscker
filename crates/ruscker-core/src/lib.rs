@@ -391,6 +391,15 @@ pub trait ContainerBackend: Send + Sync {
         Ok(None)
     }
 
+    /// "Reclaim space" for the disk panel (#766 follow-up): prune
+    /// **dangling** images (untagged orphan layers) + the build cache.
+    /// Deliberately host-SAFE — it never removes a tagged image or any
+    /// container (Ruscker or not), unlike a full `docker system prune`.
+    /// Returns the number of bytes reclaimed.
+    async fn reclaim_space(&self) -> CoreResult<u64> {
+        Ok(0)
+    }
+
     /// Local images, for the disk panel's "what's eating space" view.
     /// Each carries its size and how many containers reference it (so the
     /// UI can flag "in use" and only offer to remove unused ones).

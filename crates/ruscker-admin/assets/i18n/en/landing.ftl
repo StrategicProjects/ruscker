@@ -884,3 +884,9 @@ admin-system-yes = yes
 admin-system-no = no
 admin-system-restart-title = Restart the service
 admin-system-restart-hint = Ruscker can't restart itself safely — run this on the host (in-flight requests drain on SIGTERM).
+
+# Disk reclaim (#766 follow-up)
+admin-disk-reclaim = Reclaim space
+admin-disk-reclaim-hint = Prune dangling images + build cache (host-safe — never a tagged image or any container).
+admin-disk-reclaim-confirm = Reclaim space? Prunes dangling images and the build cache (no tagged image or container is removed).
+admin-disk-flash-reclaimed = Space reclaimed (dangling images + build cache).

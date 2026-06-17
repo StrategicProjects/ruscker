@@ -30,6 +30,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/disk/containers/prune", post(prune_stopped))
         .route("/admin/disk/images/remove", post(remove_image))
         .route("/admin/disk/images/prune", post(prune_images))
+        .route("/admin/disk/reclaim", post(reclaim))
 }
 
 /// One image row, enriched with whether it's safe to remove.
@@ -167,6 +168,7 @@ async fn index(
     let (flash, flash_error) = match q.flash.as_deref() {
         Some("removed") => (Some("admin-disk-flash-removed"), false),
         Some("pruned") => (Some("admin-disk-flash-pruned"), false),
+        Some("reclaimed") => (Some("admin-disk-flash-reclaimed"), false),
         Some("images-pruned") => (Some("admin-disk-flash-images-pruned"), false),
         Some("nothing") => (Some("admin-disk-flash-nothing"), false),
         Some("error") => (Some("admin-disk-flash-error"), true),
@@ -397,6 +399,27 @@ async fn prune_stopped(_: RequireAdmin, State(state): State<AppState>) -> Respon
         Ok(_) => redirect("pruned"),
         Err(e) => {
             tracing::warn!(error = %e, "disk: prune stopped failed");
+            redirect("error")
+        }
+    }
+}
+
+/// "Reclaim space" — host-SAFE cleanup: prune dangling images + the build
+/// cache. Never removes a tagged image or any container (Ruscker or not),
+/// unlike a full `docker system prune` — important on a host that also
+/// runs ShinyProxy or other containers.
+async fn reclaim(_: RequireAdmin, State(state): State<AppState>) -> Response {
+    let Some(backend) = state.backend.as_ref() else {
+        return redirect("error");
+    };
+    match backend.reclaim_space().await {
+        Ok(0) => redirect("nothing"),
+        Ok(bytes) => {
+            tracing::info!(bytes, "disk: reclaimed dangling images + build cache");
+            redirect("reclaimed")
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: reclaim space failed");
             redirect("error")
         }
     }

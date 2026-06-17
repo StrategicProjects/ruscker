@@ -167,6 +167,7 @@ pub mod landing_blocks;
 pub mod showcase;
 pub mod spec_access;
 pub mod specs;
+pub mod user_favorites;
 pub mod users;
 
 #[cfg(test)]

@@ -298,29 +298,7 @@ fn cmd_import(
         format!("failed to load config from {}", yaml_path.display())
     })?;
 
-    // Resolve the Media source dir, matching the flag's help exactly:
-    //   * an explicit non-empty path is used as-is;
-    //   * an explicit EMPTY value (`--images-dir ""`) skips media import —
-    //     it does NOT fall back to auto-discovery;
-    //   * omitting the flag auto-discovers beside the config like `serve`.
-    // A resolved path that isn't a directory (a typo, or a missing
-    // ShinyProxy assets dir) is warned about and skipped — it must never
-    // abort the spec import.
-    let images_dir = match images_dir_override {
-        Some(p) if p.as_os_str().is_empty() => None,
-        Some(p) => Some(p),
-        None => discover_images_dir(yaml_path, &config),
-    }
-    .filter(|d| {
-        let ok = d.is_dir();
-        if !ok {
-            eprintln!(
-                "note: images dir {} not found — skipping media import",
-                d.display()
-            );
-        }
-        ok
-    });
+    let images_dir = resolve_images_dir(images_dir_override, yaml_path, &config);
 
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -426,6 +404,39 @@ fn discover_images_dir(config_path: &Path, config: &Config) -> Option<PathBuf> {
     }
 
     None
+}
+
+/// Resolve the Media source dir for `import`, matching `--images-dir`'s
+/// help exactly:
+///   * an explicit non-empty path is used as-is;
+///   * an explicit EMPTY value (`--images-dir ""`) skips media import —
+///     it does NOT fall back to auto-discovery;
+///   * omitting the flag auto-discovers beside the config like `serve`.
+///
+/// A resolved path that isn't a directory (a typo, or a missing ShinyProxy
+/// assets dir) is warned about and dropped to `None` — media import must
+/// never abort the spec import. Pure but for the on-disk `is_dir` probe +
+/// the warning, so it's unit-testable.
+fn resolve_images_dir(
+    images_dir_override: Option<PathBuf>,
+    yaml_path: &Path,
+    config: &Config,
+) -> Option<PathBuf> {
+    match images_dir_override {
+        Some(p) if p.as_os_str().is_empty() => None,
+        Some(p) => Some(p),
+        None => discover_images_dir(yaml_path, config),
+    }
+    .filter(|d| {
+        let ok = d.is_dir();
+        if !ok {
+            eprintln!(
+                "note: images dir {} not found — skipping media import",
+                d.display()
+            );
+        }
+        ok
+    })
 }
 
 /// Default Docker socket path on Linux. Pulled out as a constant so
@@ -1111,6 +1122,49 @@ mod tests {
         let config =
             Config::from_yaml("proxy:\n  template-path: templates/x\n  specs: []\n").unwrap();
         assert!(discover_images_dir(&cfg_path, &config).is_none());
+    }
+
+    // #891 follow-up: the explicit `--images-dir` paths the help promises.
+    #[test]
+    fn resolve_images_dir_honours_explicit_flag() {
+        use std::fs;
+        let tmp = std::env::temp_dir().join(format!("ruscker-resolve-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let cfg_dir = tmp.join("etc");
+        // An auto-discoverable dir exists beside the config, so we can prove
+        // an empty override does NOT fall back to it.
+        let auto = cfg_dir.join("assets/img");
+        fs::create_dir_all(&auto).unwrap();
+        let cfg_path = cfg_dir.join("application.yml");
+        let config = Config::from_yaml("proxy:\n  specs: []\n").unwrap();
+
+        // Empty value → skip entirely, no auto-discovery.
+        assert_eq!(
+            resolve_images_dir(Some(PathBuf::from("")), &cfg_path, &config),
+            None,
+            "empty --images-dir must skip, not auto-discover"
+        );
+
+        // A non-existent explicit path → warn + skip (never used).
+        let missing = tmp.join("nope/does-not-exist");
+        assert_eq!(
+            resolve_images_dir(Some(missing), &cfg_path, &config),
+            None,
+            "a missing dir must be dropped, not used"
+        );
+
+        // An explicit real dir → used as-is.
+        let explicit = tmp.join("my-imgs");
+        fs::create_dir_all(&explicit).unwrap();
+        assert_eq!(
+            resolve_images_dir(Some(explicit.clone()), &cfg_path, &config),
+            Some(explicit)
+        );
+
+        // Omitted → auto-discovers beside the config.
+        assert_eq!(resolve_images_dir(None, &cfg_path, &config), Some(auto));
+
+        fs::remove_dir_all(&tmp).ok();
     }
 
     #[cfg(unix)]

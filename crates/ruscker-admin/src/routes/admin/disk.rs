@@ -471,11 +471,20 @@ async fn remove_image(
     }
 }
 
-/// Remove every **unused** image in one click (#463) — `containers == 0`
-/// and not referenced by any current spec. Never `--force`s, and never
-/// runs a host-wide `docker image prune`: it only removes the exact
-/// subset the panel flags as unused, so a non-Ruscker image the host
-/// happens to have stays put.
+/// Remove every **unused** image in one click (#463) — no container is
+/// built from it (on ANY host) **and** no current spec references it.
+/// Never `--force`s, and never runs a host-wide `docker image prune`: it
+/// removes only the exact subset the panel flags as unused.
+///
+/// Caveat (#892 follow-up): "unused" is about *current use*, not
+/// *provenance*. An image a side-by-side ShinyProxy pulled but isn't
+/// running a container from right now reads as unused and WILL be removed
+/// — which hurts on a host that can't re-pull (offline / CDN-blocked).
+/// Ruscker doesn't yet track which images it pulled, so it can't tell its
+/// own orphans from a neighbour's; tracked as an enhancement. The
+/// container cross-reference (#871) still protects anything actually
+/// running, and the fail-closed in-use signal (#889/multi-host) prevents
+/// deleting an image whose usage can't be determined.
 async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Response {
     let Some(backend) = state.backend.as_ref() else {
         return redirect("error");

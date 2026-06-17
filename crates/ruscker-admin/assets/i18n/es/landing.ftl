@@ -8,9 +8,6 @@ landing-signout = Salir
 landing-signed-in-as = { $user }
 
 filter-search-placeholder = Buscar aplicación…
-filter-access-all = Todos
-filter-access-public = Públicos
-filter-access-restricted = Restringidos
 filter-clear = Limpiar filtros
 
 type-all = Todos
@@ -770,7 +767,6 @@ admin-landing-default-theme = Tema predeterminado
 admin-landing-default-theme-help = El tema inicial para quien nunca eligió. El visitante aún puede cambiar.
 admin-landing-visible-sections = Secciones visibles
 admin-landing-show-search = Barra de búsqueda
-admin-landing-show-filters = Filtros de acceso (público/restringido)
 admin-landing-brand-color = Color de marca
 admin-landing-brand-custom = Color personalizado
 admin-landing-brand-color-help = Atajo para el acento (claro y oscuro). Ajuste fino abajo.

@@ -169,6 +169,29 @@ pub enum Warning {
     IgnoredCompatField {
         field: &'static str,
     },
+    /// A `labels` key isn't valid Docker label syntax (Docker keys are
+    /// `[A-Za-z0-9._-]`, reverse-DNS style). The label is stamped verbatim,
+    /// so the daemon can reject the whole container create at spawn — and
+    /// the failure only surfaces when a visitor first opens the app (#892).
+    InvalidLabelKey {
+        spec_id: String,
+        key: String,
+    },
+    /// A `labels` key is in Ruscker's reserved `ruscker.*` namespace. Those
+    /// labels are stamped by the backend (e.g. `ruscker.replica_id`, which
+    /// the disk-panel host-safety guards key on) and WIN on a collision, so
+    /// the operator's value is silently dropped. Rename it (#892).
+    ReservedLabelKey {
+        spec_id: String,
+        key: String,
+    },
+    /// `container-network` isn't a valid Docker network name (names are
+    /// `[a-zA-Z0-9][a-zA-Z0-9_.-]*`). The container create fails at spawn,
+    /// only when a visitor first opens the app (#892).
+    InvalidContainerNetwork {
+        spec_id: String,
+        value: String,
+    },
 }
 
 const KNOWN_TYPES: &[&str] = &["app", "package", "talk", "report", "api"];
@@ -662,6 +685,68 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             }
         }
     }
+
+    // Label keys: Docker syntax + Ruscker's reserved `ruscker.*` namespace.
+    // An empty/whitespace key is dropped silently by `effective_labels`, so
+    // skip it here (not worth a warning).
+    if let Some(labels) = &spec.labels {
+        for key in labels.keys() {
+            let key = key.trim();
+            if key.is_empty() {
+                continue;
+            }
+            if is_reserved_label_key(key) {
+                warnings.push(Warning::ReservedLabelKey {
+                    spec_id: spec.id.clone(),
+                    key: key.to_string(),
+                });
+            } else if !is_valid_label_key(key) {
+                warnings.push(Warning::InvalidLabelKey {
+                    spec_id: spec.id.clone(),
+                    key: key.to_string(),
+                });
+            }
+        }
+    }
+
+    // Container network name (when set) must follow Docker's naming rules,
+    // else the create fails at spawn.
+    if let Some(net) = spec.effective_container_network() {
+        if !is_valid_network_name(net) {
+            warnings.push(Warning::InvalidContainerNetwork {
+                spec_id: spec.id.clone(),
+                value: net.to_string(),
+            });
+        }
+    }
+}
+
+/// A Docker label key Ruscker accepts: non-empty and only `[A-Za-z0-9._-]`
+/// (the reverse-DNS style Docker recommends). Public so the admin spec
+/// form can validate with the exact same rule.
+pub fn is_valid_label_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// Whether a label key falls in Ruscker's reserved `ruscker.*` namespace
+/// (case-insensitive) — those are stamped by the backend and override an
+/// operator value, so they should be refused. Public for admin-form reuse.
+pub fn is_reserved_label_key(key: &str) -> bool {
+    key.to_ascii_lowercase().starts_with("ruscker.")
+}
+
+/// A valid Docker network name: a leading alphanumeric, then any of
+/// `[a-zA-Z0-9_.-]`. Public so the admin spec form validates identically.
+pub fn is_valid_network_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphanumeric() => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// A Docker bind spec: `host:container` plus an optional `:ro`/`:rw`
@@ -1316,6 +1401,101 @@ proxy:
                 .any(|w| matches!(w, Warning::IgnoredCompatField { .. })),
             "got {:?}",
             clean.warnings
+        );
+    }
+
+    #[test]
+    fn label_and_network_predicates() {
+        // Label keys.
+        assert!(is_valid_label_key("com.acme.team"));
+        assert!(is_valid_label_key("cost-center"));
+        assert!(!is_valid_label_key("")); // empty
+        assert!(!is_valid_label_key("has space"));
+        assert!(!is_valid_label_key("weird*char"));
+        // Reserved namespace (case-insensitive).
+        assert!(is_reserved_label_key("ruscker.replica_id"));
+        assert!(is_reserved_label_key("RUSCKER.spec_id"));
+        assert!(!is_reserved_label_key("rusckers")); // no dot, not the namespace
+        assert!(!is_reserved_label_key("acme.ruscker.x"));
+        // Network names.
+        assert!(is_valid_network_name("ruscker_net"));
+        assert!(is_valid_network_name("br0.idge-1"));
+        assert!(!is_valid_network_name("")); // empty
+        assert!(!is_valid_network_name("_leading")); // must start alphanumeric
+        assert!(!is_valid_network_name("has space"));
+    }
+
+    #[test]
+    fn flags_invalid_and_reserved_labels() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      labels:
+        "bad key": x
+        ruscker.replica_id: hijack
+        good.key: ok
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w, Warning::InvalidLabelKey { spec_id, key } if spec_id == "app1" && key == "bad key"
+            )),
+            "expected InvalidLabelKey, got {:?}",
+            report.warnings
+        );
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w, Warning::ReservedLabelKey { spec_id, key } if spec_id == "app1" && key == "ruscker.replica_id"
+            )),
+            "expected ReservedLabelKey, got {:?}",
+            report.warnings
+        );
+        // The valid key produces no label warning.
+        assert!(
+            !report.warnings.iter().any(|w| matches!(
+                w, Warning::InvalidLabelKey { key, .. } if key == "good.key"
+            )),
+            "a valid key must not warn"
+        );
+    }
+
+    #[test]
+    fn flags_invalid_container_network() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: app1
+      container-image: org/app:1
+      container-network: "not a net"
+"#;
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w, Warning::InvalidContainerNetwork { spec_id, value }
+                    if spec_id == "app1" && value == "not a net"
+            )),
+            "expected InvalidContainerNetwork, got {:?}",
+            report.warnings
+        );
+
+        // A valid network name is silent.
+        let ok = r#"
+proxy:
+  specs:
+    - id: app2
+      container-image: org/app:1
+      container-network: ruscker_net
+"#;
+        let report = Config::from_yaml(ok).expect("parse").validate();
+        assert!(
+            !report
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::InvalidContainerNetwork { .. })),
+            "valid network must not warn, got {:?}",
+            report.warnings
         );
     }
 }

@@ -128,6 +128,7 @@ admin-users-celular = Móvil
 admin-users-col-profile = Perfil
 admin-users-save-profile = Guardar perfil
 admin-users-import = Importar CSV
+admin-users-import-choose = Elegir archivo CSV
 admin-users-import-help = Columnas: username, role, password, groups, setor, email, celular. La primera fila es el encabezado.
 admin-users-import-title = Importar usuarios
 admin-users-import-preview-title = Vista previa de importación

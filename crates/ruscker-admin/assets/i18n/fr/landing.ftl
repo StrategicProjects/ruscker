@@ -16,6 +16,7 @@ filter-clear = Effacer les filtres
 type-all = Tous
 type-app = Applications
 type-package = Paquets
+type-link = Liens
 type-talk = Présentations
 type-report = Rapports
 type-api = APIs

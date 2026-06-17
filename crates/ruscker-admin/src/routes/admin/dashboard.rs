@@ -98,6 +98,9 @@ struct ReplicaRow {
     /// `display-name` from the spec config, or the spec_id if
     /// the spec was renamed/deleted out from under the registry.
     display_name: String,
+    /// Card logo URL (already base-prefixed), or `None` for the
+    /// monogram fallback. Serialized so the SSE JS can render it too.
+    logo: Option<String>,
     /// Lowercase state string ("ready", "starting", …).
     /// Kept stable across versions — the JS uses it to pick
     /// the dot CSS class and (via the i18n keys baked into the
@@ -155,8 +158,11 @@ struct DashboardSnapshot {
 struct AppGroup {
     spec_id: String,
     display_name: String,
-    /// Single uppercase letter for the avatar tile.
+    /// Single uppercase letter for the avatar tile (monogram fallback).
     initial: String,
+    /// Card logo URL (base-prefixed) when the spec has one; the head
+    /// renders it instead of the monogram.
+    logo: Option<String>,
     /// Replica count.
     n: usize,
     /// The worst replica's dot class + label, so the collapsed head
@@ -216,10 +222,12 @@ fn group_rows(rows: &[ReplicaRow]) -> Vec<AppGroup> {
             let has_metrics = reps.iter().any(|r| r.cpu_display.is_some());
             let cpu_sum: f64 = reps.iter().filter_map(|r| r.cpu_history.last().copied()).sum();
             let mem_sum: u64 = reps.iter().filter_map(|r| r.mem_history.last().copied()).sum();
+            let logo = reps.first().and_then(|r| r.logo.clone());
             AppGroup {
                 spec_id: spec_id.to_string(),
                 display_name,
                 initial,
+                logo,
                 n: reps.len(),
                 state_dot,
                 state_label,
@@ -450,6 +458,29 @@ async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardS
         })
         .collect();
 
+    // Card logo per spec (#dashboard-logo): the same
+    // `template-properties.logo` the landing + apps list show. Root-
+    // absolute values are base-prefixed here so the URL is correct under
+    // `--base-path` (and ready for the SSE JS to use verbatim); an `http`
+    // logo is left as-is.
+    let logo_of: std::collections::HashMap<String, String> = name_of
+        .keys()
+        .filter_map(|sid| {
+            catalog
+                .iter()
+                .find(|s| &s.id == sid)
+                .and_then(|s| s.template_properties.get_str("logo"))
+                .map(|l| {
+                    let url = if l.starts_with("http") {
+                        l.to_string()
+                    } else {
+                        format!("{}{}", state.base_path, l)
+                    };
+                    (sid.clone(), url)
+                })
+        })
+        .collect();
+
     let mut total_memory_bytes: u64 = 0;
     let rows: Vec<ReplicaRow> = snap
         .into_iter()
@@ -470,10 +501,12 @@ async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardS
             }
             let (state_code, state_dot) = state_codes(r.state);
             let state_label = state.locales.t(locale, state_label_key(r.state), None);
+            let logo = logo_of.get(&r.spec_id).cloned();
             ReplicaRow {
                 replica_id: r.id.0.to_string(),
                 spec_id: r.spec_id,
                 display_name,
+                logo,
                 state: state_code,
                 state_dot,
                 state_label,
@@ -932,6 +965,7 @@ mod tests {
             replica_id: uuid::Uuid::new_v4().to_string(),
             spec_id: spec.into(),
             display_name: name.into(),
+            logo: None,
             state: state_code,
             state_dot,
             // Hard-coded pt labels — keeps the test independent

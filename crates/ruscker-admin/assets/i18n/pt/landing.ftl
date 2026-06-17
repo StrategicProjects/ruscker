@@ -9,9 +9,6 @@ landing-signout = Sair
 landing-signed-in-as = { $user }
 
 filter-search-placeholder = Buscar aplicação…
-filter-access-all = Todos
-filter-access-public = Públicos
-filter-access-restricted = Restritos
 filter-clear = Limpar filtros
 
 type-all = Todos
@@ -132,6 +129,7 @@ admin-users-celular = Celular
 admin-users-col-profile = Perfil
 admin-users-save-profile = Salvar perfil
 admin-users-import = Importar CSV
+admin-users-import-choose = Escolher arquivo CSV
 admin-users-import-help = Colunas: username, role, password, groups, setor, email, celular. A primeira linha é o cabeçalho.
 admin-users-import-title = Importar usuários
 admin-users-import-preview-title = Prévia da importação
@@ -773,7 +771,6 @@ admin-landing-default-theme = Tema padrão
 admin-landing-default-theme-help = O tema inicial para quem nunca escolheu. O visitante ainda pode trocar.
 admin-landing-visible-sections = Seções visíveis
 admin-landing-show-search = Barra de busca
-admin-landing-show-filters = Filtros de acesso (público/restrito)
 admin-landing-brand-color = Cor da marca
 admin-landing-brand-custom = Cor personalizada
 admin-landing-brand-color-help = Atalho para o acento (claro e escuro). Ajuste fino abaixo.

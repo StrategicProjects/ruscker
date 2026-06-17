@@ -745,15 +745,6 @@
             <span>{{ self.t("admin-landing-show-search") }}</span>
           </label>
         </div>
-        <div class="spec-form-field">
-          <label class="spec-form-check" style="cursor:pointer;gap:10px">
-            <span class="switch">
-              <input type="checkbox" name="show_filters" value="on" x-model="form.show_filters" {% if !form.show_filters.is_empty() %}checked{% endif %}>
-              <span class="switch__track"><span class="switch__dot"></span></span>
-            </span>
-            <span>{{ self.t("admin-landing-show-filters") }}</span>
-          </label>
-        </div>
         {# "Featured" carousel toggle (#506), moved here from the Header
            card (#803) — it is a visible portal section like search and
            filters. The carousel only shows when this is on AND at least
@@ -1012,11 +1003,8 @@
              x-html="pvIntroHtml() || $el.dataset.placeholder"
              data-placeholder="{{ self.t("admin-landing-preview-empty") }}"
              :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
-          {# Search pill + filter chips honour the Visible-sections toggles. #}
+          {# Search pill honours the Visible-search toggle. #}
           <div class="landing-preview-mockfilter" x-show="!!form.show_search" x-cloak><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
-          <div class="landing-preview-mockchips" x-show="!!form.show_filters" x-cloak>
-            <span class="lp-chip"></span><span class="lp-chip"></span><span class="lp-chip"></span>
-          </div>
 
           {# Catalog mock: reacts to layout (grid/list/sections), density,
              accent and card-cover style. Sections renders two grouped

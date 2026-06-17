@@ -1654,6 +1654,43 @@ input[type="range"]::-moz-range-thumb {
   text-align: right;
   white-space: nowrap;
 }
+/* Grouped action buttons (#: Apps tab polish) — cluster related actions
+   (marker | manage | operate) and set the destructive Delete apart so it's
+   never bumped by mistake. Thin dividers separate the groups. */
+.admin-table .actions-cell .row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+.row-actions .ra-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.row-actions .ra-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 16px;
+  margin: 0 5px;
+  background: var(--border);
+}
+/* The destructive group sits after a wider gap from the rest. */
+.row-actions .ra-danger { margin-left: 8px; }
+/* Live image-pull progress shown inline while a re-pull runs (#: follow
+   the steps). Capped width + ellipsis so a long Docker status line can't
+   blow the row out; it only appears during the operation. */
+.row-actions .pull-status {
+  display: inline-flex;
+  align-items: center;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
 /* Access counter column (#549) — tabular figures so totals line up,
    with a faint daily-usage sparkline beside the total. */
 .admin-table .access-cell {

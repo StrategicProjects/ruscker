@@ -245,7 +245,7 @@
     </div>
   </div>
 
-  {# ── Filter row 2: type chips with long labels + access ───── #}
+  {# ── Filter row 2: type chips with long labels ───── #}
   <div class="flex flex-wrap items-center gap-1.5 mb-2">
     <button class="chip"
             :class="type_ === 'all' ? 'on-all' : ''"
@@ -262,29 +262,13 @@
       </button>
     {% endfor %}
 
-    {% if show_filters %}
-    <span class="chip-divider"></span>
-
-    <button class="access-chip"
-            :class="access === 'open' ? 'on' : ''"
-            @click="access = (access === 'open' ? 'all' : 'open')">
-      <i class="ti ti-lock-open text-[12px] text-[color:var(--color-lock-open)]" aria-hidden="true"></i>
-      <span>{{ self.t("filter-access-public") }}</span>
-    </button>
-    <button class="access-chip"
-            :class="access === 'closed' ? 'on' : ''"
-            @click="access = (access === 'closed' ? 'all' : 'closed')">
-      <i class="ti ti-lock text-[12px] text-[color:var(--color-lock)]" aria-hidden="true"></i>
-      <span>{{ self.t("filter-access-restricted") }}</span>
-    </button>
-    {% endif %}
   </div>
 
   {# ── Meta row: count + clear filters ───────────────────────── #}
   <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
     <span><span x-text="visible"></span> / <span x-text="counts.all"></span></span>
-    <button x-show="type_ !== 'all' || access !== 'all' || search !== '' || subject !== 'all' || status_ !== 'active' || sort !== 'recent'"
-            @click="type_ = 'all'; access = 'all'; search = ''; subject = 'all'; status_ = 'active'; sort = 'recent'"
+    <button x-show="type_ !== 'all' || search !== '' || subject !== 'all' || status_ !== 'active' || sort !== 'recent'"
+            @click="type_ = 'all'; search = ''; subject = 'all'; status_ = 'active'; sort = 'recent'"
             class="text-[10px] px-2 py-0.5 text-[color:var(--text-faint)] underline hover:text-[color:var(--text)]">
       {{ self.t("filter-clear") }}
     </button>
@@ -311,7 +295,6 @@
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}
          data-type="{{ card.display_type.key() }}"
-         data-access="{% if card.access_open %}open{% else %}closed{% endif %}"
          data-active="{% if card.active %}active{% else %}inactive{% endif %}"
          data-subject="{% if let Some(t) = card.subject %}{{ t }}{% endif %}"
          data-name="{{ card.display_name|lower }}"
@@ -419,7 +402,6 @@ window.ruscker = window.ruscker || {};
 window.ruscker.landing = () => ({
   search: '',
   type_: 'all',
-  access: 'all',
   subject: 'all',
   // status filter: 'active' (default), 'all', or 'inactive'.
   // Inactive items are hidden by default so the landing only shows
@@ -439,7 +421,6 @@ window.ruscker.landing = () => ({
   init() {
     this.$watch('search', () => this.recount());
     this.$watch('type_',  () => this.recount());
-    this.$watch('access', () => this.recount());
     this.$watch('subject',   () => this.recount());
     this.$watch('status_',() => this.recount());
     this.$nextTick(() => this.recount());
@@ -502,9 +483,6 @@ window.ruscker.landing = () => ({
       (this.status_ === 'active' && status === 'active') ||
       (this.status_ === 'inactive' && status === 'inactive');
     if (!okStatus) return false;
-
-    const okAccess = this.access === 'all' || el.dataset.access === this.access;
-    if (!okAccess) return false;
 
     const okSubject = this.subject === 'all' || el.dataset.subject === this.subject;
     if (!okSubject) return false;

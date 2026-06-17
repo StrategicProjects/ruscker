@@ -92,14 +92,41 @@
 </form>
 
 {# ── Bulk import from CSV (#862) ────────────────────────────────── #}
+{# The native file input renders the browser's own "Choose file / No file
+   chosen" text in the BROWSER's language — untranslatable. Hide it and
+   drive it from a styled, localized <label>, mirroring the YAML import in
+   Applications (import_editor.html). This page is intentionally Alpine-free
+   (#433), so the chosen-filename echo + submit gating are vanilla JS below.
+   `required` on a display:none input breaks native validation, so the
+   submit starts disabled and enables on pick. The filename is set via
+   textContent (XSS-safe) and is never a localized string. #}
 <form method="post" action="{{ base }}/admin/users/import" enctype="multipart/form-data"
       style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
-  <input type="file" name="file" accept=".csv,text/csv" required>
-  <button type="submit" class="admin-nav-link" style="width:auto">
+  <label class="admin-nav-link" style="width:auto;cursor:pointer">
+    <i class="ti ti-file-spreadsheet" aria-hidden="true"></i> {{ self.t("admin-users-import-choose") }}
+    <input type="file" name="file" id="csv-import-input" accept=".csv,text/csv" class="hidden">
+  </label>
+  <span class="text-xs text-[color:var(--text-muted)]" id="csv-import-name" style="word-break:break-all"></span>
+  <button type="submit" id="csv-import-submit" class="admin-nav-link" style="width:auto" disabled>
     <i class="ti ti-file-upload" aria-hidden="true"></i> {{ self.t("admin-users-import") }}
   </button>
   <span class="text-xs text-[color:var(--text-faint)]">{{ self.t("admin-users-import-help") }}</span>
 </form>
+<script>
+  // Framework-free (this page avoids Alpine, #433): reflect the chosen file
+  // name and enable the submit only once a file is picked.
+  (function () {
+    var input = document.getElementById('csv-import-input');
+    var name = document.getElementById('csv-import-name');
+    var submit = document.getElementById('csv-import-submit');
+    if (!input || !name || !submit) return;
+    input.addEventListener('change', function () {
+      var f = input.files && input.files.length ? input.files[0].name : '';
+      name.textContent = f;
+      submit.disabled = !f;
+    });
+  })();
+</script>
 
 {# ── Existing users ────────────────────────────────────────────── #}
 <table class="admin-table" data-enhance>

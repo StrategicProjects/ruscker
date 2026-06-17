@@ -186,6 +186,8 @@
             {% if !spec.trend_svg.is_empty() %}<span class="sparkline-wrap" title="{{ self.t("admin-specs-col-access-help") }}">{{ spec.trend_svg|safe }}</span>{% endif %}
           </td>
           <td class="actions-cell">
+            <div class="row-actions">
+            <span class="ra-group ra-marker">
             {# Featured star (#521): inline toggle, solid when featured, right
                in the actions column. URL + titles ride in `data-*`
                (HTML-escaped), read via `$el.dataset` — never interpolated
@@ -209,6 +211,9 @@
                 <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
               </svg>
             </button>
+            </span>
+            <span class="ra-sep" aria-hidden="true"></span>
+            <span class="ra-group">
             <a href="{{ base }}/admin/specs/{{ spec.id }}/edit"
                class="admin-nav-link"
                title="{{ self.t("admin-specs-edit") }}">
@@ -219,6 +224,9 @@
                title="{{ self.t("admin-specs-duplicate") }}">
               <i class="ti ti-copy" aria-hidden="true"></i>
             </a>
+            </span>
+            <span class="ra-sep" aria-hidden="true"></span>
+            <span class="ra-group">
             {# Update image (#855): force a re-pull of this app's image in
                place. Containerized kinds only (external/link cards have no
                image). Starts the pull (POST → job token), then follows the
@@ -226,7 +234,13 @@
                then a brief ✓/✗ flash. Titles ride data-* (never a localized
                string inside the JS handler — template_lint). #}
             {% if spec.kind != "external" %}
-            <button type="button" class="admin-nav-link" x-data="{ busy: false, ok: null }"
+            <span class="ra-pull" x-data="{ busy: false, ok: null, line: '' }">
+            {# Live step indication (#: follow the pull) — the latest SSE
+               progress line shows inline while the re-pull runs, so the
+               user can watch Pulling → Downloading → Extracting → done
+               instead of just a spinner. Capped + ellipsized in CSS. #}
+            <span class="pull-status" x-show="busy && line" x-cloak x-text="line"></span>
+            <button type="button" class="admin-nav-link"
                     data-repull-url="{{ base }}/admin/specs/{{ spec.id }}/repull"
                     data-events-url="{{ base }}/admin/specs/image-pull/events"
                     data-title="{{ self.t("admin-specs-update-image") }}"
@@ -240,12 +254,14 @@
                               .then(r => r.ok ? r.json() : Promise.reject())
                               .then(d => {
                                 const es = new EventSource($el.dataset.eventsUrl + '?job=' + encodeURIComponent(d.job));
-                                es.addEventListener('done', () => { es.close(); busy = false; ok = true; setTimeout(() => { ok = null }, 4000); });
+                                es.onmessage = (e) => { line = e.data };
+                                es.addEventListener('done', () => { es.close(); busy = false; line = ''; ok = true; setTimeout(() => { ok = null }, 4000); });
                                 es.onerror = () => { es.close(); busy = false; if (ok === null) { ok = false; setTimeout(() => { ok = null }, 6000); } };
                               })
                               .catch(() => { busy = false; ok = false; setTimeout(() => { ok = null }, 6000); })">
               <i class="ti" :class="busy ? 'ti-loader-2 animate-spin' : (ok === true ? 'ti-check' : (ok === false ? 'ti-alert-triangle' : 'ti-cloud-download'))" aria-hidden="true"></i>
             </button>
+            </span>
             {% endif %}
             {# Archive toggle (#775): active ⇄ inactive without opening the
                editor. An inactive app keeps everything (config, history,
@@ -277,6 +293,8 @@
                               .finally(() => { busy = false })">
               <i class="ti {% if spec.state == "active" %}ti-archive{% else %}ti-archive-off{% endif %}" aria-hidden="true"></i>
             </button>
+            </span>
+            <span class="ra-group ra-danger">
             {# Delete (#775): same handler the edit form uses (stops the
                app's containers, audits). The confirm rides `data-confirm`
                + the global capture-phase submit listener in _layout.html —
@@ -287,6 +305,8 @@
                 <i class="ti ti-trash" aria-hidden="true"></i>
               </button>
             </form>
+            </span>
+            </div>
           </td>
           {% endif %}
         </tr>

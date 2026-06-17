@@ -697,6 +697,22 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .with_state(state)
 }
 
+/// Per-session cache of the `must_change_password` answer for
+/// [`must_change_password_guard`] (#903). Keyed by the opaque session id,
+/// whose `must_change` state is immutable for its lifetime, so an entry is
+/// authoritative until its TTL evicts it — turning a per-navigation
+/// `users` SELECT into at most one lookup per session per TTL.
+static MUST_CHANGE_CACHE: std::sync::LazyLock<
+    dashmap::DashMap<String, (std::time::Instant, bool)>,
+> = std::sync::LazyLock::new(dashmap::DashMap::new);
+
+const MUST_CHANGE_TTL: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Soft cap on [`MUST_CHANGE_CACHE`] entries; above it an insert first
+/// drops stale entries so churned-through session ids can't grow the map
+/// without bound (same spirit as the rate-limiter sweep, #737).
+const MUST_CHANGE_CACHE_CAP: usize = 256;
+
 /// Force a first-login password change (#454).
 ///
 /// A user account created in the admin gets `must_change_password = true`
@@ -710,9 +726,15 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
 ///
 /// Break-glass token sessions (no `actor`) and anonymous requests pass
 /// through untouched — they have no account to rotate, and the routes'
-/// own guards handle authentication. The cost is one indexed user lookup
-/// per gated admin request; the admin panel is low-traffic and the proxy
-/// hot path (`/app`, `/api`) never reaches this layer.
+/// own guards handle authentication.
+///
+/// The `must_change` flag is **immutable for the life of a session id**:
+/// changing the password revokes the session and re-mints a fresh id
+/// (#544/#555), so a given id never flips from needing-a-change to not.
+/// We therefore cache the per-session answer ([`MUST_CHANGE_CACHE`]) and
+/// do the indexed `users` lookup at most once per session per TTL, instead
+/// of on every gated admin navigation (#903). The panel is low-traffic
+/// and the proxy hot path (`/app`, `/api`) never reaches this layer.
 async fn must_change_password_guard(
     axum::extract::State(state): axum::extract::State<AppState>,
     req: axum::extract::Request,
@@ -735,22 +757,42 @@ async fn must_change_password_guard(
                 .get::<tower_cookies::Cookies>()
                 .and_then(|c| c.get(auth::COOKIE_NAME).map(|c| c.value().to_string()));
             if let Some(id) = session_id {
-                if let Some(actor) = state
-                    .admin_sessions
-                    .validate(&id)
-                    .await
-                    .and_then(|info| info.actor)
-                {
-                    let must = db::users::fetch(pool, &actor)
-                        .await
-                        .ok()
-                        .flatten()
-                        .map(|u| u.must_change_password)
-                        .unwrap_or(false);
-                    if must {
-                        return axum::response::Redirect::to("/admin/account/password")
-                            .into_response();
+                // Fast path: a recent answer for this exact session id.
+                // `must_change` can't change under a live id (see above), so
+                // a cache hit is authoritative until the TTL evicts it.
+                let cached = MUST_CHANGE_CACHE.get(&id).and_then(|e| {
+                    (e.0.elapsed() < MUST_CHANGE_TTL).then_some(e.1)
+                });
+                let must = match cached {
+                    Some(v) => v,
+                    None => {
+                        // Resolve the session, then the account, once.
+                        let actor = state
+                            .admin_sessions
+                            .validate(&id)
+                            .await
+                            .and_then(|info| info.actor);
+                        let v = match actor {
+                            Some(actor) => db::users::fetch(pool, &actor)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|u| u.must_change_password)
+                                .unwrap_or(false),
+                            // No actor (break-glass token / unknown id): nothing
+                            // to rotate. Cache `false` so we don't re-check.
+                            None => false,
+                        };
+                        if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {
+                            MUST_CHANGE_CACHE.retain(|_, e| e.0.elapsed() < MUST_CHANGE_TTL);
+                        }
+                        MUST_CHANGE_CACHE.insert(id.clone(), (std::time::Instant::now(), v));
+                        v
                     }
+                };
+                if must {
+                    return axum::response::Redirect::to("/admin/account/password")
+                        .into_response();
                 }
             }
         }

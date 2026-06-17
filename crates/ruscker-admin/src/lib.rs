@@ -383,24 +383,21 @@ impl AdminServer {
         if let Some(backend) = self.state.backend.as_ref() {
             match backend.list().await {
                 Ok(mut existing) => {
-                    // The backend can't know each replica's seat
-                    // cap — that lives in the spec config. Enrich
-                    // each reconciled replica with its spec's
-                    // `effective_seats` so `sessions_max` is
-                    // accurate and the scaler's saturation /
-                    // available-seats math works on first tick.
-                    for r in &mut existing {
-                        if let Some(spec) = self
-                            .state
-                            .config
-                            .proxy
-                            .specs
-                            .iter()
-                            .find(|s| s.id == r.spec_id)
-                        {
-                            r.sessions_max = spec.effective_seats();
-                        }
-                    }
+                    // The backend can't know each replica's seat cap —
+                    // that lives in the spec config. Enrich each reconciled
+                    // replica with its spec's `effective_seats` so
+                    // `sessions_max` is accurate and the scaler's saturation
+                    // / available-seats math works on first tick.
+                    //
+                    // Resolve from the EFFECTIVE catalog (DB ∪ YAML), not
+                    // just `proxy.specs`: a spec created in the admin is
+                    // DB-only, so a YAML-only lookup left its reconciled
+                    // replica at `sessions_max = 0` → `available_seats() == 0`
+                    // → never accepting, so after a restart an already-running
+                    // DB-only app looked permanently full (#907).
+                    let catalog =
+                        catalog::effective_specs(self.state.db.as_ref(), &self.state.config).await;
+                    apply_seat_caps(&mut existing, &catalog);
                     let n = existing.len();
                     self.state.replicas.write().await.reset(existing);
                     if n > 0 {
@@ -1016,6 +1013,24 @@ fn is_safe_csp_source(t: &str) -> bool {
     valid && (body.contains('.') || body.contains(':'))
 }
 
+/// Set each reconciled replica's `sessions_max` from its spec's
+/// `effective_seats`. `specs` must be the EFFECTIVE catalog (DB ∪ YAML),
+/// not just `proxy.specs`, so a spec created in the admin (DB-only) is
+/// found — otherwise its reconciled replica keeps `list()`'s
+/// `sessions_max = 0` and reads as permanently full after a restart
+/// (#907). A replica whose spec is no longer in the catalog is left as-is.
+fn apply_seat_caps(replicas: &mut [ruscker_core::Replica], specs: &[ruscker_config::Spec]) {
+    let caps: std::collections::HashMap<&str, u32> = specs
+        .iter()
+        .map(|s| (s.id.as_str(), s.effective_seats()))
+        .collect();
+    for r in replicas {
+        if let Some(max) = caps.get(r.spec_id.as_str()) {
+            r.sessions_max = *max;
+        }
+    }
+}
+
 #[cfg(test)]
 mod csrf_tests {
     use super::request_is_cross_origin;
@@ -1152,5 +1167,60 @@ mod csp_tests {
         assert!(csp.contains("https://a.example.com"));
         assert!(csp.contains("data:"));
         assert!(csp.contains("*.cdn.example.org"));
+    }
+}
+
+#[cfg(test)]
+mod reconcile_tests {
+    use super::apply_seat_caps;
+    use ruscker_config::Spec;
+    use ruscker_core::{Replica, ReplicaId, ReplicaState};
+
+    fn yaml_spec(s: &str) -> Spec {
+        std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+        serde_yaml_ng::from_str(s).unwrap()
+    }
+
+    // #907: a reconciled replica of a DB-only spec must get its seat cap
+    // from the effective catalog, or it reads as permanently full.
+    #[test]
+    fn seat_caps_cover_db_only_specs() {
+        // The backend's list() can't know seat caps → sessions_max = 0.
+        let mut replicas = vec![Replica {
+            id: ReplicaId::new(),
+            spec_id: "db-only".into(),
+            container_id: "c1".into(),
+            upstream: "127.0.0.1:8000".parse().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 0,
+            host: None,
+        }];
+        // The effective catalog (DB ∪ YAML) carries the DB-only spec.
+        let specs = vec![yaml_spec(
+            "id: db-only\ncontainer-image: nginx\nseats-per-container: 3",
+        )];
+        apply_seat_caps(&mut replicas, &specs);
+        assert_eq!(replicas[0].sessions_max, 3, "seat cap applied");
+        assert!(replicas[0].available_seats() > 0, "no longer reads as full");
+    }
+
+    // A replica whose spec vanished from the catalog is left untouched.
+    #[test]
+    fn seat_caps_leave_unknown_spec_alone() {
+        let mut replicas = vec![Replica {
+            id: ReplicaId::new(),
+            spec_id: "gone".into(),
+            container_id: "c1".into(),
+            upstream: "127.0.0.1:8000".parse().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 1,
+            sessions_max: 7,
+            host: None,
+        }];
+        apply_seat_caps(&mut replicas, &[]);
+        assert_eq!(replicas[0].sessions_max, 7, "untouched when spec is absent");
     }
 }

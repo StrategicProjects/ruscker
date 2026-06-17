@@ -527,6 +527,35 @@ async fn duplicate_opens_new_form_prefilled_with_fresh_id() {
 }
 
 #[tokio::test]
+async fn duplicate_works_for_a_config_only_spec() {
+    // #907: `open-app` lives only in the YAML config (never inserted into
+    // the DB). Duplicating it used to 404 (the handler only looked in the
+    // DB) even though the button is shown for config-only rows; it must
+    // fall back to the effective catalog and open the prefilled New form.
+    let db = open_db().await; // empty DB → `open-app` is config-only
+    let state = app_state(db).await;
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/specs/open-app/duplicate")
+                .header(header::COOKIE, format!("{COOKIE_NAME}={sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "config-only duplicate must not 404");
+    let body = String::from_utf8(
+        axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap().to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains(r#"value="open-app-copy""#), "id suffixed to -copy");
+    assert!(body.contains(r#"action="/admin/specs""#), "New-mode create action");
+}
+
+#[tokio::test]
 async fn favicon_routes_serve_raster_with_correct_content_type() {
     // #374: Safari & co. ignore the SVG favicon and fall back to
     // `/favicon.ico` — previously unserved (black placeholder). Now the

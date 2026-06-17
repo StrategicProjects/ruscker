@@ -1394,7 +1394,20 @@ async fn duplicate_form(
     };
     let spec = match db::specs::fetch_one(pool, &id).await {
         Ok(Some(s)) => s,
-        Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+        // A config-only (YAML) spec isn't in the DB. The duplicate button
+        // is shown for those rows and forking a YAML spec into an editable
+        // DB spec is a documented use, so fall back to the effective
+        // catalog instead of 404'ing (#907).
+        Ok(None) => {
+            match crate::catalog::effective_specs_cached(&state)
+                .await
+                .iter()
+                .find(|s| s.id == id)
+            {
+                Some(s) => s.clone(),
+                None => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+            }
+        }
         Err(e) => {
             tracing::error!(error = ?e, id, "fetch spec for duplicate failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();

@@ -308,3 +308,24 @@ panel reads and writes the SQLite DB. Use `ruscker import` to populate
 the DB from a YAML, and `ruscker export` to round-trip it back — both
 preserve specs, landing customization, SEO/analytics and custom
 blocks.
+
+### Importing card images into the Media library
+
+A spec's logo/cover is a *reference* like `/assets/img/snap_aurora.png`;
+the YAML doesn't carry the image bytes. `ruscker import` ingests those
+binaries into the Media library from a directory, keeping each file's
+**original name** so the references resolve:
+
+```bash
+ruscker import application.yml --db ruscker.db \
+  --images-dir /etc/shinyproxy/templates/<tpl>/assets/img
+```
+
+When `--images-dir` is omitted it's auto-discovered next to the config
+just like `serve` (`<config-dir>/assets/img/`, then the ShinyProxy
+`template-path` layout). The import is idempotent — files already stored
+with identical bytes are left untouched. (Unlike an admin upload, the
+import keeps the original format rather than transcoding to WebP, so the
+existing references keep matching; re-upload through the Media page to
+optimize.) Without a Media copy, logos only render if `serve` is also
+pointed at the same `--images-dir` (the on-disk fallback).

@@ -122,7 +122,7 @@ impl DisplayType {
             DisplayType::Report => "type-report",
             DisplayType::Package => "type-package",
             DisplayType::Api => "type-api",
-            DisplayType::Link => "type-package",
+            DisplayType::Link => "type-link",
         }
     }
 

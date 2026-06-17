@@ -99,6 +99,12 @@
         </form>
         {% endif %}
       </div>
+      {% if usage_unknown %}
+      <div class="disk-panel__sub" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        {{ self.t("admin-disk-usage-unknown") }}
+      </div>
+      {% endif %}
       <table class="admin-table" data-enhance>
         <thead>
           <tr>

@@ -67,6 +67,10 @@ struct DiskPage<'a> {
     /// False when the server started without `--docker` — the page then
     /// shows a banner instead of empty tables.
     available: bool,
+    /// True when the host container listing FAILED, so image in-use can't
+    /// be trusted: the page then treats every image as in-use (no remove /
+    /// prune) and shows a warning banner (#871 follow-up, fail closed).
+    usage_unknown: bool,
     containers: Vec<ManagedContainer>,
     images: Vec<ImageRow>,
     /// How many of `containers` are stopped (drives the prune button).
@@ -186,6 +190,7 @@ async fn index(
             nav_section: "disk",
             role: Role::Admin,
             available: false,
+            usage_unknown: false,
             containers: Vec::new(),
             images: Vec::new(),
             stopped_count: 0,
@@ -217,21 +222,32 @@ async fn index(
     // not just Ruscker-managed ones (#871) — so an image backing a
     // non-Ruscker container (e.g. ShinyProxy) is never flagged "unused".
     // (The daemon's per-image count is unreliable, #585, so we derive it
-    // from the live container set.)
-    let container_images: HashSet<String> = backend
-        .all_container_image_refs()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    // from the live container set.) `None` ⇒ the listing FAILED: fail
+    // closed (every image reads as in-use, nothing prunable) rather than
+    // assuming the host runs nothing and exposing every image to removal.
+    let container_images: Option<HashSet<String>> = match backend.all_container_image_refs().await
+    {
+        Ok(v) => Some(v.into_iter().collect()),
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: container image refs failed; failing closed (all in-use)");
+            None
+        }
+    };
+    let usage_unknown = container_images.is_none();
 
     let stopped_count = containers.iter().filter(|c| !c.running).count();
     let images_total_bytes: i64 = images.iter().map(|i| i.size_bytes).sum();
     let images: Vec<ImageRow> = images
         .into_iter()
-        .map(|i| image_row(i, &spec_images, &container_images))
+        .map(|i| image_row(i, &spec_images, container_images.as_ref()))
         .collect();
-    let unused_images_count = images.iter().filter(|r| !r.in_use()).count();
+    // When usage is unknown every row is in-use, so this is already 0;
+    // being explicit keeps the prune button hidden and the intent clear.
+    let unused_images_count = if usage_unknown {
+        0
+    } else {
+        images.iter().filter(|r| !r.in_use()).count()
+    };
 
     // Host disk usage for the hero. statvfs the filesystem holding the
     // uploaded-images dir when known, else the root — the host disk on a
@@ -284,6 +300,7 @@ async fn index(
         nav_section: "disk",
         role: Role::Admin,
         available: true,
+        usage_unknown,
         containers,
         images,
         stopped_count,
@@ -320,18 +337,28 @@ async fn spec_image_refs(state: &AppState) -> HashSet<String> {
 /// image backing a non-Ruscker container counts as in-use. The daemon's
 /// `ImageSummary.containers` count is unreliable on a plain `list_images`
 /// (#585), so we derive in-use from the live container set instead.
-fn image_used_by_container(i: &ImageInfo, container_images: &HashSet<String>) -> bool {
-    container_images.contains(&i.id) || i.tags.iter().any(|t| container_images.contains(t))
+///
+/// `None` means the container set **could not be determined** (the daemon
+/// listing failed): we then fail CLOSED and report the image as in-use,
+/// so a transient Docker error can never flip a ShinyProxy (or Ruscker)
+/// image to "unused" and expose it to removal/prune — irrecoverable on a
+/// host that can't re-pull (#871 follow-up).
+fn image_used_by_container(i: &ImageInfo, container_images: Option<&HashSet<String>>) -> bool {
+    match container_images {
+        None => true,
+        Some(set) => set.contains(&i.id) || i.tags.iter().any(|t| set.contains(t)),
+    }
 }
 
 /// An image is safe to reclaim when no managed container is built from it
 /// **and** no current spec references it by tag. Same rule the per-row
 /// remove button uses. (Uses the real container set, not the unreliable
-/// `ImageInfo.containers` count — #585.)
+/// `ImageInfo.containers` count — #585.) A `None` container set (listing
+/// failed) makes this `false` for every image — nothing is prunable.
 fn image_unused(
     i: &ImageInfo,
     spec_images: &HashSet<String>,
-    container_images: &HashSet<String>,
+    container_images: Option<&HashSet<String>>,
 ) -> bool {
     !image_used_by_container(i, container_images)
         && !i.tags.iter().any(|t| spec_images.contains(t))
@@ -341,7 +368,7 @@ fn image_unused(
 fn image_row(
     i: ImageInfo,
     spec_images: &HashSet<String>,
-    container_images: &HashSet<String>,
+    container_images: Option<&HashSet<String>>,
 ) -> ImageRow {
     let used_by_spec = i.tags.iter().any(|t| spec_images.contains(t));
     let used_by_container = image_used_by_container(&i, container_images);
@@ -462,16 +489,19 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
     };
     let spec_images = spec_image_refs(&state).await;
     // ALL host containers (#871) — never prune an image a non-Ruscker
-    // container is built from.
-    let container_images: HashSet<String> = backend
-        .all_container_image_refs()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+    // container is built from. If the listing FAILS we can't tell what's
+    // in use, so abort the whole prune (fail closed) rather than treat
+    // every image as unused and delete in-use ones (#871 follow-up).
+    let container_images: HashSet<String> = match backend.all_container_image_refs().await {
+        Ok(v) => v.into_iter().collect(),
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: prune aborted — container image refs failed");
+            return redirect("error");
+        }
+    };
     let unused: Vec<String> = images
         .into_iter()
-        .filter(|i| image_unused(i, &spec_images, &container_images))
+        .filter(|i| image_unused(i, &spec_images, Some(&container_images)))
         .map(|i| i.id)
         .collect();
     if unused.is_empty() {
@@ -538,21 +568,34 @@ mod tests {
         let none: HashSet<String> = HashSet::new();
 
         // Referenced by a spec → in use, never pruned.
-        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog, &none));
+        assert!(!image_unused(&img(&["nginx:alpine"], 0), &catalog, Some(&none)));
         // A live container is built from it → in use (regardless of the
         // bogus `containers` count, which is -1 in practice).
-        assert!(!image_unused(&img(&["other:1"], -1), &catalog, &in_use));
+        assert!(!image_unused(&img(&["other:1"], -1), &catalog, Some(&in_use)));
         // No container, not in the catalog → reclaimable.
-        assert!(image_unused(&img(&["leftover:1"], 0), &catalog, &none));
+        assert!(image_unused(&img(&["leftover:1"], 0), &catalog, Some(&none)));
         // Dangling (untagged), no container → reclaimable.
-        assert!(image_unused(&img(&[], 0), &catalog, &none));
+        assert!(image_unused(&img(&[], 0), &catalog, Some(&none)));
         // `containers == -1` (uncomputed) but nothing actually uses it →
         // reclaimable; the previous code's reliance on `containers <= 0`
         // would have agreed here, but it WRONGLY also flagged in-use
         // images whose count came back -1 (#585) — now caught by `in_use`.
-        assert!(image_unused(&img(&["x:1"], -1), &catalog, &none));
+        assert!(image_unused(&img(&["x:1"], -1), &catalog, Some(&none)));
         // Matched by image id, not tag → in use.
         let by_id: HashSet<String> = ["sha256:abc".to_string()].into_iter().collect();
-        assert!(!image_unused(&img(&["untagged:1"], -1), &catalog, &by_id));
+        assert!(!image_unused(&img(&["untagged:1"], -1), &catalog, Some(&by_id)));
+    }
+
+    // #871 follow-up: a FAILED container listing (None) must fail closed —
+    // every image reads as in-use, so nothing is ever offered for removal
+    // or prune. Otherwise a transient Docker error could delete a still-in-
+    // use image (irrecoverable on a host that can't re-pull).
+    #[test]
+    fn unknown_container_set_makes_every_image_in_use() {
+        let catalog: HashSet<String> = HashSet::new();
+        // Even an image no spec references is in-use when usage is unknown.
+        assert!(image_used_by_container(&img(&["anything:1"], 0), None));
+        assert!(!image_unused(&img(&["anything:1"], 0), &catalog, None));
+        assert!(!image_unused(&img(&[], 0), &catalog, None));
     }
 }

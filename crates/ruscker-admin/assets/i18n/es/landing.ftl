@@ -738,6 +738,7 @@ admin-disk-col-usage = Uso
 admin-disk-used-by-spec = usada por una app
 admin-disk-used-by-container = usada por un contenedor
 admin-disk-unused = sin usar
+admin-disk-usage-unknown = No se pudo consultar los contenedores en ejecución en Docker — cada imagen se muestra como en uso y la eliminación queda deshabilitada para no borrar una imagen aún en uso. Reintenta cuando Docker responda.
 admin-disk-in-use-hint = En uso — no se puede eliminar.
 admin-disk-remove-image-confirm = ¿Eliminar esta imagen?
 admin-disk-flash-removed = Eliminado.

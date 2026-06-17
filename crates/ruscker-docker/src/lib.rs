@@ -831,6 +831,13 @@ impl ContainerBackend for LocalDockerBackend {
         Ok(removed)
     }
 
+    async fn backend_version(&self) -> CoreResult<Option<String>> {
+        // Best-effort: a failed version read is a missing diagnostic, not
+        // an error worth bubbling — return None so the System tab shows
+        // "unknown" rather than failing the page.
+        Ok(self.docker.version().await.ok().and_then(|v| v.version))
+    }
+
     async fn list_images(&self) -> CoreResult<Vec<ImageInfo>> {
         let images = self
             .docker

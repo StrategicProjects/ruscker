@@ -87,6 +87,12 @@
       <span>{{ self.t("admin-nav-audit") }}</span>
     </a>
     {% endif %}
+    {% if role.can_access_section("system") %}
+    <a href="{{ base }}/admin/system" class="admin-nav-link {% if nav_section == "system" %}is-active{% endif %}">
+      <i class="ti ti-cpu" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-system") }}</span>
+    </a>
+    {% endif %}
     {% if role.can_access_section("users") %}
     <a href="{{ base }}/admin/users" class="admin-nav-link {% if nav_section == "users" %}is-active{% endif %}">
       <i class="ti ti-users" aria-hidden="true"></i>

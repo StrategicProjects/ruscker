@@ -864,3 +864,23 @@ admin-import-confirm = Importar seleccionados
 admin-import-load-file = Cargar archivo
 admin-import-editor-placeholder = Pega tu application.yml aquí…
 admin-import-editor-empty = La vista previa aparece aquí mientras escribes.
+
+# Pestaña Sistema del admin (#766)
+admin-nav-system = Sistema
+admin-system-title = Sistema
+admin-system-subtitle = Diagnóstico de solo lectura del servidor en ejecución.
+admin-system-version = Versión de Ruscker
+admin-system-base-path = Ruta base
+admin-system-bind = Dirección de escucha
+admin-system-docker = Docker
+admin-system-db = Base de datos
+admin-system-specs = Apps en el catálogo
+admin-system-replicas = Réplicas en ejecución
+admin-system-forward-headers = Confiar en cabeceras reenviadas
+admin-system-metrics = Endpoint de métricas
+admin-system-leader = Líder HA
+admin-system-draining = Drenando
+admin-system-yes = sí
+admin-system-no = no
+admin-system-restart-title = Reiniciar el servicio
+admin-system-restart-hint = Ruscker no puede reiniciarse de forma segura por sí mismo — ejecuta esto en el host (las solicitudes en curso se drenan con SIGTERM).

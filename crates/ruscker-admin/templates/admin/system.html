@@ -1,0 +1,44 @@
+{% extends "admin/_layout.html" %}
+
+{% macro yesno(v) %}<span class="pill {% if v %}pill-state-active{% else %}pill-state-inactive{% endif %}">{% if v %}{{ self.t("admin-system-yes") }}{% else %}{{ self.t("admin-system-no") }}{% endif %}</span>{% endmacro %}
+
+{% block title %}{{ self.t("admin-system-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-system-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-system-subtitle") }}</p>
+  </div>
+</div>
+
+<div style="background:var(--surface);border:0.5px solid var(--border);border-radius:12px;padding:4px 16px;max-width:680px">
+  <table class="admin-table" style="width:100%">
+    <tbody>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-version") }}</td><td class="dash-mono">{{ version }}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-base-path") }}</td><td class="dash-mono">{{ base_path }}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-bind") }}</td><td class="dash-mono">{{ bind }}</td></tr>
+      <tr>
+        <td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-docker") }}</td>
+        <td>{% call yesno(docker_connected) %}{% endcall %}{% if let Some(v) = docker_version %} <span class="dash-mono text-[color:var(--text-muted)]">{{ v }}</span>{% endif %}</td>
+      </tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-db") }}</td><td class="dash-mono">{{ db_kind }}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-specs") }}</td><td class="dash-mono">{{ spec_count }}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-replicas") }}</td><td class="dash-mono">{{ replica_count }}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-forward-headers") }}</td><td>{% call yesno(forward_headers) %}{% endcall %}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-metrics") }}</td><td>{% call yesno(metrics_enabled) %}{% endcall %}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-leader") }}</td><td>{% call yesno(is_leader) %}{% endcall %}</td></tr>
+      <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-draining") }}</td><td>{% call yesno(draining) %}{% endcall %}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+{# Restart is a systemd / operator action, NOT an in-app button: the
+   server can't reliably restart itself (the response dies, and it would
+   need privilege over its own unit). The page just shows the command. #}
+<div style="margin-top:18px;max-width:680px">
+  <div class="text-sm font-medium mb-1">{{ self.t("admin-system-restart-title") }}</div>
+  <p class="text-xs text-[color:var(--text-muted)] mb-2">{{ self.t("admin-system-restart-hint") }}</p>
+  <code class="dash-mono" style="display:inline-block;background:var(--surface);border:0.5px solid var(--border);border-radius:8px;padding:6px 10px">sudo systemctl restart ruscker</code>
+</div>
+{% endblock %}

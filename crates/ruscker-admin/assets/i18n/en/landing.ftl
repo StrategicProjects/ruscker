@@ -864,3 +864,23 @@ admin-import-confirm = Import selected
 admin-import-load-file = Load file
 admin-import-editor-placeholder = Paste your application.yml here…
 admin-import-editor-empty = The preview appears here as you type.
+
+# Admin System tab (#766)
+admin-nav-system = System
+admin-system-title = System
+admin-system-subtitle = Read-only diagnostics of the running server.
+admin-system-version = Ruscker version
+admin-system-base-path = Base path
+admin-system-bind = Listen address
+admin-system-docker = Docker
+admin-system-db = Database
+admin-system-specs = Apps in catalog
+admin-system-replicas = Running replicas
+admin-system-forward-headers = Trust forwarded headers
+admin-system-metrics = Metrics endpoint
+admin-system-leader = HA leader
+admin-system-draining = Draining
+admin-system-yes = yes
+admin-system-no = no
+admin-system-restart-title = Restart the service
+admin-system-restart-hint = Ruscker can't restart itself safely — run this on the host (in-flight requests drain on SIGTERM).

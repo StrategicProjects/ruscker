@@ -213,10 +213,17 @@ async fn index(
     // image as "in use by a spec" so the panel won't offer to remove it.
     let spec_images = spec_image_refs(&state).await;
 
-    // The image refs live containers are actually built from — the
-    // reliable in-use signal (the daemon's per-image container count is
-    // unreliable, #585).
-    let container_images = container_image_refs(&containers);
+    // The image refs **every** container on the host is built from —
+    // not just Ruscker-managed ones (#871) — so an image backing a
+    // non-Ruscker container (e.g. ShinyProxy) is never flagged "unused".
+    // (The daemon's per-image count is unreliable, #585, so we derive it
+    // from the live container set.)
+    let container_images: HashSet<String> = backend
+        .all_container_image_refs()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
 
     let stopped_count = containers.iter().filter(|c| !c.running).count();
     let images_total_bytes: i64 = images.iter().map(|i| i.size_bytes).sum();
@@ -308,18 +315,11 @@ async fn spec_image_refs(state: &AppState) -> HashSet<String> {
         .collect()
 }
 
-/// Image refs (tags + ids) that a live managed container is built from.
-/// This is the reliable "in use by a container" signal: the daemon's
-/// `ImageSummary.containers` count is `-1` (uncomputed) on a plain
-/// `list_images`, so a positive count can't be relied on (#585). A
-/// non-Ruscker container isn't in this set, but `remove_image` (no
-/// `--force`) refuses a truly in-use image, so the actual removal stays
-/// safe — only the displayed count could be optimistic for those.
-fn container_image_refs(containers: &[ManagedContainer]) -> HashSet<String> {
-    containers.iter().map(|c| c.image.clone()).collect()
-}
-
-/// True when a managed container is built from this image (by tag or id).
+/// True when **any** host container is built from this image (by tag or
+/// id). `container_images` is the all-container ref set (#871), so an
+/// image backing a non-Ruscker container counts as in-use. The daemon's
+/// `ImageSummary.containers` count is unreliable on a plain `list_images`
+/// (#585), so we derive in-use from the live container set instead.
 fn image_used_by_container(i: &ImageInfo, container_images: &HashSet<String>) -> bool {
     container_images.contains(&i.id) || i.tags.iter().any(|t| container_images.contains(t))
 }
@@ -461,8 +461,14 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
         }
     };
     let spec_images = spec_image_refs(&state).await;
-    let container_images =
-        container_image_refs(&backend.list_managed_containers().await.unwrap_or_default());
+    // ALL host containers (#871) — never prune an image a non-Ruscker
+    // container is built from.
+    let container_images: HashSet<String> = backend
+        .all_container_image_refs()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let unused: Vec<String> = images
         .into_iter()
         .filter(|i| image_unused(i, &spec_images, &container_images))

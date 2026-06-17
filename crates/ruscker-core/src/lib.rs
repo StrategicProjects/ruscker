@@ -372,7 +372,18 @@ pub trait ContainerBackend: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Image refs (name/tag AND sha id) of **every** container on the
+    /// host — not just Ruscker-managed ones (#871). The disk panel uses
+    /// this so an image backing a non-Ruscker container (e.g. ShinyProxy)
+    /// is never flagged "unused" or removed.
+    async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     /// Force-remove a single container by id (stops it first if running).
+    /// MUST refuse a container that isn't Ruscker-managed (#871) — the
+    /// caller passes an operator-supplied id, so the label check is the
+    /// backstop against removing a non-Ruscker container on a shared host.
     async fn remove_container(&self, _container_id: &str) -> CoreResult<()> {
         Ok(())
     }

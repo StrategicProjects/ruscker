@@ -788,7 +788,50 @@ impl ContainerBackend for LocalDockerBackend {
         Ok(managed)
     }
 
+    async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
+        // ALL containers (running + stopped), no label filter.
+        let opts = ListContainersOptions {
+            all: true,
+            ..Default::default()
+        };
+        let list = self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| backend_err("list all containers", e))?;
+        let mut refs = Vec::with_capacity(list.len() * 2);
+        for c in list {
+            if let Some(img) = c.image {
+                refs.push(img);
+            }
+            if let Some(id) = c.image_id {
+                refs.push(id);
+            }
+        }
+        Ok(refs)
+    }
+
     async fn remove_container(&self, container_id: &str) -> CoreResult<()> {
+        // #871: the id comes from an operator POST, and `force=true` would
+        // stop+remove ANY container (incl. a running non-Ruscker one,
+        // bypassing the daemon's in-use refusal). Re-inspect and refuse
+        // anything without our `ruscker.replica_id` label — the listing is
+        // label-scoped, but the backend is the real backstop.
+        let info = self
+            .docker
+            .inspect_container(container_id, None)
+            .await
+            .map_err(|e| backend_err("inspect container", e))?;
+        let is_ruscker = info
+            .config
+            .as_ref()
+            .and_then(|c| c.labels.as_ref())
+            .is_some_and(|l| l.contains_key(LABEL_REPLICA_ID));
+        if !is_ruscker {
+            return Err(CoreError::Backend(format!(
+                "refusing to remove non-Ruscker container {container_id}"
+            )));
+        }
         // force=true also stops a running container first, mirroring `stop`.
         self.docker
             .remove_container(
@@ -1695,6 +1738,71 @@ mod tests {
         );
 
         backend.stop(&replica.id).await.expect("stop");
+    }
+
+    /// #871: the disk panel must never touch a non-Ruscker container or
+    /// its image on a shared host. `remove_container` refuses a container
+    /// without our label, and `all_container_image_refs` includes the
+    /// foreign container's image so the panel won't flag it "unused".
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn disk_ops_spare_non_ruscker_container_and_image() {
+        let image =
+            std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        backend
+            .ensure_image_pulled(&image, None, None)
+            .await
+            .expect("pull");
+        // A plain container with NO ruscker labels (stands in for a
+        // ShinyProxy / unrelated container on the host).
+        let created = backend
+            .docker
+            .create_container(
+                Some(CreateContainerOptions {
+                    name: Some("ruscker-it-foreign".into()),
+                    ..Default::default()
+                }),
+                ContainerCreateBody {
+                    image: Some(image.clone()),
+                    cmd: Some(vec!["sleep".into(), "30".into()]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("create foreign container");
+        let id = created.id;
+
+        // remove_container must REFUSE it (not Ruscker-labeled).
+        let err = backend
+            .remove_container(&id)
+            .await
+            .expect_err("must refuse a non-Ruscker container");
+        assert!(err.to_string().contains("non-Ruscker"), "got: {err}");
+        assert!(
+            backend.docker.inspect_container(&id, None).await.is_ok(),
+            "the foreign container must NOT have been removed"
+        );
+
+        // Its image shows up in the all-container ref set → the disk panel
+        // counts it in-use and won't offer to prune it.
+        let refs = backend.all_container_image_refs().await.expect("refs");
+        assert!(
+            refs.iter().any(|r| r == &image || r.starts_with("sha256:")),
+            "foreign image must be in the in-use set: {refs:?}"
+        );
+
+        // Cleanup directly (bypassing the guard).
+        let _ = backend
+            .docker
+            .remove_container(
+                &id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await;
     }
 
     /// #550: a container that crashes on startup (e.g. it can't reach its

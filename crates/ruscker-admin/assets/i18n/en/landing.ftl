@@ -306,6 +306,7 @@ spec-form-error-id-shape = ID must start with a letter and contain only letters,
 spec-form-error-id-duplicate = An app with that ID already exists.
 spec-form-error-name-required = Display name is required.
 spec-form-error-number = A numeric field has a non-numeric value.
+spec-form-error-max-replicas-zero = Max containers must be at least 1 (0 means the app can never start).
 spec-form-error-cpu = CPU limit must be a positive number (e.g. 0.5).
 spec-form-error-memory = Memory limit must be a size like 512m or 1.5g.
 spec-form-error-replica-range = Max replicas must be greater than or equal to min replicas.

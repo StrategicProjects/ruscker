@@ -223,21 +223,27 @@ async fn index(
         });
     };
 
-    let containers = backend.list_managed_containers().await.unwrap_or_default();
-    let images = backend.list_images().await.unwrap_or_default();
-
-    // Which image refs does the live catalog reference? Used to flag an
-    // image as "in use by a spec" so the panel won't offer to remove it.
-    let spec_images = spec_image_refs(&state).await;
-
-    // Durable provenance: which images Ruscker has ever managed (#894).
-    // Only these are ever offered for removal — a neighbour's image (e.g.
-    // ShinyProxy's) is shown but never deletable. Missing DB ⇒ empty set ⇒
-    // nothing removable (safe).
-    let ruscker_images = match state.db.as_ref() {
-        Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
-        None => HashSet::new(),
+    // These five inputs are independent — two Docker round-trips, a
+    // container-ref enumeration, and two DB reads. Awaiting them serially
+    // stacked Docker-daemon latency on every Disk-tab load (#: perf
+    // audit); run them concurrently so the page costs ~one round-trip
+    // instead of the sum. (`spec_image_refs` reads the catalog;
+    // `ruscker_images` the provenance table; the rest hit the daemon.)
+    let ruscker_images_fut = async {
+        match state.db.as_ref() {
+            Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
+            None => HashSet::new(),
+        }
     };
+    let (containers, images, spec_images, ruscker_images, container_refs) = tokio::join!(
+        backend.list_managed_containers(),
+        backend.list_images(),
+        spec_image_refs(&state),
+        ruscker_images_fut,
+        backend.all_container_image_refs(),
+    );
+    let containers = containers.unwrap_or_default();
+    let images = images.unwrap_or_default();
 
     // The image refs **every** container on the host is built from —
     // not just Ruscker-managed ones (#871) — so an image backing a
@@ -246,8 +252,7 @@ async fn index(
     // from the live container set.) `None` ⇒ the listing FAILED: fail
     // closed (every image reads as in-use, nothing prunable) rather than
     // assuming the host runs nothing and exposing every image to removal.
-    let container_images: Option<HashSet<String>> = match backend.all_container_image_refs().await
-    {
+    let container_images: Option<HashSet<String>> = match container_refs {
         Ok(v) => Some(v.into_iter().collect()),
         Err(e) => {
             tracing::warn!(error = %e, "disk: container image refs failed; failing closed (all in-use)");

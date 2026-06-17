@@ -454,17 +454,27 @@ impl ContainerBackend for MultiHostDockerBackend {
     }
 
     async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
-        // Fan out so the disk panel's in-use signal covers every host's
-        // containers (#871). A degraded host is skipped (its images just
-        // aren't protected on that host — same best-effort as the rest).
+        // This feeds the disk panel's "image in use" signal, which MUST
+        // cover every host: an image backing a container on an unreachable
+        // host would otherwise look unused and become removable — the very
+        // fail-open the local backend was hardened against (#889). So a
+        // single host failure fails the WHOLE call; the panel then enters
+        // its usage-unknown / fail-closed mode instead of trusting a
+        // partial inventory (#892 follow-up).
+        //
+        // Contrast `list_managed_containers`, deliberately kept tolerant:
+        // the scaler's liveness prune treats an absent host's containers as
+        // "not stopped", so a degraded fan-out there can't cause a false
+        // prune. The safe failure direction is opposite for the two.
         let mut all = Vec::new();
         for h in &self.hosts {
-            match h.backend.all_container_image_refs().await {
-                Ok(refs) => all.extend(refs),
-                Err(e) => {
-                    tracing::warn!(host = %h.id, error = %e, "all container image refs on host failed; skipping");
-                }
-            }
+            let refs = h.backend.all_container_image_refs().await.map_err(|e| {
+                CoreError::Backend(format!(
+                    "host {} container image refs failed: {e}",
+                    h.id
+                ))
+            })?;
+            all.extend(refs);
         }
         Ok(all)
     }

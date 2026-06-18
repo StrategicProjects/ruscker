@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.37 — 2026-06-18
+
+- **The live dashboard no longer holds a connection open.** It used a
+  persistent SSE stream; behind a reverse proxy that serves Ruscker and a
+  side-by-side app (e.g. ShinyProxy) on **one hostname** over HTTP/1.1,
+  that long-lived connection could starve the browser's ~6-per-origin
+  pool and stall every request to that host — freezing both apps until
+  the stream dropped. The dashboard now **polls** a JSON snapshot every
+  few seconds (each request returns and frees the connection), so opening
+  the monitoring panel can't wedge the origin. The live logs view and the
+  image-pull progress keep their short-lived streams. (HTTP/2 at the TLS
+  edge remains the broader fix and also helps any other app on the host.)
+
+---
+
 ## v0.2.36 — 2026-06-18
 
 Portal/admin UX + a big icon-loading win.

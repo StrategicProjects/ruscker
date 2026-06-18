@@ -9,6 +9,22 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.39 — 2026-06-18
+
+- **Apps no longer pre-warm by default.** An app with no `min-replicas`
+  set now defaults to **0 (cold-start)** — the container starts when the
+  first visitor arrives and is reaped once idle, matching ShinyProxy and
+  Shiny Server Free. Previously every containerized app defaulted to 1,
+  so importing a large config (e.g. a 24-app ShinyProxy setup) lit one
+  idle container per app at boot. To keep an app hot, set
+  `min-replicas: 1` (or more) on it explicitly. The autoscaling ceiling
+  is unchanged, so cold-start apps still scale on demand. No re-import is
+  needed — only the effective default changed; existing specs keep their
+  saved values. (The spec form's "Initial replicas" hint and summary now
+  read 0 to match.)
+
+---
+
 ## v0.2.38 — 2026-06-18
 
 - **Favoriting a card updates the Featured rail instantly.** Clicking the

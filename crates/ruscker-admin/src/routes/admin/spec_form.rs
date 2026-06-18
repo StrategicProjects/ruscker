@@ -1355,20 +1355,31 @@ async fn edit_form(
 
 /// Pick a fresh `{base}-copy[-N]` id that no spec uses yet, so the
 /// duplicate doesn't collide with the source (or a previous copy).
-/// Falls back to the bare `-copy` after a sane cap — the create-time
-/// duplicate-id validation is the final backstop.
-async fn unique_copy_id(pool: &crate::db::ConfigDb, base: &str) -> String {
+/// Checks the **effective catalog** (DB ∪ YAML), not just the DB: a
+/// config-only YAML id is real too, and since a DB spec shadows a YAML id
+/// of the same name (catalog.rs), suggesting such an id would silently
+/// hide the YAML spec (#907 follow-up). Falls back to the bare `-copy`
+/// after a sane cap — the create-time duplicate-id validation is the
+/// final backstop.
+async fn unique_copy_id(state: &AppState, base: &str) -> String {
+    let taken: std::collections::HashSet<String> = crate::catalog::effective_specs_cached(state)
+        .await
+        .iter()
+        .map(|s| s.id.clone())
+        .collect();
+    pick_copy_id(base, &taken)
+}
+
+/// Pure id picker for [`unique_copy_id`] — first free `{base}-copy[-N]`
+/// not in `taken`, falling back to the bare `-copy` after the cap.
+fn pick_copy_id(base: &str, taken: &std::collections::HashSet<String>) -> String {
     let first = format!("{base}-copy");
-    let free = |id: &str| {
-        let id = id.to_string();
-        async move { matches!(db::specs::fetch_one(pool, &id).await, Ok(None)) }
-    };
-    if free(&first).await {
+    if !taken.contains(&first) {
         return first;
     }
     for n in 2..=99 {
         let candidate = format!("{base}-copy-{n}");
-        if free(&candidate).await {
+        if !taken.contains(&candidate) {
             return candidate;
         }
     }
@@ -1414,7 +1425,7 @@ async fn duplicate_form(
         }
     };
     let mut form = SpecForm::from_spec(&spec);
-    form.id = unique_copy_id(pool, &spec.id).await;
+    form.id = unique_copy_id(&state, &spec.id).await;
     let page = SpecFormPage {
         locale: loc,
         theme,
@@ -1861,6 +1872,19 @@ proxy:
         assert!(!ok
             .validate(FormMode::New)
             .contains(&"spec-form-error-max-replicas-zero"));
+    }
+
+    // #907 follow-up: the duplicate id must skip an id taken ANYWHERE in
+    // the effective catalog (incl. a config-only YAML spec), not just the
+    // DB — else a new copy would silently shadow an existing YAML spec.
+    #[test]
+    fn pick_copy_id_skips_ids_taken_in_the_catalog() {
+        use std::collections::HashSet;
+        let taken: HashSet<String> = ["app".to_string(), "app-copy".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(pick_copy_id("app", &taken), "app-copy-2", "skips the taken -copy");
+        assert_eq!(pick_copy_id("x", &HashSet::new()), "x-copy", "bare -copy when free");
     }
 
     // #892: an invalid Docker network name is rejected at save (it would

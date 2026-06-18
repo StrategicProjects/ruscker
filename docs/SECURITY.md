@@ -5,10 +5,11 @@ Status: living document. Tracks the Phase 5 security audit
 **[accepted limitation]**, or **[deferred]**. File references use
 `crate/path:symbol` so they survive line-number drift.
 
-> **Scope.** This covers v0.2.5 (the 2026-06 audit release):
-> single-operator install, Ruscker behind a TLS-terminating reverse
-> proxy, Docker on one or more hosts. Multi-tenant / shared-team auth
-> (OIDC, SAML) is out of scope until Phase 8.
+> **Scope.** A single-operator install: Ruscker behind a
+> TLS-terminating reverse proxy, Docker on one or more hosts. The model
+> below reflects the hardening done in the 2026-06 security audit.
+> Multi-tenant / shared-team auth (OIDC, SAML) is out of scope until
+> Phase 8.
 
 ---
 
@@ -371,7 +372,7 @@ deliberate feature, not a config flip.
   slot is client-controlled whenever a proxy appends). Off on
   plain-HTTP dev so the browser doesn't drop the cookie.
 
-### Forwarded-header trust model (v0.2.5)
+### Forwarded-header trust model
 
 One switch — `server.useForwardHeaders: true` (or a
 `forward-headers-strategy` other than `none`) — gates **every**

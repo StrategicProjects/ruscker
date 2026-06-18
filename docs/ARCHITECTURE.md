@@ -221,7 +221,12 @@ for git versioning, but the running config lives in SQLite.
 - Container spawns are direct `ContainerBackend` calls, serialized
   per spec by a coalescing mutex (`state.spawn_locks`) so concurrent
   visitors to a cold app produce one container, not N.
-- The auto-scaler runs as a periodic task (every 10s).
+- The auto-scaler runs as a periodic task (every 10s). Apps default to
+  `min-replicas: 0` (cold-start — spawn on the first visit, no pre-warm);
+  it scales up on sustained saturation, retires idle replicas after a
+  grace window, then waits out a post-drop cooldown (~60s) before it will
+  respawn on saturation, so a single-seat long session can't flap a
+  replica up and down. Set `min-replicas: 1`+ to keep an app warm.
 - The session-purger runs as a periodic task (every 5s).
 - `DashMap` for in-memory state (lock-free reads, sharded writes).
 

@@ -54,10 +54,10 @@ and distribution: a **multi-arch Docker image**, a **Debian package**
 with a hardened systemd unit, static **musl tarballs**, a `curl | sh`
 installer, a **Homebrew tap**, and **cosign-signed** release artifacts.
 
-> **Production milestone.** Ruscker replaced a JVM-based stack on the
-> same machine serving the same apps, cutting idle memory from
-> **~540 MB to ~14 MB** (~38×). A real 31-spec config migrated with no
-> unsupported features.
+> **Production milestone.** Ruscker's idle footprint is **~14 MB** — the
+> JVM-based proxy it replaced, on the same machine serving the same apps,
+> sat at ~540 MB. A real 31-spec config migrated with no unsupported
+> features.
 
 ### Phase 6 — Multi-host scheduling → **v0.1.1 / v0.1.2**
 A `MultiHostDockerBackend` that talks to several Docker hosts, with
@@ -201,9 +201,9 @@ Tracked in the GitHub issues; picked up as real usage asks for them:
   `milkway/ruscker-*-demo` images that serve at the root
   (issues #389–#397).
 - **Hardening follow-ups** — live end-to-end validation of the
-  WebSocket arc on Shiny/Streamlit (validated against Jupyter today),
-  and a post-drop cooldown for scale-down to finish off the
-  seats=1 long-session flap.
+  WebSocket arc on Shiny/Streamlit (validated against Jupyter today).
+  *(The post-drop scale-down cooldown that tamed the seats=1
+  long-session flap has since shipped.)*
 
 ### Phase 8 — External auth
 OIDC (Keycloak / Auth0 / Google), SAML, and LDAP, plus per-app access

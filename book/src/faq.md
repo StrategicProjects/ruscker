@@ -39,8 +39,10 @@ requirement — if you're all-in on k8s, see
 
 Each spec has a replica pool with `min`/`max` bounds. An auto-scaler keeps
 `min` replicas warm, spawns more on sustained saturation, and reaps idle
-ones after a grace period. Routing is least-connections (interactive) or
-round-robin (APIs). It's all in [Configuration](./configuration.md).
+ones after a grace period. `min` defaults to **0** — apps cold-start on
+the first request and are reaped when idle (set `min-replicas: 1` to keep
+one warm). Routing is least-connections (interactive) or round-robin
+(APIs). It's all in [Configuration](./configuration.md).
 
 ### How does authentication work?
 
@@ -83,7 +85,7 @@ sticky upstream for the login paths remains the fallback — see
 
 Yes. Phases 0–7 are complete, the proxy is production-ready and
 horizontally scalable, and the codebase was systematically audited for
-bugs, security and UX in June 2026 (shipped as v0.2.5).
+bugs, security and UX in June 2026, with every finding fixed.
 Releases are multi-arch and cosign-signed; see the
 [release notes](./news.md) and the [Roadmap](./roadmap.md).
 Phase 8 (external auth: OIDC / SAML / LDAP) is the main remaining

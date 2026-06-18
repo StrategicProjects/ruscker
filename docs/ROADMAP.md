@@ -6,8 +6,8 @@
 > For the narrative, up-to-date version with a timeline diagram, see
 > the [Roadmap chapter](https://strategicprojects.github.io/ruscker/roadmap.html)
 > on the docs site. The phase checklists below are the original
-> planning detail (they predate v0.1.0; treat the per-item boxes as
-> historical scope, not live status).
+> planning detail (they predate v0.1.0); every item in Phases 0–7 has
+> since shipped, so their boxes are ticked. Phase 8 shows what remains.
 
 Phased plan from "config parsing only" to "production-ready ShinyProxy
 replacement".
@@ -38,15 +38,15 @@ a useful report.
 **Goal**: replace the Thymeleaf-based ShinyProxy landing with Askama +
 Tailwind 4. Specs and template properties drive what gets rendered.
 
-- [ ] Add a new `ruscker-web` crate (or fold into `ruscker-admin`)
-- [ ] Askama templates matching `docs/mockups/landing-page.html`
-- [ ] Type badge colors and access icons driven by template properties
-- [ ] Filter chips with counts (matching
+- [x] Add a new `ruscker-web` crate (or fold into `ruscker-admin`)
+- [x] Askama templates matching `docs/mockups/landing-page.html`
+- [x] Type badge colors and access icons driven by template properties
+- [x] Filter chips with counts (matching
   `docs/mockups/landing-filters-cards-refined.html`)
-- [ ] Light/dark theme toggle (cookie + system preference)
-- [ ] Image library: serve static assets from a configurable
+- [x] Light/dark theme toggle (cookie + system preference)
+- [x] Image library: serve static assets from a configurable
   directory
-- [ ] Tailwind 4 build script (no Node required, uses standalone CLI)
+- [x] Tailwind 4 build script (no Node required, uses standalone CLI)
 
 **Deliverable**: visit `localhost:8080` and see the bundled
 `examples/application.yml` portal rendered, looking visually
@@ -57,18 +57,18 @@ equivalent to today but in Tailwind. Cards are not yet clickable
 
 **Goal**: edit specs via web UI, no YAML editing required.
 
-- [ ] SQLite schema + sqlx migrations
-- [ ] Importer: `ruscker import application.yml --db ruscker.db`
-- [ ] Exporter: `ruscker export --db ruscker.db > application.yml`
-- [ ] Admin login (basic auth or env-var token for MVP; OIDC later)
-- [ ] Apps list page (filter, search, bulk actions)
-- [ ] Add/Edit spec form with type-driven fields (mockup:
+- [x] SQLite schema + sqlx migrations
+- [x] Importer: `ruscker import application.yml --db ruscker.db`
+- [x] Exporter: `ruscker export --db ruscker.db > application.yml`
+- [x] Admin login (basic auth or env-var token for MVP; OIDC later)
+- [x] Apps list page (filter, search, bulk actions)
+- [x] Add/Edit spec form with type-driven fields (mockup:
   `admin-add-edit-app.html`)
-- [ ] Image library: upload, convert to WebP, optimize
-- [ ] Credentials store: named entries, encrypted at rest
-- [ ] Landing-page section editor (mockup:
+- [x] Image library: upload, convert to WebP, optimize
+- [x] Credentials store: named entries, encrypted at rest
+- [x] Landing-page section editor (mockup:
   `admin-landing-editor.html`)
-- [ ] Audit log of all admin actions
+- [x] Audit log of all admin actions
 
 **Deliverable**: the operator can fully manage Ruscker via web UI
 without touching files.
@@ -77,21 +77,21 @@ without touching files.
 
 **Goal**: actually run apps. The technically hardest phase.
 
-- [ ] `LocalDockerBackend` via bollard
+- [x] `LocalDockerBackend` via bollard
   - [ ] Image pulling with registry credentials
   - [ ] Container spawn with resource limits, env, volumes
   - [ ] Health-check polling
   - [ ] Graceful stop (drain → SIGTERM → SIGKILL)
-- [ ] HTTP request forwarding via hyper
-- [ ] WebSocket upgrade hijack + bidirectional pump
-- [ ] Path rewriting for Shiny's relative URLs
-- [ ] Sticky session cookie signing (HMAC-SHA256 via `ring`)
-- [ ] Session store (`DashMap` impl of `SessionStore`)
-- [ ] Replica pool per spec with `Router` plumbed in
-- [ ] Auto-scaler: spawn when utilization > threshold, retire when
+- [x] HTTP request forwarding via hyper
+- [x] WebSocket upgrade hijack + bidirectional pump
+- [x] Path rewriting for Shiny's relative URLs
+- [x] Sticky session cookie signing (HMAC-SHA256 via `ring`)
+- [x] Session store (`DashMap` impl of `SessionStore`)
+- [x] Replica pool per spec with `Router` plumbed in
+- [x] Auto-scaler: spawn when utilization > threshold, retire when
   under threshold for grace period
-- [ ] Heartbeat handling (per-spec timeout overrides, `-1` = never)
-- [ ] API spec branch: HTTP-only, round-robin, no cookie
+- [x] Heartbeat handling (per-spec timeout overrides, `-1` = never)
+- [x] API spec branch: HTTP-only, round-robin, no cookie
 
 **Deliverable**: end-to-end Shiny session works. Open Aurora Prime
 card on the landing, app loads, reactivity works, session survives
@@ -101,54 +101,57 @@ page refresh.
 
 **Goal**: visibility into running containers.
 
-- [ ] `/admin/dashboard` page (mockup: `admin-dashboard.html`)
-- [ ] Metric cards: containers, sessions, memory, CPU
-- [ ] Live container table with utilization bars (SSE updates)
-- [ ] Sessions-over-24h sparkline chart
-- [ ] Recent events feed
-- [ ] Logs streaming page with filter + regex + follow mode
-- [ ] Container detail view: live CPU/mem charts, environment, logs
-- [ ] Configurable alert thresholds (notification webhooks deferred)
-- [ ] Prometheus metrics endpoint at `/metrics`
+- [x] `/admin/dashboard` page (mockup: `admin-dashboard.html`)
+- [x] Metric cards: containers, sessions, memory, CPU
+- [x] Live container table with utilization bars (SSE updates)
+- [x] Sessions-over-24h sparkline chart
+- [x] Recent events feed
+- [x] Logs streaming page with filter + regex + follow mode
+- [x] Container detail view: live CPU/mem charts, environment, logs
+- [x] Configurable alert thresholds (notification webhooks deferred)
+- [x] Prometheus metrics endpoint at `/metrics`
 
 **Deliverable**: open the dashboard, see everything that's running,
 drill into any container.
 
 ## Phase 5 — Production polish (1 week)
 
-- [ ] Graceful shutdown (drain active sessions before exit)
-- [ ] structured logging via `tracing` + `tracing-subscriber`
-- [ ] Rate limiting on API specs (token bucket)
-- [ ] CORS support for API specs
-- [ ] Configurable max body sizes
-- [ ] Health endpoint `/healthz`
-- [ ] Readiness endpoint `/readyz`
-- [ ] Multi-stage Dockerfile for Ruscker itself
-- [ ] systemd unit file
-- [ ] Documentation: deployment guide, migration guide from
+- [x] Graceful shutdown (drain active sessions before exit)
+- [x] structured logging via `tracing` + `tracing-subscriber`
+- [x] Rate limiting on API specs (token bucket)
+- [x] CORS support for API specs
+- [x] Configurable max body sizes
+- [x] Health endpoint `/healthz`
+- [x] Readiness endpoint `/readyz`
+- [x] Multi-stage Dockerfile for Ruscker itself
+- [x] systemd unit file
+- [x] Documentation: deployment guide, migration guide from
   ShinyProxy, troubleshooting
 
 **Deliverable**: ready to drop into production.
 
 ## Phase 6 (optional) — Multi-host scheduling
 
-- [ ] `MultiHostDockerBackend` (talks to multiple Docker hosts)
-- [ ] Bin-pack vs spread strategies
-- [ ] Per-spec anti-affinity ("replicas must be on different hosts")
+- [x] `MultiHostDockerBackend` (talks to multiple Docker hosts)
+- [x] Bin-pack vs spread strategies
+- [x] Per-spec anti-affinity ("replicas must be on different hosts")
 
 ## Phase 7 (optional) — HA / multi-instance
 
-- [ ] Postgres `SessionStore` implementation
-- [ ] Postgres replication for SQLite admin DB
-- [ ] Coordination via Postgres advisory locks
-- [ ] Failover testing
+- [x] Postgres `SessionStore` implementation
+- [x] Postgres replication for SQLite admin DB
+- [x] Coordination via Postgres advisory locks
+- [x] Failover testing
 
 ## Phase 8 (optional) — Auth
 
 - [ ] OIDC integration (Keycloak, Auth0, Google)
 - [ ] SAML for enterprise
-- [ ] Role-based access control (viewer / operator / admin)
-- [ ] Per-spec access lists (only group X can use this app)
+- [x] Role-based access control (Viewer / Editor / Admin) — shipped
+- [x] Per-spec access lists (only group X can use this app) — shipped in Phase 6
+
+> Only the external identity-provider items (OIDC / SAML) remain; the
+> coarse role model and per-spec access lists already ship.
 
 ## What we explicitly defer / don't do
 

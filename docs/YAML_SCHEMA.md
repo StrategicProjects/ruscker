@@ -95,7 +95,7 @@ ignored by Ruscker.
 | `container-log-path` | path | none | **Ignored** (warned when set) — use `docker logs` / the admin Logs tab |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |
-| `authentication` | enum | `none` | `none` (MVP) / `openid` / `ldap` / `saml` / `simple` |
+| `authentication` | enum | `none` | `none` (only `none` is implemented today) / `openid` / `ldap` / `saml` / `simple` |
 | `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
 | `specs` | array | `[]` | List of apps/links/APIs |
 | `container-wait-time` | ms | `60000` | Max wait for container Ready |
@@ -149,10 +149,12 @@ and `tls` mismatched with the scheme.
 
 ### Authentication
 
-**MVP only supports `none`.** The other variants are accepted by the
-parser (so existing YAML doesn't fail) but Ruscker will warn at boot
-that auth is unimplemented and continue as if `none`. Phase 8 adds
-real auth support.
+**Ruscker currently supports only `none`.** The other variants are
+accepted by the parser (so existing YAML doesn't fail) but Ruscker will
+warn at boot that auth is unimplemented and continue as if `none`. An
+external identity provider (OIDC / SAML / LDAP) is the Phase 8 roadmap
+item; today, apps that handle their own auth are the common case, and
+`none` is correct — Ruscker just routes traffic.
 
 For applications that handle their own auth internally (a common
 case), `none` is the correct choice — Ruscker just routes traffic.
@@ -576,8 +578,8 @@ applied) and flagged by `ruscker validate`.
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `min-replicas` | u32 | `1` | Always running |
-| `max-replicas` | u32 | `5` (≥ `min-replicas`) | Per-container apps auto-scale to up to 5 independent replicas by default; set explicitly to raise/lower |
+| `min-replicas` | u32 | `0` | Always-warm replicas. Default `0` = **cold-start**: no container runs until the first visitor (they see a brief splash), reaped when idle — like ShinyProxy. Set `1`+ to keep an app hot (e.g. a single-user RStudio/Jupyter you don't want cold) |
+| `max-replicas` | u32 | `5` (≥ `min-replicas`) | Per-container apps auto-scale to up to 5 independent replicas by default. With `min-replicas` unset/`0` the app still scales up to 5 on demand (cold-start); set explicitly to raise/lower |
 | `scale-up-threshold` | float | unset | scale up when pool utilization exceeds this; unset ⇒ the built-in saturation rule (enforced, #333) |
 | `scale-down-threshold` | float | unset | only retire idle replicas while utilization is below this; unset ⇒ the built-in idle rule (enforced, #333) |
 | `scale-down-grace` | s | unset | idle-grace before retiring a replica; unset ⇒ the global ~30 s grace (enforced, #333) |

@@ -5,12 +5,18 @@
        alt="Ruscker" height="56">
 </picture>
 
-**Ruscker** is a high-performance **portal and orchestrator** for
+[![Latest release](https://img.shields.io/github/v/release/StrategicProjects/ruscker?sort=semver)](https://github.com/StrategicProjects/ruscker/releases)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-ruscker.com-0F6E56)](https://strategicprojects.github.io/ruscker/)
+
+**Ruscker** is a lightweight, single-binary alternative to **ShinyProxy**
+and **Shiny Server Free** — a **portal and orchestrator** for
 containerized web workloads. It serves and load-balances
 container-per-session interactive apps (R/Shiny, Streamlit, Dash, Voilà,
 Jupyter, RStudio) and container-per-API stateless HTTP services
 (Plumber2, FastAPI) behind a single proxy, with a custom landing page and
-an admin panel.
+an admin panel. It reads an existing ShinyProxy `application.yml`
+unchanged, so migration is friction-free.
 
 It ships as a **single, ultra-lightweight static binary** with **instant
 startup** — the idle footprint sits in the low tens of megabytes.
@@ -71,8 +77,8 @@ tool" cases) is in
 ## Status
 
 **Production-ready and running in production.** The whole codebase
-went through a systematic bug / security / UX audit in June 2026
-(shipped as v0.2.5 with every finding fixed), followed by an
+went through a systematic bug / security / UX audit in June 2026 with
+every finding fixed, followed by an
 operator-driven design sprint that brought the entire admin — the
 Appearance editor in particular — to the product's design handoff,
 with per-theme (light/dark) portal styling throughout, plus a round of
@@ -80,8 +86,7 @@ private-image and deploy-robustness fixes from real production use.
 Releases are
 multi-arch (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
-has the current version. Built for efficiency, Ruscker's idle footprint
-sits in the low tens of megabytes:
+has the current version.
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
 
@@ -93,7 +98,7 @@ What's in the box:
 
 - **Reverse proxy + load balancer** — sticky sessions, WebSocket
   forwarding, per-spec replica pools, an auto-scaler, and absolute-URL
-  rewriting so unmodified Shiny/Streamlit apps work behind a subpath.
+  rewriting so unmodified Shiny/Streamlit apps work behind a sub-path.
 - **Container backend** (Docker) that spawns app containers on demand,
   applies per-container CPU/memory limits, and reaps idle ones.
 - **Admin panel** — full apps CRUD (every spec field editable from the
@@ -103,7 +108,7 @@ What's in the box:
   live preview (per-theme light/dark styling, logos, Markdown-enabled
   per-locale intros, SEO,
   social meta, analytics, custom HTML blocks), an audit log, **user
-  accounts with Viewer / Editor / Admin roles**, and a live SSE
+  accounts with Viewer / Editor / Admin roles**, and a live monitoring
   dashboard (CPU/memory sparklines, live-follow logs, stop/restart).
 - **Operations** — `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
@@ -113,7 +118,7 @@ What's in the box:
   hardened `systemd` unit, static musl tarballs, a Homebrew tap, and
   cosign-signed release artifacts.
 
-400+ unit + integration tests run green on `cargo test` (no Docker
+600+ unit + integration tests run green on `cargo test` (no Docker
 required); extra feature-gated suites exercise a real Docker daemon
 (`docker-it`) and a full proxy + WebSocket end-to-end run (`e2e`).
 
@@ -123,8 +128,8 @@ required); extra feature-gated suites exercise a real Docker daemon
 </p>
 
 <p align="center">
-  <img src="book/src/images/admin-dashboard.png" alt="The live monitoring dashboard: aggregate cards plus a per-replica table with CPU sparklines, memory, sessions and stop/restart/logs actions, streamed over SSE." width="860">
-  <br><em>Live monitoring dashboard — per-replica CPU/memory over Server-Sent Events.</em>
+  <img src="book/src/images/admin-dashboard.png" alt="The live monitoring dashboard: aggregate cards plus a per-replica table with CPU sparklines, memory, sessions and stop/restart/logs actions, refreshed on a short poll." width="860">
+  <br><em>Live monitoring dashboard — per-replica CPU/memory, refreshed on a short poll.</em>
 </p>
 
 ## Install
@@ -218,6 +223,7 @@ ruscker serve   --config <path> [--docker] [--db <file>]   # run the portal
 ruscker import  <path> --db <file>   # populate SQLite from YAML
 ruscker export  --db <file>          # round-trip back to YAML
 ruscker show    <path>               # render YAML with env vars interpolated
+ruscker inspect <path>               # dump the fully-parsed config as JSON
 ```
 
 ## YAML compatibility
@@ -268,7 +274,7 @@ scope and how to extend it.
 
 ```bash
 cargo build
-cargo test                                   # 300+ tests, no Docker needed
+cargo test                                   # 600+ tests, no Docker needed
 cargo test -p ruscker-docker --features docker-it   # + real Docker daemon
 cargo test -p ruscker-cli --features e2e            # + full proxy/WS e2e
 cargo clippy --all-targets -- -D warnings
@@ -280,6 +286,13 @@ cargo clippy --all-targets -- -D warnings
 > workspace `cargo fmt` produces a large unrelated diff; `cargo fmt
 > --check` is intentionally **not** part of the gate.
 
+## Contributing
+
+Issues and pull requests are welcome. See **Development** above for the
+build + test gate (`cargo test` · `cargo clippy --all-targets -- -D
+warnings` · `./scripts/i18n-check.sh`), and keep changes as small,
+reviewable slices.
+
 ## License
 
-Apache-2.0
+Licensed under [Apache-2.0](LICENSE).

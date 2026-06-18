@@ -26,7 +26,7 @@
     <polygon points="14,40 40,28 66,40 40,52" fill="#FFFFFF" opacity="0.72"/>
     <polygon points="14,28 40,16 66,28 40,40" fill="#FFFFFF"/>
   </g>
-  <text x="92" y="131" font-size="15" font-weight="600" fill="#FFFFFF">Ruscker — single static binary · ~16 MB · no JVM</text>
+  <text x="92" y="131" font-size="15" font-weight="600" fill="#FFFFFF">Ruscker — single static binary · ~14 MB · no JVM</text>
 
   <!-- component boxes -->
   <!-- (1) Landing -->

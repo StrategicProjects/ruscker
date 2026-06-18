@@ -21,10 +21,11 @@ Rust.
 
 ### What we gain
 
-- **Footprint**: a static binary around 15-25 MB, runtime memory in
-  the 20-50 MB range for the proxy itself. ShinyProxy (JVM) sits at
-  300-500 MB ocioso. For a portal serving 10-20 containers, this can
-  make Ruscker fit on machines where ShinyProxy can't.
+- **Footprint**: a static binary in the low tens of MB, idle memory
+  around ~14 MB for the proxy itself (measured in production). The
+  JVM-based proxy it replaced, on the same machine serving the same
+  apps, sat at ~540 MB idle. For a portal serving 10-20 containers,
+  this can make Ruscker fit on machines where ShinyProxy can't.
 - **Startup**: milliseconds vs seconds. Important for restarts during
   config changes.
 - **WebSocket performance**: Rust's async ecosystem (tokio + axum +

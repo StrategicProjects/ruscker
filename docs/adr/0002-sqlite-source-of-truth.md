@@ -28,8 +28,10 @@ import/export format.**
   bootstrap.
 - Operators can `ruscker export --db ruscker.db > application.yml` to
   produce a YAML representation (for git versioning, backup, sharing).
-- Optionally, Ruscker can watch a YAML file on disk and offer to apply
-  detected changes via the admin (with a diff view).
+- Optionally, Ruscker could watch a YAML file on disk and offer to apply
+  detected changes via the admin (with a diff view). *(Not implemented:
+  `import` is a one-shot command and `export` is manual; there is no
+  live file watcher today.)*
 - The running proxy reads from SQLite. Period.
 
 ## Consequences
@@ -53,8 +55,9 @@ import/export format.**
   YAML — operators can `cron` a daily export to a git repo for
   belt-and-suspenders durability.
 - **Drift between disk YAML and DB**: if an operator edits YAML
-  expecting it to apply, it won't until they import or accept the
-  diff. Mitigated by the YAML watcher + diff UI.
+  expecting it to apply, it won't until they re-run `ruscker import`.
+  (The YAML watcher + diff UI that would have auto-applied changes was
+  never built — see the proposed solution above.)
 
 ### What we explicitly don't do
 

@@ -38,7 +38,7 @@
   <!-- ruscker-core -->
   <rect x="210" y="296" width="300" height="52" rx="10" fill="#FFFFFF" stroke="#0F6E56" stroke-width="1.8"/>
   <text x="360" y="319" text-anchor="middle" font-size="13" font-weight="700" fill="#085041">ruscker-core</text>
-  <text x="360" y="337" text-anchor="middle" font-size="10.5" fill="#5B6B66">traits · types · routing · ReplicaRegistry</text>
+  <text x="360" y="337" text-anchor="middle" font-size="10.5" fill="#5B6B66">traits · types · ReplicaRegistry</text>
 
   <!-- ruscker-config -->
   <rect x="210" y="364" width="300" height="50" rx="10" fill="#FFFFFF" stroke="#0F6E56" stroke-width="1.8"/>

@@ -55,10 +55,13 @@ sudo systemctl daemon-reload && sudo systemctl restart ruscker
 
 ### On-demand vs. pre-warmed
 
-Ruscker's auto-scaler keeps `min-replicas` (default **1**) warm per
-spec. With many specs that's a lot of idle containers. To match
-ShinyProxy's on-demand behaviour (spawn on first request, reap when
-idle), set `min-replicas: 0` on the specs.
+By default an app **cold-starts**: `min-replicas` defaults to **0**, so
+no container runs until the first visitor arrives (they see a brief
+splash while it spawns), and the auto-scaler reaps it once idle — the
+same on-demand behaviour as ShinyProxy and Shiny Server Free, and what
+keeps a many-app portal light. To keep an app **warm** (no cold-start
+latency on the first hit), set `min-replicas: 1` (or more) on that spec;
+the scaler then keeps that many replicas running at all times.
 
 ### Multiple Docker hosts (Phase 6)
 

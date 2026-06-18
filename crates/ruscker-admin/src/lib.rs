@@ -782,21 +782,31 @@ async fn must_change_password_guard(
                             .validate(&id)
                             .await
                             .and_then(|info| info.actor);
-                        let v = match actor {
-                            Some(actor) => db::users::fetch(pool, &actor)
-                                .await
-                                .ok()
-                                .flatten()
-                                .map(|u| u.must_change_password)
-                                .unwrap_or(false),
-                            // No actor (break-glass token / unknown id): nothing
-                            // to rotate. Cache `false` so we don't re-check.
-                            None => false,
+                        // `(answer, cacheable)`. A DB **error** is NOT
+                        // cacheable: caching its `false` would let a real
+                        // must-change user skip the prompt for the whole TTL
+                        // on one transient blip (#903 follow-up). We still
+                        // let the request through this once (matching the
+                        // pre-cache fail-open), but re-check next request so
+                        // the user is caught as soon as the DB recovers.
+                        let (v, cacheable) = match actor {
+                            Some(actor) => match db::users::fetch(pool, &actor).await {
+                                Ok(u) => (u.map(|u| u.must_change_password).unwrap_or(false), true),
+                                Err(e) => {
+                                    tracing::warn!(error = ?e, "must-change lookup failed; not caching");
+                                    (false, false)
+                                }
+                            },
+                            // No actor (break-glass token / unknown id):
+                            // nothing to rotate — a definitive `false`.
+                            None => (false, true),
                         };
-                        if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {
-                            MUST_CHANGE_CACHE.retain(|_, e| e.0.elapsed() < MUST_CHANGE_TTL);
+                        if cacheable {
+                            if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {
+                                MUST_CHANGE_CACHE.retain(|_, e| e.0.elapsed() < MUST_CHANGE_TTL);
+                            }
+                            MUST_CHANGE_CACHE.insert(id.clone(), (std::time::Instant::now(), v));
                         }
-                        MUST_CHANGE_CACHE.insert(id.clone(), (std::time::Instant::now(), v));
                         v
                     }
                 };

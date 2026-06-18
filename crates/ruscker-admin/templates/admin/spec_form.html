@@ -584,7 +584,7 @@
         </div>
         <div class="stepper">
           <button type="button" tabindex="-1" @click="form.min_replicas = String(Math.max(0, (parseInt(form.min_replicas, 10) || 0) - 1))"><i class="ti ti-minus" aria-hidden="true"></i></button>
-          <input id="f-init-rep" type="number" name="min_replicas" min="0" placeholder="1"
+          <input id="f-init-rep" type="number" name="min_replicas" min="0" placeholder="0"
                  x-model="form.min_replicas" class="stepper__input">
           <button type="button" tabindex="-1" @click="form.min_replicas = String((parseInt(form.min_replicas, 10) || 0) + 1)"><i class="ti ti-plus" aria-hidden="true"></i></button>
         </div>
@@ -1084,7 +1084,7 @@
         </div>
         <div class="spec-summary__row">
           <i class="ti ti-stack-2" aria-hidden="true"></i>
-          <span x-text="((form.max_replicas || form.min_replicas) ? ((form.min_replicas || '1') + '–' + (form.max_replicas || form.min_replicas)) : '1') + ' {{ self.t("spec-form-summary-replicas") }}'"></span>
+          <span x-text="((form.max_replicas || form.min_replicas) ? ((form.min_replicas || '0') + '–' + (form.max_replicas || form.min_replicas)) : '0') + ' {{ self.t("spec-form-summary-replicas") }}'"></span>
         </div>
         <div class="spec-summary__row">
           <i class="ti ti-clock" aria-hidden="true"></i>

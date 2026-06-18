@@ -113,8 +113,14 @@
      of the full cards (fixed width ⇒ 1–3 per row by viewport, the rest
      scroll). Filter bindings are intentionally omitted: the rail always
      shows the featured set, independent of the filters below. #}
-  {% if show_highlights && self.has_featured() %}
-  <section class="highlights" x-data="ruscker.highlights()" x-init="$nextTick(() => measure())"
+  {# Always rendered when the operator enables highlights (even with an
+     empty rail): `x-show="hasCards"` hides it until there's a favorite or
+     featured card, and a star toggle on the grid (`ruscker:fav`) rebuilds
+     the rail live — no reload (#: live favorites). #}
+  {% if show_highlights %}
+  <section class="highlights" x-data="ruscker.highlights()" x-init="init()"
+           x-show="hasCards" x-cloak
+           @ruscker:fav.window="rebuild()"
            @resize.window.debounce.150ms="measure()" aria-label="{{ self.t("highlights-title") }}">
     <div class="highlights-head">
       <div class="highlights-title"><i class="ti ti-star" aria-hidden="true"></i> {{ self.t("highlights-title") }}</div>
@@ -281,6 +287,9 @@
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}
          data-type="{{ card.display_type.key() }}"
+         data-spec="{{ card.id }}"
+         {% if card.favorited %}data-fav="1"{% endif %}
+         {% if card.featured %}data-featured="1"{% endif %}
          data-active="{% if card.active %}active{% else %}inactive{% endif %}"
          data-subject="{% if let Some(t) = card.subject %}{{ t }}{% endif %}"
          data-name="{{ card.display_name|lower }}"
@@ -329,7 +338,7 @@
                   x-data="{ on: {{ card.favorited }}, busy: false }" :style="busy ? 'opacity:.5' : ''"
                   :aria-pressed="on ? 'true' : 'false'"
                   aria-label="{{ self.t("card-favorite") }}" title="{{ self.t("card-favorite") }}"
-                  @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited}).catch(()=>{on=prev}).finally(()=>{busy=false})"
+                  @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited; const card=$el.closest('.rcard'); if(card){ if(d.favorited){card.setAttribute('data-fav','1')}else{card.removeAttribute('data-fav')} } window.dispatchEvent(new CustomEvent('ruscker:fav'))}).catch(()=>{on=prev}).finally(()=>{busy=false})"
                   @keydown.enter.prevent.stop="$el.click()" @keydown.space.prevent.stop="$el.click()">
               <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : '#b9bec8'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
             </span>
@@ -517,6 +526,46 @@ window.ruscker.highlights = () => ({
   perPage: 3,
   pages: 1,
   step: 270, // card width + gap; refined by measure()
+  hasCards: false,
+  // Set the visibility flag + measure from whatever's in the track (the
+  // server-rendered rail at load, or the rebuilt one after a toggle).
+  refresh() {
+    var t = this.$refs.track;
+    this.hasCards = !!(t && t.children.length);
+    this.$nextTick(() => this.measure());
+  },
+  init() { this.refresh(); },
+  // Rebuild the rail from the grid: clone every favorited card (then any
+  // admin-featured one not already favorited), strip its star + the grid's
+  // Alpine bindings, and drop it in — so favoriting/unfavoriting updates
+  // Destaques without a reload (#: live favorites). Order mirrors the
+  // server (favorites first); a reload restores the canonical order.
+  rebuild() {
+    var track = this.$refs.track;
+    var grid = document.querySelector('.catalog');
+    if (!track || !grid) return;
+    var fav = Array.prototype.slice.call(grid.querySelectorAll('.rcard[data-fav]'));
+    var feat = Array.prototype.slice.call(
+      grid.querySelectorAll('.rcard[data-featured]:not([data-fav])'));
+    track.innerHTML = '';
+    fav.concat(feat).forEach(function (card) {
+      var clone = card.cloneNode(true);
+      var star = clone.querySelector('.rlock');
+      if (star) star.remove();
+      // Neutralize the grid's Alpine bindings (x-show/:style/x-transition)
+      // so Alpine doesn't try to evaluate them in the highlights scope.
+      Array.prototype.slice.call(clone.attributes).forEach(function (a) {
+        if (a.name[0] === ':' || a.name[0] === '@' || a.name.indexOf('x-') === 0) {
+          clone.removeAttribute(a.name);
+        }
+      });
+      clone.style.display = '';
+      clone.style.order = '';
+      track.appendChild(clone);
+    });
+    this.page = 0;
+    this.refresh();
+  },
   measure() {
     const track = this.$refs.track;
     if (!track || !track.children.length) return;

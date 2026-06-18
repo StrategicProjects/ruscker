@@ -45,7 +45,7 @@ use crate::AppState;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/dashboard", get(index))
-        .route("/admin/dashboard/events", get(events))
+        .route("/admin/dashboard/snapshot", get(snapshot))
         .route("/admin/dashboard/logs/{replica_id}", get(logs))
         .route("/admin/dashboard/logs/{replica_id}/stream", get(logs_stream))
         .route("/admin/dashboard/replicas/{replica_id}/stop", post(stop_replica))
@@ -563,23 +563,10 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// Server-Sent Events stream of dashboard snapshots. The
-/// client connects with `EventSource('/admin/dashboard/events')`
-/// and receives a JSON-encoded [`DashboardSnapshot`] every
-/// [`SSE_INTERVAL`], plus a comment keep-alive every
-/// [`SSE_KEEPALIVE_INTERVAL`] to defeat proxy idle timeouts.
-///
-/// Each emission is independent; reconnecting after a network
-/// blip just resumes the cadence — there's no event-id /
-/// last-event-id handshake to manage, and replaying a snapshot
-/// is idempotent on the client side anyway.
 /// Headers that keep an SSE response *streaming* through a reverse proxy
-/// instead of being buffered. `X-Accel-Buffering: no` tells nginx (and
-/// compatible proxies) not to buffer this response, and `Cache-Control:
-/// no-cache` keeps intermediaries from caching the stream. Without these,
-/// nginx buffers the event stream and the live dashboard appears frozen
-/// behind a reverse proxy (e.g. a `/box` subpath mount) — the WebSocket
-/// pump has `proxy_buffering off`, but a plain SSE response doesn't.
+/// instead of being buffered (still used by the live **logs** stream).
+/// `X-Accel-Buffering: no` tells nginx not to buffer; `Cache-Control:
+/// no-cache` keeps intermediaries from caching the stream.
 fn sse_no_buffer_headers() -> [(axum::http::HeaderName, &'static str); 2] {
     use axum::http::header::{HeaderName, CACHE_CONTROL};
     [
@@ -588,7 +575,20 @@ fn sse_no_buffer_headers() -> [(axum::http::HeaderName, &'static str); 2] {
     ]
 }
 
-async fn events(
+/// JSON dashboard snapshot for the live view's poller. The dashboard page
+/// fetches this every few seconds (`GET /admin/dashboard/snapshot`) rather
+/// than holding a long-lived SSE stream: a persistent `EventSource` keeps
+/// one HTTP/1.1 connection open, which over a shared-origin reverse proxy
+/// (nginx fronting Ruscker AND a side-by-side ShinyProxy) starves the
+/// browser's ~6-per-host connection pool and stalls **every** request to
+/// that origin — both apps freeze until the stream is dropped (#852
+/// follow-up). A short poll returns and frees the connection between
+/// ticks; the snapshot is memoized for [`SSE_INTERVAL`] server-side, so
+/// concurrent tabs share one build and the cost is tiny.
+///
+/// `no-store` so the browser always re-polls (freshness comes from the
+/// server-side cache, not the HTTP cache).
+async fn snapshot(
     session: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
@@ -598,29 +598,12 @@ async fn events(
     if !session.role.can_access_section("dashboard") {
         return (StatusCode::FORBIDDEN, "forbidden").into_response();
     }
-    use async_stream::stream;
-    let stream = stream! {
-        // Emit the first snapshot immediately so the client
-        // patches on connect instead of waiting one full
-        // interval. Avoids a visible "stale" gap right after
-        // page load.
-        let first = build_snapshot(&state, loc).await;
-        let body = json_for_html_script(&first);
-        yield Ok::<_, Infallible>(Event::default().data(body));
-
-        let mut ticker = tokio::time::interval(SSE_INTERVAL);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        // Burn the immediate first tick — we already emitted.
-        ticker.tick().await;
-        loop {
-            ticker.tick().await;
-            let snap = build_snapshot(&state, loc).await;
-            let body = json_for_html_script(&snap);
-            yield Ok::<_, Infallible>(Event::default().data(body));
-        }
-    };
-    let sse = Sse::new(stream).keep_alive(KeepAlive::new().interval(SSE_KEEPALIVE_INTERVAL));
-    (sse_no_buffer_headers(), sse).into_response()
+    let snap = build_snapshot(&state, loc).await;
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        axum::Json(snap),
+    )
+        .into_response()
 }
 
 /// Per-replica logs page. Fetches the last [`LOGS_TAIL`] lines

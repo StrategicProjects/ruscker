@@ -9,6 +9,21 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.35 — 2026-06-17
+
+Two small correctness fixes (#910).
+
+- **A DB blip no longer lets a must-change user skip the prompt.** The
+  forced-password-change guard's per-session cache (v0.2.34) treated a
+  transient DB error as "no change needed" and pinned it for the cache
+  window. A DB error is now never cached — the next request re-checks, so
+  the user is caught as soon as the database recovers.
+- **Duplicating an app won't shadow a YAML-defined one.** The suggested
+  copy id now checks the full effective catalog (DB + YAML), so it can't
+  land on an id already used by a config-only spec.
+
+---
+
 ## v0.2.34 — 2026-06-17
 
 Admin correctness + performance, from a navigation-focused audit.

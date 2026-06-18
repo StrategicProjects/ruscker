@@ -9,6 +9,15 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.38 — 2026-06-18
+
+- **Favoriting a card updates the Featured rail instantly.** Clicking the
+  star on a portal card now adds it to (or removes it from) the
+  "Destaques" rail live — no page reload. The rail appears the moment you
+  favorite your first card and hides again when you clear the last one.
+
+---
+
 ## v0.2.37 — 2026-06-18
 
 - **The live dashboard no longer holds a connection open.** It used a

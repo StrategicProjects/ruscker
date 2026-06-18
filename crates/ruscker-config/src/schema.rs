@@ -1232,13 +1232,17 @@ impl Spec {
         self.featured.unwrap_or(false)
     }
 
-    /// Effective minimum replicas (default 1 for containerized, 0 for
-    /// external).
+    /// Effective minimum replicas. Defaults to **0 (cold-start, spawn on
+    /// demand)** when unset — matching ShinyProxy / Shiny Server Free,
+    /// which never pre-warm: the container starts when the first visitor
+    /// arrives (the splash) and the scaler reaps it once idle. An app you
+    /// want kept hot sets `min-replicas: 1` (or more) explicitly. This is
+    /// the sane default for a multi-app portal — defaulting to 1 used to
+    /// pre-spawn *every* app at boot, which is surprising and heavy when
+    /// hosting many apps (e.g. a 24-spec ShinyProxy import). `External`
+    /// specs have no container, so 0 is also correct for them.
     pub fn effective_min_replicas(&self) -> u32 {
-        self.min_replicas.unwrap_or_else(|| match self.kind() {
-            SpecKind::External => 0,
-            _ => 1,
-        })
+        self.min_replicas.unwrap_or(0)
     }
 
     /// Effective maximum replicas. When unset, a containerized spec
@@ -1918,9 +1922,16 @@ proxy:
         );
 
         // Default ceiling when nothing is set, and an explicit max is still
-        // honoured.
+        // honoured. With `min-replicas` unset the default is now 0 (cold
+        // start) — we never pre-spawn an app the operator didn't ask to
+        // keep hot, matching ShinyProxy. It still scales on demand.
         let dflt = "proxy:\n  specs:\n    - id: d\n      container-image: nginx\n";
         let s = &serde_yaml_ng::from_str::<Config>(dflt).unwrap().proxy.specs[0];
+        assert_eq!(
+            s.effective_min_replicas(),
+            0,
+            "unset min-replicas defaults to cold-start, not pre-warm"
+        );
         assert_eq!(s.effective_max_replicas(), DEFAULT_MAX_REPLICAS);
         let cap = "proxy:\n  specs:\n    - id: c\n      container-image: nginx\n      min-replicas: 0\n      max-replicas: 4\n";
         let s = &serde_yaml_ng::from_str::<Config>(cap).unwrap().proxy.specs[0];

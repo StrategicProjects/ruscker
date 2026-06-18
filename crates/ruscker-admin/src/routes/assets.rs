@@ -330,19 +330,19 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/assets/icons/tabler-icons.woff2",
-            get(|| serve(TABLER_FONT, "font/woff2")),
+            get(|h| serve_font(h, TABLER_FONT, "font/woff2")),
         )
         .route(
             "/assets/fonts/jost-latin-400-normal.woff2",
-            get(|| serve(JOST_400, "font/woff2")),
+            get(|h| serve_font(h, JOST_400, "font/woff2")),
         )
         .route(
             "/assets/fonts/jost-latin-500-normal.woff2",
-            get(|| serve(JOST_500, "font/woff2")),
+            get(|h| serve_font(h, JOST_500, "font/woff2")),
         )
         .route(
             "/assets/fonts/jost-latin-600-normal.woff2",
-            get(|| serve(JOST_600, "font/woff2")),
+            get(|h| serve_font(h, JOST_600, "font/woff2")),
         )
         .route(
             "/assets/js/alpine.min.js",
@@ -632,6 +632,35 @@ async fn serve(body: &'static [u8], content_type: &'static str) -> Response {
     serve_with_cache(body, content_type, "public, max-age=300")
 }
 
+/// Serve a bundled **font** with an ETag + a day-long revalidated cache.
+/// Fonts are big (the icon woff2 especially) and their URLs aren't
+/// `?v`-versioned (the `@font-face src` is fixed in the vendored CSS), so
+/// under the bare `serve()` 5-min cache a returning visitor re-downloaded
+/// the whole woff2 every few minutes — the "icons take a while to appear"
+/// pop-in. With an ETag, a stale-cache revalidation is a cheap `304`
+/// instead of a full re-download, and a new binary (changed bytes → new
+/// ETag) is still picked up promptly (#911-adjacent).
+async fn serve_font(
+    req_headers: HeaderMap,
+    body: &'static [u8],
+    content_type: &'static str,
+) -> Response {
+    let etag = etag_for(body);
+    if if_none_match(&req_headers, &etag) {
+        return not_modified(&etag);
+    }
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(content_type));
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400, must-revalidate"),
+    );
+    if let Ok(v) = HeaderValue::from_str(&etag) {
+        headers.insert(header::ETAG, v);
+    }
+    (StatusCode::OK, headers, body).into_response()
+}
+
 /// Serve a bundled asset whose URL carries `?v=<version>` (#289). The
 /// version stamps the URL per release, so the bytes for a given URL are
 /// immutable — cache them hard for a year. A request without `?v`
@@ -782,5 +811,29 @@ mod tests {
         assert!(resp.headers().get(header::CONTENT_ENCODING).is_none());
         let body = to_bytes(resp.into_body(), 8 << 20).await.unwrap();
         assert_eq!(&body[..], STYLES_CSS);
+    }
+
+    // #911-adjacent: a font carries an ETag + day-long cache, and a
+    // matching `If-None-Match` returns a cheap 304 instead of re-sending
+    // the (big) woff2.
+    #[tokio::test]
+    async fn serve_font_revalidates_with_304() {
+        let fresh = serve_font(HeaderMap::new(), TABLER_FONT, "font/woff2").await;
+        assert_eq!(fresh.status(), StatusCode::OK);
+        let etag = fresh.headers().get(header::ETAG).unwrap().clone();
+        assert!(fresh
+            .headers()
+            .get(header::CACHE_CONTROL)
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("max-age=86400"));
+
+        let mut h = HeaderMap::new();
+        h.insert(header::IF_NONE_MATCH, etag);
+        let revalidate = serve_font(h, TABLER_FONT, "font/woff2").await;
+        assert_eq!(revalidate.status(), StatusCode::NOT_MODIFIED);
+        let body = to_bytes(revalidate.into_body(), 8 << 20).await.unwrap();
+        assert!(body.is_empty(), "304 carries no body");
     }
 }

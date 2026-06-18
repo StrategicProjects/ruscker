@@ -18,6 +18,6 @@
 # Reference
 
 - [Architecture](./architecture.md)
+- [Security](./security.md)
 - [Roadmap](./roadmap.md)
 - [Release notes](./news.md)
-- [Security](./security.md)

@@ -10,7 +10,7 @@ the editor/list screens return 503.
 The images aren't being served at `/assets/img/`. Either pass
 `--images-dir <dir>` pointing at the folder with the image files, or
 keep the config next to its `template-path`'s `assets/img/` so Ruscker
-auto-discovers it. Check: `curl -I http://localhost:8090/assets/img/<file>`.
+auto-discovers it. Check: `curl -I http://localhost:8080/assets/img/<file>`.
 With `--db`, you can also upload logos in **Media** and pick them in
 the spec form.
 
@@ -174,7 +174,9 @@ forward requests without authentication, and `--ServerApp.allow_origin=*`
 lets the kernel WebSocket connect. Do **not** set
 `--ServerApp.base_url=#{publicPath}`: under Ruscker's strip model the
 container never sees the mount prefix, so a non-root `base_url` makes
-Jupyter 404 every path.
+Jupyter 404 every path. See
+[Sub-path handling (the strip model)](./alternatives.md#sub-path-handling-the-strip-model)
+for why.
 
 **Do not set `SHINYPROXY_PUBLIC_PATH`** in `container-env` either. That
 variable is a ShinyProxy convention; Ruscker does not use it, and if a
@@ -189,6 +191,6 @@ image's server is listening on the port you set in `container-port`
 ```sh
 systemctl status ruscker
 journalctl -u ruscker -f
-curl -s localhost:8090/readyz
+curl -s localhost:8080/readyz
 docker ps --filter label=ruscker.replica_id
 ```

@@ -48,20 +48,21 @@ filesystem path). The bit after is whatever filename you pick.
 
 - `object-fit: cover` by default — the image fills the slot, centered.
   Good for screenshots, photos, and full-bleed art.
-- For **SVG logos** with intentional whitespace around them, use
-  `object-fit: contain` (planned: detect via file extension).
-- `alt` text comes from `template-properties.alt` (planned for
-  Phase 2). For Phase 1, cards render `alt=""` (treated as
-  decorative — the title alongside provides the semantic context).
+- **SVG logos** are detected by file extension and rendered with
+  `object-fit: contain` automatically, so the intentional whitespace
+  around a mark is preserved instead of being cropped.
+- Card covers render with `alt=""` (treated as decorative — the visible
+  title alongside carries the semantic meaning), so screen readers don't
+  announce a redundant filename.
 - SVGs are loaded via `<img src=...>`, **not** inlined — this
   blocks SVG-script-tag XSS from operator uploads.
 
 ## Caching
 
-| Phase | Strategy |
+| Asset class | Strategy |
 |---|---|
-| **Phase 1 (now)** | `cache-control: public, max-age=0, must-revalidate`. Browsers cache but always revalidate on reload — minimal surprise for the operator iterating on YAML. |
-| **Phase 5 (planned)** | Hash-bearing URLs (`/assets/img/sales-dashboard-<sha>.png`) served back with `immutable` so production deployments get long-lived caching without losing the cache-bust on updates. |
+| **Versioned bundle assets** (`?v=<version>` on CSS/JS/built-in art) | `cache-control: public, max-age=31536000, immutable` — the `?v=` query busts the cache on every release, so the bytes behind a given URL never change. |
+| **Uploaded / dynamic images** (Media library, card covers) | Short `max-age` plus an `ETag`; a reload sends `If-None-Match` and gets a cheap `304` when unchanged. Editing an image changes its content hash, so the next request re-fetches. |
 
 > **Important:** never use `cache-control: immutable` on a URL whose
 > bytes can change. Chrome interprets `immutable` as "don't check on
@@ -92,13 +93,16 @@ re-reads from disk on every request.
 2. Ruscker re-encodes to WebP, returns a stable URL.
 3. Pick the image from a gallery dropdown when editing the spec.
 
-## Bundled examples
+## Example config and images
 
-The repository ships ~57 real card images at
-`examples/assets/img/` (extracted from a real-world ShinyProxy
-install, sanitized). They cover every spec in
-`examples/application.yml` — running `ruscker serve --config
-examples/application.yml` shows the portal with all images visible.
+`examples/application.yml` references a couple of `/assets/img/...`
+cover paths, but the image files themselves are **not** bundled in the
+repository (the originals came from a real install and were sanitized
+out). Running `ruscker serve --config examples/application.yml` renders
+the portal fine — those cards simply fall back to their tint/monogram
+cover. To see real covers, drop your own files in an `assets/img/`
+folder beside the config (or point `--images-dir` at one), or upload
+them in the admin **Media** library.
 
 ## What we explicitly don't do
 

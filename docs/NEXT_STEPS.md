@@ -64,9 +64,10 @@ This makes nobody re-discover what we just debugged.
 Known refinements that matter under sustained real load (see CLAUDE.md
 "Known gaps"):
 
-- **Scale-down hysteresis / post-drop cooldown.** Today a `seats=1` spec
-  with long sessions can flap; hysteresis dampens but doesn't eliminate
-  it. Add a cooldown after a scale-down before the next one.
+- **Scale-down hysteresis / post-drop cooldown.** ✅ *Shipped.* A
+  `seats=1` spec with long sessions could flap; a post-drop cooldown
+  (`DEFAULT_SCALE_DOWN_COOLDOWN_TICKS`) now gates the saturation respawn
+  after a scale-down, on top of the existing hysteresis.
 - **Per-spec heartbeat-timeout override.** A single global timeout today;
   some apps need a longer idle window than others.
 - **Observability template.** The Prometheus endpoint already exists
@@ -104,8 +105,8 @@ Recommended regardless of the chosen direction.
    scenario).
 2. **A — deploy recipe** (nginx + systemd + compose + book chapter),
    capturing the footguns we just hit.
-3. **B — reliability** items as demand dictates (start with the
-   scale-down cooldown, the one with a user-visible symptom).
+3. **B — reliability** items as demand dictates (the scale-down
+   cooldown, which had the user-visible symptom, has since shipped).
 
 Open question to settle before slicing: is the deploy recipe targeting
 **root-mount**, **subpath-mount**, or **both** as first-class? (Both is

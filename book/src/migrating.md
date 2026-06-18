@@ -9,7 +9,7 @@ Before switching anything, ask Ruscker what your config uses:
 
 ```sh
 ruscker validate application.yml                 # general report
-ruscker validate --strict-compat application.yml # migration pre-flight
+ruscker validate application.yml --strict-compat # migration pre-flight
 ```
 
 `--strict-compat` lists every ShinyProxy feature your config uses that
@@ -139,7 +139,8 @@ Beyond parity, you also get: a real admin panel (no more hand-editing
 YAML), a live monitoring dashboard, per-spec `container-env` /
 `container-cmd` injection, per-API rate-limiting and CORS, per-user
 and per-group app visibility, health probes, graceful shutdown, and a
-tiny footprint — idle memory drops from ~540 MB to ~14 MB. See
+tiny footprint — **~14 MB** idle, against the ~540 MB of the JVM-based
+proxy it replaced on the same machine. See
 [The admin panel](./admin.md).
 
 ## Not supported (yet)

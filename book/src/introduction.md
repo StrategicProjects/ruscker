@@ -51,7 +51,7 @@ engineered to keep the runtime light while staying compatible:
 Ruscker runs in production today — the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
 has the current version, and the whole codebase went through a
-systematic bug / security / UX audit in June 2026 (v0.2.5), with every
+systematic bug / security / UX audit in June 2026, with every
 finding fixed. Built for extreme efficiency, its idle footprint sits
 in the low tens of megabytes:
 

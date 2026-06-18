@@ -9,6 +9,29 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.36 — 2026-06-18
+
+Portal/admin UX + a big icon-loading win.
+
+- **Icons appear instantly.** The bundled Tabler icon font shipped the
+  full set — ~447 KB woff2 + ~209 KB CSS — even though the app uses ~95
+  glyphs, so on a cold visit the icons "popped in" only after that
+  download. Subsetted to just the used glyphs (**10.7 KB woff2 + 4 KB
+  CSS**), and fonts now carry an ETag + a day-long revalidated cache, so
+  repeat visits don't re-download them.
+- **Favorite star tidied.** Logged-out visitors no longer see an empty
+  white circle on cards; the "Destaques" carousel drops the star
+  entirely; the un-favorited star is a softer grey.
+- **CSV user import is clearer.** Instead of two look-alike buttons, you
+  see "Choose CSV file" first; once a file is picked it becomes a single
+  primary "Review import: «file»" button (plus a discreet "change file"),
+  so the choose → review flow is obvious.
+- **Fixes (#910):** a transient DB error no longer lets a must-change user
+  skip the password prompt, and duplicating an app won't suggest an id
+  that shadows a YAML-defined one.
+
+---
+
 ## v0.2.35 — 2026-06-17
 
 Two small correctness fixes (#910).

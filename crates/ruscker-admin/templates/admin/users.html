@@ -101,30 +101,56 @@
    submit starts disabled and enables on pick. The filename is set via
    textContent (XSS-safe) and is never a localized string. #}
 <form method="post" action="{{ base }}/admin/users/import" enctype="multipart/form-data"
-      style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
-  <label class="admin-nav-link" style="width:auto;cursor:pointer">
+      style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:20px">
+  <input type="file" name="file" id="csv-import-input" accept=".csv,text/csv" class="hidden">
+
+  {# Step 1 — choose a file. A real `<label for>` opens the native picker,
+     so no JS is needed to trigger it. #}
+  <label for="csv-import-input" id="csv-import-choose" class="admin-nav-link" style="width:auto;cursor:pointer">
     <i class="ti ti-file-spreadsheet" aria-hidden="true"></i> {{ self.t("admin-users-import-choose") }}
-    <input type="file" name="file" id="csv-import-input" accept=".csv,text/csv" class="hidden">
   </label>
-  <span class="text-xs text-[color:var(--text-muted)]" id="csv-import-name" style="word-break:break-all"></span>
-  <button type="submit" id="csv-import-submit" class="admin-nav-link" style="width:auto" disabled>
-    <i class="ti ti-file-upload" aria-hidden="true"></i> {{ self.t("admin-users-import") }}
+
+  {# Step 2 — appears only after a file is chosen, so the two steps never
+     show as look-alike buttons at once (#: clearer import UX). It's the
+     PRIMARY action and opens the preview, so it reads "Review import:
+     <file>". The localized prefix rides data-* (filename is data, appended
+     in the script) so no localized string lands in a JS handler. #}
+  <button type="submit" id="csv-import-submit" class="admin-login-btn" style="width:auto;display:none"
+          data-review="{{ self.t("admin-users-import-review") }}">
+    <i class="ti ti-arrow-right" aria-hidden="true"></i>
+    <span id="csv-import-submit-label">{{ self.t("admin-users-import-review") }}</span>
   </button>
+  <button type="button" id="csv-import-change" class="text-xs text-[color:var(--text-faint)] underline"
+          style="display:none;cursor:pointer">{{ self.t("admin-users-import-change") }}</button>
+
   <span class="text-xs text-[color:var(--text-faint)]">{{ self.t("admin-users-import-help") }}</span>
 </form>
 <script>
-  // Framework-free (this page avoids Alpine, #433): reflect the chosen file
-  // name and enable the submit only once a file is picked.
+  // Framework-free (this page avoids Alpine, #433): progressive disclosure —
+  // show "Choose" until a file is picked, then swap to the primary
+  // "Review import: <file>" + a discreet "change file" link.
   (function () {
     var input = document.getElementById('csv-import-input');
-    var name = document.getElementById('csv-import-name');
+    var choose = document.getElementById('csv-import-choose');
     var submit = document.getElementById('csv-import-submit');
-    if (!input || !name || !submit) return;
-    input.addEventListener('change', function () {
+    var label = document.getElementById('csv-import-submit-label');
+    var change = document.getElementById('csv-import-change');
+    if (!input || !choose || !submit || !label || !change) return;
+    function sync() {
       var f = input.files && input.files.length ? input.files[0].name : '';
-      name.textContent = f;
-      submit.disabled = !f;
-    });
+      if (f) {
+        label.textContent = submit.dataset.review + ': ' + f;
+        choose.style.display = 'none';
+        submit.style.display = '';
+        change.style.display = '';
+      } else {
+        choose.style.display = '';
+        submit.style.display = 'none';
+        change.style.display = 'none';
+      }
+    }
+    input.addEventListener('change', sync);
+    change.addEventListener('click', function () { input.click(); });
   })();
 </script>
 

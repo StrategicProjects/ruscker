@@ -149,22 +149,8 @@
               <span class="rbadge b-{{ card.display_type.key() }}">{{ self.t(card.display_type.abbr_key()) }}</span>
               {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
             </div>
-            {# Per-user favorite star (#858) — replaces the old decorative
-               padlock. Logged-in only; clicking toggles over fetch without
-               navigating the card link. Anonymous visitors see nothing here. #}
-            <span class="rlock">
-              {% if signed_in_user %}
-              <span class="rstar" role="button" tabindex="0" data-spec="{{ card.id }}"
-                    style="cursor:pointer;display:inline-flex;line-height:0"
-                    x-data="{ on: {{ card.favorited }}, busy: false }" :style="busy ? 'opacity:.5' : ''"
-                    :aria-pressed="on ? 'true' : 'false'"
-                    aria-label="{{ self.t("card-favorite") }}" title="{{ self.t("card-favorite") }}"
-                    @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited}).catch(()=>{on=prev}).finally(()=>{busy=false})"
-                    @keydown.enter.prevent.stop="$el.click()" @keydown.space.prevent.stop="$el.click()">
-                <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : 'currentColor'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
-              </span>
-              {% endif %}
-            </span>
+            {# Featured carousel: no favorite star/circle here — the star
+               lives on the grid cards only (#: cleaner Destaques rail). #}
           </div>
           <div class="rbody">
             <div class="rtitle">{{ card.display_name }}</div>
@@ -332,9 +318,12 @@
             {% if let Some(subj) = card.subject %}<span class="rbadge rbadge--subject" title="{{ subj }}">{{ subj }}</span>{% endif %}
           </div>
           {# Per-user favorite star (#858) — replaces the decorative padlock.
-             Logged-in only; toggles over fetch without navigating the card. #}
+             Logged-in ONLY: an anonymous visitor gets no star and no white
+             circle placeholder (the `.rlock` wraps the whole thing now).
+             Toggles over fetch without navigating the card. The empty star
+             is a soft grey, filling amber when favorited. #}
+          {% if signed_in_user %}
           <span class="rlock">
-            {% if signed_in_user %}
             <span class="rstar" role="button" tabindex="0" data-spec="{{ card.id }}"
                   style="cursor:pointer;display:inline-flex;line-height:0"
                   x-data="{ on: {{ card.favorited }}, busy: false }" :style="busy ? 'opacity:.5' : ''"
@@ -342,10 +331,10 @@
                   aria-label="{{ self.t("card-favorite") }}" title="{{ self.t("card-favorite") }}"
                   @click.prevent.stop="busy=true; const prev=on; on=!on; fetch((window.RUSCKER_BASE||'')+'/favorite/'+encodeURIComponent($el.dataset.spec),{method:'POST'}).then(r=>r.ok?r.json():Promise.reject()).then(d=>{on=d.favorited}).catch(()=>{on=prev}).finally(()=>{busy=false})"
                   @keydown.enter.prevent.stop="$el.click()" @keydown.space.prevent.stop="$el.click()">
-              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : 'currentColor'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+              <svg viewBox="0 0 24 24" width="13" height="13" aria-hidden="true" :fill="on ? '#f5a623' : 'none'" :stroke="on ? '#f5a623' : '#b9bec8'" stroke-width="1.6" stroke-linejoin="round"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
             </span>
-            {% endif %}
           </span>
+          {% endif %}
         </div>
 
         <div class="rbody">

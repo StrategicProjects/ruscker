@@ -8,6 +8,7 @@
 [![Latest release](https://img.shields.io/github/v/release/StrategicProjects/ruscker?sort=semver)](https://github.com/StrategicProjects/ruscker/releases)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-ruscker.com-0F6E56)](https://strategicprojects.github.io/ruscker/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20849123.svg)](https://doi.org/10.5281/zenodo.20849123)
 
 **Ruscker** is a lightweight, single-binary alternative to **ShinyProxy**
 and **Shiny Server Free** — a **portal and orchestrator** for

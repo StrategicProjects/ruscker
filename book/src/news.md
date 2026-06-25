@@ -9,6 +9,16 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.40 — 2026-06-25
+
+- **Citation metadata + DOI.** Added a `CITATION.cff` at the repo root so
+  GitHub shows a **"Cite this repository"** button (APA/BibTeX) and
+  [Zenodo](https://zenodo.org) archives each release with a permanent
+  **DOI**. No code changes — this is the first release archived to
+  Zenodo. Cite Ruscker with the concept DOI shown on the repository page.
+
+---
+
 ## v0.2.39 — 2026-06-18
 
 - **Apps no longer pre-warm by default.** An app with no `min-replicas`

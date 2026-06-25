@@ -11,6 +11,7 @@ authors:
     family-names: Leite
     email: leite@castlab.org
     affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0002-4718-9766'
   - given-names: Marcos
     family-names: Wasilew
     email: marcos.wasilew@gmail.com
@@ -18,14 +19,17 @@ authors:
     family-names: Vasconcelos
     email: hugo.vasconcelos@ufpe.br
     affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0001-6249-0920'
   - given-names: Carlos
     family-names: Amorin
     email: carlos.agaf@ufpe.br
     affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0001-6315-8305'
   - given-names: Diogo
     family-names: Bezerra
     email: diogo.bezerra@ufpe.br
     affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0002-1216-8674'
   - given-names: Júlia
     family-names: Nascimento Barreto
     email: juliabarreto@gd.seplag.pe.gov.br

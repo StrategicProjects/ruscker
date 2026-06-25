@@ -294,6 +294,34 @@ build + test gate (`cargo test` · `cargo clippy --all-targets -- -D
 warnings` · `./scripts/i18n-check.sh`), and keep changes as small,
 reviewable slices.
 
+## Citation
+
+If you use Ruscker in academic work, please cite it. Ruscker is archived
+on [Zenodo](https://doi.org/10.5281/zenodo.20849123) with a permanent
+DOI, and the repository ships a [`CITATION.cff`](CITATION.cff) — GitHub's
+**"Cite this repository"** button (top of the repo page) generates APA
+and BibTeX from it.
+
+> Leite, A., Wasilew, M., Vasconcelos, H., Amorin, C., Bezerra, D., &
+> Nascimento Barreto, J. *Ruscker: a lightweight Rust portal and
+> orchestrator for containerized interactive web apps and HTTP APIs.*
+> Zenodo. https://doi.org/10.5281/zenodo.20849123
+
+```bibtex
+@software{ruscker,
+  author  = {Leite, Andre and Wasilew, Marcos and Vasconcelos, Hugo and
+             Amorin, Carlos and Bezerra, Diogo and Nascimento Barreto, J\'ulia},
+  title   = {Ruscker: a lightweight Rust portal and orchestrator for
+             containerized interactive web apps and HTTP APIs},
+  url     = {https://github.com/StrategicProjects/ruscker},
+  doi     = {10.5281/zenodo.20849123},
+  publisher = {Zenodo}
+}
+```
+
+The DOI above is the **concept DOI** — it always resolves to the latest
+release. Each release also gets its own version DOI on Zenodo.
+
 ## License
 
 Licensed under [Apache-2.0](LICENSE).

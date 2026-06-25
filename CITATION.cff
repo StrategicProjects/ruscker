@@ -1,0 +1,58 @@
+cff-version: 1.2.0
+title: >-
+  Ruscker: a lightweight Rust portal and orchestrator for
+  containerized interactive web apps and HTTP APIs
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Andre
+    family-names: Leite
+    email: leite@castlab.org
+    affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0002-4718-9766'
+  - given-names: Marcos
+    family-names: Wasilew
+    email: marcos.wasilew@gmail.com
+  - given-names: Hugo
+    family-names: Vasconcelos
+    email: hugo.vasconcelos@ufpe.br
+    affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0001-6249-0920'
+  - given-names: Carlos
+    family-names: Amorin
+    email: carlos.agaf@ufpe.br
+    affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0001-6315-8305'
+  - given-names: Diogo
+    family-names: Bezerra
+    email: diogo.bezerra@ufpe.br
+    affiliation: Universidade Federal de Pernambuco
+    orcid: 'https://orcid.org/0000-0002-1216-8674'
+  - given-names: Júlia
+    family-names: Nascimento Barreto
+    email: juliabarreto@gd.seplag.pe.gov.br
+    affiliation: Secretaria de Planejamento e Gestão de Pernambuco
+repository-code: 'https://github.com/StrategicProjects/ruscker'
+url: 'https://ruscker.com'
+abstract: >-
+  Ruscker is a lightweight, single-binary Rust alternative to
+  ShinyProxy and Shiny Server Free. It serves and load-balances
+  containerized interactive web applications (R/Shiny, Streamlit,
+  Dash, Voilà) and stateless HTTP APIs (Plumber2, FastAPI) behind a
+  single proxy, with a custom landing page and admin panel. It keeps
+  ShinyProxy's YAML configuration schema for friction-free migration.
+keywords:
+  - shiny
+  - shinyproxy
+  - reverse-proxy
+  - load-balancer
+  - rust
+  - docker
+  - r
+  - data-science
+  - container-orchestration
+license: Apache-2.0
+version: 0.2.39
+date-released: '2026-06-18'

@@ -541,14 +541,18 @@ async fn tick(
                     grace_ticks = drop_after,
                     "idle replicas past grace — scaling down"
                 );
+                let mut stopped_any = false;
                 for r in drop_candidates {
-                    if let Err(e) = stop_one(state, &r.id, backend.as_ref()).await {
-                        warn!(
-                            spec = %spec.id,
-                            replica = ?r.id,
-                            error = ?e,
-                            "scale-down stop failed"
-                        );
+                    match stop_one(state, &r.id, backend.as_ref()).await {
+                        Ok(()) => stopped_any = true,
+                        Err(e) => {
+                            warn!(
+                                spec = %spec.id,
+                                replica = ?r.id,
+                                error = ?e,
+                                "scale-down stop failed"
+                            );
+                        }
                     }
                     // Removed from registry → forget its counter
                     // so it can't haunt us if the same id
@@ -560,7 +564,7 @@ async fn tick(
                 // spawn for this spec waits — breaks the flap.
                 // Set after this tick's decrement so it lasts the
                 // full window. `0` disables (tests).
-                if cooldown_ticks > 0 {
+                if stopped_any && cooldown_ticks > 0 {
                     cooldown.insert(spec.id.clone(), cooldown_ticks);
                 }
             }
@@ -695,26 +699,25 @@ fn lifetime_reap_candidates(
         .collect()
 }
 
-/// Stop a single replica and remove it from the registry. Used
-/// by the idle scale-down path. The backend stop is best-effort
-/// — even if it fails (already gone, network blip), we still
-/// remove the entry so the registry doesn't accumulate
-/// phantoms.
+/// Stop a single replica and remove it from the registry. The backend
+/// stop is best-effort: its error is returned for observability, but only
+/// after local cleanup, so an already-gone container or network blip can't
+/// leave a phantom replica or session behind.
 async fn stop_one(
     state: &AppState,
     replica_id: &ruscker_core::ReplicaId,
     backend: &dyn ruscker_core::ContainerBackend,
 ) -> anyhow::Result<()> {
-    backend
+    let stop_result = backend
         .stop(replica_id)
         .await
-        .map_err(|e| anyhow::anyhow!("backend stop: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("backend stop: {e}"));
     state.replicas.write().await.remove(replica_id);
     // Purge the stopped replica's sessions so `len()` doesn't stay
     // inflated until the idle sweep (and forever under
     // `heartbeat-timeout: -1`) — see SessionStore::drop_replica (#324).
     state.sessions.drop_replica(replica_id).await;
-    Ok(())
+    stop_result
 }
 
 /// Stop and remove every replica of `spec_id`, best-effort, and drop
@@ -738,14 +741,11 @@ pub async fn stop_spec(state: &AppState, spec_id: &str) -> usize {
         .map(|r| r.id.clone())
         .collect();
     for id in &ids {
-        if let Err(e) = backend.stop(id).await {
+        if let Err(e) = stop_one(state, id, backend.as_ref()).await {
             // A container already gone / a flaky daemon must not block the
-            // delete. Drop the registry entry regardless so we don't leave
-            // a phantom behind — mirrors `stop_one`.
+            // delete. `stop_one` already purged local state before returning.
             tracing::warn!(error = ?e, spec_id, replica = ?id, "stop on app delete failed");
         }
-        state.replicas.write().await.remove(id);
-        state.sessions.drop_replica(id).await;
     }
     if !ids.is_empty() {
         tracing::info!(spec_id, replicas = ids.len(), "reaped containers for deleted app");
@@ -918,8 +918,8 @@ mod tests {
     use async_trait::async_trait;
     use ruscker_config::Config;
     use ruscker_core::{
-        ContainerBackend, CoreResult, Replica, ReplicaId, ReplicaMetrics, ReplicaRegistry,
-        ReplicaState,
+        ContainerBackend, CoreError, CoreResult, Replica, ReplicaId, ReplicaMetrics,
+        ReplicaRegistry, ReplicaState,
     };
     use std::net::SocketAddr;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -1027,6 +1027,46 @@ mod tests {
         }
     }
 
+    struct FailingStopBackend {
+        spawns: AtomicU32,
+        stops: AtomicU32,
+    }
+
+    #[async_trait]
+    impl ContainerBackend for FailingStopBackend {
+        async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<Replica> {
+            self.spawns.fetch_add(1, Ordering::SeqCst);
+            Ok(fake_replica(spec_id))
+        }
+
+        async fn spawn_with_port(
+            &self,
+            spec_id: &str,
+            image: &str,
+            _port: u16,
+        ) -> CoreResult<Replica> {
+            self.spawn(spec_id, image).await
+        }
+
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            self.stops.fetch_add(1, Ordering::SeqCst);
+            Err(CoreError::Backend("daemon unavailable".into()))
+        }
+
+        async fn list(&self) -> CoreResult<Vec<Replica>> {
+            Ok(vec![])
+        }
+
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            Ok(ReplicaMetrics {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+    }
+
     fn state_with_yaml(yaml: &str, backend: Arc<dyn ContainerBackend>) -> AppState {
         let cfg = Config::from_yaml(yaml).expect("parse config");
         AppState {
@@ -1068,6 +1108,64 @@ mod tests {
             sessions_max: 1,
             host: None,
         }
+    }
+
+    #[tokio::test]
+    async fn stop_one_cleans_registry_and_sessions_after_success() {
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let replica = fake_replica("clean-stop");
+        let replica_id = replica.id.clone();
+        state.replicas.write().await.add(replica);
+        state
+            .sessions
+            .touch_or_register(
+                &state.replicas,
+                uuid::Uuid::new_v4(),
+                "clean-stop",
+                &replica_id,
+                false,
+            )
+            .await;
+
+        stop_one(&state, &replica_id, backend.as_ref()).await.unwrap();
+
+        assert!(state.replicas.read().await.replicas_of("clean-stop").is_empty());
+        assert_eq!(state.sessions.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn stop_one_cleans_registry_and_sessions_after_backend_failure() {
+        let backend = Arc::new(FailingStopBackend {
+            spawns: AtomicU32::new(0),
+            stops: AtomicU32::new(0),
+        });
+        let state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let replica = fake_replica("ghost");
+        let replica_id = replica.id.clone();
+        state.replicas.write().await.add(replica);
+        state
+            .sessions
+            .touch_or_register(
+                &state.replicas,
+                uuid::Uuid::new_v4(),
+                "ghost",
+                &replica_id,
+                false,
+            )
+            .await;
+        assert_eq!(state.sessions.len(), 1);
+
+        let err = stop_one(&state, &replica_id, backend.as_ref())
+            .await
+            .unwrap_err();
+
+        assert!(err.to_string().contains("daemon unavailable"));
+        assert_eq!(backend.stops.load(Ordering::SeqCst), 1);
+        assert!(state.replicas.read().await.replicas_of("ghost").is_empty());
+        assert_eq!(state.sessions.len(), 0);
     }
 
     /// #453: deleting an app reaps exactly its containers (via
@@ -1804,6 +1902,62 @@ proxy:
             1,
             "saturation respawn resumes after cooldown lifts"
         );
+    }
+
+    #[tokio::test]
+    async fn failed_scale_down_cleans_local_state_without_arming_cooldown() {
+        let backend = Arc::new(FailingStopBackend {
+            spawns: AtomicU32::new(0),
+            stops: AtomicU32::new(0),
+        });
+        let state = state_with_yaml(
+            r#"
+proxy:
+  specs:
+  - id: recover
+    container-image: nginx:alpine
+    min-replicas: 1
+    max-replicas: 3
+"#,
+            backend.clone(),
+        );
+        {
+            let mut reg = state.replicas.write().await;
+            reg.add(replica_with_sessions("recover", 1, 1));
+            reg.add(replica_with_sessions("recover", 0, 1));
+        }
+        let mut idle_ticks = HashMap::new();
+        let mut saturation_ticks = HashMap::new();
+        let mut cooldown = HashMap::new();
+
+        tick(
+            &state,
+            &mut idle_ticks,
+            &mut saturation_ticks,
+            &mut cooldown,
+            1,
+            1,
+            3,
+        )
+        .await;
+
+        assert_eq!(backend.stops.load(Ordering::SeqCst), 1);
+        assert_eq!(state.replicas.read().await.replicas_of("recover").len(), 1);
+        assert!(!cooldown.contains_key("recover"));
+
+        // The remaining replica is saturated. Without a false cooldown, the
+        // next tick can restore capacity immediately despite the stop error.
+        tick(
+            &state,
+            &mut idle_ticks,
+            &mut saturation_ticks,
+            &mut cooldown,
+            1,
+            1,
+            3,
+        )
+        .await;
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

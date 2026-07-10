@@ -491,7 +491,10 @@ impl LocalDockerBackend {
             .map_err(|e| CoreError::Backend(format!("parse host_port `{port_str}`: {e}")))
     }
 
-    async fn container_id_for_replica(&self, replica_id: &ReplicaId) -> CoreResult<String> {
+    async fn find_container_id_for_replica(
+        &self,
+        replica_id: &ReplicaId,
+    ) -> CoreResult<Option<String>> {
         let label_filter = format!("{LABEL_REPLICA_ID}={replica_id}");
         let mut filters = HashMap::new();
         filters.insert("label".to_string(), vec![label_filter]);
@@ -505,8 +508,12 @@ impl LocalDockerBackend {
             .list_containers(Some(opts))
             .await
             .map_err(|e| backend_err("list containers", e))?;
-        list.first()
-            .and_then(|c| c.id.clone())
+        Ok(list.first().and_then(|c| c.id.clone()))
+    }
+
+    async fn container_id_for_replica(&self, replica_id: &ReplicaId) -> CoreResult<String> {
+        self.find_container_id_for_replica(replica_id)
+            .await?
             .ok_or_else(|| {
                 CoreError::Backend(format!("no container labeled with replica_id={replica_id}"))
             })
@@ -566,7 +573,10 @@ impl ContainerBackend for LocalDockerBackend {
     }
 
     async fn stop(&self, replica_id: &ReplicaId) -> CoreResult<()> {
-        let container_id = self.container_id_for_replica(replica_id).await?;
+        let Some(container_id) = self.find_container_id_for_replica(replica_id).await? else {
+            tracing::debug!(replica = %replica_id, "stop: container already absent");
+            return Ok(());
+        };
         // Graceful: SIGTERM with timeout — bollard escalates to
         // SIGKILL internally after `t` seconds.
         let _ = self
@@ -1627,6 +1637,10 @@ mod tests {
         backend.stop(&replica.id).await.expect("stop");
         let after = backend.list().await.expect("list after stop");
         assert!(!after.iter().any(|r| r.id == replica.id));
+        backend
+            .stop(&replica.id)
+            .await
+            .expect("stopping an already-absent container is idempotent");
         assert!(
             !backend.prev_stats.contains_key(&replica.container_id),
             "stop() must forget the container's metrics baseline (#325)"

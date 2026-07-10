@@ -46,12 +46,26 @@ jobs:
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # Do not publish a tag whose locked dependency tree is rejected by
+  # RustSec. The regular security workflow already covers dependency
+  # changes on PRs/main; this gate protects an arbitrary release tag too.
+  cargo-audit:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: Audit dependencies
+        run: cargo audit
+
   # --------------------------------------------------------------------
   # Per-arch native build of the static musl binary, then the tarball
   # and the .deb (cargo-deb, reusing that same binary via --no-build).
   # --------------------------------------------------------------------
   artifacts:
-    needs: meta
+    needs: [meta, cargo-audit]
     name: artifacts (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -157,7 +171,7 @@ jobs:
   # Per-arch native Docker build, pushed to ghcr by digest (no tag yet).
   # --------------------------------------------------------------------
   docker-build:
-    needs: meta
+    needs: [meta, cargo-audit]
     name: docker (${{ matrix.arch }})
     strategy:
       fail-fast: false

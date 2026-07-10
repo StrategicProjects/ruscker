@@ -508,6 +508,11 @@ Non-blocking follow-ups:
 - [x] `audit_log.diff_json` verified to record metadata only — never a
       password/token/cookie (regression test in `db::credentials`)
 - [x] Automated `cargo audit` in CI (`.github/workflows/security.yml`,
-      weekly + on dependency changes)
+      weekly + on dependency changes) and as a blocking release gate.
+      The remaining `RUSTSEC-2024-0436` unmaintained warning is visible but
+      non-fatal: `paste` is only present through `image`'s optional `ravif`
+      lockfile edge, while Ruscker enables only `png`, `jpeg`, `webp`, and
+      `rayon`. Re-evaluate this exception whenever the `image` feature set
+      changes.
 - [ ] Nonce-based CSP, drop `unsafe-inline` (§7)
 - [ ] `semgrep` in CI (cargo-audit is wired; semgrep deferred)

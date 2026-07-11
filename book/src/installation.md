@@ -140,6 +140,11 @@ cargo build --release --bin ruscker
 ./target/release/ruscker --help
 ```
 
+Development and release builds use Rust 1.96.0 from
+`rust-toolchain.toml`. The MSRV source of truth is
+`workspace.package.rust-version` in `Cargo.toml` (currently 1.94.0); the
+dedicated `msrv` workflow reads that field and checks the locked graph.
+
 ## Verifying release artifacts
 
 Every tagged release is signed with [cosign](https://docs.sigstore.dev/)

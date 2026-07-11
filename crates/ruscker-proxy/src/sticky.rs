@@ -221,7 +221,7 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 fn decode_hex(s: &str) -> Result<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return Err(anyhow!("hex length must be even"));
     }
     let mut out = Vec::with_capacity(s.len() / 2);

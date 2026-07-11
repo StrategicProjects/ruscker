@@ -21,7 +21,7 @@
 # matches rust-toolchain.toml so the image's toolchain is used
 # directly (no extra rustup download).
 # ----------------------------------------------------------------------
-FROM rust:1.95-bookworm AS builder
+FROM rust:1.96-bookworm AS builder
 
 WORKDIR /build
 COPY . .

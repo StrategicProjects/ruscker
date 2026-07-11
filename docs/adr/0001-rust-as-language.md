@@ -78,17 +78,15 @@ with the JVM.
 
 ## Stability constraints
 
-> Amendment (2026-06): MSRV has since moved to **1.85**
-> (`rust-version` in the workspace `Cargo.toml`; toolchain pinned via
-> `rust-toolchain.toml`) and the dependency pins below were lifted as
-> the ecosystem stabilized. The decision and rationale stand.
+> Amendment (2026-07): the current **MSRV is Rust 1.94.0**. The workspace
+> declares it once via `workspace.package.rust-version`; CI verifies the
+> locked graph with that toolchain. Development, release builds, and the
+> Docker builder use the pinned Rust 1.96.0 toolchain from
+> `rust-toolchain.toml`. The original 1.75/no-rustup goal is now historical:
+> the current latest-stable dependency policy (notably sqlx 0.9) made that
+> floor impossible.
 
-- **MSRV** (Minimum Supported Rust Version): 1.75. This is what
-  Ubuntu 24.04 ships, and we want a no-rustup install path.
-- **Edition**: 2021. Edition 2024 is not yet stable on MSRV.
-- Several transitive deps need pinning (`getrandom 0.2.15`,
-  `indexmap 2.7.0`, `clap 4.5.20`, `uuid 1.10.0`) because their
-  newer versions require Edition 2024. This is documented in the
-  workspace developer notes.
-
-If MSRV ever bumps, we can lift the pins.
+- **Current MSRV** (Minimum Supported Rust Version): 1.94.0.
+- **Development/release toolchain**: 1.96.0, pinned separately from MSRV so
+  contributors get deterministic rustfmt and clippy behavior.
+- **Edition**: 2021. Edition changes remain independent from MSRV changes.

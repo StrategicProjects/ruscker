@@ -460,7 +460,7 @@ async fn forward(
             if !full {
                 let (st, sp) = (state.clone(), spec.clone());
                 tokio::spawn(async move {
-                    if let Err(e) = crate::scaler::spawn_replica(&st, &sp).await {
+                    if let Err(e) = crate::scaler::ensure_replica_available(&st, &sp).await {
                         tracing::warn!(spec = %sp.id, error = ?e, "background spawn (splash) failed");
                     }
                 });

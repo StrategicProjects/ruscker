@@ -19,6 +19,7 @@ use ruscker_core::{
     ContainerBackend, CoreError, CoreResult, ImageInfo, LogStream, ManagedContainer,
     RegistryCredentials, Replica, ReplicaId, ReplicaMetrics, SpawnRequest,
 };
+use std::collections::HashSet;
 
 use crate::LocalDockerBackend;
 
@@ -156,6 +157,69 @@ pub struct MultiHostDockerBackend {
     /// many of a spec already run on each host). Populated on `spawn`
     /// and refreshed on `list`.
     placement: DashMap<ReplicaId, (String, String)>,
+}
+
+type HostListCall<'a> = (
+    String,
+    futures_util::future::BoxFuture<'a, CoreResult<Vec<Replica>>>,
+);
+
+/// Results from the hosts that answered plus the ids of hosts whose state is
+/// unknown. A successful empty list is different from an error/timeout: the
+/// former authoritatively says the host has no replicas; the latter must keep
+/// its previous placements until a later reconcile succeeds.
+#[derive(Debug)]
+struct HostListBatch {
+    reported: Vec<(String, Vec<Replica>)>,
+    failed_hosts: HashSet<String>,
+}
+
+/// Run all host list calls concurrently with an independent budget per host.
+/// Partial success is useful degraded state; zero successful hosts is an
+/// outage and must surface as an error instead of masquerading as `Ok([])`.
+async fn list_hosts_with_timeout(
+    calls: Vec<HostListCall<'_>>,
+    budget: std::time::Duration,
+) -> CoreResult<HostListBatch> {
+    let total = calls.len();
+    let results = futures_util::future::join_all(calls.into_iter().map(|(id, call)| async move {
+        (id, tokio::time::timeout(budget, call).await)
+    }))
+    .await;
+
+    let mut reported = Vec::new();
+    let mut failed_hosts = HashSet::new();
+    for (id, result) in results {
+        match result {
+            Ok(Ok(replicas)) => reported.push((id, replicas)),
+            Ok(Err(error)) => {
+                tracing::warn!(host = %id, error = %error, "list on host failed; skipping");
+                failed_hosts.insert(id);
+            }
+            Err(_) => {
+                tracing::warn!(host = %id, "list on host timed out; skipping");
+                failed_hosts.insert(id);
+            }
+        }
+    }
+
+    if reported.is_empty() {
+        return Err(CoreError::Backend(format!(
+            "replica list failed on every docker host ({total} configured)"
+        )));
+    }
+    Ok(HostListBatch {
+        reported,
+        failed_hosts,
+    })
+}
+
+fn retain_confirmed_or_unknown_placements(
+    placement: &DashMap<ReplicaId, (String, String)>,
+    live: &HashSet<ReplicaId>,
+    failed_hosts: &HashSet<String>,
+) {
+    placement.retain(|id, (host, _)| live.contains(id) || failed_hosts.contains(host));
 }
 
 /// One host's current load — the input to the pure placement decision.
@@ -369,35 +433,38 @@ impl ContainerBackend for MultiHostDockerBackend {
     }
 
     async fn list(&self) -> CoreResult<Vec<Replica>> {
-        // Fan out over every host; tag each replica's placement so
-        // later stop/metrics/logs route correctly. A host that fails to
-        // answer is logged and skipped (degraded, not fatal).
+        // Fan out concurrently over every host; tag each replica's placement
+        // so later stop/metrics/logs route correctly. A failed host is skipped
+        // when at least one sibling answers, but an all-host outage is fatal.
+        let calls: Vec<HostListCall<'_>> = self
+            .hosts
+            .iter()
+            .map(|host| {
+                (
+                    host.id.clone(),
+                    Box::pin(host.backend.list()) as futures_util::future::BoxFuture<'_, _>,
+                )
+            })
+            .collect();
+        let batch = list_hosts_with_timeout(calls, HOST_FANOUT_TIMEOUT).await?;
         let mut all = Vec::new();
-        let mut live: std::collections::HashSet<ReplicaId> = std::collections::HashSet::new();
-        let mut failed_hosts: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for h in &self.hosts {
-            match h.backend.list().await {
-                Ok(mut replicas) => {
-                    for r in &mut replicas {
-                        self.placement
-                            .insert(r.id.clone(), (h.id.clone(), r.spec_id.clone()));
-                        r.host = Some(h.id.clone());
-                        live.insert(r.id.clone());
-                    }
-                    all.extend(replicas);
-                }
-                Err(e) => {
-                    tracing::warn!(host = %h.id, error = %e, "list on host failed; skipping");
-                    failed_hosts.insert(h.id.clone());
-                }
+        let mut live = HashSet::new();
+        for (host_id, mut replicas) in batch.reported {
+            for replica in &mut replicas {
+                self.placement.insert(
+                    replica.id.clone(),
+                    (host_id.clone(), replica.spec_id.clone()),
+                );
+                replica.host = Some(host_id.clone());
+                live.insert(replica.id.clone());
             }
+            all.extend(replicas);
         }
         // Authoritative prune (#160 D1): drop placement for replicas no
         // host reported, so dead/crashed containers stop inflating
         // `pick_host`'s load counts. Keep entries whose owning host
         // *didn't answer* — we can't tell if those are gone.
-        self.placement
-            .retain(|id, (host, _)| live.contains(id) || failed_hosts.contains(host));
+        retain_confirmed_or_unknown_placements(&self.placement, &live, &batch.failed_hosts);
         Ok(all)
     }
 
@@ -663,6 +730,7 @@ impl ContainerBackend for MultiHostDockerBackend {
 mod tests {
     use super::*;
     use ruscker_config::{Host, HostTls};
+    use std::future::Future;
     use std::path::PathBuf;
 
     fn host(id: &str, address: &str) -> Host {
@@ -771,6 +839,95 @@ mod tests {
     #[test]
     fn empty_loads_is_none() {
         assert_eq!(choose_host(&[], Placement::Spread, false), None);
+    }
+
+    fn list_call<F>(id: &str, future: F) -> HostListCall<'static>
+    where
+        F: Future<Output = CoreResult<Vec<Replica>>> + Send + 'static,
+    {
+        (id.to_string(), Box::pin(future))
+    }
+
+    fn fake_replica(spec_id: &str) -> Replica {
+        Replica {
+            id: ReplicaId::new(),
+            spec_id: spec_id.into(),
+            container_id: "fake".into(),
+            upstream: "127.0.0.1:1".parse().unwrap(),
+            state: ruscker_core::ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+            host: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_fanout_returns_healthy_host_without_waiting_forever() {
+        // #945: a host that never answers must not block a healthy sibling.
+        let expected = fake_replica("healthy-app");
+        let calls = vec![
+            list_call(
+                "stuck",
+                std::future::pending::<CoreResult<Vec<Replica>>>(),
+            ),
+            list_call("healthy", async move { Ok(vec![expected]) }),
+        ];
+        let started = std::time::Instant::now();
+        let batch = list_hosts_with_timeout(calls, std::time::Duration::from_millis(20))
+            .await
+            .expect("partial success is degraded but usable");
+
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(100),
+            "fan-out exceeded its per-host timeout"
+        );
+        assert_eq!(batch.reported.len(), 1);
+        assert_eq!(batch.reported[0].0, "healthy");
+        assert_eq!(batch.reported[0].1[0].spec_id, "healthy-app");
+        assert!(batch.failed_hosts.contains("stuck"));
+    }
+
+    #[tokio::test]
+    async fn list_fanout_errors_when_every_host_fails() {
+        let calls = vec![
+            list_call("error", async {
+                Err(CoreError::Backend("daemon down".into()))
+            }),
+            list_call(
+                "stuck",
+                std::future::pending::<CoreResult<Vec<Replica>>>(),
+            ),
+        ];
+        let error = list_hosts_with_timeout(calls, std::time::Duration::from_millis(20))
+            .await
+            .expect_err("total outage must not look like an empty cluster");
+        assert!(error.to_string().contains("every docker host"));
+    }
+
+    #[test]
+    fn placement_prune_keeps_entries_from_failed_hosts() {
+        let placement = DashMap::new();
+        let live = fake_replica("live");
+        let stale = fake_replica("stale");
+        let unknown = fake_replica("unknown");
+        placement.insert(live.id.clone(), ("healthy".into(), live.spec_id.clone()));
+        placement.insert(stale.id.clone(), ("healthy".into(), stale.spec_id.clone()));
+        placement.insert(
+            unknown.id.clone(),
+            ("unreachable".into(), unknown.spec_id.clone()),
+        );
+        let live_ids = HashSet::from([live.id.clone()]);
+        let failed_hosts = HashSet::from(["unreachable".to_string()]);
+
+        retain_confirmed_or_unknown_placements(&placement, &live_ids, &failed_hosts);
+
+        assert!(placement.contains_key(&live.id));
+        assert!(!placement.contains_key(&stale.id));
+        assert!(
+            placement.contains_key(&unknown.id),
+            "failed host placement remains unknown, not dead"
+        );
     }
 
     // `LocalDockerBackend` isn't `Debug`, so extract the error message

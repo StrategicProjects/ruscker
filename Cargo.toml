@@ -12,7 +12,7 @@ members = [
 [workspace.package]
 version = "0.2.40"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.94.0"
 license = "Apache-2.0"
 authors = ["Ruscker contributors"]
 repository = "https://github.com/StrategicProjects/ruscker"
@@ -59,7 +59,7 @@ clap = { version = "4.6", features = ["derive", "env"] }
 
 # Misc utilities
 regex = "1.12"
-# once_cell removed — Rust 1.95 std::sync::LazyLock is used instead
+# once_cell removed — std::sync::LazyLock is available at the 1.94.0 MSRV.
 url = "2.5.8"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }

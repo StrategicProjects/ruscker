@@ -1,0 +1,56 @@
+name: msrv
+
+# Keep the workspace's rust-version promise honest. The development/release
+# toolchain is newer (rust-toolchain.toml), so this job invokes the MSRV
+# explicitly instead of relying on the directory override.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/msrv.yml"
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/**"
+      - "rust-toolchain.toml"
+      - ".github/workflows/msrv.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: msrv-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Declared MSRV
+    runs-on: ubuntu-24.04
+    env:
+      DOCKER_REGISTRY_PASSWORD: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Read workspace MSRV
+        id: msrv
+        run: |
+          version=$(sed -n 's/^rust-version = "\([^"]*\)"/\1/p' Cargo.toml)
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust ${{ steps.msrv.outputs.version }}
+        run: rustup toolchain install "${{ steps.msrv.outputs.version }}" --profile minimal --no-self-update
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv-${{ steps.msrv.outputs.version }}
+
+      - name: Check workspace at MSRV
+        run: cargo +${{ steps.msrv.outputs.version }} check --workspace --all-targets --locked

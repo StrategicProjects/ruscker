@@ -185,6 +185,11 @@ cargo build --release          # rustup fetches the pinned toolchain on first ru
 ./target/release/ruscker --help
 ```
 
+Development and release builds use Rust 1.96.0 from
+`rust-toolchain.toml`. The MSRV source of truth is
+`workspace.package.rust-version` in `Cargo.toml` (currently 1.94.0), and
+the `msrv` workflow reads that same field when checking the locked graph.
+
 ## Quickstart
 
 ```bash

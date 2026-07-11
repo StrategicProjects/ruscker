@@ -31,15 +31,15 @@
 //!   immediately. With it, the cycle is at least
 //!   `idle_grace + cooldown + saturation_grace` ticks.
 //!
-//! Spawns are funneled through the same per-spec coalescer as
-//! on-demand spawns, so a cold-start request that arrives at
-//! the same time as a scaler tick never races into a duplicate
-//! container.
+//! Spawns are funneled through the same per-spec mutex as
+//! on-demand spawns. Deliberate scale-up requests add capacity;
+//! cold-start splash requests re-check availability under that
+//! mutex and coalesce to a single backend spawn.
 
 use crate::AppState;
 use dashmap::DashMap;
 use ruscker_config::{Spec, SpecKind};
-use ruscker_core::ReplicaId;
+use ruscker_core::{ReplicaId, ReplicaState};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -442,7 +442,9 @@ async fn tick(
             let to_spawn = min - count;
             info!(spec = %spec.id, count, min, to_spawn, "scaling up to min-replicas");
             for _ in 0..to_spawn {
-                if let Err(e) = spawn_one(state, spec, backend.as_ref()).await {
+                if let Err(e) =
+                    spawn_one(state, spec, backend.as_ref(), SpawnIntent::AddCapacity).await
+                {
                     log_spawn_failure(&spec.id, "scale-up", &e);
                     break;
                 }
@@ -481,7 +483,9 @@ async fn tick(
                     saturated_ticks = *n,
                     "saturation sustained — scaling up by 1"
                 );
-                if let Err(e) = spawn_one(state, spec, backend.as_ref()).await {
+                if let Err(e) =
+                    spawn_one(state, spec, backend.as_ref(), SpawnIntent::AddCapacity).await
+                {
                     log_spawn_failure(&spec.id, "saturation", &e);
                 } else {
                     SPAWN_FAILURES.clear(&spec.id);
@@ -758,22 +762,54 @@ pub async fn stop_spec(state: &AppState, spec_id: &str) -> usize {
 /// (e.g. the dashboard's "restart" action). Resolves the
 /// backend off `state`; errors if none is wired.
 ///
-/// Same coalescer semantics as the internal scale-up path —
-/// concurrent spawns for the same spec serialize on the
-/// per-spec mutex.
+/// This is an explicit **add capacity** operation: concurrent
+/// calls serialize on the per-spec mutex, but each adds a
+/// replica while the spec remains below `max-replicas`.
 pub(crate) async fn spawn_replica(state: &AppState, spec: &Spec) -> anyhow::Result<()> {
     let backend = state
         .backend
         .clone()
         .ok_or_else(|| anyhow::anyhow!("no container backend wired"))?;
-    spawn_one(state, spec, backend.as_ref()).await
+    spawn_one(state, spec, backend.as_ref(), SpawnIntent::AddCapacity).await
 }
 
-/// Spawn one additional replica for `spec`. Used by every
-/// scale-up branch (to-min and on-saturation). Goes through the
-/// per-spec mutex so a concurrent on-demand spawn coalesces
-/// with us — the caller decided we should add capacity, so we
-/// don't re-check against any threshold here.
+/// Ensure the cold-start path has a replica coming up or ready to
+/// accept a session. Unlike [`spawn_replica`], concurrent callers
+/// coalesce their intent: after taking the per-spec mutex, followers
+/// return as soon as the first caller has produced usable capacity.
+///
+/// A failed first attempt does not leave single-flight state behind.
+/// The next waiter acquires the mutex, still sees no capacity, and
+/// retries normally.
+pub(crate) async fn ensure_replica_available(
+    state: &AppState,
+    spec: &Spec,
+) -> anyhow::Result<()> {
+    let backend = state
+        .backend
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("no container backend wired"))?;
+    spawn_one(
+        state,
+        spec,
+        backend.as_ref(),
+        SpawnIntent::EnsureAvailable,
+    )
+    .await
+}
+
+#[derive(Clone, Copy)]
+enum SpawnIntent {
+    /// The scaler or a manual restart deliberately wants one more replica.
+    AddCapacity,
+    /// The splash only needs one spawn in flight or one accepting replica.
+    EnsureAvailable,
+}
+
+/// Run one serialized spawn operation for `spec`. `AddCapacity`
+/// deliberately adds a replica; `EnsureAvailable` first checks
+/// under the mutex whether another caller already satisfied the
+/// cold-start request.
 ///
 /// Capping (don't exceed max, don't undershoot min) is the
 /// caller's job; this function just performs one spawn.
@@ -781,6 +817,7 @@ async fn spawn_one(
     state: &AppState,
     spec: &Spec,
     backend: &dyn ruscker_core::ContainerBackend,
+    intent: SpawnIntent,
 ) -> anyhow::Result<()> {
     let spec_mutex: std::sync::Arc<tokio::sync::Mutex<()>> = state
         .spawn_locks
@@ -788,6 +825,26 @@ async fn spawn_one(
         .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
         .clone();
     let _guard = spec_mutex.lock().await;
+
+    if matches!(intent, SpawnIntent::EnsureAvailable) {
+        // This check must happen after acquiring the spec mutex. A burst of
+        // splash requests can all observe an empty registry before the first
+        // container finishes; followers queued on the mutex must see the
+        // capacity that caller created instead of spawning up to `max` (#942).
+        let available = state
+            .replicas
+            .read()
+            .await
+            .replicas_of(&spec.id)
+            .iter()
+            .any(|replica| {
+                replica.state == ReplicaState::Starting || replica.is_accepting()
+            });
+        if available {
+            tracing::debug!(spec = %spec.id, "cold-start spawn coalesced");
+            return Ok(());
+        }
+    }
 
     // Defensive cap (#581): re-read the live replica count under the spawn
     // mutex and refuse to exceed `max-replicas`. The scaler already checks
@@ -1017,6 +1074,72 @@ mod tests {
         async fn list(&self) -> CoreResult<Vec<Replica>> {
             Ok(vec![])
         }
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            Ok(ReplicaMetrics {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+    }
+
+    /// Backend whose first spawn stays blocked until the test releases it.
+    /// This makes a cold-start burst deterministic: every sibling can queue
+    /// behind the same per-spec mutex while the registry is still empty.
+    struct GatedColdStartBackend {
+        attempts: AtomicU32,
+        first_started: tokio::sync::Semaphore,
+        release_first: tokio::sync::Semaphore,
+        fail_first: bool,
+    }
+
+    impl GatedColdStartBackend {
+        fn new(fail_first: bool) -> Self {
+            Self {
+                attempts: AtomicU32::new(0),
+                first_started: tokio::sync::Semaphore::new(0),
+                release_first: tokio::sync::Semaphore::new(0),
+                fail_first,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ContainerBackend for GatedColdStartBackend {
+        async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<Replica> {
+            let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+            if attempt == 0 {
+                self.first_started.add_permits(1);
+                self.release_first
+                    .acquire()
+                    .await
+                    .expect("release semaphore remains open")
+                    .forget();
+                if self.fail_first {
+                    return Err(CoreError::Backend("first spawn failed".into()));
+                }
+            }
+            Ok(fake_replica(spec_id))
+        }
+
+        async fn spawn_with_port(
+            &self,
+            spec_id: &str,
+            image: &str,
+            _port: u16,
+        ) -> CoreResult<Replica> {
+            self.spawn(spec_id, image).await
+        }
+
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+
+        async fn list(&self) -> CoreResult<Vec<Replica>> {
+            Ok(vec![])
+        }
+
         async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
             Ok(ReplicaMetrics {
                 cpu_percent: 0.0,
@@ -1331,6 +1454,99 @@ proxy:
             "no spawn while already at max-replicas"
         );
         assert_eq!(state.replicas.read().await.replicas_of("capped").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn explicit_spawn_still_adds_capacity_above_one_replica() {
+        // The scaler and dashboard restart use AddCapacity, not the splash's
+        // EnsureAvailable intent. A Ready replica must not coalesce this call.
+        let backend = Arc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+        });
+        let state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: scaleout\ncontainer-image: nginx:alpine\nmax-replicas: 3",
+        )
+        .unwrap();
+        state.replicas.write().await.add(fake_replica("scaleout"));
+
+        spawn_replica(&state, &spec).await.unwrap();
+
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
+        assert_eq!(state.replicas.read().await.replicas_of("scaleout").len(), 2);
+    }
+
+    #[tokio::test]
+    async fn cold_start_burst_coalesces_to_one_backend_spawn() {
+        // #942: every request observes the empty registry before the gated
+        // first spawn finishes. The post-lock EnsureAvailable check must make
+        // all 19 followers reuse its result, even though max-replicas is 5.
+        let backend = Arc::new(GatedColdStartBackend::new(false));
+        let state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: burst\ncontainer-image: nginx:alpine\nmin-replicas: 0\nmax-replicas: 5",
+        )
+        .unwrap();
+
+        let mut tasks = Vec::new();
+        for _ in 0..20 {
+            let state = state.clone();
+            let spec = spec.clone();
+            tasks.push(tokio::spawn(async move {
+                ensure_replica_available(&state, &spec).await
+            }));
+        }
+
+        backend
+            .first_started
+            .acquire()
+            .await
+            .expect("first spawn starts")
+            .forget();
+        assert_eq!(backend.attempts.load(Ordering::SeqCst), 1);
+        backend.release_first.add_permits(1);
+
+        for task in tasks {
+            task.await.expect("cold-start task joins").unwrap();
+        }
+        assert_eq!(
+            backend.attempts.load(Ordering::SeqCst),
+            1,
+            "20 cold starts must issue exactly one backend spawn"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("burst").len(), 1);
+    }
+
+    #[tokio::test]
+    async fn cold_start_can_retry_after_first_spawn_failure() {
+        // Single-flight is represented only by the mutex, so a failed leader
+        // leaves no stale future/flag suppressing a later request.
+        let backend = Arc::new(GatedColdStartBackend::new(true));
+        let state = state_with_yaml("proxy:\n  specs: []\n", backend.clone());
+        let spec: Spec = serde_yaml_ng::from_str(
+            "id: retry\ncontainer-image: nginx:alpine\nmin-replicas: 0\nmax-replicas: 5",
+        )
+        .unwrap();
+
+        let first_state = state.clone();
+        let first_spec = spec.clone();
+        let first = tokio::spawn(async move {
+            ensure_replica_available(&first_state, &first_spec).await
+        });
+        backend
+            .first_started
+            .acquire()
+            .await
+            .expect("first spawn starts")
+            .forget();
+        backend.release_first.add_permits(1);
+        assert!(first.await.expect("first task joins").is_err());
+
+        ensure_replica_available(&state, &spec)
+            .await
+            .expect("later cold start retries");
+        assert_eq!(backend.attempts.load(Ordering::SeqCst), 2);
+        assert_eq!(state.replicas.read().await.replicas_of("retry").len(), 1);
     }
 
     #[tokio::test]

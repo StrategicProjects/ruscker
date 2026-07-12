@@ -2,7 +2,7 @@
 //!
 //! Upload pipeline:
 //!   1. axum::Multipart streams the form field
-//!   2. `images::process_upload` sniffs MIME, decodes,
+//!   2. `images::process_upload_async` sniffs MIME and runs bounded decode,
 //!      re-encodes PNG/JPEG to WebP (SVG passes through)
 //!   3. `db::images::insert` writes the BLOB + audit row
 //!   4. Redirect back to /admin/images
@@ -264,14 +264,15 @@ async fn upload(
             continue; // empty file input — nothing chosen
         }
 
-        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
-            Ok(p) => p,
-            Err(err) => {
-                tracing::warn!(error = ?err, filename, "rejecting upload");
-                last_error = Some(err.to_string());
-                continue;
-            }
-        };
+        let mut processed =
+            match images::process_upload_async(filename.clone(), mime, bytes).await {
+                Ok(p) => p,
+                Err(err) => {
+                    tracing::warn!(error = ?err, filename, "rejecting upload");
+                    last_error = Some(err.to_string());
+                    continue;
+                }
+            };
         // Don't silently overwrite a same-named image: pick a free name
         // (`logo.webp` → `logo-2.webp`) so both are kept, and tell the
         // operator it was renamed. The import path keeps exact names.
@@ -367,7 +368,7 @@ async fn upload_inline(
         if bytes.is_empty() {
             continue;
         }
-        let mut processed = match images::process_upload(&filename, mime.as_deref(), bytes) {
+        let mut processed = match images::process_upload_async(filename, mime, bytes).await {
             Ok(p) => p,
             Err(err) => return inline_err(StatusCode::UNPROCESSABLE_ENTITY, err.to_string()),
         };

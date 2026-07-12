@@ -636,6 +636,8 @@ spec-form-scale-down = Umbral de scale-down
 spec-help-scale-down = Fracción de utilización (0–1) por debajo de la cual se retira una réplica. Vacío = predeterminado del scaler.
 spec-form-scale-down-grace = Gracia de scale-down (s)
 spec-help-scale-down-grace = Segundos por debajo del umbral antes de retirar la réplica. Vacío = predeterminado.
+spec-form-scale-down-cooldown = Cooldown tras scale-down (s)
+spec-help-scale-down-cooldown = Segundos sin scale-up por saturación tras retirar una réplica. Vacío = 60; 0 desactiva.
 spec-form-drain-timeout = Tiempo de drenaje (s)
 spec-help-drain-timeout = Segundos para drenar las sesiones de una réplica antes de detenerla. Vacío = predeterminado.
 spec-form-routing-strategy = Estrategia de enrutamiento

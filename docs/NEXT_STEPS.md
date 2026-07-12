@@ -66,8 +66,9 @@ Known refinements that matter under sustained real load (see CLAUDE.md
 
 - **Scale-down hysteresis / post-drop cooldown.** ✅ *Shipped.* A
   `seats=1` spec with long sessions could flap; a post-drop cooldown
-  (`DEFAULT_SCALE_DOWN_COOLDOWN_TICKS`) now gates the saturation respawn
-  after a scale-down, on top of the existing hysteresis.
+  (`scale-down-cooldown-secs`, 60 s by default) now gates the saturation
+  respawn after a scale-down, on top of the existing hysteresis, and can
+  be tuned per app.
 - **Per-spec heartbeat-timeout override.** A single global timeout today;
   some apps need a longer idle window than others.
 - **Observability template.** The Prometheus endpoint already exists

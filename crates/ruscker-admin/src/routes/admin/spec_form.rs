@@ -516,6 +516,8 @@ pub struct SpecForm {
     pub scale_down_threshold: String,
     /// Seconds below `scale-down-threshold` before reaping.
     pub scale_down_grace: String,
+    /// Seconds to suppress saturation scale-up after a scale-down.
+    pub scale_down_cooldown_secs: String,
     /// Seconds to drain a replica's sessions before stopping it.
     pub drain_timeout: String,
 
@@ -647,6 +649,10 @@ impl SpecForm {
                 .map(|f| f.0.to_string())
                 .unwrap_or_default(),
             scale_down_grace: spec.scale_down_grace.map(|n| n.to_string()).unwrap_or_default(),
+            scale_down_cooldown_secs: spec
+                .scale_down_cooldown_secs
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
             drain_timeout: spec.drain_timeout.map(|n| n.to_string()).unwrap_or_default(),
             routing_strategy: spec.routing_strategy.map(routing_to_key).unwrap_or_default(),
             placement: spec.placement.map(placement_to_key).unwrap_or_default(),
@@ -816,6 +822,7 @@ impl SpecForm {
             scale_up_threshold: parse_opt::<f64>(&self.scale_up_threshold).map(OrderedFloat),
             scale_down_threshold: parse_opt::<f64>(&self.scale_down_threshold).map(OrderedFloat),
             scale_down_grace: parse_opt(&self.scale_down_grace),
+            scale_down_cooldown_secs: parse_opt(&self.scale_down_cooldown_secs),
             drain_timeout: parse_opt(&self.drain_timeout),
             routing_strategy: routing_from_key(&self.routing_strategy),
             placement: placement_from_key(&self.placement),
@@ -854,6 +861,7 @@ impl SpecForm {
             &self.container_port,
             &self.container_lifetime,
             &self.scale_down_grace,
+            &self.scale_down_cooldown_secs,
             &self.drain_timeout,
         ];
         if int_fields
@@ -2027,6 +2035,7 @@ proxy:
       scale-up-threshold: 0.8
       scale-down-threshold: 0.2
       scale-down-grace: 45
+      scale-down-cooldown-secs: 90
       drain-timeout: 20
       template-properties:
         type: app
@@ -2052,6 +2061,7 @@ proxy:
         assert_eq!(merged.routing_strategy, Some(RoutingStrategy::RoundRobin));
         assert_eq!(merged.scale_up_threshold.map(|f| f.0), Some(0.8));
         assert_eq!(merged.scale_down_grace, Some(45));
+        assert_eq!(merged.scale_down_cooldown_secs, Some(90));
         assert_eq!(merged.drain_timeout, Some(20));
     }
 

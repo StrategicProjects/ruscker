@@ -636,6 +636,8 @@ spec-form-scale-down = Scale-down threshold
 spec-help-scale-down = Utilization fraction (0–1) below which a replica is reaped. Blank = scaler default.
 spec-form-scale-down-grace = Scale-down grace (s)
 spec-help-scale-down-grace = Seconds below the threshold before reaping the replica. Blank = default.
+spec-form-scale-down-cooldown = Post-scale-down cooldown (s)
+spec-help-scale-down-cooldown = Seconds to suppress saturation scale-up after a replica is retired. Blank = 60; 0 disables.
 spec-form-drain-timeout = Drain timeout (s)
 spec-help-drain-timeout = Seconds to drain a replica's sessions before stopping it. Blank = default.
 spec-form-routing-strategy = Routing strategy

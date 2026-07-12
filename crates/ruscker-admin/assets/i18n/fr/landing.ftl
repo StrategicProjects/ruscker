@@ -636,6 +636,8 @@ spec-form-scale-down = Seuil de scale-down
 spec-help-scale-down = Fraction d'utilisation (0–1) sous laquelle une réplique est retirée. Vide = défaut du scaler.
 spec-form-scale-down-grace = Délai de scale-down (s)
 spec-help-scale-down-grace = Secondes sous le seuil avant de retirer la réplique. Vide = défaut.
+spec-form-scale-down-cooldown = Cooldown après scale-down (s)
+spec-help-scale-down-cooldown = Secondes sans scale-up par saturation après le retrait d’une réplique. Vide = 60 ; 0 désactive.
 spec-form-drain-timeout = Délai de drainage (s)
 spec-help-drain-timeout = Secondes pour drainer les sessions d'une réplique avant de l'arrêter. Vide = défaut.
 spec-form-routing-strategy = Stratégie de routage

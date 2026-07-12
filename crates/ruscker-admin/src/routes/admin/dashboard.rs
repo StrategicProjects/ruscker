@@ -264,9 +264,7 @@ struct DashboardPage<'a> {
     total_sessions: u32,
     spec_count: usize,
     tracker_sessions: usize,
-    total_memory_bytes: u64,
     total_memory_display: String,
-    rows: Vec<ReplicaRow>,
     /// The same replicas grouped by app for the accordion render (#623).
     groups: Vec<AppGroup>,
     /// JSON of the same snapshot, embedded in a `<script
@@ -381,10 +379,8 @@ async fn index(
         total_sessions: snap.total_sessions,
         spec_count: snap.spec_count,
         tracker_sessions: snap.tracker_sessions,
-        total_memory_bytes: snap.total_memory_bytes,
         total_memory_display: snap.total_memory_display.clone(),
         groups: group_rows(&snap.rows),
-        rows: snap.rows.clone(),
         snapshot_json,
     };
     super::render(&page)
@@ -992,10 +988,8 @@ mod tests {
                 .collect::<std::collections::HashSet<_>>()
                 .len(),
             tracker_sessions: 0,
-            total_memory_bytes: 0,
             total_memory_display: "—".to_string(),
             groups: group_rows(&rows),
-            rows,
             snapshot_json: "{}".to_string(),
         };
         page.render().expect("render dashboard")

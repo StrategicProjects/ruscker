@@ -11,8 +11,6 @@
 //! Admin CRUD (Phase 2), proxy (Phase 3), dashboard (Phase 4) come
 //! later.
 
-#![allow(dead_code)]
-
 use anyhow::{Context, Result};
 use axum::Router;
 use ruscker_config::Config;

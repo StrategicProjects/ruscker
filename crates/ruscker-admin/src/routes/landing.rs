@@ -18,7 +18,7 @@ use crate::auth::{MaybeSession, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::view_model::{
-    build_type_chips, sort_by_recent, unique_subjects, CardCounts, CardCtx, DisplayType, TypeChip,
+    build_type_chips, sort_by_recent, unique_subjects, CardCtx, DisplayType, TypeChip,
 };
 use crate::AppState;
 
@@ -67,7 +67,6 @@ struct LandingPage<'a> {
     /// Unique themes present in this config, alphabetically. Drives
     /// the `<select>` filter at the top of the landing.
     subjects: Vec<&'a str>,
-    counts: CardCounts,
     /// Resolved per-locale intro, rendered through the inline-Markdown
     /// subset (#812: **bold**, *italic*, [links] — escape-first, see
     /// `crate::markdown`). Empty string when no intro is configured;
@@ -202,12 +201,6 @@ impl<'a> LandingPage<'a> {
     /// whether to render a slot's chrome insert (header-left replaces the
     /// Ruscker mark; header-right sits after the chrome cluster; the
     /// `center` bucket still renders as a separate bar). See #468.
-    /// Any card in the "Featured" section? Gates the carousel together
-    /// with `show_highlights` (#506/#858 — favorites ∪ admin-featured).
-    fn has_featured(&self) -> bool {
-        !self.highlights.is_empty()
-    }
-
     fn has_logos_at(&self, slot: &str, align: &str) -> bool {
         self.logos.iter().any(|l| l.slot == slot && l.align == align)
     }
@@ -382,9 +375,6 @@ async fn index(
 
     let type_chips = build_type_chips(&cards);
     let subjects = unique_subjects(&cards);
-    let counts = CardCounts {
-        total: cards.iter().filter(|c| c.active).count(),
-    };
 
     // Landing customization: read from DB when available
     // (admin-editable), fall back to the YAML-derived value
@@ -585,7 +575,6 @@ async fn index(
         cards,
         type_chips,
         subjects,
-        counts,
         intro: crate::markdown::render_inline(&intro),
         header_title,
         header_subtitle,

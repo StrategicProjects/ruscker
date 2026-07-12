@@ -21,7 +21,7 @@ use crate::auth::{RequireAdmin, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
-use ruscker_core::{ImageInfo, ManagedContainer};
+use ruscker_core::{CoreResult, ImageInfo, ManagedContainer};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -79,6 +79,12 @@ struct DiskPage<'a> {
     /// False when the server started without `--docker` — the page then
     /// shows a banner instead of empty tables.
     available: bool,
+    /// The Docker backend exists, but its managed-container inventory
+    /// failed. Kept separate from an empty successful listing so the UI
+    /// never reports "no containers" during a daemon outage.
+    containers_unavailable: bool,
+    /// The Docker backend exists, but its image inventory failed.
+    images_unavailable: bool,
     /// True when the host container listing FAILED, so image in-use can't
     /// be trusted: the page then treats every image as in-use (no remove /
     /// prune) and shows a warning banner (#871 follow-up, fail closed).
@@ -202,6 +208,8 @@ async fn index(
             nav_section: "disk",
             role: Role::Admin,
             available: false,
+            containers_unavailable: false,
+            images_unavailable: false,
             usage_unknown: false,
             containers: Vec::new(),
             images: Vec::new(),
@@ -242,8 +250,8 @@ async fn index(
         ruscker_images_fut,
         backend.all_container_image_refs(),
     );
-    let containers = containers.unwrap_or_default();
-    let images = images.unwrap_or_default();
+    let (containers, containers_unavailable) = inventory_or_empty(containers, "containers");
+    let (images, images_unavailable) = inventory_or_empty(images, "images");
 
     // The image refs **every** container on the host is built from —
     // not just Ruscker-managed ones (#871) — so an image backing a
@@ -323,6 +331,8 @@ async fn index(
         nav_section: "disk",
         role: Role::Admin,
         available: true,
+        containers_unavailable,
+        images_unavailable,
         usage_unknown,
         containers,
         images,
@@ -342,6 +352,23 @@ async fn index(
         flash,
         flash_error,
     })
+}
+
+/// Preserve the difference between an empty Docker inventory and a failed
+/// inventory request. The panel can still render its other independent data,
+/// but must label the failed section as degraded instead of showing a false
+/// empty state.
+fn inventory_or_empty<T>(
+    result: CoreResult<Vec<T>>,
+    inventory: &'static str,
+) -> (Vec<T>, bool) {
+    match result {
+        Ok(items) => (items, false),
+        Err(e) => {
+            tracing::warn!(error = %e, inventory, "disk: Docker inventory listing failed");
+            (Vec::new(), true)
+        }
+    }
 }
 
 /// The set of image refs the live (DB-first) catalog references — an
@@ -511,11 +538,17 @@ async fn remove_image(
             return redirect("error");
         }
     };
-    let container_images: Option<HashSet<String>> = backend
-        .all_container_image_refs()
-        .await
-        .ok()
-        .map(|v| v.into_iter().collect());
+    let container_images: HashSet<String> = match backend.all_container_image_refs().await {
+        Ok(v) => v.into_iter().collect(),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                id = %form.id,
+                "disk: image remove aborted — container image refs failed"
+            );
+            return redirect("error");
+        }
+    };
     let spec_images = spec_image_refs(&state).await;
     let ruscker_images = match state.db.as_ref() {
         Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
@@ -523,7 +556,7 @@ async fn remove_image(
     };
     let ok = images.iter().any(|i| {
         i.id == form.id
-            && image_removable(i, &spec_images, container_images.as_ref(), &ruscker_images)
+            && image_removable(i, &spec_images, Some(&container_images), &ruscker_images)
     });
     if !ok {
         tracing::warn!(id = %form.id, "disk: refusing to remove an image that is in use, foreign, or unknown");
@@ -626,6 +659,61 @@ mod tests {
     #[test]
     fn disk_usage_is_none_for_a_bad_path() {
         assert!(disk_usage("/no/such/path/should/exist/here").is_none());
+    }
+
+    #[test]
+    fn inventory_errors_are_not_reported_as_empty_success() {
+        let (items, unavailable) = inventory_or_empty::<u8>(Ok(Vec::new()), "test");
+        assert!(items.is_empty());
+        assert!(!unavailable, "a successful empty inventory is available");
+
+        let error = ruscker_core::CoreError::Backend("daemon unavailable".into());
+        let (items, unavailable) = inventory_or_empty::<u8>(Err(error), "test");
+        assert!(items.is_empty());
+        assert!(unavailable, "a failed inventory must stay distinguishable");
+    }
+
+    #[test]
+    fn degraded_inventory_renders_warnings_not_empty_claims() {
+        let locales = Locales::load().expect("load locales");
+        let html = DiskPage {
+            locale: Locale::En,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
+            nav_section: "disk",
+            role: Role::Admin,
+            available: true,
+            containers_unavailable: true,
+            images_unavailable: true,
+            usage_unknown: false,
+            containers: Vec::new(),
+            images: Vec::new(),
+            stopped_count: 0,
+            unused_images_count: 0,
+            images_total_bytes: 0,
+            disk_available: false,
+            disk_total: 0,
+            disk_used: 0,
+            disk_free: 0,
+            disk_pct: 0,
+            seg_images_bytes: 0,
+            seg_other_bytes: 0,
+            seg_images_pct: 0.0,
+            seg_other_pct: 0.0,
+            seg_free_pct: 0.0,
+            flash: None,
+            flash_error: false,
+        }
+        .render()
+        .expect("render degraded disk page");
+
+        assert!(html.contains("image inventory"));
+        assert!(html.contains("container inventory"));
+        assert_eq!(html.matches("This is a partial view").count(), 2);
+        assert!(!html.contains("No local images."));
+        assert!(!html.contains("No Ruscker-managed containers."));
     }
 
     fn img(tags: &[&str], containers: i64) -> ImageInfo {

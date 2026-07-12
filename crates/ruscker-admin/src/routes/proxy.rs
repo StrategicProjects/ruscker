@@ -1525,6 +1525,7 @@ pub(crate) fn creds_from_spec(
                 .as_deref()
                 .filter(|s| !s.is_empty())
                 .map(str::to_string),
+            credential_name: None,
         })),
         _ => Ok(None),
     }
@@ -2256,6 +2257,7 @@ docker-registry-domain: priv.io
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("priv.io"));
+        assert!(c.credential_name.is_none(), "YAML credentials are inline");
     }
 
     #[test]

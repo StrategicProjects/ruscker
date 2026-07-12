@@ -58,7 +58,7 @@ async fn set_theme(
         Some(val) => cookies.add(persistent_cookie(theme::COOKIE_NAME, val.to_string())),
         // Auto = no explicit choice; remove the cookie so the OS
         // preference takes over.
-        None => cookies.remove(Cookie::new(theme::COOKIE_NAME, "")),
+        None => cookies.remove(removal_cookie(theme::COOKIE_NAME)),
     }
     redirect_back(&headers).into_response()
 }
@@ -71,6 +71,15 @@ fn persistent_cookie(name: &'static str, value: String) -> Cookie<'static> {
     c.set_http_only(true);
     c.set_same_site(tower_cookies::cookie::SameSite::Lax);
     c.set_max_age(Duration::days(365));
+    c
+}
+
+/// Match the persisted cookie's path when removing it. Browsers identify
+/// cookies by name + domain + path, so a path-less removal would leave the
+/// explicit `Path=/` light/dark preference in place.
+fn removal_cookie(name: &'static str) -> Cookie<'static> {
+    let mut c = Cookie::new(name, "");
+    c.set_path("/");
     c
 }
 

@@ -203,6 +203,34 @@ async fn landing_emits_data_theme_when_set() {
 }
 
 #[tokio::test]
+async fn set_theme_auto_removes_the_root_scoped_cookie() {
+    let app = router(app_state());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/__set/theme")
+                .header(header::COOKIE, "ruscker_theme=dark")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("theme=auto"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    let removal = response
+        .headers()
+        .get(header::SET_COOKIE)
+        .expect("Auto emits a removal cookie")
+        .to_str()
+        .unwrap();
+    assert!(removal.starts_with("ruscker_theme="), "{removal}");
+    assert!(removal.contains("Path=/"), "{removal}");
+    assert!(removal.contains("Max-Age=0"), "{removal}");
+}
+
+#[tokio::test]
 async fn landing_stylesheet_link_is_present() {
     let (_, body) = get_with_cookie(None).await;
     // The URL carries a `?v=<version>` cache-buster (#289).

@@ -1,0 +1,65 @@
+name: ci
+
+# This workflow is both the merge gate and the release gate. Keeping the
+# commands in one reusable workflow prevents a tag from being validated by a
+# weaker path than the commit that reached main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-24.04
+    env:
+      DOCKER_REGISTRY_PASSWORD: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-test
+
+      - name: Test workspace
+        run: cargo test --locked
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-24.04
+    env:
+      DOCKER_REGISTRY_PASSWORD: test
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install pinned Rust toolchain
+        run: rustup show
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ci-clippy
+
+      - name: Lint all targets
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+  i18n:
+    name: i18n parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check i18n parity
+        run: ./scripts/i18n-check.sh

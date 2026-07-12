@@ -34,6 +34,19 @@ jobs:
       version: ${{ steps.m.outputs.version }}
       prerelease: ${{ steps.m.outputs.prerelease }}
     steps:
+      - uses: actions/checkout@v6
+
+      - name: Verify tag matches workspace version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          workspace_version=$(sed -n 's/^version = "\([^"]*\)"/\1/p' Cargo.toml | head -n 1)
+          tag_version="${TAG#v}"
+          if [ -z "$workspace_version" ] || [ "$tag_version" != "$workspace_version" ]; then
+            echo "::error::tag ${TAG} does not match workspace version ${workspace_version:-<missing>}"
+            exit 1
+          fi
+
       - id: m
         run: |
           repo="${GITHUB_REPOSITORY,,}"
@@ -60,12 +73,20 @@ jobs:
       - name: Audit dependencies
         run: cargo audit
 
+  # Reuse the exact PR/main quality gate for the tagged revision. Publishing
+  # jobs below depend on it, so no artifact or image can leave the repository
+  # before tests, clippy, and translation parity pass.
+  quality:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   # --------------------------------------------------------------------
   # Per-arch native build of the static musl binary, then the tarball
   # and the .deb (cargo-deb, reusing that same binary via --no-build).
   # --------------------------------------------------------------------
   artifacts:
-    needs: [meta, cargo-audit]
+    needs: [meta, cargo-audit, quality]
     name: artifacts (${{ matrix.arch }})
     strategy:
       fail-fast: false
@@ -171,7 +192,7 @@ jobs:
   # Per-arch native Docker build, pushed to ghcr by digest (no tag yet).
   # --------------------------------------------------------------------
   docker-build:
-    needs: [meta, cargo-audit]
+    needs: [meta, cargo-audit, quality]
     name: docker (${{ matrix.arch }})
     strategy:
       fail-fast: false

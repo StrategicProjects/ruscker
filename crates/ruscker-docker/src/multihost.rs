@@ -7,9 +7,9 @@
 //! [`ContainerBackend`] trait, so it drops in wherever the single-host
 //! backend went.
 //!
-//! 6a covers connection + spawn/list/stop/metrics/logs routing with a
-//! simple least-loaded placement. Richer placement (spread/bin-pack,
-//! anti-affinity, capacity caps) is 6c.
+//! Placement supports weighted spread, bin-pack, per-spec anti-affinity,
+//! and per-host capacity caps. The scoring itself is pure so its edge
+//! cases stay covered without requiring live Docker daemons.
 
 use async_trait::async_trait;
 use bollard::{Docker, API_DEFAULT_VERSION};
@@ -241,7 +241,7 @@ struct HostLoad {
 ///   fullest host that still has room. Ties break to the lowest index.
 fn choose_host(loads: &[HostLoad], placement: Placement, anti_affinity: bool) -> Option<usize> {
     let eligible: Vec<usize> = (0..loads.len())
-        .filter(|&i| loads[i].max.is_none_or(|m| (loads[i].count as u32) < m))
+        .filter(|&i| loads[i].max.is_none_or(|m| loads[i].count < m as usize))
         .collect();
     if eligible.is_empty() {
         return None;
@@ -262,11 +262,11 @@ fn choose_host(loads: &[HostLoad], placement: Placement, anti_affinity: bool) ->
     };
     match placement {
         Placement::Spread => pool.into_iter().min_by(|&a, &b| {
-            let la = loads[a].count as f64 / loads[a].weight.max(1) as f64;
-            let lb = loads[b].count as f64 / loads[b].weight.max(1) as f64;
-            la.partial_cmp(&lb)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then(a.cmp(&b))
+            // Compare count/weight without floating-point rounding. u128
+            // also leaves enough headroom for every usize × u32 input.
+            let left = loads[a].count as u128 * loads[b].weight.max(1) as u128;
+            let right = loads[b].count as u128 * loads[a].weight.max(1) as u128;
+            left.cmp(&right).then(a.cmp(&b))
         }),
         Placement::BinPack => pool
             .into_iter()
@@ -792,6 +792,33 @@ mod tests {
         }
     }
 
+    fn fake_backend() -> LocalDockerBackend {
+        // Constructing bollard's HTTP client is lazy: these unit tests
+        // exercise scheduling only and never contact this address.
+        let docker = Docker::connect_with_http(
+            "http://127.0.0.1:2375",
+            CONNECT_TIMEOUT,
+            API_DEFAULT_VERSION,
+        )
+        .expect("build lazy docker client");
+        LocalDockerBackend::from_docker(docker)
+    }
+
+    fn multi_host(entries: &[(&str, Option<u32>, u32)]) -> MultiHostDockerBackend {
+        MultiHostDockerBackend {
+            hosts: entries
+                .iter()
+                .map(|(id, max_containers, weight)| HostEntry {
+                    id: (*id).to_string(),
+                    backend: fake_backend(),
+                    max_containers: *max_containers,
+                    weight: *weight,
+                })
+                .collect(),
+            placement: DashMap::new(),
+        }
+    }
+
     #[test]
     fn spread_picks_weighted_least_loaded() {
         // host0: 3 containers, host1: 1 → spread picks host1.
@@ -804,6 +831,21 @@ mod tests {
         // Tie → lowest index.
         let loads = [load(2, None, 1, false), load(2, None, 1, false)];
         assert_eq!(choose_host(&loads, Placement::Spread, false), Some(0));
+    }
+
+    #[test]
+    fn spread_scoring_does_not_lose_integer_precision() {
+        if usize::BITS < 64 {
+            return;
+        }
+        // Adjacent large integers collapse to the same f64 value. The
+        // exact comparison must still see that host1 is less loaded.
+        let base = 1usize << 54;
+        let loads = [
+            load(base + 2, None, 1, false),
+            load(base + 1, None, 1, false),
+        ];
+        assert_eq!(choose_host(&loads, Placement::Spread, false), Some(1));
     }
 
     #[test]
@@ -822,6 +864,12 @@ mod tests {
         // Every host full ⇒ None.
         let loads = [load(5, Some(5), 1, false), load(3, Some(3), 1, false)];
         assert_eq!(choose_host(&loads, Placement::Spread, false), None);
+
+        // A usize count must not wrap through a narrowing u32 cast and
+        // make a grossly over-capacity host eligible again.
+        let over_u32 = (u32::MAX as usize).saturating_add(1);
+        let loads = [load(over_u32, Some(1), 1, false)];
+        assert_eq!(choose_host(&loads, Placement::Spread, false), None);
     }
 
     #[test]
@@ -834,6 +882,30 @@ mod tests {
         // plain spread (least-loaded).
         let loads = [load(2, None, 1, true), load(1, None, 1, true)];
         assert_eq!(choose_host(&loads, Placement::Spread, true), Some(1));
+
+        // A spec-free but full host is not a candidate; soft affinity
+        // falls back to an eligible host that already runs the spec.
+        let loads = [load(1, Some(1), 1, false), load(1, Some(2), 1, true)];
+        assert_eq!(choose_host(&loads, Placement::Spread, true), Some(1));
+    }
+
+    #[test]
+    fn pick_host_uses_recorded_replica_load_and_spec_affinity() {
+        let backend = multi_host(&[("small", None, 1), ("large", None, 2)]);
+        backend.placement.insert(
+            ReplicaId::new(),
+            ("large".to_string(), "target".to_string()),
+        );
+        backend.placement.insert(
+            ReplicaId::new(),
+            ("missing-host".to_string(), "target".to_string()),
+        );
+
+        let mut request = SpawnRequest::new("target", "example.invalid/app");
+        request.anti_affinity = true;
+
+        let selected = backend.pick_host(&request).expect("an eligible host");
+        assert_eq!(selected.id, "small");
     }
 
     #[test]

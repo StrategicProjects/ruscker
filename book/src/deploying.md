@@ -111,8 +111,16 @@ the scaler retries. The dashboard shows the host inline next to each
 replica's container id, so you can see where each
 replica landed.
 
-**Validating it.** A gated integration test exercises spawn + spread +
-routed stop against two real daemons:
+**Validating it.** The default crate tests cover weighted spread,
+bin-pack, capacity caps, anti-affinity fallback, placement-cache
+accounting and degraded-host reconciliation without a Docker daemon:
+
+```sh
+cargo test -p ruscker-docker
+```
+
+An additional gated integration test exercises spawn + spread + routed
+stop against two real daemons:
 
 ```sh
 RUSCKER_IT_HOST1=ssh://ops@10.0.0.11 \

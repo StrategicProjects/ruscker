@@ -83,9 +83,11 @@
             <i class="ti ti-stack-2" style="color:#06b6d4" aria-hidden="true"></i>
             {{ self.t("admin-disk-images-heading") }}
           </div>
+          {% if !images_unavailable %}
           <div class="disk-panel__sub">
             {{ images.len() }} {{ self.t("admin-disk-word-images") }} · {{ self.human(images_total_bytes) }}{% if unused_images_count > 0 %} · {{ unused_images_count }} {{ self.t("admin-disk-unused") }}{% endif %}
           </div>
+          {% endif %}
         </div>
         {% if unused_images_count > 0 %}
         <form method="post" action="{{ base }}/admin/disk/images/prune" class="disk-prune-form"
@@ -99,8 +101,13 @@
         </form>
         {% endif %}
       </div>
-      {% if usage_unknown %}
-      <div class="disk-panel__sub" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
+      {% if images_unavailable %}
+      <div class="disk-panel__sub" role="alert" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        {{ self.t("admin-disk-images-unavailable") }}
+      </div>
+      {% else if usage_unknown %}
+      <div class="disk-panel__sub" role="alert" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
         <i class="ti ti-alert-triangle" aria-hidden="true"></i>
         {{ self.t("admin-disk-usage-unknown") }}
       </div>
@@ -148,7 +155,7 @@
             </td>
           </tr>
           {% endfor %}
-          {% if images.is_empty() %}
+          {% if images.is_empty() && !images_unavailable %}
           <tr><td colspan="4" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-disk-no-images") }}</td></tr>
           {% endif %}
         </tbody>
@@ -163,9 +170,11 @@
             <i class="ti ti-box" style="color:#06d6a0" aria-hidden="true"></i>
             {{ self.t("admin-disk-containers-heading") }}
           </div>
+          {% if !containers_unavailable %}
           <div class="disk-panel__sub">
             {{ containers.len() }} {{ self.t("admin-disk-word-containers") }}{% if stopped_count > 0 %} · {{ stopped_count }} {{ self.t("admin-disk-word-stopped") }}{% endif %}
           </div>
+          {% endif %}
         </div>
         {% if stopped_count > 0 %}
         <form method="post" action="{{ base }}/admin/disk/containers/prune" class="disk-prune-form"
@@ -179,6 +188,12 @@
         </form>
         {% endif %}
       </div>
+      {% if containers_unavailable %}
+      <div class="disk-panel__sub" role="alert" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
+        <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+        {{ self.t("admin-disk-containers-unavailable") }}
+      </div>
+      {% endif %}
       <table class="admin-table" data-enhance>
         <thead>
           <tr>
@@ -214,7 +229,7 @@
             </td>
           </tr>
           {% endfor %}
-          {% if containers.is_empty() %}
+          {% if containers.is_empty() && !containers_unavailable %}
           <tr><td colspan="3" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-disk-no-containers") }}</td></tr>
           {% endif %}
         </tbody>

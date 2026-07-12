@@ -19,6 +19,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  migration-parity:
+    name: Migration parity
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      # Keep this independent from the Rust build so a missing SQLite or
+      # Postgres migration twin fails quickly with a filename diff (#938).
+      - name: Check SQLite/Postgres migration parity
+        run: bash ./scripts/migration-parity-check.sh
+
   test:
     name: Tests
     runs-on: ubuntu-24.04

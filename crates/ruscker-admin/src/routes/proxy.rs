@@ -594,7 +594,11 @@ async fn forward(
             Some(proto) => upgrade.protocols([proto]),
             None => upgrade,
         };
-        return upgrade.on_upgrade(move |socket| ws::pump(socket, handshake.stream));
+        let pump_spec = spec.id.clone();
+        let pump_replica = replica.id.to_string();
+        return upgrade.on_upgrade(move |socket| {
+            ws::pump_with_context(socket, handshake.stream, pump_spec, pump_replica)
+        });
     }
 
     // 6. HTTP forward.

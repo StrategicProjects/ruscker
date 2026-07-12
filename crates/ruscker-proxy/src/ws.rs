@@ -9,9 +9,15 @@
 //! correct behaviour for stateful Shiny/Streamlit frames — we must not
 //! drop them), an **idle watchdog** reaps a connection with no traffic
 //! either way, and a closing side gets a short grace to drain the other.
+//! A peer that remains blocked beyond the send timeout loses the whole
+//! connection instead of individual frames: partial frame loss would
+//! silently corrupt an interactive app session.
 //!
-//! Errors are logged via `tracing` but never propagated — once axum has
-//! returned its 101, there's no HTTP-shaped error left to surface.
+//! Every termination is logged with its origin, close code/reason, frame
+//! counts, and a zero dropped-frame count. [`pump_with_context`] adds the
+//! app and replica fields to the tracing span. Errors are never propagated
+//! — once axum has returned its 101, there's no HTTP-shaped error left to
+//! surface.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -19,13 +25,14 @@ use std::time::Duration;
 
 use axum::extract::ws::{CloseFrame as AxClose, Message as AxMsg, WebSocket};
 use futures_util::stream::{SplitSink, SplitStream};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, StreamExt};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::{header, HeaderValue};
 use tokio_tungstenite::tungstenite::protocol::CloseFrame as TgClose;
 use tokio_tungstenite::tungstenite::Message as TgMsg;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use tracing::Instrument;
 
 /// Translate a client (axum) close frame to the upstream (tungstenite)
 /// shape, preserving the close code and reason. Forwarding the real frame
@@ -56,6 +63,59 @@ const IDLE_CHECK: Duration = Duration::from_secs(30);
 /// After one side closes, how long the other may keep draining its final
 /// frames (the close handshake, a last burst) before forced teardown.
 const DRAIN_GRACE: Duration = Duration::from_secs(5);
+/// Maximum time one frame may wait for a slow peer. Stateful frames are
+/// never dropped; exceeding this closes the connection and emits a warning.
+const SEND_TIMEOUT: Duration = Duration::from_secs(30);
+
+const CLIENT: &str = "client";
+const UPSTREAM: &str = "upstream";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SendOutcome {
+    Sent,
+    Failed(String),
+    TimedOut,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EndReason {
+    Close {
+        code: Option<u16>,
+        reason: String,
+        forward: SendOutcome,
+    },
+    Eof {
+        forward: SendOutcome,
+    },
+    ReceiveError(String),
+    SendError(String),
+    BackpressureTimeout,
+    UnsupportedFrame,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DirectionEnd {
+    origin: &'static str,
+    target: &'static str,
+    forwarded_frames: u64,
+    reason: EndReason,
+}
+
+async fn send_with_timeout<S, M>(
+    sink: &mut S,
+    message: M,
+    timeout: Duration,
+) -> SendOutcome
+where
+    S: Sink<M> + Unpin,
+    S::Error: std::fmt::Display,
+{
+    match tokio::time::timeout(timeout, sink.send(message)).await {
+        Ok(Ok(())) => SendOutcome::Sent,
+        Ok(Err(err)) => SendOutcome::Failed(err.to_string()),
+        Err(_) => SendOutcome::TimedOut,
+    }
+}
 
 /// An established upstream WebSocket connection.
 pub type UpstreamStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -109,6 +169,23 @@ pub async fn connect(
 /// in both directions until either closes (or the connection goes
 /// idle). Open the upstream with [`connect`] first.
 pub async fn pump(client: WebSocket, upstream: UpstreamStream) {
+    pump_inner(client, upstream).await;
+}
+
+/// Like [`pump`], with a tracing span that identifies the app and replica.
+/// The admin proxy uses this entry point so every close/error/timeout event
+/// can be correlated with the affected container (#933).
+pub async fn pump_with_context(
+    client: WebSocket,
+    upstream: UpstreamStream,
+    spec: String,
+    replica: String,
+) {
+    let span = tracing::info_span!("ws_pump", spec = %spec, replica = %replica);
+    pump_inner(client, upstream).instrument(span).await;
+}
+
+async fn pump_inner(client: WebSocket, upstream: UpstreamStream) {
     let (cli_tx, cli_rx) = client.split();
     let (up_tx, up_rx) = upstream.split();
 
@@ -116,20 +193,181 @@ pub async fn pump(client: WebSocket, upstream: UpstreamStream) {
     // touch it, the watchdog reads it.
     let last = Arc::new(AtomicU64::new(now_ms()));
 
-    let mut c2u = tokio::spawn(client_to_upstream(cli_rx, up_tx, last.clone()));
-    let mut u2c = tokio::spawn(upstream_to_client(up_rx, cli_tx, last.clone()));
-    let mut watchdog = tokio::spawn(idle_watchdog(last));
+    let mut c2u = tokio::spawn(
+        client_to_upstream(cli_rx, up_tx, last.clone()).in_current_span(),
+    );
+    let mut u2c = tokio::spawn(
+        upstream_to_client(up_rx, cli_tx, last.clone()).in_current_span(),
+    );
+    let mut watchdog = tokio::spawn(idle_watchdog(last).in_current_span());
 
     // Whichever finishes first wins; give the *other* direction a short
     // grace to drain before we abort everything.
     tokio::select! {
-        _ = &mut c2u => { let _ = tokio::time::timeout(DRAIN_GRACE, &mut u2c).await; }
-        _ = &mut u2c => { let _ = tokio::time::timeout(DRAIN_GRACE, &mut c2u).await; }
-        _ = &mut watchdog => {}
+        result = &mut c2u => {
+            log_join_result("client_to_upstream", result);
+            match tokio::time::timeout(DRAIN_GRACE, &mut u2c).await {
+                Ok(result) => log_join_result("upstream_to_client", result),
+                Err(_) => log_drain_timeout("upstream_to_client"),
+            }
+        }
+        result = &mut u2c => {
+            log_join_result("upstream_to_client", result);
+            match tokio::time::timeout(DRAIN_GRACE, &mut c2u).await {
+                Ok(result) => log_join_result("client_to_upstream", result),
+                Err(_) => log_drain_timeout("client_to_upstream"),
+            }
+        }
+        _ = &mut watchdog => {
+            tracing::info!(
+                origin = "watchdog",
+                idle_timeout_secs = IDLE_TIMEOUT.as_secs(),
+                dropped_frames = 0_u64,
+                "ws idle timeout"
+            );
+        }
     }
     c2u.abort();
     u2c.abort();
     watchdog.abort();
+    tracing::debug!(dropped_frames = 0_u64, "ws pump ended");
+}
+
+fn log_join_result(direction: &'static str, result: Result<DirectionEnd, tokio::task::JoinError>) {
+    match result {
+        Ok(end) => log_direction_end(end),
+        Err(err) => tracing::warn!(
+            direction,
+            error = ?err,
+            dropped_frames = 0_u64,
+            "ws direction task failed"
+        ),
+    }
+}
+
+fn log_drain_timeout(direction: &'static str) {
+    tracing::warn!(
+        direction,
+        drain_timeout_ms = DRAIN_GRACE.as_millis() as u64,
+        dropped_frames = 0_u64,
+        backpressure_action = "close_connection",
+        "ws drain timeout"
+    );
+}
+
+fn log_direction_end(end: DirectionEnd) {
+    let DirectionEnd {
+        origin,
+        target,
+        forwarded_frames,
+        reason,
+    } = end;
+    match reason {
+        EndReason::Close {
+            code,
+            reason,
+            forward: SendOutcome::Sent,
+        } => tracing::debug!(
+            origin,
+            target,
+            close_code = ?code,
+            close_reason = ?reason,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws close frame"
+        ),
+        EndReason::Close {
+            code,
+            reason,
+            forward: SendOutcome::Failed(error),
+        } => tracing::debug!(
+            origin,
+            target,
+            close_code = ?code,
+            close_reason = ?reason,
+            error = %error,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws close forwarding failed"
+        ),
+        EndReason::Close {
+            code,
+            reason,
+            forward: SendOutcome::TimedOut,
+        } => tracing::warn!(
+            origin,
+            target,
+            close_code = ?code,
+            close_reason = ?reason,
+            send_timeout_ms = SEND_TIMEOUT.as_millis() as u64,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            backpressure_action = "close_connection",
+            "ws close forwarding timed out"
+        ),
+        EndReason::Eof {
+            forward: SendOutcome::Sent,
+        } => tracing::debug!(
+            origin,
+            target,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws stream ended"
+        ),
+        EndReason::Eof {
+            forward: SendOutcome::Failed(error),
+        } => tracing::debug!(
+            origin,
+            target,
+            error = %error,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws stream ended; fallback close failed"
+        ),
+        EndReason::Eof {
+            forward: SendOutcome::TimedOut,
+        } => tracing::warn!(
+            origin,
+            target,
+            send_timeout_ms = SEND_TIMEOUT.as_millis() as u64,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            backpressure_action = "close_connection",
+            "ws fallback close timed out"
+        ),
+        EndReason::ReceiveError(error) => tracing::debug!(
+            origin,
+            target,
+            error = %error,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws receive error"
+        ),
+        EndReason::SendError(error) => tracing::debug!(
+            origin,
+            target,
+            error = %error,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws send error"
+        ),
+        EndReason::BackpressureTimeout => tracing::warn!(
+            origin,
+            target,
+            send_timeout_ms = SEND_TIMEOUT.as_millis() as u64,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            backpressure_action = "close_connection",
+            "ws send timed out"
+        ),
+        EndReason::UnsupportedFrame => tracing::debug!(
+            origin,
+            target,
+            forwarded_frames,
+            dropped_frames = 0_u64,
+            "ws unsupported raw frame"
+        ),
+    }
 }
 
 /// Forward client → upstream until the client closes/errors.
@@ -137,7 +375,8 @@ async fn client_to_upstream(
     mut rx: SplitStream<WebSocket>,
     mut tx: SplitSink<UpstreamStream, TgMsg>,
     last: Arc<AtomicU64>,
-) {
+) -> DirectionEnd {
+    let mut forwarded_frames = 0_u64;
     while let Some(msg) = rx.next().await {
         last.store(now_ms(), Ordering::Relaxed);
         let out = match msg {
@@ -151,20 +390,72 @@ async fn client_to_upstream(
             Ok(AxMsg::Close(frame)) => {
                 // Forward the client's actual close code/reason, then stop
                 // (don't also send the fallback Close(None) below).
-                let _ = tx.send(TgMsg::Close(ax_close_to_tg(frame))).await;
-                return;
+                let code = frame.as_ref().map(|f| f.code);
+                let reason = frame
+                    .as_ref()
+                    .map(|f| f.reason.to_string())
+                    .unwrap_or_default();
+                let forward = send_with_timeout(
+                    &mut tx,
+                    TgMsg::Close(ax_close_to_tg(frame)),
+                    SEND_TIMEOUT,
+                )
+                .await;
+                if forward == SendOutcome::Sent {
+                    forwarded_frames += 1;
+                }
+                return DirectionEnd {
+                    origin: CLIENT,
+                    target: UPSTREAM,
+                    forwarded_frames,
+                    reason: EndReason::Close {
+                        code,
+                        reason,
+                        forward,
+                    },
+                };
             }
             Err(err) => {
-                tracing::debug!(error = ?err, "client ws error");
-                break;
+                let _ = send_with_timeout(&mut tx, TgMsg::Close(None), SEND_TIMEOUT).await;
+                return DirectionEnd {
+                    origin: CLIENT,
+                    target: UPSTREAM,
+                    forwarded_frames,
+                    reason: EndReason::ReceiveError(err.to_string()),
+                };
             }
         };
-        if tx.send(out).await.is_err() {
-            break;
+        match send_with_timeout(&mut tx, out, SEND_TIMEOUT).await {
+            SendOutcome::Sent => forwarded_frames += 1,
+            SendOutcome::Failed(error) => {
+                return DirectionEnd {
+                    origin: CLIENT,
+                    target: UPSTREAM,
+                    forwarded_frames,
+                    reason: EndReason::SendError(error),
+                };
+            }
+            SendOutcome::TimedOut => {
+                return DirectionEnd {
+                    origin: CLIENT,
+                    target: UPSTREAM,
+                    forwarded_frames,
+                    reason: EndReason::BackpressureTimeout,
+                };
+            }
         }
     }
     // Client side ended without an explicit close — ask upstream to close.
-    let _ = tx.send(TgMsg::Close(None)).await;
+    let forward = send_with_timeout(&mut tx, TgMsg::Close(None), SEND_TIMEOUT).await;
+    if forward == SendOutcome::Sent {
+        forwarded_frames += 1;
+    }
+    DirectionEnd {
+        origin: CLIENT,
+        target: UPSTREAM,
+        forwarded_frames,
+        reason: EndReason::Eof { forward },
+    }
 }
 
 /// Forward upstream → client until the upstream closes/errors.
@@ -172,7 +463,8 @@ async fn upstream_to_client(
     mut rx: SplitStream<UpstreamStream>,
     mut tx: SplitSink<WebSocket, AxMsg>,
     last: Arc<AtomicU64>,
-) {
+) -> DirectionEnd {
+    let mut forwarded_frames = 0_u64;
     while let Some(msg) = rx.next().await {
         last.store(now_ms(), Ordering::Relaxed);
         let out = match msg {
@@ -183,21 +475,81 @@ async fn upstream_to_client(
             Ok(TgMsg::Pong(p)) => AxMsg::Pong(p),
             Ok(TgMsg::Close(frame)) => {
                 // Forward the upstream's actual close code/reason, then stop.
-                let _ = tx.send(AxMsg::Close(tg_close_to_ax(frame))).await;
-                return;
+                let code = frame.as_ref().map(|f| u16::from(f.code));
+                let reason = frame
+                    .as_ref()
+                    .map(|f| f.reason.to_string())
+                    .unwrap_or_default();
+                let forward = send_with_timeout(
+                    &mut tx,
+                    AxMsg::Close(tg_close_to_ax(frame)),
+                    SEND_TIMEOUT,
+                )
+                .await;
+                if forward == SendOutcome::Sent {
+                    forwarded_frames += 1;
+                }
+                return DirectionEnd {
+                    origin: UPSTREAM,
+                    target: CLIENT,
+                    forwarded_frames,
+                    reason: EndReason::Close {
+                        code,
+                        reason,
+                        forward,
+                    },
+                };
             }
             // Raw frames are an opt-in tungstenite mode we don't enable.
-            Ok(TgMsg::Frame(_)) => break,
+            Ok(TgMsg::Frame(_)) => {
+                let _ = send_with_timeout(&mut tx, AxMsg::Close(None), SEND_TIMEOUT).await;
+                return DirectionEnd {
+                    origin: UPSTREAM,
+                    target: CLIENT,
+                    forwarded_frames,
+                    reason: EndReason::UnsupportedFrame,
+                };
+            }
             Err(err) => {
-                tracing::debug!(error = ?err, "upstream ws error");
-                break;
+                let _ = send_with_timeout(&mut tx, AxMsg::Close(None), SEND_TIMEOUT).await;
+                return DirectionEnd {
+                    origin: UPSTREAM,
+                    target: CLIENT,
+                    forwarded_frames,
+                    reason: EndReason::ReceiveError(err.to_string()),
+                };
             }
         };
-        if tx.send(out).await.is_err() {
-            break;
+        match send_with_timeout(&mut tx, out, SEND_TIMEOUT).await {
+            SendOutcome::Sent => forwarded_frames += 1,
+            SendOutcome::Failed(error) => {
+                return DirectionEnd {
+                    origin: UPSTREAM,
+                    target: CLIENT,
+                    forwarded_frames,
+                    reason: EndReason::SendError(error),
+                };
+            }
+            SendOutcome::TimedOut => {
+                return DirectionEnd {
+                    origin: UPSTREAM,
+                    target: CLIENT,
+                    forwarded_frames,
+                    reason: EndReason::BackpressureTimeout,
+                };
+            }
         }
     }
-    let _ = tx.send(AxMsg::Close(None)).await;
+    let forward = send_with_timeout(&mut tx, AxMsg::Close(None), SEND_TIMEOUT).await;
+    if forward == SendOutcome::Sent {
+        forwarded_frames += 1;
+    }
+    DirectionEnd {
+        origin: UPSTREAM,
+        target: CLIENT,
+        forwarded_frames,
+        reason: EndReason::Eof { forward },
+    }
 }
 
 /// Returns when the connection has seen no frames either way for
@@ -227,6 +579,39 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::pin::Pin;
+    use std::task::{Context, Poll};
+
+    struct PendingSink;
+
+    impl<T> Sink<T> for PendingSink {
+        type Error = std::io::Error;
+
+        fn poll_ready(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn start_send(self: Pin<&mut Self>, _item: T) -> Result<(), Self::Error> {
+            Ok(())
+        }
+
+        fn poll_flush(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn poll_close(
+            self: Pin<&mut Self>,
+            _cx: &mut Context<'_>,
+        ) -> Poll<Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+    }
 
     #[test]
     fn close_frame_translation_preserves_code_and_reason() {
@@ -253,6 +638,38 @@ mod tests {
     fn close_frame_translation_passes_none_through() {
         assert!(ax_close_to_tg(None).is_none());
         assert!(tg_close_to_ax(None).is_none());
+    }
+
+    #[tokio::test]
+    async fn blocked_send_becomes_timeout_instead_of_a_frame_drop() {
+        let mut sink = PendingSink;
+        let outcome = send_with_timeout(&mut sink, (), Duration::from_millis(5)).await;
+        assert_eq!(outcome, SendOutcome::TimedOut);
+    }
+
+    #[test]
+    fn direction_end_keeps_origin_close_and_frame_count() {
+        let end = DirectionEnd {
+            origin: UPSTREAM,
+            target: CLIENT,
+            forwarded_frames: 17,
+            reason: EndReason::Close {
+                code: Some(1001),
+                reason: "maintenance".into(),
+                forward: SendOutcome::Sent,
+            },
+        };
+        assert_eq!(end.origin, "upstream");
+        assert_eq!(end.target, "client");
+        assert_eq!(end.forwarded_frames, 17);
+        assert_eq!(
+            end.reason,
+            EndReason::Close {
+                code: Some(1001),
+                reason: "maintenance".into(),
+                forward: SendOutcome::Sent,
+            }
+        );
     }
 
     // #730: the upstream handshake must carry the full URL (Jupyter

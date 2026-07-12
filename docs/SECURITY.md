@@ -293,7 +293,11 @@ Status: living document. Tracks the Phase 5 security audit
   hop-by-hop strip list.
 - **[implemented]** WS pump isolation — each direction runs as an
   independent task (a slow client only backpressures its own
-  producer), with an idle watchdog and a drain grace on close.
+  producer), with an idle watchdog and a drain grace on close. A
+  30-second per-frame send timeout closes a persistently blocked
+  connection instead of dropping stateful frames; structured events
+  identify the app, replica, close origin/code/reason, frame count,
+  and timeout policy (#933).
 - **[implemented]** `X-Forwarded-For` is normalized on the forward
   (#744, v0.2.5) — in trusted mode (§7) the real peer IP is appended
   to the inbound chain; untrusted, the spoofable client value is
@@ -504,7 +508,9 @@ Non-blocking follow-ups:
       token; logout revokes server-side (#77)
 - [x] Operator CSP origins (blocks/analytics) sanitized before use (#82)
 - [x] `proxy-connection` in hop-by-hop strip (§6, #84)
-- [x] WS pump backpressure: independent tasks + idle watchdog (§6, #81)
+- [x] WS pump backpressure: independent tasks + idle/send watchdogs,
+      structured close diagnostics, and no stateful frame drops (§6,
+      #81, #933)
 - [x] `audit_log.diff_json` verified to record metadata only — never a
       password/token/cookie (regression test in `db::credentials`)
 - [x] Automated `cargo audit` in CI (`.github/workflows/security.yml`,

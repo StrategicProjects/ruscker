@@ -896,7 +896,7 @@ async fn import_referenced_logos(
             Ok(b) => b,
             Err(_) => continue, // not on disk → nothing to copy
         };
-        match crate::images::process_upload(&filename, None, bytes) {
+        match crate::images::process_upload_async(filename.clone(), None, bytes).await {
             Ok(processed) => {
                 if crate::db::images::insert(db, processed, Some(actor))
                     .await

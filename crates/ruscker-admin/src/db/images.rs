@@ -568,7 +568,9 @@ pub async fn import_dir(db: &ConfigDb, dir: &std::path::Path) -> Result<ImportIm
             }
         };
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or_default();
-        let Some(processed) = crate::images::process_for_import(name, raw) else {
+        let Some(processed) =
+            crate::images::process_for_import_async(name.to_string(), raw).await
+        else {
             report.skipped += 1;
             continue;
         };

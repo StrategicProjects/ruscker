@@ -444,21 +444,13 @@ async fn serve_card_image(
         if let Some(cached) = THUMB_CACHE.get(&key) {
             return serve_thumbnail_bytes(&req_headers, cached.clone());
         }
-        let src = bytes.clone();
-        match tokio::task::spawn_blocking(move || {
-            crate::images::thumbnail_webp(&src, THUMB_MAX_DIM)
-        })
-        .await
-        {
-            Ok(Ok(thumb)) => {
+        match crate::images::thumbnail_webp_async(bytes.clone(), THUMB_MAX_DIM).await {
+            Ok(thumb) => {
                 THUMB_CACHE.insert(key, thumb.clone());
                 return serve_thumbnail_bytes(&req_headers, thumb);
             }
-            Ok(Err(err)) => {
-                tracing::warn!(error = ?err, filename, "thumbnail generation failed; serving full image");
-            }
             Err(err) => {
-                tracing::warn!(error = ?err, filename, "thumbnail task join failed; serving full image");
+                tracing::warn!(error = ?err, filename, "thumbnail generation failed; serving full image");
             }
         }
     }

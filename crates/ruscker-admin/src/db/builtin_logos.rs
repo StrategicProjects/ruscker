@@ -28,14 +28,19 @@ pub async fn seed_if_unseeded(db: &ConfigDb) -> Result<()> {
         {
             continue;
         }
-        let processed =
-            match crate::images::process_upload(filename, Some("image/svg+xml"), bytes.to_vec()) {
-                Ok(p) => p,
-                Err(err) => {
-                    tracing::warn!(error = ?err, filename, "skip built-in logo seed");
-                    continue;
-                }
-            };
+        let processed = match crate::images::process_upload_async(
+            filename.to_string(),
+            Some("image/svg+xml".to_string()),
+            bytes.to_vec(),
+        )
+        .await
+        {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!(error = ?err, filename, "skip built-in logo seed");
+                continue;
+            }
+        };
         super::images::insert(db, processed, None)
             .await
             .with_context(|| format!("seed built-in logo {filename}"))?;

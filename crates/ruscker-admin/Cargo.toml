@@ -65,6 +65,7 @@ serde_json = { workspace = true }
 serde_yaml_ng = { workspace = true }
 chrono = { workspace = true }
 regex = { workspace = true }
+url = { workspace = true }
 uuid = { workspace = true }
 
 # Persistence (Phase 2)

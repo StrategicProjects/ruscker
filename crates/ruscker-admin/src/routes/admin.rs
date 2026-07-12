@@ -85,6 +85,10 @@ struct LoginPage<'a> {
     /// `true` ⇒ render the break-glass **token** form (bootstrap or
     /// `?token=1`); `false` ⇒ the username/password form.
     bootstrap: bool,
+    /// Validated root-relative app destination carried through the form.
+    next: String,
+    /// Percent-encoded twin used by the password/token login switch links.
+    next_encoded: String,
 }
 
 impl LoginPage<'_> {
@@ -127,6 +131,9 @@ struct AccountPasswordPage<'a> {
     first: bool,
     /// "" | "wrong-current" | "mismatch" | "short".
     error: &'static str,
+    /// Validated app destination carried through a mandatory first-login
+    /// password change.
+    next: String,
 }
 
 impl AccountPasswordPage<'_> {
@@ -190,6 +197,8 @@ async fn show_token_form(state: &AppState, force_token: bool) -> bool {
 pub struct LoginQuery {
     /// `?token=1` forces the break-glass token form.
     pub token: Option<String>,
+    /// Optional app destination captured by the restricted-app guard.
+    pub next: Option<String>,
 }
 
 async fn login_form(
@@ -199,16 +208,31 @@ async fn login_form(
     Query(q): Query<LoginQuery>,
 ) -> Response {
     let bootstrap = show_token_form(&state, q.token.is_some()).await;
-    let page = LoginPage {
+    let next = app_next_path(q.next.as_deref(), &state.base_path).unwrap_or_default();
+    let page = login_page(&state, loc, theme, "", bootstrap, next);
+    render(&page)
+}
+
+fn login_page<'a>(
+    state: &'a AppState,
+    loc: Locale,
+    theme: Theme,
+    error: &'static str,
+    bootstrap: bool,
+    next: String,
+) -> LoginPage<'a> {
+    let next_encoded = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
+    LoginPage {
         locale: loc,
         theme,
         locales: &state.locales,
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
-        error: "",
+        error,
         bootstrap,
-    };
-    render(&page)
+        next,
+        next_encoded,
+    }
 }
 
 fn login_error(
@@ -217,16 +241,9 @@ fn login_error(
     theme: Theme,
     error: &'static str,
     bootstrap: bool,
+    next: String,
 ) -> Response {
-    let page = LoginPage {
-        locale: loc,
-        theme,
-        locales: &state.locales,
-        locales_all: &Locale::ALL,
-        base: state.base_path.clone(),
-        error,
-        bootstrap,
-    };
+    let page = login_page(state, loc, theme, error, bootstrap, next);
     let body = match page.render() {
         Ok(s) => s,
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "render").into_response(),
@@ -241,6 +258,7 @@ fn login_error(
 pub struct LoginForm {
     pub username: String,
     pub password: String,
+    pub next: Option<String>,
 }
 
 /// Primary login: username + password against the `users` table.
@@ -262,6 +280,7 @@ async fn login_submit(
     if !state.login_limiter.allow() {
         return rate_limited();
     }
+    let next = app_next_path(form.next.as_deref(), &state.base_path);
 
     // Username/password login needs the user store. Without a DB the
     // only way in is the break-glass token.
@@ -270,14 +289,28 @@ async fn login_submit(
         // DB-present and token paths, so a no-DB deploy can't be probed
         // without tripping the same backoff.
         state.login_limiter.record_failure();
-        return login_error(&state, loc, theme, "wrong-login", false);
+        return login_error(
+            &state,
+            loc,
+            theme,
+            "wrong-login",
+            false,
+            next.clone().unwrap_or_default(),
+        );
     };
 
     let user = match db::users::verify_login(pool, &form.username, &form.password).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             state.login_limiter.record_failure();
-            return login_error(&state, loc, theme, "wrong-login", false);
+            return login_error(
+                &state,
+                loc,
+                theme,
+                "wrong-login",
+                false,
+                next.clone().unwrap_or_default(),
+            );
         }
         Err(e) => {
             tracing::error!(error = ?e, "login lookup failed");
@@ -295,29 +328,38 @@ async fn login_submit(
     // First login with an admin-assigned password ⇒ ask whether to
     // change it.
     if user.must_change_password {
-        return Redirect::to("/admin/account/password").into_response();
+        let target = next
+            .as_deref()
+            .map(|next| super::with_next_query("/admin/account/password", next))
+            .unwrap_or_else(|| "/admin/account/password".to_string());
+        return Redirect::to(&target).into_response();
     }
 
-    let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
-    let raw_path = super::same_origin_path(referer, user.role.home());
-    // Under a base path (#173), referer paths come in as
-    // `/box/admin/specs` — strip the prefix before the `/admin/`
-    // and `/` checks so a non-admin signing in from `/box/admin/X`
-    // returns to `X`, not the dashboard. The response middleware
-    // re-prefixes the `Location` on the way out.
-    let path = strip_base_prefix(&raw_path, &state.base_path);
-    let target = if path == "/" {
-        // Signed in from the public landing — return there so the
-        // viewer sees the apps their groups unlock (#155), rather than
-        // bouncing a non-admin into the panel.
-        path.to_string()
-    } else if path.starts_with("/admin/")
-        && !path.starts_with("/admin/login")
-        && user.role.can_access_section(section_for_admin_path(path))
-    {
-        path.to_string()
-    } else {
-        user.role.home().to_string()
+    let target = match next {
+        Some(target) => target,
+        None => {
+            let referer = headers.get(REFERER).and_then(|v| v.to_str().ok());
+            let raw_path = super::same_origin_path(referer, user.role.home());
+            // Under a base path (#173), referer paths come in as
+            // `/box/admin/specs` — strip the prefix before the `/admin/`
+            // and `/` checks so a non-admin signing in from `/box/admin/X`
+            // returns to `X`, not the dashboard. The response middleware
+            // re-prefixes the `Location` on the way out.
+            let path = strip_base_prefix(&raw_path, &state.base_path);
+            if path == "/" {
+                // Signed in from the public landing — return there so the
+                // viewer sees the apps their groups unlock (#155), rather
+                // than bouncing a non-admin into the panel.
+                path.to_string()
+            } else if path.starts_with("/admin/")
+                && !path.starts_with("/admin/login")
+                && user.role.can_access_section(section_for_admin_path(path))
+            {
+                path.to_string()
+            } else {
+                user.role.home().to_string()
+            }
+        }
     };
     Redirect::to(&target).into_response()
 }
@@ -359,9 +401,23 @@ fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
     }
 }
 
+/// Validate an explicit post-login destination and normalize it to the
+/// router's base-less form. The restricted-app guard is the only producer
+/// today, so deliberately accept `/app/...` destinations only: arbitrary
+/// admin paths keep using the existing role-aware Referer fallback.
+fn app_next_path(next: Option<&str>, base: &str) -> Option<String> {
+    let path = super::local_next_path(next)?;
+    let path = strip_base_prefix(path, base);
+    let path_only = path.split(['?', '#']).next().unwrap_or(path);
+    path_only
+        .starts_with("/app/")
+        .then(|| path.to_string())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct TokenForm {
     pub token: String,
+    pub next: Option<String>,
 }
 
 /// Break-glass login with `RUSCKER_ADMIN_TOKEN`. Always grants an
@@ -385,10 +441,18 @@ async fn token_login(
     if !state.login_limiter.allow() {
         return rate_limited();
     }
+    let next = app_next_path(form.next.as_deref(), &state.base_path);
     if !state.admin_auth.matches_token(&form.token) {
         state.login_limiter.record_failure();
         cookies.remove(Cookie::new(COOKIE_NAME, ""));
-        return login_error(&state, loc, theme, "wrong-token", true);
+        return login_error(
+            &state,
+            loc,
+            theme,
+            "wrong-token",
+            true,
+            next.clone().unwrap_or_default(),
+        );
     }
 
     state.login_limiter.record_success();
@@ -403,7 +467,7 @@ async fn token_login(
     if need_setup {
         Redirect::to("/admin/setup").into_response()
     } else {
-        Redirect::to("/admin/dashboard").into_response()
+        Redirect::to(next.as_deref().unwrap_or("/admin/dashboard")).into_response()
     }
 }
 
@@ -519,11 +583,17 @@ async fn setup_submit(
 
 // ── Self-service password change + first-login prompt ─────────────
 
+#[derive(Debug, Deserialize)]
+struct PasswordQuery {
+    next: Option<String>,
+}
+
 async fn password_form(
     session: AdminSession,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
+    Query(query): Query<PasswordQuery>,
 ) -> Response {
     // Break-glass token sessions have no account to change.
     let Some(actor) = session.actor.clone() else {
@@ -538,6 +608,7 @@ async fn password_form(
             .unwrap_or(false),
         None => false,
     };
+    let next = app_next_path(query.next.as_deref(), &state.base_path).unwrap_or_default();
     render(&AccountPasswordPage {
         locale: loc,
         theme,
@@ -548,6 +619,7 @@ async fn password_form(
         role: session.role,
         first,
         error: "",
+        next,
     })
 }
 
@@ -556,6 +628,7 @@ pub struct PasswordForm {
     pub current: String,
     pub new_password: String,
     pub confirm: String,
+    pub next: Option<String>,
 }
 
 async fn password_submit(
@@ -577,6 +650,7 @@ async fn password_submit(
         )
             .into_response();
     };
+    let next = app_next_path(form.next.as_deref(), &state.base_path);
 
     // First login is mandatory (#454): there is no "keep current"
     // escape — the only way past the prompt is a real password change
@@ -598,6 +672,7 @@ async fn password_submit(
             role: session.role,
             first,
             error,
+            next: next.clone().unwrap_or_default(),
         })
     };
 
@@ -638,9 +713,10 @@ async fn password_submit(
         .create(session.role, Some(actor.clone()))
         .await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
-    // Land on the role's home — a Viewer goes to the portal (#857), not
-    // the dashboard it can't open.
-    Redirect::to(session.role.home()).into_response()
+    // Return to the app that triggered authentication when one was carried
+    // through the mandatory password rotation. Otherwise use the role home
+    // (a Viewer goes to the portal, not the dashboard it cannot open).
+    Redirect::to(next.as_deref().unwrap_or(session.role.home())).into_response()
 }
 
 /// Map an `/admin/...` path to the `nav_section` it belongs to, for
@@ -716,7 +792,7 @@ pub(crate) fn render<T: Template>(t: &T) -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::strip_base_prefix;
+    use super::{app_next_path, strip_base_prefix};
     use super::{LoginPage, SetupPage};
     use crate::i18n::{Locale, Locales};
     use crate::theme::Theme;
@@ -879,6 +955,46 @@ mod tests {
         assert_eq!(strip_base_prefix("/box/?theme=dark", "/box"), "/?theme=dark");
     }
 
+    #[test]
+    fn app_next_accepts_only_app_paths_and_strips_the_base_path() {
+        assert_eq!(
+            app_next_path(Some("/box/app/analysts/report?tab=2"), "/box"),
+            Some("/app/analysts/report?tab=2".to_string())
+        );
+        assert_eq!(
+            app_next_path(Some("/app/demo/"), ""),
+            Some("/app/demo/".to_string())
+        );
+        assert_eq!(
+            app_next_path(Some("https://evil.example/app/demo"), ""),
+            None
+        );
+        assert_eq!(app_next_path(Some("//evil.example/app/demo"), ""), None);
+        assert_eq!(app_next_path(Some("/admin/dashboard"), ""), None);
+    }
+
+    #[test]
+    fn login_page_carries_app_next_across_login_modes() {
+        let locales = Locales::load().expect("load locales");
+        let html = LoginPage {
+            locale: Locale::En,
+            theme: Theme::Auto,
+            locales: &locales,
+            locales_all: &Locale::ALL,
+            base: std::sync::Arc::from(""),
+            error: "",
+            bootstrap: false,
+            next: "/app/demo/?tab=1".to_string(),
+            next_encoded: "%2Fapp%2Fdemo%2F%3Ftab%3D1".to_string(),
+        }
+        .render()
+        .expect("render login");
+        assert!(html.contains(r#"name="next" value="/app/demo/?tab=1""#));
+        assert!(html.contains(
+            r#"href="/admin/login?token=1&amp;next=%2Fapp%2Fdemo%2F%3Ftab%3D1""#
+        ));
+    }
+
     // The favicon set lives in the shared `_favicons.html` partial; the
     // standalone login/setup heads must include it so Safari has the raster
     // .ico/.png to fall back on (Safari can ignore the SVG favicon and
@@ -894,6 +1010,8 @@ mod tests {
             base: std::sync::Arc::from(""),
             error: "",
             bootstrap: false,
+            next: String::new(),
+            next_encoded: String::new(),
         }
         .render()
         .expect("render login");
@@ -940,6 +1058,8 @@ mod tests {
             base: std::sync::Arc::from(""),
             error: "",
             bootstrap: false,
+            next: String::new(),
+            next_encoded: String::new(),
         }
         .render()
         .expect("render login");

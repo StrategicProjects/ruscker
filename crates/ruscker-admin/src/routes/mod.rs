@@ -47,9 +47,31 @@ pub(crate) fn same_origin_path(referer: Option<&str>, fallback: &'static str) ->
     after_authority.to_string()
 }
 
+/// Accept an explicit post-login destination only when it is already a
+/// root-relative path on this origin. Unlike [`same_origin_path`], this does
+/// not translate an absolute external URL into a local path: an operator- or
+/// attacker-supplied `next=https://evil.example/x` is rejected outright.
+pub(crate) fn local_next_path(value: Option<&str>) -> Option<&str> {
+    let value = value?;
+    let safe = value.starts_with('/')
+        && !value.starts_with("//")
+        && !value.contains('\\')
+        && !value.bytes().any(|b| b < 0x20 || b == 0x7f);
+    safe.then_some(value)
+}
+
+/// Append a percent-encoded `next` query parameter to a local path. The path
+/// may already carry another query parameter (the token-login selector does),
+/// in which case `next` is appended with `&`.
+pub(crate) fn with_next_query(path: &str, next: &str) -> String {
+    let separator = if path.contains('?') { '&' } else { '?' };
+    let encoded: String = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
+    format!("{path}{separator}next={encoded}")
+}
+
 #[cfg(test)]
 mod same_origin_tests {
-    use super::same_origin_path;
+    use super::{local_next_path, same_origin_path, with_next_query};
 
     #[test]
     fn keeps_path_from_absolute_referer() {
@@ -85,5 +107,26 @@ mod same_origin_tests {
     #[test]
     fn accepts_already_relative_referer() {
         assert_eq!(same_origin_path(Some("/dashboard"), "/"), "/dashboard");
+    }
+
+    #[test]
+    fn explicit_next_accepts_only_root_relative_paths() {
+        assert_eq!(local_next_path(Some("/app/foo?q=1")), Some("/app/foo?q=1"));
+        assert_eq!(local_next_path(Some("https://evil.example/x")), None);
+        assert_eq!(local_next_path(Some("//evil.example/x")), None);
+        assert_eq!(local_next_path(Some("/\\evil.example/x")), None);
+        assert_eq!(local_next_path(Some("/app/foo\nset-cookie:x")), None);
+    }
+
+    #[test]
+    fn next_query_is_encoded_and_appends_to_existing_query() {
+        assert_eq!(
+            with_next_query("/admin/login", "/app/foo?tab=1&sort=name"),
+            "/admin/login?next=%2Fapp%2Ffoo%3Ftab%3D1%26sort%3Dname"
+        );
+        assert_eq!(
+            with_next_query("/admin/login?token=1", "/app/foo/"),
+            "/admin/login?token=1&next=%2Fapp%2Ffoo%2F"
+        );
     }
 }

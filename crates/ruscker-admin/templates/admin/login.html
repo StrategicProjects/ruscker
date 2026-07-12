@@ -23,6 +23,8 @@
 <form method="post" action="{% if bootstrap %}{{ base }}/admin/login/token{% else %}{{ base }}/admin/login{% endif %}"
       class="admin-login-card" autocomplete="off">
 
+  {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+
   <div class="admin-login-brand">
     <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
       <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
@@ -74,9 +76,9 @@
      chrome cluster (#182 + #183). #}
   <div class="admin-login-footer admin-login-footer--end">
     {% if bootstrap %}
-      <a href="{{ base }}/admin/login">{{ self.t("admin-login-use-password") }}</a>
+      <a href="{{ base }}/admin/login{% if next != "" %}?next={{ next_encoded }}{% endif %}">{{ self.t("admin-login-use-password") }}</a>
     {% else %}
-      <a href="{{ base }}/admin/login?token=1">{{ self.t("admin-login-use-token") }}</a>
+      <a href="{{ base }}/admin/login?token=1{% if next != "" %}&amp;next={{ next_encoded }}{% endif %}">{{ self.t("admin-login-use-token") }}</a>
     {% endif %}
     <a href="{{ base }}/">{{ self.t("admin-login-back-portal") }}</a>
   </div>

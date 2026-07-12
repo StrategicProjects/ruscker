@@ -116,6 +116,98 @@ async fn password_login_succeeds_and_wrong_fails() {
 }
 
 #[tokio::test]
+async fn password_login_honors_only_a_local_app_next() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool),
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (safe_status, safe_location) = post(
+        state.clone(),
+        "/admin/login",
+        "username=alice&password=alicepass1&next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1",
+        None,
+    )
+    .await;
+    assert_eq!(safe_status, StatusCode::SEE_OTHER);
+    assert_eq!(safe_location, "/app/analysts-app/?tab=1");
+
+    let (external_status, external_location) = post(
+        state,
+        "/admin/login",
+        "username=alice&password=alicepass1&next=https%3A%2F%2Fevil.example%2Fpwn",
+        None,
+    )
+    .await;
+    assert_eq!(external_status, StatusCode::SEE_OTHER);
+    assert_eq!(
+        external_location, "/",
+        "external next falls back to role home"
+    );
+}
+
+#[tokio::test]
+async fn app_next_is_reprefixed_under_a_base_path() {
+    let (mut state, pool) = state_with_db().await;
+    state.base_path = Arc::from("/box");
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool),
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (status, location) = post(
+        state,
+        "/box/admin/login",
+        "username=alice&password=alicepass1&next=%2Fapp%2Fanalysts-app%2F",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(location, "/box/app/analysts-app/");
+}
+
+#[tokio::test]
+async fn token_login_honors_a_local_app_next_after_bootstrap() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool),
+        "admin",
+        "adminpass1",
+        Role::Admin,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+
+    let (status, location) = post(
+        state,
+        "/admin/login/token",
+        "token=break-glass-tok&next=%2Fapp%2Fanalysts-app%2F",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(location, "/app/analysts-app/");
+}
+
+#[tokio::test]
 async fn first_login_with_must_change_redirects_to_password() {
     let (state, pool) = state_with_db().await;
     // must_change = true ⇒ first login lands on the change-password page.
@@ -131,6 +223,98 @@ async fn first_login_with_must_change_redirects_to_password() {
     .await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     assert_eq!(loc, "/admin/account/password");
+}
+
+#[tokio::test]
+async fn app_next_survives_mandatory_password_rotation() {
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool),
+        "bob",
+        "bobpass12",
+        Role::Viewer,
+        true,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    let app = router(state);
+
+    let login = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from(
+                    "username=bob&password=bobpass12&next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        login
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok()),
+        Some("/admin/account/password?next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1")
+    );
+    let cookie = login
+        .headers()
+        .get("set-cookie")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("login issues a session cookie")
+        .to_string();
+
+    let password_page = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/admin/account/password?next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(password_page.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(password_page.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    assert!(
+        std::str::from_utf8(&body)
+            .unwrap()
+            .contains(r#"name="next" value="/app/analysts-app/?tab=1""#),
+        "password form must preserve the validated destination"
+    );
+
+    let changed = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/account/password")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", cookie)
+                .body(Body::from(
+                    "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9&next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(changed.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        changed
+            .headers()
+            .get("location")
+            .and_then(|value| value.to_str().ok()),
+        Some("/app/analysts-app/?tab=1")
+    );
 }
 
 /// Count `<form ` opens, then verify none of them is nested inside

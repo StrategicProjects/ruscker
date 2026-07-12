@@ -383,8 +383,19 @@ async fn forward(
                 // base-prefixed login URL ourselves (#294) — otherwise a
                 // `/box/app/<spec>` visitor is bounced to a `/admin/login`
                 // that 404s outside the mount.
-                return Redirect::to(&format!("{}/admin/login", state.base_path))
-                    .into_response();
+                // `nest` has already stripped `state.base_path` from this
+                // URI. Carry its untouched path-and-query rather than the
+                // decoded `Path` extractors, preserving percent-encoding.
+                let next = req
+                    .uri()
+                    .path_and_query()
+                    .map(|value| value.as_str())
+                    .unwrap_or_else(|| req.uri().path());
+                let login = super::with_next_query(
+                    &format!("{}/admin/login", state.base_path),
+                    next,
+                );
+                return Redirect::to(&login).into_response();
             }
             return with_cors(
                 (StatusCode::FORBIDDEN, "access denied\n").into_response(),

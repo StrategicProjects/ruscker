@@ -9,6 +9,7 @@
 
 use axum::body::Body;
 use axum::http::{header, Request, StatusCode};
+use axum::response::Response;
 use ruscker_admin::auth::{AdminAuth, Role, COOKIE_NAME};
 use ruscker_admin::db::ConfigDb;
 use ruscker_admin::i18n::Locales;
@@ -84,14 +85,17 @@ async fn app_state(db: ConfigDb) -> AppState {
     }
 }
 
-async fn get(state: AppState, path: &str, cookie: Option<String>) -> StatusCode {
+async fn get_response(state: AppState, path: &str, cookie: Option<String>) -> Response {
     let app = router(state);
     let mut req = Request::builder().method("GET").uri(path);
     if let Some(c) = cookie {
         req = req.header(header::COOKIE, c);
     }
-    let resp = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
-    resp.status()
+    app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap()
+}
+
+async fn get(state: AppState, path: &str, cookie: Option<String>) -> StatusCode {
+    get_response(state, path, cookie).await.status()
 }
 
 /// A request that the guard lets through lands on the "no backend"
@@ -113,10 +117,43 @@ async fn open_api_reachable_anonymously() {
 #[tokio::test]
 async fn restricted_app_redirects_anonymous_to_login() {
     let state = app_state(open_db().await).await;
-    // Redirect::to ⇒ 303 See Other to /admin/login (guard fires before
-    // the backend check, so this is not a 503).
-    let st = get(state, "/app/analysts-app/", None).await;
-    assert_eq!(st, StatusCode::SEE_OTHER, "anon → login redirect");
+    // Redirect::to ⇒ 303 See Other. The original path and query are
+    // carried in `next`, so a successful login can return here (#924).
+    let response = get_response(
+        state,
+        "/app/analysts-app/report%20name?tab=a%2Fb",
+        None,
+    )
+    .await;
+    assert_eq!(
+        response.status(),
+        StatusCode::SEE_OTHER,
+        "anon → login redirect"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some(
+            "/admin/login?next=%2Fapp%2Fanalysts-app%2Freport%2520name%3Ftab%3Da%252Fb"
+        )
+    );
+}
+
+#[tokio::test]
+async fn restricted_app_login_redirect_keeps_the_base_path() {
+    let mut state = app_state(open_db().await).await;
+    state.base_path = Arc::from("/box");
+    let response = get_response(state, "/box/app/analysts-app/report?tab=2", None).await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        response
+            .headers()
+            .get(header::LOCATION)
+            .and_then(|value| value.to_str().ok()),
+        Some("/box/admin/login?next=%2Fapp%2Fanalysts-app%2Freport%3Ftab%3D2")
+    );
 }
 
 #[tokio::test]

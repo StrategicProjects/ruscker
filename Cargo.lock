@@ -2890,6 +2890,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "unic-langid",
+ "url",
  "uuid",
  "zeroize",
 ]

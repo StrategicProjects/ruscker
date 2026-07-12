@@ -37,6 +37,24 @@ async fn spawn_echo_upstream() -> String {
     format!("ws://{addr}/")
 }
 
+/// Spawn an upstream that immediately closes with a diagnostic frame.
+async fn spawn_closing_upstream() -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((stream, _)) = listener.accept().await {
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.close(Some(tokio_tungstenite::tungstenite::protocol::CloseFrame {
+                code: 1001u16.into(),
+                reason: "maintenance".into(),
+            }))
+            .await
+            .unwrap();
+        }
+    });
+    format!("ws://{addr}/")
+}
+
 /// Spawn the axum proxy app (one `/ws` route → `ws::connect` +
 /// `ws::pump`, the #730 two-step shape). Returns its bound address.
 async fn spawn_proxy(upstream_url: String) -> std::net::SocketAddr {
@@ -48,7 +66,14 @@ async fn spawn_proxy(upstream_url: String) -> std::net::SocketAddr {
                 let handshake = ruscker_proxy::ws::connect(&url, None, None)
                     .await
                     .expect("upstream handshake");
-                ws.on_upgrade(move |sock| ruscker_proxy::ws::pump(sock, handshake.stream))
+                ws.on_upgrade(move |sock| {
+                    ruscker_proxy::ws::pump_with_context(
+                        sock,
+                        handshake.stream,
+                        "test-app".into(),
+                        "test-replica".into(),
+                    )
+                })
             }
         }),
     );
@@ -99,4 +124,24 @@ async fn pump_forwards_both_ways_and_closes_cleanly() {
     })
     .await;
     assert!(drained.is_ok(), "pump tore down without hanging");
+}
+
+#[tokio::test]
+async fn pump_preserves_upstream_close_code_and_reason() {
+    let upstream = spawn_closing_upstream().await;
+    let proxy = spawn_proxy(upstream).await;
+    let (mut client, _resp) = tokio_tungstenite::connect_async(format!("ws://{proxy}/ws"))
+        .await
+        .expect("client connects through the proxy");
+
+    let frame = tokio::time::timeout(Duration::from_secs(5), client.next())
+        .await
+        .expect("close within 5s")
+        .expect("a close frame")
+        .expect("not an error");
+    let Message::Close(Some(close)) = frame else {
+        panic!("expected close frame, got {frame:?}");
+    };
+    assert_eq!(u16::from(close.code), 1001);
+    assert_eq!(close.reason.as_str(), "maintenance");
 }

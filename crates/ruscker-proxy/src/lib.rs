@@ -11,7 +11,5 @@
 //! reusable — every function here can be unit-tested without an
 //! axum server.
 
-#![allow(dead_code)]
-
 pub mod sticky;
 pub mod ws;

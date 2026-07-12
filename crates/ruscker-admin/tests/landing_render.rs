@@ -165,6 +165,39 @@ proxy:
 }
 
 #[tokio::test]
+async fn filters_toggle_hides_filters_without_hiding_search() {
+    // The crate-wide dead-code suppression hid that `show-filters` was
+    // carried into the page model but never consulted by the template
+    // (#935). Search and filters are independent appearance switches.
+    let yaml = r#"
+proxy:
+  title: Filter Toggle Test
+  landing-customization:
+    show-search: true
+    show-filters: false
+  specs:
+    - id: alpha
+      display-name: Alpha
+      container-image: img:1
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8(body.to_vec()).unwrap();
+
+    assert!(body.contains(r#"type="search""#), "search remains visible");
+    assert!(!body.contains(r#"x-model="subject""#), "subject filter is hidden");
+    assert!(!body.contains(r#"x-model="status_""#), "status filter is hidden");
+    assert!(!body.contains(r#"class="chip""#), "type chips are hidden");
+}
+
+#[tokio::test]
 async fn landing_honors_locale_cookie() {
     // Distinctive substrings from the per-locale intro in the example's
     // landing-customization.intro-locales — proves the locale cookie

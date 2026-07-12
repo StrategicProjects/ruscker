@@ -14,8 +14,6 @@
 //! Ruscker can crash and resume without losing track of who's
 //! running.
 
-#![allow(dead_code)]
-
 use async_trait::async_trait;
 use bollard::models::{
     ContainerCreateBody, ContainerSummaryStateEnum, HostConfig, NetworkCreateRequest, PortBinding,
@@ -1232,8 +1230,8 @@ fn cpu_percent_from_delta(
 /// means ready".
 /// `Some(exit_code)` once the container has stopped/exited, `None` while
 /// it is still running (or inspect failed — treat as "keep waiting").
-/// Mirrors the string-matching style of `state_from_docker` so it's
-/// robust across bollard enum shapes (#550 A).
+/// Uses the formatted status defensively because the inspect response's
+/// nested status type differs from the container-summary enum (#550 A).
 async fn container_exit_code(docker: &Docker, container_id: &str) -> Option<i64> {
     let info = docker.inspect_container(container_id, None).await.ok()?;
     let state = info.state?;
@@ -1376,19 +1374,6 @@ fn state_from_enum(s: Option<&ContainerSummaryStateEnum>) -> ReplicaState {
         _ => ReplicaState::Starting,
     }
 }
-
-fn state_from_docker(s: Option<&str>) -> ReplicaState {
-    match s {
-        Some(s) if s.contains("running") => ReplicaState::Ready,
-        Some(s) if s.contains("created") || s.contains("restarting") => ReplicaState::Starting,
-        Some(s) if s.contains("paused") => ReplicaState::Draining,
-        Some(s) if s.contains("exited") || s.contains("dead") || s.contains("removing") => {
-            ReplicaState::Stopped
-        }
-        _ => ReplicaState::Starting,
-    }
-}
-
 
 const DOCKER_HUB_REGISTRY: &str = "https://index.docker.io/v1/";
 
@@ -1590,15 +1575,6 @@ mod tests {
         assert_eq!(registry_from_image("docker.io/acme/app"), DOCKER_HUB_REGISTRY);
         assert_eq!(registry_from_image("ghcr.io/acme/app"), "ghcr.io");
         assert_eq!(registry_from_image("localhost:5000/app"), "localhost:5000");
-    }
-
-    #[test]
-    fn state_from_docker_maps_common_values() {
-        assert_eq!(state_from_docker(Some("running")), ReplicaState::Ready);
-        assert_eq!(state_from_docker(Some("created")), ReplicaState::Starting);
-        assert_eq!(state_from_docker(Some("paused")), ReplicaState::Draining);
-        assert_eq!(state_from_docker(Some("exited")), ReplicaState::Stopped);
-        assert_eq!(state_from_docker(None), ReplicaState::Starting);
     }
 
     #[test]

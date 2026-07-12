@@ -440,12 +440,6 @@ pub struct TypeChip {
     pub count: usize,
 }
 
-/// Counts to display alongside filter chips.
-#[derive(Debug, Clone, Default)]
-pub struct CardCounts {
-    pub total: usize,
-}
-
 /// Sort cards by recency (newest first). Cards without a parseable
 /// `updated` date sink to the end, preserving their relative
 /// declaration order. This matches the "Recentes" sort the mockup

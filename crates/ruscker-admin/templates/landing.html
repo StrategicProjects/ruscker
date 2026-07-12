@@ -189,6 +189,7 @@
 
   {# ── Sticky filter cluster (#623): search + filters + meta stay
      reachable while the catalog scrolls under them. ── #}
+  {% if show_search || show_filters %}
   <div class="portal-sticky">
   {# ── Filter row 1: search + theme select + sort + status ───── #}
   <div class="flex flex-wrap gap-2.5 items-center mb-3.5">
@@ -203,6 +204,7 @@
     </label>
     {% endif %}
 
+    {% if show_filters %}
     <div class="select-wrap" :class="subject !== 'all' ? 'is-active' : ''">
       <select x-model="subject"
               class="theme-select"
@@ -235,8 +237,10 @@
       </select>
       <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
     </div>
+    {% endif %}
   </div>
 
+  {% if show_filters %}
   {# ── Filter row 2: type chips with long labels ───── #}
   <div class="flex flex-wrap items-center gap-1.5 mb-2">
     <button class="chip"
@@ -255,6 +259,7 @@
     {% endfor %}
 
   </div>
+  {% endif %}
 
   {# ── Meta row: count + clear filters ───────────────────────── #}
   <div class="text-[11px] text-[color:var(--text-faint)] mb-3.5 flex items-center gap-1.5">
@@ -266,6 +271,7 @@
     </button>
   </div>
   </div>{# /portal-sticky #}
+  {% endif %}
 
   {# ── Card area (#701): one or more groups. `grid`/`list` renders a
      single unlabeled group with every card; `sections` renders one

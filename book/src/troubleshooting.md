@@ -68,6 +68,22 @@ container on a machine with full internet, or in CI — and copy the
 artifact over. Docker pulls and the `build.rs` Tailwind download (from
 GitHub) still work from a connected builder.
 
+If crates and the Rust toolchain are already cached but GitHub is unavailable,
+the admin build script cannot download its pinned standalone Tailwind CLI.
+Choose one of these explicit offline modes:
+
+```bash
+# Production/UI build: supply a previously downloaded Tailwind executable.
+TAILWIND_BIN=/opt/tailwindcss cargo build --release
+
+# Backend-only development/tests: compile with placeholder, unstyled CSS.
+TAILWIND_SKIP=1 cargo test --locked
+```
+
+`TAILWIND_SKIP` is not suitable for a production admin UI. Without either
+setting, a missing download now fails with a concise error explaining these
+options instead of a Rust panic.
+
 ## `perl: warning: Setting locale failed` during `apt`/`dpkg`
 Cosmetic — the install still succeeds. It means a locale your SSH
 session forwards (commonly `LC_CTYPE=UTF-8` from a macOS client via

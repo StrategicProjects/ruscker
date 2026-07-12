@@ -185,6 +185,12 @@ cargo build --release          # rustup fetches the pinned toolchain on first ru
 ./target/release/ruscker --help
 ```
 
+The first source build downloads the pinned standalone Tailwind CLI to
+`~/.cache/ruscker`. For an offline build, provide a previously downloaded
+binary with `TAILWIND_BIN=/path/to/tailwindcss cargo build --release`.
+Backend-only builds and tests may use `TAILWIND_SKIP=1`, which deliberately
+embeds placeholder CSS and therefore produces an unstyled admin UI.
+
 Development and release builds use Rust 1.96.0 from
 `rust-toolchain.toml`. The MSRV source of truth is
 `workspace.package.rust-version` in `Cargo.toml` (currently 1.94.0), and

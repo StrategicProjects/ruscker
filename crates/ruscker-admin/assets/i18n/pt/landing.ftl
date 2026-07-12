@@ -640,6 +640,8 @@ spec-form-scale-down = Limiar de scale-down
 spec-help-scale-down = Fração de utilização (0–1) abaixo da qual uma réplica é recolhida. Em branco = padrão do scaler.
 spec-form-scale-down-grace = Carência de scale-down (s)
 spec-help-scale-down-grace = Segundos abaixo do limiar antes de recolher a réplica. Em branco = padrão.
+spec-form-scale-down-cooldown = Cooldown pós-scale-down (s)
+spec-help-scale-down-cooldown = Segundos sem scale-up por saturação após recolher uma réplica. Em branco = 60; 0 desativa.
 spec-form-drain-timeout = Timeout de drenagem (s)
 spec-help-drain-timeout = Segundos para drenar as sessões de uma réplica antes de pará-la. Em branco = padrão.
 spec-form-routing-strategy = Estratégia de roteamento

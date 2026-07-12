@@ -23,7 +23,7 @@
 //! - **Flap dampening**: the worst-case flap (one user, one
 //!   seat, long sticky session) is stretched by both the
 //!   hysteresis windows AND a post-drop cooldown
-//!   ([`DEFAULT_SCALE_DOWN_COOLDOWN_TICKS`]) that suppresses
+//!   ([`ruscker_config::DEFAULT_SCALE_DOWN_COOLDOWN_SECS`]) that suppresses
 //!   saturation scale-up of a spec right after it was scaled
 //!   down. A spec we just dropped a replica from is almost
 //!   certainly still saturated (the session that pinned it
@@ -72,22 +72,6 @@ pub const DEFAULT_IDLE_GRACE_TICKS: u32 = 3;
 /// Setting this to 1 (used in unit tests) restores the
 /// "spawn on first saturated observation" behavior.
 pub const DEFAULT_SATURATION_GRACE_TICKS: u32 = 2;
-
-/// After scale-down stops a replica for a spec, suppress
-/// saturation-driven scale-up of that spec for this many ticks.
-/// With the default 10s interval that's ~60s. This breaks the
-/// residual spawn↔drop flap that the two-counter hysteresis
-/// only dampens: with `seats-per-container: 1` and one
-/// long-lived sticky session, replica A is permanently
-/// saturated, so right after we drop the idle replica B the
-/// saturation branch would want to spawn B again. The cooldown
-/// holds that off, so the flap (if load truly stays this shape)
-/// happens at most once per `idle_grace + cooldown + saturation_grace`
-/// window instead of once per `idle_grace + saturation_grace`.
-///
-/// Below-min and genuinely-growing load are unaffected — the
-/// cooldown only gates the *saturation* scale-up path.
-pub const DEFAULT_SCALE_DOWN_COOLDOWN_TICKS: u32 = 6;
 
 /// A freshly-Ready replica is exempt from the idle counter (and so from
 /// idle scale-down) for this long, measured from `started_at` — which the
@@ -209,7 +193,7 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
             ?interval,
             idle_grace_ticks = DEFAULT_IDLE_GRACE_TICKS,
             saturation_grace_ticks = DEFAULT_SATURATION_GRACE_TICKS,
-            scale_down_cooldown_ticks = DEFAULT_SCALE_DOWN_COOLDOWN_TICKS,
+            scale_down_cooldown_secs = ruscker_config::DEFAULT_SCALE_DOWN_COOLDOWN_SECS,
             "auto-scaler started"
         );
         // Per-replica idle-tick counter, per-spec saturated-tick
@@ -254,14 +238,15 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
                 continue;
             }
 
-            tick(
+            tick_with_interval(
                 &state,
                 &mut idle_ticks,
                 &mut saturation_ticks,
                 &mut cooldown,
                 DEFAULT_IDLE_GRACE_TICKS,
                 DEFAULT_SATURATION_GRACE_TICKS,
-                DEFAULT_SCALE_DOWN_COOLDOWN_TICKS,
+                None,
+                interval,
             )
             .await;
         }
@@ -279,22 +264,25 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
 /// - `spawn_after_saturated_ticks` — hysteresis threshold for
 ///   scale-up on saturation. Below-min spawns never use this;
 ///   they're baseline capacity, not load-driven.
-/// - `cooldown_ticks` — how long to suppress saturation
-///   scale-up after a scale-down (per spec).
+/// - `default_cooldown_ticks` — test-only fallback when the spec leaves
+///   `scale-down-cooldown-secs` unset. Production passes `None` and uses
+///   the schema default.
+/// - `interval` — scaler cadence used to convert per-spec seconds to ticks.
 ///
 /// Scale-up and scale-down are mutually exclusive for a single
 /// spec on a single tick: a saturated spec by definition has no
 /// idle replicas, and an over-min spec with idle replicas isn't
 /// saturated.
 #[allow(clippy::too_many_arguments)]
-async fn tick(
+async fn tick_with_interval(
     state: &AppState,
     idle_ticks: &mut HashMap<ReplicaId, u32>,
     saturation_ticks: &mut HashMap<String, u32>,
     cooldown: &mut HashMap<String, u32>,
     drop_after_ticks: u32,
     spawn_after_saturated_ticks: u32,
-    cooldown_ticks: u32,
+    default_cooldown_ticks: Option<u32>,
+    interval: Duration,
 ) {
     let Some(backend) = state.backend.clone() else {
         return;
@@ -377,6 +365,7 @@ async fn tick(
 
         let min = spec.effective_min_replicas() as usize;
         let max = spec.effective_max_replicas() as usize;
+        let cooldown_after_drop = cooldown_ticks_for_spec(spec, interval, default_cooldown_ticks);
 
         // Read the post-drop cooldown for this spec, then
         // decrement it (creating no entry if absent). `cooling`
@@ -567,9 +556,9 @@ async fn tick(
                 // Arm the post-drop cooldown so the next saturation
                 // spawn for this spec waits — breaks the flap.
                 // Set after this tick's decrement so it lasts the
-                // full window. `0` disables (tests).
-                if stopped_any && cooldown_ticks > 0 {
-                    cooldown.insert(spec.id.clone(), cooldown_ticks);
+                // full configured window. `0` disables per spec.
+                if stopped_any && cooldown_after_drop > 0 {
+                    cooldown.insert(spec.id.clone(), cooldown_after_drop);
                 }
             }
         }
@@ -640,7 +629,55 @@ fn scale_up_triggered(replicas: &[ruscker_core::Replica], up_threshold: Option<f
 /// `scale-down-grace` against the scaler's fixed tick cadence.
 fn grace_secs_to_ticks(secs: u64, interval: Duration) -> u32 {
     let iv = interval.as_secs().max(1);
-    secs.div_ceil(iv).max(1) as u32
+    secs.div_ceil(iv).max(1).min(u32::MAX as u64) as u32
+}
+
+/// Convert the per-spec post-drop cooldown to ticks. Unlike idle grace,
+/// zero is meaningful here: it explicitly disables suppression (#936).
+fn cooldown_secs_to_ticks(secs: u64, interval: Duration) -> u32 {
+    if secs == 0 {
+        0
+    } else {
+        grace_secs_to_ticks(secs, interval)
+    }
+}
+
+fn cooldown_ticks_for_spec(
+    spec: &Spec,
+    interval: Duration,
+    default_cooldown_ticks: Option<u32>,
+) -> u32 {
+    match spec.scale_down_cooldown_secs {
+        Some(secs) => cooldown_secs_to_ticks(secs, interval),
+        None => default_cooldown_ticks.unwrap_or_else(|| {
+            cooldown_secs_to_ticks(spec.effective_scale_down_cooldown_secs(), interval)
+        }),
+    }
+}
+
+/// Test wrapper that keeps the existing tick-level tuning surface. An
+/// explicit per-spec cooldown still wins over this fallback.
+#[cfg(test)]
+async fn tick(
+    state: &AppState,
+    idle_ticks: &mut HashMap<ReplicaId, u32>,
+    saturation_ticks: &mut HashMap<String, u32>,
+    cooldown: &mut HashMap<String, u32>,
+    drop_after_ticks: u32,
+    spawn_after_saturated_ticks: u32,
+    default_cooldown_ticks: u32,
+) {
+    tick_with_interval(
+        state,
+        idle_ticks,
+        saturation_ticks,
+        cooldown,
+        drop_after_ticks,
+        spawn_after_saturated_ticks,
+        Some(default_cooldown_ticks),
+        DEFAULT_INTERVAL,
+    )
+    .await;
 }
 
 /// For API specs, overlay request-based capacity onto the snapshot so the
@@ -1783,6 +1820,16 @@ proxy:
     }
 
     #[test]
+    fn cooldown_secs_to_ticks_allows_zero_and_rounds_up() {
+        let iv = Duration::from_secs(10);
+        assert_eq!(cooldown_secs_to_ticks(60, iv), 6);
+        assert_eq!(cooldown_secs_to_ticks(25, iv), 3);
+        assert_eq!(cooldown_secs_to_ticks(1, iv), 1);
+        assert_eq!(cooldown_secs_to_ticks(0, iv), 0);
+        assert_eq!(cooldown_secs_to_ticks(u64::MAX, iv), u32::MAX);
+    }
+
+    #[test]
     fn overlay_request_capacity_maps_inflight_for_api_only() {
         let api: Spec = serde_yaml_ng::from_str(
             "id: api1\ncontainer-image: a:1\ntype: api\nconcurrent-requests-per-replica: 50\n",
@@ -2073,6 +2120,7 @@ proxy:
     container-image: nginx:alpine
     min-replicas: 1
     max-replicas: 3
+    scale-down-cooldown-secs: 25
 "#,
             backend.clone(),
         );
@@ -2091,11 +2139,13 @@ proxy:
         let mut cooldown = HashMap::new();
         // idle grace = 1 (drop immediately), saturation grace = 1
         // (would respawn immediately if not for cooldown),
-        // cooldown = 3 ticks.
-        let (drop_after, sat_after, cd) = (1u32, 1u32, 3u32);
+        // The per-spec 25-second cooldown rounds up to 3 ticks and wins
+        // over the test fallback of 99 ticks.
+        let (drop_after, sat_after, fallback_cd) = (1u32, 1u32, 99u32);
 
         // Tick 1: B is idle past grace → drop B → count=1, cooldown armed.
-        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, fallback_cd)
+            .await;
         assert_eq!(state.replicas.read().await.replicas_of("flappy").len(), 1);
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 0, "drop only, no spawn yet");
         assert!(cooldown.contains_key("flappy"), "cooldown armed after drop");
@@ -2103,7 +2153,8 @@ proxy:
         // Ticks 2-4: A still saturated (1/1), count=1<max, but
         // cooldown suppresses the saturation spawn.
         for t in 0..3 {
-            tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+            tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, fallback_cd)
+                .await;
             assert_eq!(
                 backend.spawns.load(Ordering::SeqCst),
                 0,
@@ -2112,7 +2163,8 @@ proxy:
         }
 
         // Cooldown now expired → saturation spawn allowed again.
-        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, cd).await;
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, drop_after, sat_after, fallback_cd)
+            .await;
         assert_eq!(
             backend.spawns.load(Ordering::SeqCst),
             1,
@@ -2192,6 +2244,7 @@ proxy:
     container-image: nginx:alpine
     min-replicas: 1
     max-replicas: 3
+    scale-down-cooldown-secs: 0
 "#,
             backend.clone(),
         );
@@ -2206,11 +2259,12 @@ proxy:
         let mut sat = HashMap::new();
         let mut cooldown = HashMap::new();
 
-        // Tick 1: drop the idle one (count 2→1). cooldown=0 → not armed.
-        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 0).await;
+        // Tick 1: the explicit per-spec zero wins over the six-tick test
+        // fallback, so dropping the idle replica does not arm cooldown.
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 6).await;
         assert!(!cooldown.contains_key("nocd"));
         // Tick 2: A saturated, count=1<max → respawn immediately.
-        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 0).await;
+        tick(&state, &mut idle_ticks, &mut sat, &mut cooldown, 1, 1, 6).await;
         assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
     }
 

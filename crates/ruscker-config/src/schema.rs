@@ -969,6 +969,13 @@ pub struct Spec {
     #[serde(rename = "scale-down-grace")]
     pub scale_down_grace: Option<u64>,
 
+    /// Seconds to suppress saturation-driven scale-up after this spec
+    /// scales down. Prevents an idle replica from being immediately
+    /// respawned while another long-lived session keeps the pool saturated.
+    /// Defaults to 60; `0` disables the cooldown.
+    #[serde(rename = "scale-down-cooldown-secs")]
+    pub scale_down_cooldown_secs: Option<u64>,
+
     /// Seconds to wait for in-flight sessions to drain before killing
     /// a replica being retired. Defaults to 60.
     #[serde(rename = "drain-timeout")]
@@ -1091,6 +1098,10 @@ pub enum SpecKind {
 /// container each — out of the box, rather than locking everyone out after
 /// the first. Override per spec with `max-replicas`.
 pub const DEFAULT_MAX_REPLICAS: u32 = 5;
+
+/// Default post-scale-down cooldown in seconds. With the scaler's default
+/// 10-second cadence this preserves the original six-tick window.
+pub const DEFAULT_SCALE_DOWN_COOLDOWN_SECS: u64 = 60;
 
 /// Default `seats-per-container` for web-framework specs (Shiny, Streamlit,
 /// Dash, Voilà — `SpecKind::Shiny`/`InteractiveApp`). These frameworks
@@ -1301,6 +1312,13 @@ impl Spec {
     /// pool is still moderately utilized.
     pub fn effective_scale_down_threshold(&self) -> Option<f64> {
         self.scale_down_threshold.map(|f| f.0)
+    }
+
+    /// Post-scale-down window during which saturation-driven scale-up is
+    /// suppressed for this spec. Default 60 seconds; `0` opts out (#936).
+    pub fn effective_scale_down_cooldown_secs(&self) -> u64 {
+        self.scale_down_cooldown_secs
+            .unwrap_or(DEFAULT_SCALE_DOWN_COOLDOWN_SECS)
     }
 
     /// Whether a signed-in user's sticky sessions on this spec should be
@@ -1906,6 +1924,31 @@ proxy:
     }
 
     #[test]
+    fn scale_down_cooldown_defaults_parses_and_allows_zero() {
+        let yaml = r#"
+proxy:
+  specs:
+    - id: default
+      container-image: nginx
+    - id: tuned
+      container-image: nginx
+      scale-down-cooldown-secs: 25
+    - id: disabled
+      container-image: nginx
+      scale-down-cooldown-secs: 0
+"#;
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let specs = &config.proxy.specs;
+        assert_eq!(
+            specs[0].effective_scale_down_cooldown_secs(),
+            DEFAULT_SCALE_DOWN_COOLDOWN_SECS
+        );
+        assert_eq!(specs[1].scale_down_cooldown_secs, Some(25));
+        assert_eq!(specs[1].effective_scale_down_cooldown_secs(), 25);
+        assert_eq!(specs[2].effective_scale_down_cooldown_secs(), 0);
+    }
+
+    #[test]
     fn cold_start_spec_still_scales_to_one() {
         // A cold-start app sets `min-replicas: 0` (don't pre-spawn) and
         // usually leaves `max-replicas` unset. effective-max must NOT
@@ -1991,6 +2034,7 @@ proxy:
             scale_up_threshold: None,
             scale_down_threshold: None,
             scale_down_grace: None,
+            scale_down_cooldown_secs: None,
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,
@@ -2041,6 +2085,7 @@ proxy:
             scale_up_threshold: None,
             scale_down_threshold: None,
             scale_down_grace: None,
+            scale_down_cooldown_secs: None,
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,
@@ -2091,6 +2136,7 @@ proxy:
             scale_up_threshold: None,
             scale_down_threshold: None,
             scale_down_grace: None,
+            scale_down_cooldown_secs: None,
             drain_timeout: None,
             routing_strategy: None,
             inject_base_href: None,

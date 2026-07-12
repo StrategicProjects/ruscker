@@ -839,7 +839,7 @@
             </div>
             <span class="switch">
               <input type="checkbox" x-model="autoscaling"
-                     @change="if (!autoscaling) { form.scale_up_threshold = ''; form.scale_down_threshold = ''; form.scale_down_grace = ''; }">
+                     @change="if (!autoscaling) { form.scale_up_threshold = ''; form.scale_down_threshold = ''; form.scale_down_grace = ''; form.scale_down_cooldown_secs = ''; }">
               <span class="switch__track"><span class="switch__dot"></span></span>
             </span>
           </label>
@@ -879,6 +879,14 @@
               </div>
               <input id="f-scale-grace" type="number" name="scale_down_grace" min="0"
                      value="{{ form.scale_down_grace }}" placeholder="30" class="spec-form-input">
+            </div>
+            <div class="spec-form-field">
+              <div class="spec-form-label-row">
+                <label for="f-scale-cooldown" class="spec-form-label">{{ self.t("spec-form-scale-down-cooldown") }}</label>
+                {% call help(self.t("spec-help-scale-down-cooldown")) %}{% endcall %}
+              </div>
+              <input id="f-scale-cooldown" type="number" name="scale_down_cooldown_secs" min="0"
+                     value="{{ form.scale_down_cooldown_secs }}" placeholder="60" class="spec-form-input">
             </div>
             <div class="spec-form-field">
               <div class="spec-form-label-row">
@@ -1351,7 +1359,8 @@ window.ruscker.specForm = (initial, logoImages, availableGroups) => ({
   // toggle's signal (#854).
   autoscaling: !!((initial.scale_up_threshold || '').toString().trim()
     || (initial.scale_down_threshold || '').toString().trim()
-    || (initial.scale_down_grace || '').toString().trim()),
+    || (initial.scale_down_grace || '').toString().trim()
+    || (initial.scale_down_cooldown_secs || '').toString().trim()),
   // Card-cover editing mode: 'auto' (kind tint, empty cover),
   // 'solid' (color), 'gradient' (builder), or 'legacy' for a saved
   // image cover (`url(...)`) from before image covers were retired —

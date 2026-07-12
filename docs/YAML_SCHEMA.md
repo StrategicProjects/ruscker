@@ -583,6 +583,7 @@ applied) and flagged by `ruscker validate`.
 | `scale-up-threshold` | float | unset | scale up when pool utilization exceeds this; unset ⇒ the built-in saturation rule (enforced, #333) |
 | `scale-down-threshold` | float | unset | only retire idle replicas while utilization is below this; unset ⇒ the built-in idle rule (enforced, #333) |
 | `scale-down-grace` | s | unset | idle-grace before retiring a replica; unset ⇒ the global ~30 s grace (enforced, #333) |
+| `scale-down-cooldown-secs` | s | `60` | suppress saturation-driven scale-up after this app scales down, preventing immediate respawn flaps; `0` disables. Ruscker extension (#936) |
 | `drain-timeout` | s | `60` | grace for in-flight sessions on a `max-lifetime` recycle (enforced, #335) |
 | `routing-strategy` | enum | varies | See below |
 | `concurrent-requests-per-replica` | u32 | `100` | API-only — per-replica in-flight cap the scaler scales on (enforced, #336) |

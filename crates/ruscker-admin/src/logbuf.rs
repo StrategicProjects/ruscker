@@ -36,12 +36,25 @@ impl LogBuffer {
         }
     }
 
+    /// Acquire the buffer even if an earlier writer panicked while holding
+    /// the mutex. This is a best-effort, in-memory log tail: losing the
+    /// dashboard and potentially cascading the panic through the process is
+    /// worse than continuing from the still structurally valid ring buffer.
+    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     /// Append one line, evicting the oldest if at capacity.
     pub fn push_line(&self, line: impl Into<String>) {
-        let mut g = self.inner.lock().unwrap();
+        // Run caller-provided conversion code before taking the mutex so a
+        // custom `Into<String>` panic cannot poison the shared buffer.
+        let line = line.into();
+        let mut g = self.lock();
         let seq = g.next_seq;
         g.next_seq += 1;
-        g.lines.push_back((seq, line.into()));
+        g.lines.push_back((seq, line));
         while g.lines.len() > g.cap {
             g.lines.pop_front();
         }
@@ -50,7 +63,7 @@ impl LogBuffer {
     /// Current snapshot, oldest-first — full buffer (e.g. the download
     /// endpoint).
     pub fn snapshot(&self) -> Vec<String> {
-        let g = self.inner.lock().unwrap();
+        let g = self.lock();
         g.lines.iter().map(|(_, l)| l.clone()).collect()
     }
 
@@ -59,7 +72,7 @@ impl LogBuffer {
     /// a long-lived buffer doesn't ship the whole ring on every load
     /// (#200); the SSE stream then appends what's new.
     pub fn tail(&self, n: usize) -> (Vec<String>, usize) {
-        let g = self.inner.lock().unwrap();
+        let g = self.lock();
         let total = g.lines.len();
         let start = total.saturating_sub(n);
         let lines = g.lines.iter().skip(start).map(|(_, l)| l.clone()).collect();
@@ -70,13 +83,13 @@ impl LogBuffer {
     /// records this at connect and asks [`Self::since`] for anything past
     /// it.
     pub fn cursor(&self) -> u64 {
-        self.inner.lock().unwrap().next_seq
+        self.lock().next_seq
     }
 
     /// Lines with `seq >= after`, plus the new cursor. Lines evicted
     /// since `after` are simply absent (a tail, not a guaranteed log).
     pub fn since(&self, after: u64) -> (Vec<String>, u64) {
-        let g = self.inner.lock().unwrap();
+        let g = self.lock();
         let new: Vec<String> = g
             .lines
             .iter()
@@ -134,5 +147,28 @@ mod tests {
         // Nothing new past the latest cursor.
         let (empty, _) = b.since(next);
         assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn recovers_after_mutex_poisoning() {
+        let b = LogBuffer::new(4);
+        b.push_line("before panic");
+
+        let poison_target = b.clone();
+        let panicked = std::panic::catch_unwind(move || {
+            let _guard = poison_target.inner.lock().expect("mutex starts healthy");
+            panic!("simulate a writer panic while holding the log buffer");
+        });
+        assert!(panicked.is_err(), "the mutex must have been poisoned");
+        assert!(b.inner.is_poisoned());
+
+        // Every public lock-taking operation must keep working. Because the
+        // poison flag remains set, this also proves recovery is repeatable.
+        b.push_line("after panic");
+        assert_eq!(b.snapshot(), vec!["before panic", "after panic"]);
+        assert_eq!(b.tail(1), (vec!["after panic".to_string()], 2));
+        let cursor = b.cursor();
+        b.push_line("new line");
+        assert_eq!(b.since(cursor).0, vec!["new line"]);
     }
 }

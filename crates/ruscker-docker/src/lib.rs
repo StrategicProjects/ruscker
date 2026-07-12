@@ -401,14 +401,38 @@ impl LocalDockerBackend {
             serveraddress: canonical_server_address(c.server_address.as_deref()),
             ..Default::default()
         });
-        let auth = auth_desc(creds);
-        tracing::info!(image, auth = %auth, "pulling image");
+        let context = pull_log_context(image, creds);
+        let auth = auth_desc(&context);
+        tracing::info!(
+            image,
+            auth_mode = context.auth_mode,
+            credential = %context.credential,
+            registry = %context.registry,
+            username = %context.username,
+            "pulling image"
+        );
         let mut stream = self.docker.create_image(Some(opts), None, bollard_creds);
         while let Some(event) = stream.next().await {
             // The auth context rides in the error: "pull access denied"
             // with `anonymous` vs `authenticated as …` is the difference
             // between a missing credential and a wrong one (#820).
-            event.map_err(|e| backend_err(&format!("pull image ({auth})"), e))?;
+            match event {
+                Err(error) => {
+                    log_pull_failure(image, &context, &error);
+                    return Err(backend_err(&format!("pull image ({auth})"), error));
+                }
+                Ok(info) => {
+                    if let Some(error) = info.error_detail {
+                        let message = error
+                            .message
+                            .unwrap_or_else(|| "Docker reported an unspecified pull error".into());
+                        log_pull_failure(image, &context, &message);
+                        return Err(CoreError::Backend(format!(
+                            "pull image ({auth}): {message}"
+                        )));
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -984,14 +1008,20 @@ impl ContainerBackend for LocalDockerBackend {
         // the spawn pull already does, but the editor's Pull button
         // (this path) didn't — "denied — anonymous" vs "— authenticated
         // as …" tells a dropped credential from a rejected one.
-        let auth = auth_desc(creds);
+        let context = pull_log_context(image, creds);
+        let auth = auth_desc(&context);
+        let log_image = image.to_string();
         let stream = self
             .docker
             .create_image(Some(opts), None, bollard_creds)
             .map(move |ev| match ev {
                 Ok(info) => {
                     if let Some(err) = info.error_detail {
-                        return format!("error: {} — {auth}", err.message.unwrap_or_default());
+                        let message = err
+                            .message
+                            .unwrap_or_else(|| "Docker reported an unspecified pull error".into());
+                        log_pull_failure(&log_image, &context, &message);
+                        return format!("error: {message} — {auth}");
                     }
                     let id = info.id.unwrap_or_default();
                     let status = info.status.unwrap_or_default();
@@ -1011,7 +1041,10 @@ impl ContainerBackend for LocalDockerBackend {
                     }
                     line
                 }
-                Err(e) => format!("error: {e}"),
+                Err(error) => {
+                    log_pull_failure(&log_image, &context, &error);
+                    format!("error: {error} — {auth}")
+                }
             });
         Ok(Box::pin(stream))
     }
@@ -1357,6 +1390,8 @@ fn state_from_docker(s: Option<&str>) -> ReplicaState {
 }
 
 
+const DOCKER_HUB_REGISTRY: &str = "https://index.docker.io/v1/";
+
 /// The registry address the Docker daemon should see for a pull.
 ///
 /// Docker Hub is special: `docker login` records it as
@@ -1370,9 +1405,8 @@ fn state_from_docker(s: Option<&str>) -> ReplicaState {
 /// credential store documents as "Docker Hub") to the canonical
 /// address; any other registry passes through verbatim.
 fn canonical_server_address(addr: Option<&str>) -> Option<String> {
-    const HUB: &str = "https://index.docker.io/v1/";
     let Some(a) = addr.map(str::trim).filter(|s| !s.is_empty()) else {
-        return Some(HUB.to_string());
+        return Some(DOCKER_HUB_REGISTRY.to_string());
     };
     let bare = a
         .trim_start_matches("https://")
@@ -1385,24 +1419,89 @@ fn canonical_server_address(addr: Option<&str>) -> Option<String> {
         "docker.io" | "index.docker.io" | "registry-1.docker.io"
             | "hub.docker.com" | "registry.hub.docker.com"
     ) {
-        Some(HUB.to_string())
+        Some(DOCKER_HUB_REGISTRY.to_string())
     } else {
         Some(a.to_string())
     }
 }
 
+/// Non-secret, structured context attached to every pull failure. Keeping
+/// this as its own value makes it impossible for the password to be logged by
+/// accident: the secret never enters the context at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PullLogContext {
+    auth_mode: &'static str,
+    credential: String,
+    registry: String,
+    username: String,
+}
+
+fn pull_log_context(
+    image: &str,
+    creds: Option<&ruscker_core::RegistryCredentials>,
+) -> PullLogContext {
+    match creds {
+        Some(creds) => PullLogContext {
+            auth_mode: "authenticated",
+            credential: creds
+                .credential_name
+                .clone()
+                .unwrap_or_else(|| "inline".to_string()),
+            registry: canonical_server_address(creds.server_address.as_deref())
+                .unwrap_or_else(|| DOCKER_HUB_REGISTRY.to_string()),
+            username: creds.username.clone(),
+        },
+        None => PullLogContext {
+            auth_mode: "anonymous",
+            credential: "none".to_string(),
+            registry: registry_from_image(image),
+            username: "none".to_string(),
+        },
+    }
+}
+
+/// Infer the registry from a Docker image reference when an anonymous pull
+/// has no credential server address. Docker treats the first path component
+/// as a registry only when it looks like a host (`.`, `:`, or `localhost`);
+/// otherwise the reference belongs to Docker Hub.
+fn registry_from_image(image: &str) -> String {
+    let first = image.split('/').next().unwrap_or_default();
+    if image.contains('/')
+        && (first == "localhost" || first.contains('.') || first.contains(':'))
+    {
+        canonical_server_address(Some(first)).unwrap_or_else(|| first.to_string())
+    } else {
+        DOCKER_HUB_REGISTRY.to_string()
+    }
+}
+
+fn log_pull_failure(
+    image: &str,
+    context: &PullLogContext,
+    error: impl std::fmt::Display,
+) {
+    tracing::error!(
+        image,
+        auth_mode = context.auth_mode,
+        credential = %context.credential,
+        registry = %context.registry,
+        username = %context.username,
+        error = %error,
+        "image pull failed"
+    );
+}
+
 /// Operator-facing description of how a pull authenticates — rides in
 /// the pull error so "credential ignored / not attached" is diagnosable
 /// from the splash message alone (#820).
-fn auth_desc(creds: Option<&ruscker_core::RegistryCredentials>) -> String {
-    match creds {
-        Some(c) => format!(
+fn auth_desc(context: &PullLogContext) -> String {
+    if context.auth_mode == "authenticated" {
+        format!(
             "authenticated as {} @ {}",
-            c.username,
-            canonical_server_address(c.server_address.as_deref())
-                .unwrap_or_else(|| "Docker Hub".into())
-        ),
-        None => "anonymous".to_string(),
+            context.username, context.registry
+        )
+    } else {
+        format!("anonymous @ {}", context.registry)
     }
 }
 
@@ -1458,14 +1557,39 @@ mod tests {
     }
 
     #[test]
-    fn auth_desc_names_user_and_registry() {
-        assert_eq!(auth_desc(None), "anonymous");
+    fn pull_log_context_names_auth_credential_and_registry_without_password() {
+        let anonymous = pull_log_context("ghcr.io/acme/public:latest", None);
+        assert_eq!(anonymous.auth_mode, "anonymous");
+        assert_eq!(anonymous.credential, "none");
+        assert_eq!(anonymous.registry, "ghcr.io");
+        assert_eq!(anonymous.username, "none");
+        assert_eq!(auth_desc(&anonymous), "anonymous @ ghcr.io");
+
         let c = ruscker_core::RegistryCredentials {
             username: "milkway".into(),
-            password: "x".into(),
+            password: "never-log-this-password".into(),
             server_address: Some("docker.io".into()),
+            credential_name: Some("private-hub".into()),
         };
-        assert_eq!(auth_desc(Some(&c)), "authenticated as milkway @ https://index.docker.io/v1/");
+        let authenticated = pull_log_context("milkway/private", Some(&c));
+        assert_eq!(authenticated.auth_mode, "authenticated");
+        assert_eq!(authenticated.credential, "private-hub");
+        assert_eq!(authenticated.registry, DOCKER_HUB_REGISTRY);
+        assert_eq!(authenticated.username, "milkway");
+        assert_eq!(
+            auth_desc(&authenticated),
+            "authenticated as milkway @ https://index.docker.io/v1/"
+        );
+        assert!(!format!("{authenticated:?}").contains(&c.password));
+    }
+
+    #[test]
+    fn anonymous_registry_is_inferred_from_the_image_reference() {
+        assert_eq!(registry_from_image("ubuntu"), DOCKER_HUB_REGISTRY);
+        assert_eq!(registry_from_image("library/nginx"), DOCKER_HUB_REGISTRY);
+        assert_eq!(registry_from_image("docker.io/acme/app"), DOCKER_HUB_REGISTRY);
+        assert_eq!(registry_from_image("ghcr.io/acme/app"), "ghcr.io");
+        assert_eq!(registry_from_image("localhost:5000/app"), "localhost:5000");
     }
 
     #[test]

@@ -241,6 +241,7 @@ pub async fn resolve(
                 username,
                 password,
                 server_address,
+                credential_name: Some(name.to_string()),
             }))
         }
     }
@@ -447,6 +448,7 @@ mod tests {
         assert_eq!(c.username, "bot");
         assert_eq!(c.password, "hunter2");
         assert_eq!(c.server_address.as_deref(), Some("registry.example.com"));
+        assert_eq!(c.credential_name.as_deref(), Some("priv"));
     }
 
     #[tokio::test]

@@ -61,12 +61,15 @@ pub type CoreResult<T> = Result<T, CoreError>;
 /// `ghcr.io`, etc.) — leave it `None` for Docker Hub. The username
 /// and password are required when present; partial credentials
 /// (just a username, just a password) make no sense and the
-/// resolver should produce `None` instead.
+/// resolver should produce `None` instead. `credential_name` is optional
+/// non-secret provenance for diagnostics: stored credentials carry their
+/// admin-library name, while inline YAML credentials leave it unset.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegistryCredentials {
     pub username: String,
     pub password: String,
     pub server_address: Option<String>,
+    pub credential_name: Option<String>,
 }
 
 /// Backend-neutral container resource limits. The local Docker

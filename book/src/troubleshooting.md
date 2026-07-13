@@ -23,6 +23,26 @@ the spec form.
   `docker-registry-username` + `docker-registry-password` (the latter
   via `${DOCKER_REGISTRY_PASSWORD}`).
 
+## An app keeps failing with an old or broken image
+
+You pushed a fixed image to the registry under the **same tag**, but
+the app keeps crashing with the old error. That's not a Docker bug and
+doesn't need a daemon restart — it's the pull-if-missing design: once
+a tag is on the host, spawns use the local copy and never re-contact
+the registry (a flaky network must not stop an app whose image is
+already local).
+
+The fix is one click: **Apps → the app's "Update image" button**. It
+forces a pull, the daemon fetches the new manifest for the tag, and
+the next start uses the fixed image — verified end to end, no
+`systemctl restart docker` involved.
+
+If a forced pull *doesn't* help and the registry digest is identical
+to the local one (Docker answers "Image is up to date"), you may be
+looking at genuine local-cache corruption — rare, and daemon-side. In
+that order: `docker rmi <image>` then Update image again; a daemon
+restart is the last resort, not the routine.
+
 ## A Shiny app loads but the page is broken / no live updates
 Shiny needs WebSockets. Make sure your reverse proxy forwards the
 upgrade headers (`Upgrade` / `Connection "upgrade"`) — see the nginx

@@ -5,6 +5,11 @@ A field-by-field reference for migrating a ShinyProxy 3.x
 [Migrating from ShinyProxy](./migrating.md); this page answers the
 narrower question *"what happens to each key in my config?"*
 
+> Context: in Ruscker your `application.yml` is the **import format**
+> (`ruscker import` brings the specs into the database); the service's
+> own config is `ruscker.yml` — same schema. See
+> [Configuration](./configuration.md) for the four-layer model.
+
 Statuses:
 
 | | Meaning |

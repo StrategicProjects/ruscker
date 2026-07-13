@@ -12,8 +12,9 @@ sudo apt install ./ruscker_<version>-1_amd64.deb
 
 Manage your **apps, landing page and users in the admin panel** at
 `/admin` — the unit runs with `--db`, so the catalog is live out of the
-box. `application.yml` only carries **deployment** settings; put your
-**secrets** in `/etc/ruscker/ruscker.env` (read by the unit):
+box. `/etc/ruscker/ruscker.yml` only carries **service** settings (every
+option is documented inline in the shipped file); put your **secrets** in
+`/etc/ruscker/ruscker.env` (read by the unit):
 
 ```ini
 RUSCKER_ADMIN_TOKEN=...        # openssl rand -hex 32
@@ -42,8 +43,8 @@ sudo systemctl edit ruscker
 [Service]
 SupplementaryGroups=docker
 ExecStart=
-ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml \
-  --bind 127.0.0.1:8090 --docker --db /var/lib/ruscker/ruscker.db
+ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/ruscker.yml \
+  --docker --db /var/lib/ruscker/ruscker.db
 ```
 
 ```sh
@@ -371,7 +372,7 @@ services:
   ruscker:
     image: ghcr.io/strategicprojects/ruscker:latest
     command: >
-      serve --config /etc/ruscker/application.yml
+      serve --config /etc/ruscker/ruscker.yml
       --bind 0.0.0.0:8080 --docker --db /var/lib/ruscker/ruscker.db
     ports: ["127.0.0.1:8090:8080"]
     environment:
@@ -379,7 +380,7 @@ services:
       RUSCKER_MASTER_KEY:  ${RUSCKER_MASTER_KEY}
       RUSCKER_COOKIE_KEY:  ${RUSCKER_COOKIE_KEY}
     volumes:
-      - ./application.yml:/etc/ruscker/application.yml:ro
+      - ./ruscker.yml:/etc/ruscker/ruscker.yml:ro
       - /var/run/docker.sock:/var/run/docker.sock
       - ruscker-data:/var/lib/ruscker
     restart: unless-stopped
@@ -395,7 +396,7 @@ trade-off as the `docker` group with the `.deb`.
 
 State lives in two places:
 
-- **`/etc/ruscker/`** — `application.yml` and `ruscker.env` (your
+- **`/etc/ruscker/`** — `ruscker.yml` and `ruscker.env` (your
   tokens). Back these up with the rest of `/etc`.
 - **The SQLite DB** (`/var/lib/ruscker/ruscker.db`) — specs, the image
   library, encrypted credentials, landing customization and the audit

@@ -1,26 +1,31 @@
 # Configuration
 
-Ruscker has **two layers** of configuration, and it helps to keep them
-apart:
+Ruscker's configuration lives in **four places**, each with its own
+job — keeping them apart answers most "where do I set X?" questions:
 
-- **Portal content** — your apps (specs), the landing page, users,
-  credentials, and media. This lives in the **database** and is managed
-  from the [admin panel](./admin.md); you don't write any YAML for it.
-  On a fresh `--db` the portal even seeds a set of showcase apps for you.
-- **Runtime / deployment** — *how and where* Ruscker runs: the address it
-  binds, whether it sits at the site root or under a subpath, the Docker
-  backend, the database, secrets, and HA. These are **CLI flags and
-  environment variables**, set once at startup.
+- **`ruscker.yml`** — how the **service** runs: bind address and port,
+  the subpath (`server.context-path`), forwarded-header trust, proxy
+  timeouts, metrics. The `.deb` installs a fully self-documented file
+  at `/etc/ruscker/ruscker.yml`; a few of these also have CLI-flag
+  overrides for one-off runs.
+- **`ruscker.env`** — **secrets** and environment: the admin token,
+  the master/cookie keys, registry passwords. Secrets are never
+  written in YAML — reference them as `${VAR}` and define them here.
+- **The database** (`--db`) — your **portal**: apps (specs), the
+  landing appearance, users, credentials, media. Managed from the
+  [admin panel](./admin.md); on a fresh `--db` it even seeds a set of
+  showcase apps for you.
+- **`application.yml`** — the **ShinyProxy import format**:
+  `ruscker import application.yml --db …` brings an existing config
+  into the database. It parses with the same schema as `ruscker.yml`,
+  so an existing file also still works as `--config` — but the
+  canonical service file is `ruscker.yml` (`serve` without `--config`
+  finds `ruscker.yml` first and falls back to `application.yml`).
 
-The `application.yml` file is the **bootstrap + migration format**: it
-must exist (it can be two lines), it carries the runtime `proxy:`
-settings that aren't flags, and it's how you **import an existing
-ShinyProxy config**. If you prefer to drive everything from YAML
-(GitOps), you still can — but for a normal install the admin panel is
-where you manage apps, and the YAML stays small.
-
-> Secrets are never written in the YAML — use `${VAR}` interpolation and
-> set the variables in the environment (or `/etc/ruscker/ruscker.env`).
+If you prefer to drive everything from YAML (GitOps), you still can —
+spec entries are accepted in the service file too. For a normal
+install the admin panel is where you manage apps, and the YAML stays
+small.
 
 ## Where each setting lives
 
@@ -30,8 +35,8 @@ where you manage apps, and the YAML stays small.
 | Customise the landing (title, colours, logos, SEO, blocks) | **Admin panel → Portal** |
 | Manage users, roles, group membership | **Admin panel → Users** |
 | Store registry credentials | **Admin panel → Credentials** |
-| Bind address / port | `--bind` (or `proxy.bind-address` / `proxy.port`) |
-| Serve at the root or a subpath | `--base-path` (or `proxy.server.context-path`) |
+| Bind address / port | `ruscker.yml` (`proxy.bind-address` / `proxy.port`); `--bind` overrides |
+| Serve at the root or a subpath | `ruscker.yml` (`server.context-path`); `--base-path` / `RUSCKER_BASE_PATH` override |
 | Enable / disable the Docker backend | auto · `--docker` · `--no-docker` |
 | Database (catalog, users, sessions) | `--db <file>` · `--config-db-url` (Postgres/HA) |
 | Admin token + crypto keys | `RUSCKER_ADMIN_TOKEN`, `RUSCKER_MASTER_KEY`, `RUSCKER_COOKIE_KEY` |
@@ -50,13 +55,14 @@ at the **site root** (`https://apps.example.org/`). If you can't dedicate
 a subdomain and need it under a path (`https://example.org/apps/`), set a
 base path:
 
-```sh
-ruscker serve --config application.yml --bind 127.0.0.1:8080 --db ruscker.db \
-  --base-path /apps
+```yaml
+# ruscker.yml
+server:
+  context-path: /apps
 ```
 
-(Equivalently `proxy.server.context-path: /apps` in the YAML, or the
-`RUSCKER_BASE_PATH` env var.) Ruscker then emits every URL — landing,
+(Equivalently the `--base-path /apps` flag or the `RUSCKER_BASE_PATH`
+env var — precedence: flag > env > file.) Ruscker then emits every URL — landing,
 admin, assets, and the `/app` proxy — under `/apps`, and rewrites app
 responses so unmodified Shiny / Streamlit / Jupyter apps work behind the
 prefix. Point your reverse proxy's `/apps/` location at Ruscker. Full
@@ -138,10 +144,11 @@ proxy:
 
 ## The full YAML reference
 
-Everything below is the complete `application.yml` schema (the same
-`docs/YAML_SCHEMA.md` shipped in the repo). Reach for it to **migrate an
-existing ShinyProxy config**, or to drive specs and landing from YAML
-instead of the admin panel — not for a normal, admin-panel-managed
-install.
+Everything below is the complete YAML schema (the same
+`docs/YAML_SCHEMA.md` shipped in the repo) — `ruscker.yml` and the
+ShinyProxy-compatible `application.yml` both parse with it. Reach for
+it to **migrate an existing ShinyProxy config**, or to drive specs and
+landing from YAML instead of the admin panel — not for a normal,
+admin-panel-managed install.
 
 {{#include ../../docs/YAML_SCHEMA.md}}

@@ -8,7 +8,7 @@ shown below).
 ## 1. Run it (the portal seeds itself)
 
 Ruscker reads a config file, but it can be almost empty — the **database
-seeds the demos**. Save this two-line `application.yml`:
+seeds the demos**. Save this two-line `ruscker.yml`:
 
 ```yaml
 proxy:
@@ -19,7 +19,7 @@ Then start it with an admin token and `--db` (the admin database):
 
 ```sh
 RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32) \
-ruscker serve --config application.yml --bind 127.0.0.1:8080 --db ruscker.db
+ruscker serve --bind 127.0.0.1:8080 --db ruscker.db
 ```
 
 - Ruscker **auto-connects to Docker** when the daemon socket is
@@ -41,11 +41,11 @@ DB (the image is cosign-signed; `:latest` tracks the current release):
 ```sh
 docker run --rm -p 8080:8080 \
   -e RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32) \
-  -v "$PWD/application.yml:/etc/ruscker/application.yml:ro" \
+  -v "$PWD/ruscker.yml:/etc/ruscker/ruscker.yml:ro" \
   -v "$PWD/ruscker.db:/data/ruscker.db" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/strategicprojects/ruscker:latest \
-  serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080 \
+  serve --config /etc/ruscker/ruscker.yml --bind 0.0.0.0:8080 \
         --docker --db /data/ruscker.db
 ```
 
@@ -90,7 +90,7 @@ Two ways, neither of which needs a restart for the admin route:
   features:
 
   ```sh
-  ruscker validate application.yml
+  ruscker validate ruscker.yml
   # add --strict-compat to flag any ShinyProxy feature Ruscker would ignore
   ```
 

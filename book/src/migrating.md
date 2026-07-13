@@ -151,17 +151,16 @@ source of truth for your specific config. For apps that handle their
 own auth (a common case), `none` is correct: Ruscker just routes
 traffic.
 
-The following ShinyProxy per-spec fields are accepted by the parser
-but currently ignored:
+For the full field-by-field picture — every ShinyProxy key with its
+status in Ruscker (supported / warned-and-ignored / planned / out of
+scope, and the Ruscker way to get the same outcome) — see the
+**[ShinyProxy → Ruscker field map](./shinyproxy-fieldmap.md)**.
 
-- `minimum-seats-available` — use `min-replicas` instead
-- `labels` — custom container labels (phase 3.5)
-- `network-connections` — container network wiring (phase 3.5)
-- `kubernetes-*` — Kubernetes backend
-
-Fields that **are** now fully supported (and no longer flagged by
-`--strict-compat`): `volumes`, `container-env`, `container-cmd`,
-`port` (maps to `container-port`), and the scaling and lifecycle knobs
-`scale-up-threshold`, `scale-down-threshold`, `scale-down-grace`,
-`max-lifetime`, `container-lifetime`, `drain-timeout`,
-`stop-on-logout`, and `concurrent-requests-per-replica`.
+The short version: the container keys (`container-env` / `-cmd` /
+`-volumes` / `-network`, `labels`, the CPU/memory requests and limits,
+`port`), the access lists, and the lifecycle knobs all map straight
+across; `minimum-seats-available` (use `min-replicas`),
+`network-connections` (use the single `container-network`) and
+`kubernetes-*` are flagged by `--strict-compat`; per-user-instance
+knobs (`max-instances` family) don't apply — Ruscker pools
+seats × replicas instead.

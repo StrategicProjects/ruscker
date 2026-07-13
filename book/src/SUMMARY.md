@@ -9,6 +9,7 @@
 - [Quickstart](./quickstart.md)
 - [Installation](./installation.md)
 - [Migrating from ShinyProxy](./migrating.md)
+  - [Field map (de-para)](./shinyproxy-fieldmap.md)
 - [Configuration](./configuration.md)
 - [The admin panel](./admin.md)
 - [Deploying in production](./deploying.md)

@@ -20,8 +20,8 @@ use bollard::models::{
 };
 use bollard::query_parameters::{
     CreateContainerOptions, CreateImageOptions, ListContainersOptions, ListImagesOptions,
-    LogsOptionsBuilder, RemoveContainerOptions, RemoveImageOptions, StartContainerOptions,
-    StatsOptionsBuilder, StopContainerOptions,
+    ListVolumesOptions, LogsOptionsBuilder, RemoveContainerOptions, RemoveImageOptions,
+    RemoveVolumeOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
 };
 pub mod multihost;
 pub use multihost::MultiHostDockerBackend;
@@ -988,6 +988,76 @@ impl ContainerBackend for LocalDockerBackend {
             .remove_image(image, None::<RemoveImageOptions>, None)
             .await
             .map_err(|e| backend_err("remove image", e))?;
+        Ok(())
+    }
+
+    async fn list_volumes(&self) -> CoreResult<Vec<ruscker_core::VolumeInfo>> {
+        // Reference counts come from EVERY container on the host
+        // (running or stopped, any owner) — the safety cross-ref that
+        // keeps the panel from offering a neighbour's in-use volume.
+        let opts = ListContainersOptions {
+            all: true,
+            ..Default::default()
+        };
+        let containers = self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| backend_err("list containers for volume refs", e))?;
+        let mut refs: std::collections::HashMap<String, i64> = std::collections::HashMap::new();
+        for c in &containers {
+            for m in c.mounts.iter().flatten() {
+                if let Some(name) = &m.name {
+                    *refs.entry(name.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        let listed = self
+            .docker
+            .list_volumes(None::<ListVolumesOptions>)
+            .await
+            .map_err(|e| backend_err("list volumes", e))?;
+        Ok(listed
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| ruscker_core::VolumeInfo {
+                refs: refs.get(&v.name).copied().unwrap_or(0),
+                ruscker_created: v.labels.contains_key("ruscker.created"),
+                created_at: v.created_at,
+                driver: v.driver,
+                name: v.name,
+            })
+            .collect())
+    }
+
+    async fn create_volume(&self, name: &str) -> CoreResult<()> {
+        // Labelled so the panel can tell "made here" from a
+        // neighbour's volume — informational, mirrors the image
+        // provenance idea (#894).
+        let req = bollard::models::VolumeCreateRequest {
+            name: Some(name.to_string()),
+            labels: Some(std::collections::HashMap::from([(
+                "ruscker.created".to_string(),
+                "true".to_string(),
+            )])),
+            ..Default::default()
+        };
+        self.docker
+            .create_volume(req)
+            .await
+            .map_err(|e| backend_err("create volume", e))?;
+        Ok(())
+    }
+
+    async fn remove_volume(&self, name: &str) -> CoreResult<()> {
+        // No force: the daemon refuses an in-use volume, backstopping
+        // the panel's zero-references rule. Volume removal destroys
+        // data — the daemon must always have the final word.
+        self.docker
+            .remove_volume(name, None::<RemoveVolumeOptions>)
+            .await
+            .map_err(|e| backend_err("remove volume", e))?;
         Ok(())
     }
 
@@ -2131,6 +2201,37 @@ mod tests {
         assert!(
             !after.iter().any(|c| c.id == replica.container_id),
             "container should be gone after remove"
+        );
+    }
+
+    /// #987: named-volume roundtrip against the real daemon — create
+    /// (labelled `ruscker.created`) → list (refs == 0, ours) → remove →
+    /// gone. Reaps a leftover from a previous crashed run first, so the
+    /// test is idempotent.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn volume_create_list_remove_roundtrip() {
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let name = "ruscker-it-vol-test";
+
+        // Idempotence: a run that died mid-test may have left the
+        // volume behind — best-effort reap before starting.
+        let _ = backend.remove_volume(name).await;
+
+        backend.create_volume(name).await.expect("create volume");
+        let listed = backend.list_volumes().await.expect("list volumes");
+        let v = listed
+            .iter()
+            .find(|v| v.name == name)
+            .expect("created volume listed");
+        assert_eq!(v.refs, 0, "fresh volume has no container references");
+        assert!(v.ruscker_created, "create_volume must stamp ruscker.created");
+
+        backend.remove_volume(name).await.expect("remove volume");
+        let after = backend.list_volumes().await.expect("list after remove");
+        assert!(
+            !after.iter().any(|v| v.name == name),
+            "volume should be gone after remove"
         );
     }
 }

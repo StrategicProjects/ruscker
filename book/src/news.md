@@ -9,6 +9,40 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.43 — 2026-07-13
+
+- **Scheduled jobs (cron).** A new **Schedules** page in the admin runs
+  a spec's image to completion on a cron — the ETL/report case: same
+  image, environment, volumes and credentials as the app, with an
+  optional command override per schedule. Semantics built for ETL:
+  a new schedule waits for its first occurrence (no fire-on-create),
+  downtime over several occurrences collapses to one firing, and in HA
+  only the leader fires (with an atomic claim so nothing double-runs).
+  Each run lands in a history with status, exit code, duration and the
+  log tail; a failing job raises the **`job-failed`** alert through the
+  notification webhook. Per-schedule timeout (default 1 h). Job
+  containers never linger — removed on every exit path, and invisible
+  to the replica machinery.
+- **Named-volume management.** The Disk panel gained a **Volumes**
+  card: list named Docker volumes with live reference counts (any
+  container on the host counts), create them (labelled as
+  Ruscker-created), and remove — offered only for volumes Ruscker
+  created, with zero references and no catalog spec mentioning them;
+  third-party data is never removable from the panel, and the daemon's
+  no-force refusal backstops everything.
+- **Refresh button on the Apps list** — reload rows, states and counts
+  without hunting for F5.
+- **Docs.** The admin guide caught up with the recent releases
+  (consolidated user editing, password policy and generator, the
+  corrected Viewer role, sections following the new tab order); a new
+  **Data plane** section in Security states the proxy→container
+  encryption story explicitly (loopback on a single host; private
+  network / WireGuard for multi-host); and Troubleshooting explains
+  the one-click fix when an app keeps failing with an old cached image
+  (the **Update image** button — no Docker restart involved).
+
+---
+
 ## v0.2.42 — 2026-07-13
 
 - **Password policy.** New passwords (creating a user, admin reset,

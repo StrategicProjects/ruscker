@@ -1064,10 +1064,15 @@ impl ContainerBackend for LocalDockerBackend {
         }
 
         // Wait for the exit, bounded: a hung job must not pin the
-        // scheduler forever. The cap is generous — ETL runs are long —
-        // and slice B makes it per-schedule.
+        // scheduler forever. The default cap is generous — ETL runs are
+        // long — and a schedule can override it per-request via
+        // `SpawnRequest::job_timeout_secs` (#986 slice C).
         const JOB_TIMEOUT: Duration = Duration::from_secs(60 * 60);
-        let waited = tokio::time::timeout(JOB_TIMEOUT, async {
+        let cap = req
+            .job_timeout_secs
+            .map(Duration::from_secs)
+            .unwrap_or(JOB_TIMEOUT);
+        let waited = tokio::time::timeout(cap, async {
             self.docker
                 .wait_container(&container_id, None::<bollard::query_parameters::WaitContainerOptions>)
                 .next()
@@ -1078,7 +1083,7 @@ impl ContainerBackend for LocalDockerBackend {
             Err(_) => {
                 cleanup(self.docker.clone(), container_id).await;
                 return Err(CoreError::Backend(format!(
-                    "job for `{}` still running after {JOB_TIMEOUT:?}; killed and removed",
+                    "job for `{}` still running after {cap:?}; killed and removed",
                     req.spec_id
                 )));
             }

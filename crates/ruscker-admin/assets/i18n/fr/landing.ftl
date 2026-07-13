@@ -936,3 +936,37 @@ admin-disk-reclaim = Récupérer de l'espace
 admin-disk-reclaim-hint = Purge les images dangling + le cache de build (sûr — jamais une image taguée ni un conteneur).
 admin-disk-reclaim-confirm = Récupérer de l'espace ? Purge les images dangling et le cache de build (aucune image taguée ni conteneur supprimé).
 admin-disk-flash-reclaimed = Espace récupéré (images dangling + cache de build).
+
+# Planifications — cron jobs (#986 tranche C)
+admin-nav-schedules = Planifications
+admin-schedules-title = Planifications
+admin-schedules-subtitle = Exécute l'image d'une app jusqu'au bout selon un horaire cron (ETL, rapports).
+admin-schedules-create = Nouvelle planification
+admin-schedules-spec = App
+admin-schedules-cron = Cron
+admin-schedules-cron-help = Cron standard à 5 champs, en UTC. Exemples : "0 3 * * *" = chaque jour à 03:00 ; "*/15 * * * *" = toutes les 15 minutes.
+admin-schedules-cmd = Commande
+admin-schedules-cmd-help = Un argument par ligne (argv). Vide = la commande de l'app elle-même (son container-cmd, sinon le CMD de l'image).
+admin-schedules-timeout = Timeout (minutes)
+admin-schedules-timeout-help = Durée maximale d'une exécution. Vide = 1 heure.
+admin-schedules-next-run = Prochaine exécution
+admin-schedules-last-run = Dernière exécution
+admin-schedules-enabled = Active
+admin-schedules-disabled = Inactive
+admin-schedules-toggle = Activer/désactiver
+admin-schedules-delete = Supprimer
+admin-schedules-confirm-delete = Supprimer cette planification ? Son historique d'exécutions part avec elle.
+admin-schedules-empty = Aucune planification pour l'instant — créez-en une ci-dessus.
+admin-schedules-runs-title = Dernières exécutions
+admin-schedules-runs-empty = Aucune exécution pour l'instant.
+admin-schedules-runs-started = Début
+admin-schedules-runs-status = Statut
+admin-schedules-runs-exit = Code de sortie
+admin-schedules-runs-duration = Durée
+admin-schedules-log = Log
+admin-schedules-flash-created = Planification créée. Elle se déclenche à la prochaine occurrence du cron (pas d'exécution à la création).
+admin-schedules-flash-deleted = Planification supprimée.
+admin-schedules-flash-toggled = Planification mise à jour.
+admin-schedules-flash-bad-cron = Expression cron invalide — utilisez la forme à 5 champs, p. ex. "0 3 * * *".
+admin-schedules-flash-bad-spec = App inconnue, ou l'app n'a pas d'image de conteneur à exécuter.
+admin-schedules-flash-error = L'opération a échoué — consultez les logs du serveur.

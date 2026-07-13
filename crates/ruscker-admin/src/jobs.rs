@@ -86,6 +86,15 @@ async fn job_request(
     if let Some(c) = creds {
         req = req.with_creds(c);
     }
+    // Per-schedule wall-clock cap (#986 slice C). Zero/negative values
+    // (nothing can produce them through the UI, but the column is plain
+    // i64) fall back to the backend's default rather than a 0s timeout
+    // that would kill every job instantly.
+    if let Some(t) = schedule.timeout_secs {
+        if t > 0 {
+            req = req.with_job_timeout(t as u64);
+        }
+    }
     Ok(req)
 }
 
@@ -158,8 +167,8 @@ async fn tick(state: &AppState) {
         };
 
         // Detached: a long ETL must not block the next tick. The run
-        // itself is bounded by run_job's cap (per-schedule timeout is
-        // slice C, the column already exists).
+        // itself is bounded by run_job's cap (the schedule's own
+        // timeout when set, else the backend default).
         let state = state.clone();
         let backend = backend.clone();
         tokio::spawn(async move {

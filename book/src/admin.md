@@ -269,6 +269,36 @@ back at the blocks section.
 > landing. It's admin-only input — the intentional escape hatch — so
 > only paste HTML you trust.
 
+### Schedules
+
+Cron-scheduled, run-to-completion jobs (Admin-only) — nightly ETL,
+report generation, cache warm-ups. A schedule picks one of your
+containerized apps and runs **that app's image** with the same
+environment, volumes, resource limits and registry credentials a normal
+replica gets, optionally overriding the command (one argv element per
+line; leave it empty to run the app's own `container-cmd`, or the
+image's baked `CMD`). External apps can't be scheduled — there is
+nothing to run.
+
+Semantics worth knowing:
+
+- **No run on creation.** A new schedule waits for its next cron
+  occurrence (times are UTC).
+- **Downtime collapses.** If the server was down across several
+  occurrences, the schedule fires **once** on the next tick — ETL
+  semantics, not a message queue.
+- **Leader-only in HA.** With several active-active instances, only the
+  scaler leader fires schedules, and a database claim backstops a split
+  brain so an occurrence never double-fires.
+- **Timeout.** Each run is capped — 1 hour by default, or the
+  per-schedule *Timeout (minutes)* when set. A run over the cap is
+  killed and recorded as an error.
+- **History.** The *Latest runs* table shows each run's status (`ok` /
+  `failed` = non-zero exit / `error` = couldn't run), exit code,
+  duration and an expandable log tail.
+- **Alerts.** A failed run raises a `job-failed` alert through the
+  webhook configured in the System tab (see below).
+
 ### Groups
 Groups (`/admin/groups`, admin-only) gate which apps a user sees. They're
 **derived**, not a separate table: a group exists as long as a user belongs

@@ -163,6 +163,12 @@ pub struct SpawnRequest {
     /// the container's labels; its own `ruscker.*` labels win on a key
     /// collision. Empty ⇒ only the internal labels.
     pub labels: Vec<(String, String)>,
+
+    /// Wall-clock cap, in seconds, for a run-to-completion job (#986
+    /// slice C). Only [`ContainerBackend::run_job`] consumes it — a
+    /// regular replica spawn ignores the field entirely. `None` ⇒ the
+    /// backend's default cap (1 h on the local Docker backend).
+    pub job_timeout_secs: Option<u64>,
 }
 
 impl SpawnRequest {
@@ -181,6 +187,7 @@ impl SpawnRequest {
             cmd: None,
             network: None,
             labels: Vec::new(),
+            job_timeout_secs: None,
         }
     }
 
@@ -230,6 +237,13 @@ impl SpawnRequest {
 
     pub fn with_labels(mut self, labels: Vec<(String, String)>) -> Self {
         self.labels = labels;
+        self
+    }
+
+    /// Cap a run-to-completion job at `secs` seconds (see
+    /// [`SpawnRequest::job_timeout_secs`]). No-op for replica spawns.
+    pub fn with_job_timeout(mut self, secs: u64) -> Self {
+        self.job_timeout_secs = Some(secs);
         self
     }
 }
@@ -774,6 +788,15 @@ mod registry_tests {
         let bare = SpawnRequest::new("a", "img");
         assert!(bare.env.is_empty());
         assert!(bare.cmd.is_none());
+    }
+
+    // #986 slice C: the per-schedule job timeout rides on the request.
+    // Default is None (backend default cap); the builder sets it.
+    #[test]
+    fn spawn_request_carries_job_timeout() {
+        assert!(SpawnRequest::new("a", "img").job_timeout_secs.is_none());
+        let req = SpawnRequest::new("etl", "img").with_job_timeout(600);
+        assert_eq!(req.job_timeout_secs, Some(600));
     }
 
     #[test]

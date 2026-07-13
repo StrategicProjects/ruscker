@@ -36,8 +36,10 @@ server:
 
   # Serve the whole portal under a URL prefix when you can't dedicate
   # a (sub)domain — e.g. https://example.org/apps/. Health probes
-  # (/healthz, /readyz) stay at the root. The --base-path CLI flag and
-  # the RUSCKER_BASE_PATH env var override this file.
+  # (/healthz, /readyz) stay at the root. Precedence: the --base-path
+  # CLI flag > the RUSCKER_BASE_PATH env var > this file. Pair it with
+  # a reverse-proxy location for the same prefix — see the "Subpath"
+  # recipe in /usr/share/doc/ruscker/README.Debian.
   #context-path: /apps
 
 proxy:
@@ -47,11 +49,9 @@ proxy:
   # GitOps).
   #title: Ruscker
 
-  # Listener. NOTE: the packaged systemd unit passes
-  # `--bind 0.0.0.0:8080` on ExecStart, which OVERRIDES these two —
-  # to drive them from this file, remove the flag with a drop-in
-  # (`systemctl edit ruscker`). Changing ports behind nginx usually
-  # isn't needed.
+  # Listener. This file is what the packaged systemd unit reads —
+  # changing the port or interface never requires editing the unit.
+  # (The --bind CLI flag still overrides both, for one-off runs.)
   #bind-address: 0.0.0.0
   #port: 8080
 

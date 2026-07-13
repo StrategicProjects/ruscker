@@ -517,6 +517,18 @@ fn resolve_config_path_in(dir: &std::path::Path, explicit: Option<PathBuf>) -> P
     }
 }
 
+/// The serve base-path precedence contract (#977): the CLI override
+/// (the `--base-path` flag, or `RUSCKER_BASE_PATH` — clap folds the
+/// env var into the same value, flag winning) beats the file's
+/// `server.context-path` / `servlet.context-path`. Everything is
+/// normalized (`"box"`, `"/box/"` → `"/box"`; blank ⇒ root).
+fn effective_base_path(cli_override: Option<&str>, server: &ruscker_config::Server) -> String {
+    match cli_override {
+        Some(p) => ruscker_config::normalize_base_path(p),
+        None => server.effective_base_path(),
+    }
+}
+
 fn cmd_serve(args: ServeArgs) -> Result<()> {
     let ServeArgs {
         config_path,
@@ -574,12 +586,10 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
     // multi-host backend when `proxy.hosts` is set (Phase 6).
     let hosts = config.proxy.hosts.clone();
 
-    // Base path (#173): the `--base-path` flag wins over
-    // `server.context-path`. Normalized once; `""` ⇒ root.
-    let base_path = match base_path_override {
-        Some(p) => ruscker_config::normalize_base_path(&p),
-        None => config.server.effective_base_path(),
-    };
+    // Base path (#173/#977): precedence is `--base-path` flag >
+    // `RUSCKER_BASE_PATH` env (clap folds it into the same Option) >
+    // `server.context-path` in the file. Normalized once; `""` ⇒ root.
+    let base_path = effective_base_path(base_path_override.as_deref(), &config.server);
 
     // Captured before `config` moves into the server (#970): how long
     // a spawned container gets to become ready before the spawn fails.
@@ -1096,6 +1106,29 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn base_path_precedence_is_cli_then_file_all_normalized() {
+        let yaml = |cp: &str| {
+            ruscker_config::Config::from_yaml(&format!(
+                "server:\n  context-path: {cp}\nproxy:\n  specs: []\n"
+            ))
+            .unwrap()
+            .server
+        };
+        // File only — normalized.
+        assert_eq!(effective_base_path(None, &yaml("/apps/")), "/apps");
+        assert_eq!(effective_base_path(None, &yaml("box")), "/box");
+        // CLI override (flag or RUSCKER_BASE_PATH) beats the file…
+        assert_eq!(effective_base_path(Some("cli"), &yaml("/apps")), "/cli");
+        // …including a blank override, which forces the root.
+        assert_eq!(effective_base_path(Some(""), &yaml("/apps")), "");
+        // Neither ⇒ root.
+        let none = ruscker_config::Config::from_yaml("proxy:\n  specs: []\n")
+            .unwrap()
+            .server;
+        assert_eq!(effective_base_path(None, &none), "");
+    }
 
     #[test]
     fn config_resolution_prefers_ruscker_yml_then_falls_back() {

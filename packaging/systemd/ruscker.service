@@ -17,11 +17,13 @@ Group=ruscker
 EnvironmentFile=-/etc/ruscker/ruscker.env
 # Default command: landing + admin + proxy, with the SQLite catalog at
 # /var/lib/ruscker/ruscker.db — so the admin panel works and the showcase
-# apps seed on first boot, no YAML editing required. Add `--docker` to
-# enable the container backend (the `ruscker` user then also needs Docker
-# access — run `sudo ruscker-enable-docker`, see
+# apps seed on first boot, no YAML editing required. The listen address
+# comes from /etc/ruscker/ruscker.yml (`bind-address` / `port`, default
+# 0.0.0.0:8080) — changing it never requires editing this unit (#977).
+# Add `--docker` to enable the container backend (the `ruscker` user then
+# also needs Docker access — run `sudo ruscker-enable-docker`, see
 # /usr/share/doc/ruscker/README.Debian).
-ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/ruscker.yml --bind 0.0.0.0:8080 --db /var/lib/ruscker/ruscker.db
+ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/ruscker.yml --db /var/lib/ruscker/ruscker.db
 Restart=on-failure
 RestartSec=5s
 

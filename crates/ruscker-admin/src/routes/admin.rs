@@ -471,9 +471,6 @@ async fn token_login(
     }
 }
 
-/// Minimum length for an admin-set or self-chosen password.
-const MIN_PASSWORD_LEN: usize = 8;
-
 // ── First-admin setup ────────────────────────────────────────────
 
 async fn setup_form(
@@ -547,7 +544,7 @@ async fn setup_submit(
     if username.is_empty() {
         return setup_err("exists"); // empty username reuses the generic field error
     }
-    if form.password.len() < MIN_PASSWORD_LEN {
+    if !crate::auth::password_meets_policy(&form.password) {
         return setup_err("short");
     }
     if form.password != form.confirm {
@@ -676,7 +673,7 @@ async fn password_submit(
         })
     };
 
-    if form.new_password.len() < MIN_PASSWORD_LEN {
+    if !crate::auth::password_meets_policy(&form.new_password) {
         return pw_err("short");
     }
     if form.new_password != form.confirm {
@@ -881,7 +878,7 @@ mod tests {
                     .header(header::COOKIE, format!("{}={}", crate::auth::COOKIE_NAME, mine))
                     .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
                     .body(Body::from(
-                        "current=old-password-1&new_password=new-password-2&confirm=new-password-2",
+                        "current=old-password-1&new_password=New!password-2&confirm=New!password-2",
                     ))
                     .unwrap(),
             )
@@ -919,7 +916,7 @@ mod tests {
         assert_eq!(info.actor.as_deref(), Some("alice"));
 
         // And the new password is the one that verifies.
-        assert!(crate::db::users::verify_login(pool, "alice", "new-password-2")
+        assert!(crate::db::users::verify_login(pool, "alice", "New!password-2")
             .await
             .expect("verify")
             .is_some());

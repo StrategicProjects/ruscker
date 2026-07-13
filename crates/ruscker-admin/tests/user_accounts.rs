@@ -303,7 +303,7 @@ async fn app_next_survives_mandatory_password_rotation() {
                 .header("content-type", "application/x-www-form-urlencoded")
                 .header("cookie", cookie)
                 .body(Body::from(
-                    "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9&next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1",
+                    "current=bobpass12&new_password=Bob!pass-new9&confirm=Bob!pass-new9&next=%2Fapp%2Fanalysts-app%2F%3Ftab%3D1",
                 ))
                 .unwrap(),
         )
@@ -534,7 +534,7 @@ async fn changing_password_lifts_the_guard() {
                 .header("content-type", "application/x-www-form-urlencoded")
                 .header("cookie", &cookie)
                 .body(Body::from(
-                    "current=bobpass12&new_password=bobpass-new9&confirm=bobpass-new9",
+                    "current=bobpass12&new_password=Bob!pass-new9&confirm=Bob!pass-new9",
                 ))
                 .unwrap(),
         )
@@ -748,4 +748,76 @@ async fn consolidated_user_edit_is_prefilled_and_saves_all_fields() {
     assert_eq!(user.setor.as_deref(), Some("Data"));
     assert_eq!(user.email.as_deref(), Some("alice@example.com"));
     assert_eq!(user.celular.as_deref(), Some("555-0100"));
+}
+
+#[tokio::test]
+async fn password_policy_enforced_on_create_and_reset() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool.clone());
+    ruscker_admin::db::users::create(&db, "root", "Root!pass1", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let sid = state
+        .admin_sessions
+        .create(Role::Admin, Some("root".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    // The report's exact motivating example: teste123 (8 chars, but no
+    // uppercase and no special) must be rejected with the policy flash…
+    let (status, loc) = post(
+        state.clone(),
+        "/admin/users",
+        "username=dave&password=teste123&role=viewer",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/users?flash=weak-password");
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "dave").await.unwrap().is_none(),
+        "weak-password create must not persist the user"
+    );
+
+    // …and a compliant password passes.
+    let (_, loc) = post(
+        state.clone(),
+        "/admin/users",
+        "username=dave&password=Dave!pass1&role=viewer",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(loc, "/admin/users?flash=created");
+
+    // Admin reset: weak rejected (flash lands on the edit page), the
+    // stored hash untouched…
+    let (_, loc) = post(
+        state.clone(),
+        "/admin/users/dave/password",
+        "password=12345678",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(loc, "/admin/users/dave/edit?flash=weak-password");
+    assert!(
+        ruscker_admin::db::users::verify_login(&db, "dave", "Dave!pass1")
+            .await
+            .unwrap()
+            .is_some(),
+        "old password still valid after a rejected reset"
+    );
+
+    // …and a compliant reset goes through.
+    let (_, loc) = post(
+        state,
+        "/admin/users/dave/password",
+        "password=N0va!senha",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(loc, "/admin/users?flash=saved");
+    assert!(ruscker_admin::db::users::verify_login(&db, "dave", "N0va!senha")
+        .await
+        .unwrap()
+        .is_some());
 }

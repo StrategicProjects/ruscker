@@ -610,11 +610,51 @@ impl FromRequestParts<crate::AppState> for MaybeSession {
     }
 }
 
+/// The password policy, in ONE place for every path that sets one
+/// (create user, admin reset, first-admin setup, own-password change,
+/// CSV import): at least 8 characters with at least one uppercase
+/// letter, one lowercase letter, one digit, and one special
+/// (non-alphanumeric) character. Length counts characters, not bytes,
+/// so `Sécurité#1` isn't over-credited; upper/lower use the Unicode
+/// classes (an accented letter counts), digits are ASCII.
+///
+/// Composition rules are a deliberate trade-off: modern NIST guidance
+/// prefers plain length + a blocklist, but composition is what audits
+/// commonly require, and with `must_change_password` + the login rate
+/// limiter the cost is low. Existing hashes are untouched — the policy
+/// applies only when a password is (re)set.
+pub fn password_meets_policy(password: &str) -> bool {
+    password.chars().count() >= 8
+        && password.chars().any(|c| c.is_uppercase())
+        && password.chars().any(|c| c.is_lowercase())
+        && password.chars().any(|c| c.is_ascii_digit())
+        && password.chars().any(|c| !c.is_alphanumeric())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use axum::http::HeaderMap;
     use std::time::Duration;
+
+    #[test]
+    fn password_policy_requires_all_four_classes_and_length() {
+        // The old-world passwords the policy exists to reject.
+        assert!(!password_meets_policy("teste123"), "no upper, no special");
+        assert!(!password_meets_policy("12345678"), "digits only");
+        assert!(!password_meets_policy("Senh!X1"), "7 chars — too short");
+        assert!(!password_meets_policy("SENHA!123"), "no lowercase");
+        assert!(!password_meets_policy("senha!123"), "no uppercase");
+        assert!(!password_meets_policy("Senhas!!"), "no digit");
+        assert!(!password_meets_policy("Senha123"), "no special");
+        // Compliant.
+        assert!(password_meets_policy("Senha!123"));
+        assert!(password_meets_policy("Str0ng#pass"));
+        // Unicode: accented letters count as letters (à = lowercase),
+        // and length is chars, not bytes.
+        assert!(password_meets_policy("Sécurité#1"));
+        assert!(!password_meets_policy("Sé#1aB"), "6 chars even if 8+ bytes");
+    }
 
     #[tokio::test]
     async fn admin_sessions_create_validate_remove() {

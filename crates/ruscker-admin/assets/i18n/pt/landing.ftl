@@ -102,7 +102,7 @@ admin-pw-new-label = Nova senha
 admin-pw-confirm-label = Confirme a senha
 admin-pw-error-current = Senha atual incorreta.
 admin-pw-error-mismatch = As senhas não coincidem.
-admin-pw-error-short = A senha deve ter ao menos 8 caracteres.
+admin-pw-error-short = A senha não atende à política: mínimo de 8 caracteres, com 1 maiúscula, 1 minúscula, 1 número e 1 caractere especial.
 admin-pw-submit = Salvar senha
 admin-pw-reveal = Mostrar/ocultar senha
 # — Gestão de usuários (admin)
@@ -146,7 +146,7 @@ admin-users-import-col-status = Status
 admin-users-import-status-ok = vai importar
 admin-users-import-status-exists = já existe — ignorado
 admin-users-import-status-bad-username = usuário inválido
-admin-users-import-status-bad-password = senha curta (mín. 8)
+admin-users-import-status-bad-password = senha fora da política (mín. 8, com maiúscula, minúscula, número e especial)
 admin-users-import-status-bad-role = nível inválido
 admin-users-import-confirm = Importar usuários
 admin-users-import-cancel = Cancelar
@@ -166,7 +166,9 @@ admin-users-flash-deleted = Usuário removido.
 admin-users-flash-last-admin = Não é possível remover ou rebaixar o último administrador.
 admin-users-flash-bad-input = Dados inválidos: o usuário só pode ter letras, números e _ . @ - , e a senha precisa de ao menos 8 caracteres.
 admin-users-username-rule = Apenas letras, números e _ . @ - (sem espaços nem acentos).
-admin-users-password-rule = Mínimo de 8 caracteres.
+admin-users-password-rule = Mínimo de 8 caracteres, com ao menos 1 maiúscula, 1 minúscula, 1 número e 1 caractere especial.
+admin-users-flash-weak-password = Senha fraca — a política exige mínimo de 8 caracteres, com 1 maiúscula, 1 minúscula, 1 número e 1 caractere especial.
+admin-users-generate-password = Gerar senha aleatória
 admin-users-flash-exists = Já existe um usuário com esse nome.
 
 # Admin dashboard

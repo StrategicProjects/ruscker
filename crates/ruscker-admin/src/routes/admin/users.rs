@@ -50,7 +50,7 @@ struct UsersPage<'a> {
     /// Username of the logged-in admin — flags the "you" row.
     me: String,
     /// "" | "saved" | "created" | "deleted" | "last-admin" | "bad-input"
-    /// | "exists" | "imported"
+    /// | "weak-password" | "exists" | "imported"
     flash: &'static str,
     /// `(imported, skipped)` counts for a CSV import summary (#862),
     /// shown when `flash == "imported"`.
@@ -85,7 +85,7 @@ struct UserEditPage<'a> {
     role: Role,
     user: db::users::UserRow,
     me: String,
-    /// "" | "saved" | "last-admin" | "bad-input"
+    /// "" | "saved" | "last-admin" | "bad-input" | "weak-password"
     flash: &'static str,
 }
 
@@ -148,6 +148,7 @@ async fn index(
         Some("deleted") => "deleted",
         Some("last-admin") => "last-admin",
         Some("bad-input") => "bad-input",
+        Some("weak-password") => "weak-password",
         Some("exists") => "exists",
         Some("imported") => "imported",
         _ => "",
@@ -187,8 +188,6 @@ pub struct CreateForm {
     pub celular: String,
 }
 
-const MIN_PASSWORD_LEN: usize = 8;
-
 async fn create(
     admin: RequireAdmin,
     State(state): State<AppState>,
@@ -199,8 +198,11 @@ async fn create(
     };
     let username = db::users::normalize_username(&form.username);
     let role = Role::parse(&form.role).unwrap_or(Role::Viewer);
-    if !db::users::is_valid_username(&username) || form.password.len() < MIN_PASSWORD_LEN {
+    if !db::users::is_valid_username(&username) {
         return redirect_flash("bad-input");
+    }
+    if !crate::auth::password_meets_policy(&form.password) {
+        return redirect_flash("weak-password");
     }
     let groups = db::users::parse_groups(&form.groups);
     // New accounts get the "change your password?" prompt on first login.
@@ -276,6 +278,7 @@ async fn edit(
         Some("saved") => "saved",
         Some("last-admin") => "last-admin",
         Some("bad-input") => "bad-input",
+        Some("weak-password") => "weak-password",
         _ => "",
     };
     super::render(&UserEditPage {
@@ -468,8 +471,8 @@ async fn reset_password(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    if form.password.len() < MIN_PASSWORD_LEN {
-        return redirect_flash("bad-input");
+    if !crate::auth::password_meets_policy(&form.password) {
+        return redirect_edit_flash(&db::users::normalize_username(&username), "weak-password");
     }
     // Admin-assigned password ⇒ prompt the user to change it next login.
     match db::users::set_password(pool, &username, &form.password, true, Some(admin.actor())).await
@@ -626,7 +629,7 @@ fn parse_csv_users(body: &str) -> Result<Vec<CsvRow>, &'static str> {
 
         let error = if !db::users::is_valid_username(&username) {
             Some("bad-username")
-        } else if password.len() < MIN_PASSWORD_LEN {
+        } else if !crate::auth::password_meets_policy(&password) {
             Some("bad-password")
         } else if !role_raw.is_empty() && Role::parse(&role_raw.to_lowercase()).is_none() {
             Some("bad-role")
@@ -858,7 +861,7 @@ mod tests {
     #[test]
     fn parses_csv_users_with_validation() {
         let csv = "username,role,password,groups,setor\n\
-                   alice,editor,alicepass1,\"a;b\",GAPE\n\
+                   alice,editor,Alice!pass1,\"a;b\",GAPE\n\
                    bad user,viewer,short,,\n";
         let rows = parse_csv_users(csv).unwrap();
         assert_eq!(rows.len(), 2);
@@ -873,7 +876,7 @@ mod tests {
         assert!(!rows[1].importable());
 
         // Blank role defaults to Viewer.
-        let r = parse_csv_users("username,password\nbob,bobpass12\n").unwrap();
+        let r = parse_csv_users("username,password\nbob,Bob!pass12\n").unwrap();
         assert_eq!(r[0].role, Role::Viewer);
         assert!(r[0].error.is_none());
 

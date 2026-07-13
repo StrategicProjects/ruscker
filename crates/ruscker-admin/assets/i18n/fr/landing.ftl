@@ -98,7 +98,7 @@ admin-pw-new-label = Nouveau mot de passe
 admin-pw-confirm-label = Confirmer le mot de passe
 admin-pw-error-current = Le mot de passe actuel est incorrect.
 admin-pw-error-mismatch = Les mots de passe ne correspondent pas.
-admin-pw-error-short = Le mot de passe doit comporter au moins 8 caractères.
+admin-pw-error-short = Le mot de passe ne respecte pas la politique : au moins 8 caractères, dont 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial.
 admin-pw-submit = Enregistrer le mot de passe
 admin-pw-reveal = Afficher/masquer le mot de passe
 # — Gestion des utilisateurs (admin)
@@ -142,7 +142,7 @@ admin-users-import-col-status = Statut
 admin-users-import-status-ok = sera importé
 admin-users-import-status-exists = existe déjà — ignoré
 admin-users-import-status-bad-username = identifiant invalide
-admin-users-import-status-bad-password = mot de passe trop court (min. 8)
+admin-users-import-status-bad-password = mot de passe hors politique (min. 8, avec majuscule, minuscule, chiffre et spécial)
 admin-users-import-status-bad-role = niveau invalide
 admin-users-import-confirm = Importer les utilisateurs
 admin-users-import-cancel = Annuler
@@ -162,7 +162,9 @@ admin-users-flash-deleted = Utilisateur supprimé.
 admin-users-flash-last-admin = Impossible de supprimer ou rétrograder le dernier administrateur.
 admin-users-flash-bad-input = Données invalides : le nom d’utilisateur ne peut contenir que des lettres, chiffres et _ . @ - , et le mot de passe doit comporter au moins 8 caractères.
 admin-users-username-rule = Lettres, chiffres et _ . @ - uniquement (sans espaces ni accents).
-admin-users-password-rule = Au moins 8 caractères.
+admin-users-password-rule = Au moins 8 caractères, dont 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial.
+admin-users-flash-weak-password = Mot de passe faible — la politique exige au moins 8 caractères, dont 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial.
+admin-users-generate-password = Générer un mot de passe aléatoire
 admin-users-flash-exists = Un utilisateur portant ce nom existe déjà.
 
 # Admin dashboard

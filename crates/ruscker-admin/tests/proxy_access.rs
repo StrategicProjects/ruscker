@@ -82,6 +82,7 @@ async fn app_state(db: ConfigDb) -> AppState {
         draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         spec_cache: std::sync::Arc::new(dashmap::DashMap::new()),
         catalog_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        access_counter: Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
     }
 }
 

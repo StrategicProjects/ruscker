@@ -11,38 +11,52 @@ use super::ConfigDb;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 
-/// Today's bucket key in UTC, `YYYY-MM-DD`.
-fn today() -> String {
+/// Today's bucket key in UTC, `YYYY-MM-DD`. `pub(crate)` so the
+/// in-memory aggregator ([`crate::access_counter`]) buckets increments
+/// with the same key it will later flush under.
+pub(crate) fn today() -> String {
     chrono::Utc::now().format("%Y-%m-%d").to_string()
 }
 
-/// Record one access for `spec_id` (today's bucket, +1). Atomic via
-/// `ON CONFLICT`. Callers treat this as best-effort — a counter hiccup
-/// must never break the request being served.
+/// Record one access for `spec_id` (today's bucket, +1). Callers treat
+/// this as best-effort — a counter hiccup must never break the request
+/// being served. The proxy hot path doesn't call this directly anymore
+/// (#944) — it buffers in [`crate::access_counter`], which flushes here
+/// via [`record_delta`].
 pub async fn record(db: &ConfigDb, spec_id: &str) -> Result<()> {
-    let day = today();
+    record_delta(db, spec_id, &today(), 1).await
+}
+
+/// Add `delta` accesses to the `(spec_id, day)` bucket in one atomic
+/// UPSERT (#944). The flush task calls this once per touched bucket per
+/// window, so the write rate tracks specs × flush windows — not the
+/// request rate.
+pub async fn record_delta(db: &ConfigDb, spec_id: &str, day: &str, delta: i64) -> Result<()> {
     match db {
         ConfigDb::Sqlite(pool) => {
             sqlx::query(
-                "INSERT INTO spec_access (spec_id, day, count) VALUES (?, ?, 1)
-                 ON CONFLICT(spec_id, day) DO UPDATE SET count = count + 1",
+                "INSERT INTO spec_access (spec_id, day, count) VALUES (?, ?, ?)
+                 ON CONFLICT(spec_id, day) DO UPDATE SET count = count + excluded.count",
             )
             .bind(spec_id)
-            .bind(&day)
+            .bind(day)
+            .bind(delta)
             .execute(pool)
             .await
-            .context("record spec access (sqlite)")?;
+            .context("record spec access delta (sqlite)")?;
         }
         ConfigDb::Postgres(pool) => {
             sqlx::query(
-                "INSERT INTO spec_access (spec_id, day, count) VALUES ($1, $2, 1)
-                 ON CONFLICT (spec_id, day) DO UPDATE SET count = spec_access.count + 1",
+                "INSERT INTO spec_access (spec_id, day, count) VALUES ($1, $2, $3)
+                 ON CONFLICT (spec_id, day) DO UPDATE
+                     SET count = spec_access.count + EXCLUDED.count",
             )
             .bind(spec_id)
-            .bind(&day)
+            .bind(day)
+            .bind(delta)
             .execute(pool)
             .await
-            .context("record spec access (postgres)")?;
+            .context("record spec access delta (postgres)")?;
         }
     }
     Ok(())
@@ -189,5 +203,38 @@ mod tests {
         assert_eq!(sparkline_svg(&[]), "");
         assert_eq!(sparkline_svg(&[0, 0, 0]), "");
         assert!(sparkline_svg(&[0, 1, 3, 2]).contains("<polyline"));
+    }
+
+    #[tokio::test]
+    async fn record_delta_upserts_and_accumulates() {
+        let db = mem_db().await;
+        record_delta(&db, "a", "2026-07-12", 41).await.unwrap();
+        record_delta(&db, "a", "2026-07-12", 1).await.unwrap();
+        record_delta(&db, "a", "2026-07-13", 8).await.unwrap();
+        let totals = totals(&db).await.expect("totals");
+        assert_eq!(totals.get("a"), Some(&50));
+    }
+
+    // The delta UPSERT against a real Postgres (its `EXCLUDED`-qualified
+    // conflict arm differs from SQLite's). Gated on `postgres-it`.
+    #[cfg(feature = "postgres-it")]
+    #[tokio::test]
+    async fn record_delta_against_real_postgres() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let url = std::env::var("RUSCKER_TEST_PG_URL")
+            .expect("set RUSCKER_TEST_PG_URL to a reachable postgres:// DSN");
+        let pg = crate::db::open_pg(&url).await.unwrap();
+        sqlx::query("DELETE FROM spec_access")
+            .execute(&pg)
+            .await
+            .unwrap();
+        let db = ConfigDb::Postgres(pg);
+
+        record_delta(&db, "a", "2026-07-12", 41).await.unwrap();
+        record_delta(&db, "a", "2026-07-12", 1).await.unwrap();
+        record_delta(&db, "b", "2026-07-12", 7).await.unwrap();
+        let totals = totals(&db).await.expect("totals");
+        assert_eq!(totals.get("a"), Some(&42));
+        assert_eq!(totals.get("b"), Some(&7));
     }
 }

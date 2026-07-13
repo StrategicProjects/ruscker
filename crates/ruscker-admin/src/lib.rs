@@ -21,6 +21,7 @@ use tokio::net::TcpListener;
 use tower_cookies::CookieManagerLayer;
 use tracing::info;
 
+pub mod access_counter;
 pub mod auth;
 pub mod catalog;
 pub mod crypto;
@@ -192,6 +193,14 @@ pub struct AppState {
     /// any node changes the signature every reader observes). `Arc` so all
     /// cloned `AppState`s share it in-process while each test gets its own.
     pub catalog_cache: catalog::CatalogCache,
+
+    /// In-memory buffer for the per-spec access counter (#944). The
+    /// proxy hot path bumps it synchronously; a single drain task
+    /// (started from `AdminServer::run`) batches the deltas into the DB
+    /// every couple of seconds, so writes track specs × flush windows —
+    /// not the request rate. Shared so every cloned `AppState` and the
+    /// drain task see the same buffer.
+    pub access_counter: Arc<access_counter::AccessCounter>,
 }
 
 impl AppState {
@@ -249,6 +258,7 @@ impl AdminServer {
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: Arc::new(dashmap::DashMap::new()),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
+            access_counter: Arc::new(access_counter::AccessCounter::default()),
         };
         Ok(Self {
             addr,
@@ -455,6 +465,17 @@ impl AdminServer {
             );
         }
 
+        // Access-counter drain (#944): the proxy hot path only bumps an
+        // in-memory buffer; this single supervised task batches the
+        // deltas into the DB. Needs only the DB, not a backend (external
+        // specs count clicks even in landing-only mode). Detached like
+        // the loops above — every flush is idempotent-by-delta, and the
+        // final flush on shutdown runs explicitly below.
+        if let Some(db) = self.state.db.clone() {
+            #[allow(clippy::let_underscore_future)]
+            let _ = access_counter::spawn(self.state.access_counter.clone(), db);
+        }
+
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());
         let listener = TcpListener::bind(self.addr)
             .await
@@ -495,6 +516,24 @@ impl AdminServer {
             .with_graceful_shutdown(shutdown_signal(self.state.clone()))
             .await
             .context("axum serve")?;
+        // Final access-counter flush (#944): in-flight requests have
+        // finished, so their bumps are in the buffer. Bounded — a dead
+        // DB must not hold up shutdown past the watchdog.
+        if let Some(db) = self.state.db.as_ref() {
+            let flush = self.state.access_counter.flush(db);
+            match tokio::time::timeout(std::time::Duration::from_secs(5), flush).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => tracing::warn!(
+                    error = ?e,
+                    lost = self.state.access_counter.backlog(),
+                    "final access-counter flush failed; pending counts lost"
+                ),
+                Err(_) => tracing::warn!(
+                    lost = self.state.access_counter.backlog(),
+                    "final access-counter flush timed out; pending counts lost"
+                ),
+            }
+        }
         info!("shutdown complete");
         Ok(())
     }

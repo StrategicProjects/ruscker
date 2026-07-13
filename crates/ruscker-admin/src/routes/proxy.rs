@@ -261,7 +261,7 @@ async fn forward(
             // Count the external-card click (#549). The landing routes
             // external cards through `/app/{id}` precisely so this click
             // is visible to Ruscker. Best-effort — never blocks the bounce.
-            record_access(&state, &spec.id).await;
+            record_access(&state, &spec.id);
             return Redirect::to(target).into_response();
         }
         return (
@@ -725,7 +725,7 @@ async fn forward(
         // A new sticky session = a new app visit (#549). Counting here
         // (not per request) means assets/WebSocket/polling don't inflate
         // it, and direct `/app/{id}` URLs (no landing) still count.
-        record_access(&state, &spec.id).await;
+        record_access(&state, &spec.id);
         let session = StickySession {
             session_id,
             spec_id: spec.id.clone(),
@@ -745,13 +745,12 @@ async fn forward(
 
     // API specs aren't sticky, so count each forwarded call here (#549
     // follow-up). One per request — for an API, each call *is* the
-    // access. Spawned, not awaited (#744): the write is best-effort by
-    // contract, and awaiting it inline added a DB round-trip to every
-    // API response (serializing on SQLite's single writer under load).
+    // access. A synchronous in-memory bump (#944): the per-request
+    // `tokio::spawn` from #744 kept the task and write rate equal to
+    // the request rate; now the drain task batches everything into one
+    // UPSERT per flush window.
     if spec.kind() == SpecKind::Api {
-        let st = state.clone();
-        let id = spec.id.clone();
-        tokio::spawn(async move { record_access(&st, &id).await });
+        record_access(&state, &spec.id);
     }
 
     let resp = with_cors(resp, cors_on);
@@ -782,14 +781,15 @@ fn spec_kind_needs_sticky(kind: SpecKind) -> bool {
     matches!(kind, SpecKind::Shiny | SpecKind::InteractiveApp)
 }
 
-/// Best-effort per-spec access count (#549). A counter write must never
-/// break the request being served, so a missing DB or a write error is
-/// ignored (logged at debug).
-async fn record_access(state: &AppState, spec_id: &str) {
-    if let Some(db) = state.db.as_ref() {
-        if let Err(e) = crate::db::spec_access::record(db, spec_id).await {
-            tracing::debug!(spec = spec_id, error = ?e, "spec access count failed");
-        }
+/// Best-effort per-spec access count (#549). Since #944 this is a plain
+/// in-memory bump — no task, no DB round-trip, nothing that could break
+/// the request being served. A single drain task (started in
+/// `AdminServer::run`) batches the deltas into the DB; without a DB
+/// there's no drain task, so skip the bump instead of buffering counts
+/// that would never land anywhere.
+fn record_access(state: &AppState, spec_id: &str) {
+    if state.db.is_some() {
+        state.access_counter.bump(spec_id);
     }
 }
 
@@ -2221,6 +2221,7 @@ mod tests {
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: StdArc::new(dashmap::DashMap::new()),
             catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
+            access_counter: StdArc::new(crate::access_counter::AccessCounter::default()),
         }
     }
 

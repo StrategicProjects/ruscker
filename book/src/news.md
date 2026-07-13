@@ -9,6 +9,30 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.42 — 2026-07-13
+
+- **Password policy.** New passwords (creating a user, admin reset,
+  first-admin setup, changing your own, CSV import) must now have at
+  least **8 characters with 1 uppercase, 1 lowercase, 1 digit and
+  1 special character**. Existing passwords are untouched — the rule
+  applies when a password is set or reset (and admin-assigned
+  passwords already force a change at first login). Error messages and
+  form hints state the full rule in all four languages.
+- **Random password generator.** A new button beside the password
+  field (user create and reset forms) fills in a strong 14-character
+  password — generated in the browser with cryptographic randomness,
+  policy-compliant by construction, without look-alike characters
+  (no `0`/`O`, `1`/`l`), and revealed so you can read what you're
+  about to hand over. No more `teste123`.
+- **Admin tabs reordered by workflow.** Daily drivers first
+  (Dashboard, Apps, Media, Credentials, Appearance), then people
+  (Users, Groups), with diagnostics and maintenance at the end
+  (Logs, Disk, Audit, System) — Disk no longer sits between Dashboard
+  and Apps. An Editor's visible tabs now form one contiguous block, so
+  Editor and Admin share the same nav geography.
+
+---
+
 ## v0.2.41 — 2026-07-13
 
 A large batch: ten issues closed, including the whole config-model epic.

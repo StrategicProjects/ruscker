@@ -31,6 +31,7 @@ pub mod groups;
 pub mod images;
 pub mod landing;
 pub mod logs;
+pub mod schedules_ui;
 pub mod spec_form;
 pub mod specs;
 pub mod system;
@@ -63,6 +64,7 @@ pub fn routes() -> Router<AppState> {
         .merge(audit::routes())
         .merge(groups::routes())
         .merge(logs::routes())
+        .merge(schedules_ui::routes())
         .merge(users::routes())
         .merge(system::routes())
 }
@@ -739,6 +741,8 @@ fn section_for_admin_path(path: &str) -> &'static str {
         "audit"
     } else if path.starts_with("/admin/logs") {
         "logs"
+    } else if path.starts_with("/admin/schedules") {
+        "schedules"
     } else {
         // /admin root and anything unrecognised → dashboard (every
         // role can reach it).

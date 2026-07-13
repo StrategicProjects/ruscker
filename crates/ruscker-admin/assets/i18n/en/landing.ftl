@@ -936,3 +936,37 @@ admin-disk-reclaim = Reclaim space
 admin-disk-reclaim-hint = Prune dangling images + build cache (host-safe — never a tagged image or any container).
 admin-disk-reclaim-confirm = Reclaim space? Prunes dangling images and the build cache (no tagged image or container is removed).
 admin-disk-flash-reclaimed = Space reclaimed (dangling images + build cache).
+
+# Schedules — cron jobs (#986 slice C)
+admin-nav-schedules = Schedules
+admin-schedules-title = Schedules
+admin-schedules-subtitle = Run an app's image to completion on a cron schedule (ETL, reports).
+admin-schedules-create = New schedule
+admin-schedules-spec = App
+admin-schedules-cron = Cron
+admin-schedules-cron-help = Standard 5-field cron, UTC. Examples: "0 3 * * *" = every day at 03:00; "*/15 * * * *" = every 15 minutes.
+admin-schedules-cmd = Command
+admin-schedules-cmd-help = One line per argument (argv). Empty = the app's own command (its container-cmd, else the image's CMD).
+admin-schedules-timeout = Timeout (minutes)
+admin-schedules-timeout-help = Wall-clock cap for one run. Empty = 1 hour.
+admin-schedules-next-run = Next run
+admin-schedules-last-run = Last run
+admin-schedules-enabled = Enabled
+admin-schedules-disabled = Disabled
+admin-schedules-toggle = Enable/disable
+admin-schedules-delete = Delete
+admin-schedules-confirm-delete = Delete this schedule? Its run history goes with it.
+admin-schedules-empty = No schedules yet — create one above.
+admin-schedules-runs-title = Latest runs
+admin-schedules-runs-empty = No runs yet.
+admin-schedules-runs-started = Started
+admin-schedules-runs-status = Status
+admin-schedules-runs-exit = Exit code
+admin-schedules-runs-duration = Duration
+admin-schedules-log = Log
+admin-schedules-flash-created = Schedule created. It fires at the next cron occurrence (no run on creation).
+admin-schedules-flash-deleted = Schedule deleted.
+admin-schedules-flash-toggled = Schedule updated.
+admin-schedules-flash-bad-cron = Invalid cron expression — use the 5-field form, e.g. "0 3 * * *".
+admin-schedules-flash-bad-spec = Unknown app, or the app has no container image to run.
+admin-schedules-flash-error = The operation failed — check the server logs.

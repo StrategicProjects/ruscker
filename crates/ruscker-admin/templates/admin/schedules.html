@@ -1,0 +1,177 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-schedules-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-schedules-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-schedules-subtitle") }}</p>
+  </div>
+</div>
+
+{# Flash split (#746) — persistent role="alert" errors, toastable
+   role="status" successes; no colour-only state. #}
+{% if let Some(f) = flash %}
+  {% if flash_error %}
+  <div class="admin-login-error mb-3" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {{ self.t(f) }}
+  </div>
+  {% else %}
+  <div class="admin-flash-ok mb-3" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {{ self.t(f) }}
+  </div>
+  {% endif %}
+{% endif %}
+
+{# ── Create a schedule ─────────────────────────────────────────── #}
+<section style="padding:18px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <div class="font-medium mb-3" style="display:flex;align-items:center;gap:8px">
+    <i class="ti ti-clock" aria-hidden="true"></i>
+    {{ self.t("admin-schedules-create") }}
+  </div>
+  <form method="post" action="{{ base }}/admin/schedules" autocomplete="off">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-schedules-spec") }}</span>
+        <select name="spec_id" required>
+          {% for s in specs %}
+            <option value="{{ s.0 }}">{{ s.1 }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-schedules-cron") }}</span>
+        <input type="text" name="cron" required placeholder="0 3 * * *"
+               autocapitalize="none" spellcheck="false" class="dash-mono">
+        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-schedules-cron-help") }}</span>
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-schedules-cmd") }}</span>
+        <textarea name="cmd" rows="3" class="dash-mono" spellcheck="false"
+                  style="resize:vertical" placeholder="Rscript&#10;etl.R"></textarea>
+        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-schedules-cmd-help") }}</span>
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-schedules-timeout") }}</span>
+        <input type="number" name="timeout_mins" min="1" step="1" placeholder="60">
+        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-schedules-timeout-help") }}</span>
+      </label>
+    </div>
+
+    <div class="flex items-center gap-3 mt-4">
+      <button type="submit" class="admin-login-btn" style="width:auto">
+        <i class="ti ti-plus" aria-hidden="true"></i>
+        {{ self.t("admin-schedules-create") }}
+      </button>
+    </div>
+  </form>
+</section>
+
+{# ── Schedules table ───────────────────────────────────────────── #}
+<section style="padding:18px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <table class="admin-table" data-enhance>
+    <thead>
+      <tr>
+        <th>{{ self.t("admin-schedules-spec") }}</th>
+        <th style="width:120px">{{ self.t("admin-schedules-cron") }}</th>
+        <th>{{ self.t("admin-schedules-cmd") }}</th>
+        <th style="width:160px">{{ self.t("admin-schedules-next-run") }}</th>
+        <th style="width:160px">{{ self.t("admin-schedules-last-run") }}</th>
+        <th style="width:110px">{{ self.t("admin-schedules-enabled") }}</th>
+        <th style="width:84px" data-nosort></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in schedules %}
+      <tr{% if !s.enabled %} class="is-unused"{% endif %}>
+        <td><code class="dash-mono" style="font-size:11.5px">{{ s.spec_id }}</code></td>
+        <td><code class="dash-mono" style="font-size:11.5px">{{ s.cron }}</code></td>
+        <td><code class="dash-mono" style="font-size:11.5px">{{ s.cmd_summary }}</code></td>
+        <td class="tnum" style="font-size:11.5px">{{ s.next_run }}</td>
+        <td class="tnum" style="font-size:11.5px">{{ s.last_run }}</td>
+        <td>
+          {% if s.enabled %}
+            <span class="use-badge use-badge--on">{{ self.t("admin-schedules-enabled") }}</span>
+          {% else %}
+            <span class="use-badge use-badge--off">{{ self.t("admin-schedules-disabled") }}</span>
+          {% endif %}
+        </td>
+        <td style="text-align:right;white-space:nowrap">
+          <form method="post" action="{{ base }}/admin/schedules/{{ s.id }}/toggle" style="display:inline">
+            <button type="submit" class="dash-action" title="{{ self.t("admin-schedules-toggle") }}">
+              {% if s.enabled %}<i class="ti ti-player-pause"></i>{% else %}<i class="ti ti-player-play"></i>{% endif %}
+            </button>
+          </form>
+          <form method="post" action="{{ base }}/admin/schedules/{{ s.id }}/delete" style="display:inline"
+                data-confirm="{{ self.t("admin-schedules-confirm-delete") }}">
+            <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-schedules-delete") }}">
+              <i class="ti ti-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      {% if schedules.is_empty() %}
+      <tr><td colspan="7" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-schedules-empty") }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</section>
+
+{# ── Latest runs ───────────────────────────────────────────────── #}
+<section style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <div class="font-medium mb-3" style="display:flex;align-items:center;gap:8px">
+    <i class="ti ti-history" aria-hidden="true"></i>
+    {{ self.t("admin-schedules-runs-title") }}
+  </div>
+  <table class="admin-table" data-enhance>
+    <thead>
+      <tr>
+        <th>{{ self.t("admin-schedules-spec") }}</th>
+        <th style="width:160px">{{ self.t("admin-schedules-runs-started") }}</th>
+        <th style="width:100px">{{ self.t("admin-schedules-runs-status") }}</th>
+        <th style="width:90px">{{ self.t("admin-schedules-runs-exit") }}</th>
+        <th style="width:100px">{{ self.t("admin-schedules-runs-duration") }}</th>
+        <th data-nosort>{{ self.t("admin-schedules-log") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runs %}
+      <tr>
+        <td><code class="dash-mono" style="font-size:11.5px">{{ r.spec_id }}</code></td>
+        <td class="tnum" style="font-size:11.5px">{{ r.started }}</td>
+        <td>
+          {% if r.status == "ok" %}
+            <span class="use-badge use-badge--on">{{ r.status }}</span>
+          {% else %}
+            {# failed (non-zero exit) and error (couldn't run) are both red. #}
+            <span class="use-badge" style="background:color-mix(in srgb, #ef4444 14%, transparent);color:#dc2626">{{ r.status }}</span>
+          {% endif %}
+        </td>
+        <td class="tnum" style="font-size:11.5px">{{ r.exit_code }}</td>
+        <td class="tnum" style="font-size:11.5px">{{ r.duration }}</td>
+        <td>
+          {% if !r.log_tail.is_empty() %}
+          <details>
+            <summary style="cursor:pointer;font-size:11.5px;color:var(--text-muted)">{{ self.t("admin-schedules-log") }}</summary>
+            <pre class="dash-mono" style="font-size:11px;white-space:pre-wrap;word-break:break-word;max-height:220px;overflow:auto;margin-top:6px;padding:8px;background:var(--surface-soft);border-radius:8px">{{ r.log_tail }}</pre>
+          </details>
+          {% else %}
+            <span class="text-[color:var(--text-faint)]" style="font-size:11.5px">—</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if runs.is_empty() %}
+      <tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-schedules-runs-empty") }}</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

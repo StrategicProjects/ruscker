@@ -82,6 +82,12 @@
       <span>{{ self.t("admin-nav-landing") }}</span>
     </a>
     {% endif %}
+    {% if role.can_access_section("schedules") %}
+    <a href="{{ base }}/admin/schedules" class="admin-nav-link {% if nav_section == "schedules" %}is-active{% endif %}">
+      <i class="ti ti-clock" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-schedules") }}</span>
+    </a>
+    {% endif %}
     {% if role.can_access_section("users") %}
     <a href="{{ base }}/admin/users" class="admin-nav-link {% if nav_section == "users" %}is-active{% endif %}">
       <i class="ti ti-users" aria-hidden="true"></i>

@@ -940,3 +940,37 @@ admin-disk-reclaim = Recuperar espaço
 admin-disk-reclaim-hint = Limpa imagens dangling + cache de build (seguro — nunca remove imagem nomeada nem container).
 admin-disk-reclaim-confirm = Recuperar espaço? Limpa imagens dangling e o cache de build (nenhuma imagem nomeada ou container é removido).
 admin-disk-flash-reclaimed = Espaço recuperado (imagens dangling + cache de build).
+
+# Agendamentos — cron jobs (#986 fatia C)
+admin-nav-schedules = Agendamentos
+admin-schedules-title = Agendamentos
+admin-schedules-subtitle = Executa a imagem de um app até o fim em um horário cron (ETL, relatórios).
+admin-schedules-create = Novo agendamento
+admin-schedules-spec = App
+admin-schedules-cron = Cron
+admin-schedules-cron-help = Cron padrão de 5 campos, em UTC. Exemplos: "0 3 * * *" = todo dia às 03:00; "*/15 * * * *" = a cada 15 minutos.
+admin-schedules-cmd = Comando
+admin-schedules-cmd-help = Um argumento por linha (argv). Vazio = o comando do próprio app (o container-cmd, senão o CMD da imagem).
+admin-schedules-timeout = Timeout (minutos)
+admin-schedules-timeout-help = Limite de duração de uma execução. Vazio = 1 hora.
+admin-schedules-next-run = Próxima execução
+admin-schedules-last-run = Última execução
+admin-schedules-enabled = Ativo
+admin-schedules-disabled = Inativo
+admin-schedules-toggle = Ativar/desativar
+admin-schedules-delete = Excluir
+admin-schedules-confirm-delete = Excluir este agendamento? O histórico de execuções vai junto.
+admin-schedules-empty = Nenhum agendamento ainda — crie um acima.
+admin-schedules-runs-title = Últimas execuções
+admin-schedules-runs-empty = Nenhuma execução ainda.
+admin-schedules-runs-started = Início
+admin-schedules-runs-status = Status
+admin-schedules-runs-exit = Código de saída
+admin-schedules-runs-duration = Duração
+admin-schedules-log = Log
+admin-schedules-flash-created = Agendamento criado. Dispara na próxima ocorrência do cron (não executa ao criar).
+admin-schedules-flash-deleted = Agendamento excluído.
+admin-schedules-flash-toggled = Agendamento atualizado.
+admin-schedules-flash-bad-cron = Expressão cron inválida — use a forma de 5 campos, ex.: "0 3 * * *".
+admin-schedules-flash-bad-spec = App desconhecido, ou o app não tem imagem de container para executar.
+admin-schedules-flash-error = A operação falhou — verifique os logs do servidor.

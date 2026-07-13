@@ -69,7 +69,8 @@ impl Role {
             // authenticated-end-user role (group-based card visibility,
             // #155), so it reaches NO admin section.
             "dashboard" | "specs" | "images" => *self >= Role::Editor,
-            // Everything else is admin-only.
+            // Everything else — credentials, landing, users, groups,
+            // logs, disk, audit, system, schedules — is admin-only.
             _ => *self == Role::Admin,
         }
     }
@@ -752,7 +753,7 @@ mod tests {
         assert_eq!(Role::Editor.home(), "/admin/specs");
         assert_eq!(Role::Admin.home(), "/admin/specs");
         // Admin-only sections.
-        for sec in ["credentials", "landing", "blocks", "audit"] {
+        for sec in ["credentials", "landing", "blocks", "audit", "schedules"] {
             assert!(!Role::Viewer.can_access_section(sec));
             assert!(!Role::Editor.can_access_section(sec));
             assert!(Role::Admin.can_access_section(sec));

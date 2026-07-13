@@ -936,3 +936,37 @@ admin-disk-reclaim = Recuperar espacio
 admin-disk-reclaim-hint = Limpia imágenes dangling + caché de compilación (seguro — nunca una imagen con tag ni un contenedor).
 admin-disk-reclaim-confirm = ¿Recuperar espacio? Limpia imágenes dangling y la caché de compilación (no se elimina ninguna imagen con tag ni contenedor).
 admin-disk-flash-reclaimed = Espacio recuperado (imágenes dangling + caché de compilación).
+
+# Programaciones — cron jobs (#986 parte C)
+admin-nav-schedules = Programaciones
+admin-schedules-title = Programaciones
+admin-schedules-subtitle = Ejecuta la imagen de una app hasta terminar según un horario cron (ETL, informes).
+admin-schedules-create = Nueva programación
+admin-schedules-spec = App
+admin-schedules-cron = Cron
+admin-schedules-cron-help = Cron estándar de 5 campos, en UTC. Ejemplos: "0 3 * * *" = cada día a las 03:00; "*/15 * * * *" = cada 15 minutos.
+admin-schedules-cmd = Comando
+admin-schedules-cmd-help = Un argumento por línea (argv). Vacío = el comando de la propia app (su container-cmd, si no el CMD de la imagen).
+admin-schedules-timeout = Timeout (minutos)
+admin-schedules-timeout-help = Límite de duración de una ejecución. Vacío = 1 hora.
+admin-schedules-next-run = Próxima ejecución
+admin-schedules-last-run = Última ejecución
+admin-schedules-enabled = Activa
+admin-schedules-disabled = Inactiva
+admin-schedules-toggle = Activar/desactivar
+admin-schedules-delete = Eliminar
+admin-schedules-confirm-delete = ¿Eliminar esta programación? Su historial de ejecuciones se va con ella.
+admin-schedules-empty = Aún no hay programaciones — crea una arriba.
+admin-schedules-runs-title = Últimas ejecuciones
+admin-schedules-runs-empty = Aún no hay ejecuciones.
+admin-schedules-runs-started = Inicio
+admin-schedules-runs-status = Estado
+admin-schedules-runs-exit = Código de salida
+admin-schedules-runs-duration = Duración
+admin-schedules-log = Log
+admin-schedules-flash-created = Programación creada. Se dispara en la próxima ocurrencia del cron (no se ejecuta al crearla).
+admin-schedules-flash-deleted = Programación eliminada.
+admin-schedules-flash-toggled = Programación actualizada.
+admin-schedules-flash-bad-cron = Expresión cron no válida — usa la forma de 5 campos, p. ej. "0 3 * * *".
+admin-schedules-flash-bad-spec = App desconocida, o la app no tiene imagen de contenedor que ejecutar.
+admin-schedules-flash-error = La operación falló — revisa los logs del servidor.

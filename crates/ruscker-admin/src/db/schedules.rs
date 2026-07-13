@@ -32,6 +32,22 @@ impl Schedule {
     }
 }
 
+/// One row of run history, joined with its schedule so the admin UI
+/// (#986 slice C) can show which SPEC ran without a second query. A
+/// run whose schedule was deleted disappears with it (`ON DELETE
+/// CASCADE` on `schedule_runs.schedule_id`).
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct RunRow {
+    pub schedule_id: i64,
+    pub spec_id: String,
+    pub started_at: DateTime<Utc>,
+    /// `ok` | `failed` | `error` (see [`RunStatus`]).
+    pub status: String,
+    pub exit_code: Option<i64>,
+    pub log_tail: Option<String>,
+    pub duration_ms: Option<i64>,
+}
+
 /// Outcome bucket for a run row. `Error` = the job could not run at
 /// all; `Failed` = ran and exited non-zero.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +81,41 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<Schedule>> {
                 .await
                 .context("list schedules (postgres)")?
         }
+    };
+    Ok(rows)
+}
+
+/// The most recent runs across ALL schedules, newest first — the
+/// "Latest runs" table on `/admin/schedules`.
+pub async fn recent_runs(db: &ConfigDb, limit: i64) -> Result<Vec<RunRow>> {
+    // The JOIN resolves spec_id; the index on (schedule_id, started_at)
+    // doesn't help a global ORDER BY, but the table is small and the
+    // LIMIT keeps the scan bounded in practice.
+    let rows = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as::<_, RunRow>(
+            "SELECT r.schedule_id, s.spec_id, r.started_at, r.status, r.exit_code,
+                    r.log_tail, r.duration_ms
+             FROM schedule_runs r
+             JOIN schedules s ON s.id = r.schedule_id
+             ORDER BY r.started_at DESC
+             LIMIT ?",
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .context("recent schedule runs (sqlite)")?,
+        ConfigDb::Postgres(pool) => sqlx::query_as::<_, RunRow>(
+            "SELECT r.schedule_id, s.spec_id, r.started_at, r.status, r.exit_code,
+                    r.log_tail, r.duration_ms
+             FROM schedule_runs r
+             JOIN schedules s ON s.id = r.schedule_id
+             ORDER BY r.started_at DESC
+             LIMIT $1",
+        )
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .context("recent schedule runs (postgres)")?,
     };
     Ok(rows)
 }
@@ -312,6 +363,37 @@ mod tests {
         assert!(list_all(&db).await.unwrap().is_empty());
     }
 
+    /// #986 slice C: `recent_runs` joins the spec back in, orders
+    /// newest-first, and honours the limit.
+    #[tokio::test]
+    async fn recent_runs_joins_spec_and_orders_newest_first() {
+        let db = mem_db().await;
+        insert(&db, "etl-a", "0 3 * * *", None, None, None).await.unwrap();
+        insert(&db, "etl-b", "0 4 * * *", None, None, None).await.unwrap();
+        let all = list_all(&db).await.unwrap();
+        let (a, b) = (all[0].id, all[1].id);
+        assert_eq!(all[0].spec_id, "etl-a");
+
+        let t0: DateTime<Utc> = "2026-07-13T03:00:00Z".parse().unwrap();
+        let t1: DateTime<Utc> = "2026-07-13T04:00:00Z".parse().unwrap();
+        record_run(&db, a, t0, RunStatus::Ok, Some(0), "done", Some(1500)).await.unwrap();
+        record_run(&db, b, t1, RunStatus::Failed, Some(2), "boom", Some(80)).await.unwrap();
+
+        let runs = recent_runs(&db, 20).await.unwrap();
+        assert_eq!(runs.len(), 2);
+        // Newest first, each carrying its schedule's spec_id.
+        assert_eq!(runs[0].spec_id, "etl-b");
+        assert_eq!(runs[0].status, "failed");
+        assert_eq!(runs[0].exit_code, Some(2));
+        assert_eq!(runs[0].log_tail.as_deref(), Some("boom"));
+        assert_eq!(runs[0].duration_ms, Some(80));
+        assert_eq!(runs[1].spec_id, "etl-a");
+        assert_eq!(runs[1].status, "ok");
+
+        // The limit bounds the page.
+        assert_eq!(recent_runs(&db, 1).await.unwrap().len(), 1);
+    }
+
     // Dual-dialect check (the `IS NOT DISTINCT FROM` claim + BOOLEAN
     // columns). Gated on `postgres-it`.
     #[cfg(feature = "postgres-it")]
@@ -331,6 +413,10 @@ mod tests {
         assert!(mark_fired(&db, s.id, None, now).await.unwrap());
         assert!(!mark_fired(&db, s.id, None, now).await.unwrap());
         record_run(&db, s.id, now, RunStatus::Ok, Some(0), "", Some(10)).await.unwrap();
+        // The $n-placeholder JOIN query parses under real Postgres too.
+        let runs = recent_runs(&db, 5).await.unwrap();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].spec_id, "etl-app");
         delete(&db, s.id, None).await.unwrap();
     }
 }

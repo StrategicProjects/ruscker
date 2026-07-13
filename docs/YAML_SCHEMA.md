@@ -98,7 +98,7 @@ ignored by Ruscker.
 | `authentication` | enum | `none` | `none` (only `none` is implemented today) / `openid` / `ldap` / `saml` / `simple` |
 | `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
 | `specs` | array | `[]` | List of apps/links/APIs |
-| `container-wait-time` | ms | `60000` | **Not consumed today** — the spawn readiness wait is a fixed 60 s; wiring the field is tracked in issue #970 |
+| `container-wait-time` | ms | `60000` | Max wait for a spawned container to become ready (TCP + HTTP probe) before the spawn fails; `0` keeps the default (#970) |
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
 | `metrics-enabled` | bool | `false` | Expose a Prometheus `/metrics` endpoint (**unauthenticated** when on — firewall it). Ruscker extension |

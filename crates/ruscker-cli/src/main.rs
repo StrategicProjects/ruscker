@@ -548,6 +548,10 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
         None => config.server.effective_base_path(),
     };
 
+    // Captured before `config` moves into the server (#970): how long
+    // a spawned container gets to become ready before the spawn fails.
+    let container_wait = std::time::Duration::from_millis(config.proxy.container_wait_time);
+
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
@@ -576,12 +580,17 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
             // hosts); `connect` validates them and fails only on zero.
             tracing::info!(count = hosts.len(), "multi-host backend");
             let backend = ruscker_docker::MultiHostDockerBackend::connect(&hosts)
-                .context("connect to Docker hosts")?;
+                .context("connect to Docker hosts")?
+                // `proxy.container-wait-time` (#970): how long a spawned
+                // container gets to become ready before the spawn fails.
+                .with_readiness_timeout(container_wait);
             server = server.with_backend(std::sync::Arc::new(backend));
         } else if docker || is_local_docker_reachable() {
             // `docker` ⇒ forced on; otherwise auto (the socket file exists).
             match ruscker_docker::LocalDockerBackend::local() {
                 Ok(b) => {
+                    // `proxy.container-wait-time` (#970), as above.
+                    let b = b.with_readiness_timeout(container_wait);
                     let backend: std::sync::Arc<dyn ruscker_core::ContainerBackend> =
                         std::sync::Arc::new(b);
                     // The socket file can be present while the service user

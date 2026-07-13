@@ -12,6 +12,11 @@ description = "Admin panel and public landing for Ruscker (Askama + HTMX + Tailw
 # set RUSCKER_TEST_PG_URL to a reachable `postgres://` DSN. See
 # crates/ruscker-admin/src/sessions_pg.rs for a throwaway-daemon recipe.
 postgres-it = []
+# Live WebSocket e2e against REAL Shiny + Streamlit containers (#929):
+# spawns the demo images through the proxy and exercises the rewrite +
+# WS pump arc. Needs Docker and pulls ~1 GB of images on first run:
+#   cargo test -p ruscker-admin --features ws-e2e --test ws_e2e -- --nocapture
+ws-e2e = []
 
 [dependencies]
 ruscker-config = { path = "../ruscker-config" }
@@ -101,3 +106,6 @@ tower = { workspace = true, features = ["util"] }
 tokio = { workspace = true }
 # WS client + mock upstream for the proxy upgrade tests (#730)
 tokio-tungstenite = { workspace = true }
+# Real Docker backend for the ws-e2e feature (#929) — dev-only; the
+# production wiring stays in ruscker-cli.
+ruscker-docker = { path = "../ruscker-docker" }

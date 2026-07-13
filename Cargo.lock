@@ -2924,6 +2924,7 @@ dependencies = [
  "regex",
  "ruscker-config",
  "ruscker-core",
+ "ruscker-docker",
  "ruscker-proxy",
  "rustls",
  "serde",

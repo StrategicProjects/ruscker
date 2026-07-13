@@ -98,7 +98,7 @@ ignored by Ruscker.
 | `authentication` | enum | `none` | `none` (only `none` is implemented today) / `openid` / `ldap` / `saml` / `simple` |
 | `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
 | `specs` | array | `[]` | List of apps/links/APIs |
-| `container-wait-time` | ms | `60000` | Max wait for container Ready |
+| `container-wait-time` | ms | `60000` | **Not consumed today** — the spawn readiness wait is a fixed 60 s; wiring the field is tracked in issue #970 |
 | `shutdown-grace-ms` | ms | `30000` | Drain window on SIGTERM/Ctrl-C before forced exit; `/readyz` reports `draining` during it. Ruscker extension |
 | `max-body-size` | size | none | Global cap on proxied request bodies (`"10m"`, `"1g"`, bytes); over → `413`. Per-spec `max-body-size` overrides. Ruscker extension |
 | `metrics-enabled` | bool | `false` | Expose a Prometheus `/metrics` endpoint (**unauthenticated** when on — firewall it). Ruscker extension |
@@ -751,3 +751,9 @@ Run `ruscker validate --strict-compat <config>` to list every
 unsupported feature a config uses (and exit non-zero if any are
 found) — the recommended pre-flight check when migrating from
 ShinyProxy.
+
+For a field-by-field ShinyProxy → Ruscker reference — every documented
+ShinyProxy 3.x key with its status here (supported /
+warned-and-ignored / planned / out of scope) and the Ruscker
+equivalent where one exists — see the **ShinyProxy → Ruscker field
+map** page on the docs site (`book/src/shinyproxy-fieldmap.md`).

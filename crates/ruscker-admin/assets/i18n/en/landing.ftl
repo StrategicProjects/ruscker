@@ -209,6 +209,7 @@ admin-login-back-portal = ← public portal
 
 # Apps list
 admin-specs-title = Apps
+admin-specs-refresh = Refresh
 admin-specs-subtitle = Spec catalog stored in the database
 admin-specs-empty = No apps yet. Use { $cmd } to import from a YAML.
 admin-specs-add = Add app

@@ -101,7 +101,13 @@ Put Ruscker and the hosts on a private network and open that range
 between them; **do not expose those ports to the public** — they're
 unauthenticated app backends. (For SSH hosts, the SSH connection is
 only the Docker *control* plane; the *data* plane is still this direct
-TCP path.)
+TCP path.) This inter-host traffic is plain HTTP by design — if the
+link between the machines isn't trusted, encrypt it at the network
+layer (WireGuard or an encrypted overlay), which covers every
+published port at once. On a **single host** none of this applies:
+containers publish on `127.0.0.1` and the proxy connects over
+loopback, so the traffic never leaves the machine — see the *Data
+plane* section of [Security](./security.md).
 
 **Placement.** `spread` (default) distributes replicas (weighted by
 `weight`) for fault isolation; `bin-pack` fills one host before the

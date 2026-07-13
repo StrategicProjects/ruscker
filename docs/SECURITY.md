@@ -376,6 +376,32 @@ deliberate feature, not a config flip.
   slot is client-controlled whenever a proxy appends). Off on
   plain-HTTP dev so the browser doesn't drop the cookie.
 
+### Data plane: proxy → app containers
+
+Where the traffic between Ruscker and the containers it spawns
+actually flows, and why it is **deliberately not TLS**:
+
+- **Single host (the default and every current deployment):** each
+  container publishes its port on **`127.0.0.1`** and the proxy
+  connects over loopback — the bytes never leave the machine, so
+  there is no network path for an eavesdropper that doesn't already
+  own the host. End-to-end encryption with the *user* is complete:
+  browser —TLS→ reverse proxy —loopback→ Ruscker —loopback→ container.
+- **Multi host (`proxy.hosts`):** the data plane crosses the network
+  (`host:published-port`), so the deployment requirement is a
+  **private network between the Ruscker box and the app hosts**, with
+  the ephemeral published-port range opened only between them and
+  **never exposed publicly** (the backends are unauthenticated). If
+  the link between hosts isn't trusted, encrypt at the network layer
+  (WireGuard / an encrypted overlay) — that protects every port at
+  once and needs no per-container certificates.
+- **[accepted limitation / by design]** Ruscker does not do TLS or
+  mTLS *to* the app containers: apps (Shiny, Streamlit, Jupyter,
+  Plumber) serve plain HTTP by default, and per-container certificate
+  issuance/rotation would add real complexity against a threat the
+  loopback / private-network requirement already removes. This
+  mirrors ShinyProxy and the rest of this class of tool.
+
 ### Forwarded-header trust model
 
 One switch — `server.useForwardHeaders: true` (or a

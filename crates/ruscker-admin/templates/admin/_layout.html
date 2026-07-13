@@ -45,16 +45,17 @@
       <i class="ti ti-arrow-back-up" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-portal") }}</span>
     </a>
+    {# Tab order is by workflow, not feature age: operate (Painel) →
+       the catalog and what feeds it (Aplicações → Mídia → Credenciais
+       → Aparência) → people (Usuários → Grupos) → diagnostics and
+       governance last (Logs → Disco → Auditoria → Sistema). Nice side
+       effect: an Editor's tabs (dashboard/specs/images) are one
+       contiguous block on the left — everything after Mídia is
+       admin-only, so the two roles share the same geography. #}
     {% if role.can_access_section("dashboard") %}
     <a href="{{ base }}/admin/dashboard" class="admin-nav-link {% if nav_section == "dashboard" %}is-active{% endif %}">
       <i class="ti ti-chart-line" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-dashboard") }}</span>
-    </a>
-    {% endif %}
-    {% if role.can_access_section("disk") %}
-    <a href="{{ base }}/admin/disk" class="admin-nav-link {% if nav_section == "disk" %}is-active{% endif %}">
-      <i class="ti ti-database" aria-hidden="true"></i>
-      <span>{{ self.t("admin-nav-disk") }}</span>
     </a>
     {% endif %}
     {% if role.can_access_section("specs") %}
@@ -81,18 +82,6 @@
       <span>{{ self.t("admin-nav-landing") }}</span>
     </a>
     {% endif %}
-    {% if role.can_access_section("audit") %}
-    <a href="{{ base }}/admin/audit" class="admin-nav-link {% if nav_section == "audit" %}is-active{% endif %}">
-      <i class="ti ti-history" aria-hidden="true"></i>
-      <span>{{ self.t("admin-nav-audit") }}</span>
-    </a>
-    {% endif %}
-    {% if role.can_access_section("system") %}
-    <a href="{{ base }}/admin/system" class="admin-nav-link {% if nav_section == "system" %}is-active{% endif %}">
-      <i class="ti ti-cpu" aria-hidden="true"></i>
-      <span>{{ self.t("admin-nav-system") }}</span>
-    </a>
-    {% endif %}
     {% if role.can_access_section("users") %}
     <a href="{{ base }}/admin/users" class="admin-nav-link {% if nav_section == "users" %}is-active{% endif %}">
       <i class="ti ti-users" aria-hidden="true"></i>
@@ -109,6 +98,24 @@
     <a href="{{ base }}/admin/logs" class="admin-nav-link {% if nav_section == "logs" %}is-active{% endif %}">
       <i class="ti ti-terminal-2" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-logs") }}</span>
+    </a>
+    {% endif %}
+    {% if role.can_access_section("disk") %}
+    <a href="{{ base }}/admin/disk" class="admin-nav-link {% if nav_section == "disk" %}is-active{% endif %}">
+      <i class="ti ti-database" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-disk") }}</span>
+    </a>
+    {% endif %}
+    {% if role.can_access_section("audit") %}
+    <a href="{{ base }}/admin/audit" class="admin-nav-link {% if nav_section == "audit" %}is-active{% endif %}">
+      <i class="ti ti-history" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-audit") }}</span>
+    </a>
+    {% endif %}
+    {% if role.can_access_section("system") %}
+    <a href="{{ base }}/admin/system" class="admin-nav-link {% if nav_section == "system" %}is-active{% endif %}">
+      <i class="ti ti-cpu" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-system") }}</span>
     </a>
     {% endif %}
   </div>

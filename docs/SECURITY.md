@@ -20,7 +20,7 @@ Status: living document. Tracks the Phase 5 security audit
 | Asset | Why it matters |
 |-------|----------------|
 | `RUSCKER_ADMIN_TOKEN` | break-glass Admin login + first-account bootstrap — full access |
-| User passwords (DB) | per-user login; stored as argon2id hashes |
+| User passwords (DB) | per-user login; stored as argon2id hashes; policy on set/reset: ≥ 8 chars with upper + lower + digit + special |
 | `RUSCKER_MASTER_KEY` | decrypts the registry-credential store |
 | `RUSCKER_COOKIE_KEY` | forges sticky-session cookies |
 | Registry credentials (DB) | pull access to private images |

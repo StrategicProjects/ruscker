@@ -79,13 +79,19 @@ Known refinements that matter under sustained real load (see CLAUDE.md
 
 ### C. Core-claim de-risking (cheap insurance, do alongside) — *low effort*
 
-The whole value proposition is hosting Shiny / Streamlit / Dash, but the
-URL-rewriting + WebSocket arc was validated against **Jupyter**, not
-those. `ruscker-proxy/CLAUDE.md` already flags a missing
-`tests/shiny_e2e.rs`. Spin up a real Shiny *and* a Streamlit container
-behind the proxy and exercise the rewrite + WS pump end to end. If it
-surfaces a bug, far cheaper to fix now than after adopters hit it.
-Recommended regardless of the chosen direction.
+**DONE (#929):** `crates/ruscker-admin/tests/ws_e2e.rs`, gated behind
+the `ws-e2e` feature, spins up the real `openanalytics/shinyproxy-demo`
+(Shiny) and `…-streamlit-demo` (Streamlit) containers through the
+proxy's own cold-spawn path and validates the whole arc: injected
+`<base href>`, WS upgrade, frames flowing both ways through `ws::pump`
+(Shiny answers the init with its `{"config":…}` frame; Streamlit's
+Tornado pings arrive and our ping round-trips back as a pong), refresh
+survival (second socket while the first is open), clean close. Run
+locally with Docker:
+
+```sh
+cargo test -p ruscker-admin --features ws-e2e --test ws_e2e -- --nocapture
+```
 
 ---
 

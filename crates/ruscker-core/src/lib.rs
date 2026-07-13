@@ -428,6 +428,21 @@ pub trait ContainerBackend: Send + Sync {
         Ok(())
     }
 
+    /// Run a container to COMPLETION (#986 slice A) — the primitive
+    /// behind scheduled jobs (ETL, reports): same image/env/volumes/
+    /// creds model as a spawn (the request type is [`SpawnRequest`];
+    /// `inner_port`/`placement` are ignored — a job publishes nothing),
+    /// but the container runs, exits, has its exit code + log tail
+    /// captured, and is removed. A NON-ZERO exit is a valid
+    /// [`JobOutcome`], not an `Err` — errors mean the job could not be
+    /// run at all (pull/create/start failure, timeout). Defaults to an
+    /// error so backends without job support fail closed.
+    async fn run_job(&self, _req: &SpawnRequest) -> CoreResult<JobOutcome> {
+        Err(CoreError::Backend(
+            "run-to-completion jobs are not supported by this backend".into(),
+        ))
+    }
+
     /// Named Docker volumes on the host, with how many containers (ANY
     /// container, not just Ruscker's) reference each — the disk panel
     /// only offers to remove unreferenced ones (#987). Defaults to an
@@ -523,6 +538,20 @@ pub struct ManagedContainer {
     pub status: String,
     /// Whether the container is currently running.
     pub running: bool,
+}
+
+/// The result of a run-to-completion job (#986). A captured non-zero
+/// exit code is a *reported failure*, distinct from the backend being
+/// unable to run the job at all (which is a `CoreResult::Err`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct JobOutcome {
+    /// The container's exit code (0 = success).
+    pub exit_code: i64,
+    /// Trailing log lines (stdout+stderr interleaved), for the run
+    /// history and failure alerts.
+    pub log_tail: Vec<String>,
+    /// Wall-clock duration of the run, in milliseconds.
+    pub duration_ms: u64,
 }
 
 /// A named Docker volume, for the disk panel's volumes card (#987).

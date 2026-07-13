@@ -42,6 +42,10 @@ use tokio::time::sleep;
 
 pub const LABEL_SPEC_ID: &str = "ruscker.spec_id";
 pub const LABEL_REPLICA_ID: &str = "ruscker.replica_id";
+/// Stamped on run-to-completion job containers (#986) instead of
+/// `LABEL_REPLICA_ID`, so the replica machinery (reconcile, registry,
+/// liveness prune, disk panel's managed list) never sees a job.
+pub const LABEL_JOB: &str = "ruscker.job";
 pub const LABEL_INNER_PORT: &str = "ruscker.inner_port";
 
 /// Default inner port if the spec doesn't tell us — matches the
@@ -989,6 +993,119 @@ impl ContainerBackend for LocalDockerBackend {
             .await
             .map_err(|e| backend_err("remove image", e))?;
         Ok(())
+    }
+
+    async fn run_job(&self, req: &ruscker_core::SpawnRequest) -> CoreResult<ruscker_core::JobOutcome> {
+        use futures_util::StreamExt;
+        let started = std::time::Instant::now();
+
+        // Same pull path as a spawn (idempotent, creds-aware).
+        self.ensure_image_pulled(&req.image, req.creds.as_ref(), req.platform.as_deref())
+            .await?;
+
+        // Create WITHOUT any port publishing: a job talks to nobody.
+        // `ruscker.job` (not `ruscker.replica_id`) keeps it invisible
+        // to the replica machinery; `ruscker.spec_id` still ties it to
+        // its spec for the disk panel / manual cleanup.
+        let mut labels = HashMap::new();
+        for (k, v) in &req.labels {
+            labels.insert(k.clone(), v.clone());
+        }
+        labels.insert(LABEL_SPEC_ID.to_string(), req.spec_id.clone());
+        labels.insert(LABEL_JOB.to_string(), "true".to_string());
+
+        let mut host_config = HostConfig {
+            binds: (!req.volumes.is_empty()).then(|| req.volumes.clone()),
+            ..Default::default()
+        };
+        apply_limits(&mut host_config, &req.limits);
+        if let Some(network) = req.network.as_deref() {
+            self.ensure_network(network).await?;
+            host_config.network_mode = Some(network.to_string());
+        }
+        let body = ContainerCreateBody {
+            image: Some(req.image.clone()),
+            labels: Some(labels),
+            host_config: Some(host_config),
+            env: (!req.env.is_empty()).then(|| req.env.clone()),
+            cmd: req.cmd.clone(),
+            ..Default::default()
+        };
+        let suffix = uuid::Uuid::new_v4().to_string();
+        let name = format!("ruscker-job-{}-{}", req.spec_id, &suffix[..8]);
+        let opts = CreateContainerOptions {
+            name: Some(name.clone()),
+            platform: req.platform.clone().unwrap_or_default(),
+        };
+        let container_id = self
+            .docker
+            .create_container(Some(opts), body)
+            .await
+            .map_err(|e| backend_err("create job container", e))?
+            .id;
+
+        // Best-effort removal on EVERY exit path below — a finished or
+        // failed job must never linger as a stopped container.
+        let cleanup = |docker: Docker, id: String| async move {
+            let opts = RemoveContainerOptions {
+                force: true,
+                ..Default::default()
+            };
+            let _ = docker.remove_container(&id, Some(opts)).await;
+        };
+
+        if let Err(e) = self
+            .docker
+            .start_container(&container_id, None::<StartContainerOptions>)
+            .await
+        {
+            cleanup(self.docker.clone(), container_id).await;
+            return Err(backend_err("start job container", e));
+        }
+
+        // Wait for the exit, bounded: a hung job must not pin the
+        // scheduler forever. The cap is generous — ETL runs are long —
+        // and slice B makes it per-schedule.
+        const JOB_TIMEOUT: Duration = Duration::from_secs(60 * 60);
+        let waited = tokio::time::timeout(JOB_TIMEOUT, async {
+            self.docker
+                .wait_container(&container_id, None::<bollard::query_parameters::WaitContainerOptions>)
+                .next()
+                .await
+        })
+        .await;
+        let exit_code = match waited {
+            Err(_) => {
+                cleanup(self.docker.clone(), container_id).await;
+                return Err(CoreError::Backend(format!(
+                    "job for `{}` still running after {JOB_TIMEOUT:?}; killed and removed",
+                    req.spec_id
+                )));
+            }
+            // Docker reports a non-zero exit as a stream *error* carrying
+            // the response — both arms below still mean "the job ran".
+            Ok(Some(Ok(w))) => w.status_code,
+            Ok(Some(Err(bollard::errors::Error::DockerContainerWaitError { code, .. }))) => code,
+            Ok(Some(Err(e))) => {
+                cleanup(self.docker.clone(), container_id).await;
+                return Err(backend_err("wait for job container", e));
+            }
+            Ok(None) => {
+                cleanup(self.docker.clone(), container_id).await;
+                return Err(CoreError::Backend("job wait stream ended without a status".into()));
+            }
+        };
+
+        let log_tail = self
+            .logs_for_container(&container_id, READINESS_LOG_TAIL)
+            .await
+            .unwrap_or_default();
+        cleanup(self.docker.clone(), container_id).await;
+        Ok(ruscker_core::JobOutcome {
+            exit_code,
+            log_tail,
+            duration_ms: started.elapsed().as_millis() as u64,
+        })
     }
 
     async fn list_volumes(&self) -> CoreResult<Vec<ruscker_core::VolumeInfo>> {
@@ -2202,6 +2319,49 @@ mod tests {
             !after.iter().any(|c| c.id == replica.container_id),
             "container should be gone after remove"
         );
+    }
+
+    /// #986 slice A: a run-to-completion job against the real daemon.
+    /// A succeeding job returns exit 0 + its stdout in the tail; a
+    /// FAILING job is a valid JobOutcome (exit code preserved), never
+    /// an Err; and in both cases the container is removed afterwards.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn run_job_captures_exit_and_logs_and_reaps() {
+        use ruscker_core::ContainerBackend as _;
+        let backend = LocalDockerBackend::local().expect("connect docker");
+
+        let mut req = ruscker_core::SpawnRequest::new("it-job", "busybox:latest");
+        req.cmd = Some(vec![
+            "sh".into(),
+            "-c".into(),
+            "echo etl-ok; exit 0".into(),
+        ]);
+        let out = backend.run_job(&req).await.expect("job ran");
+        assert_eq!(out.exit_code, 0);
+        assert!(
+            out.log_tail.iter().any(|l| l.contains("etl-ok")),
+            "stdout captured: {:?}",
+            out.log_tail
+        );
+
+        // Non-zero exit: reported, not an error.
+        req.cmd = Some(vec!["sh".into(), "-c".into(), "echo boom >&2; exit 3".into()]);
+        let out = backend.run_job(&req).await.expect("failing job still ran");
+        assert_eq!(out.exit_code, 3);
+        assert!(out.log_tail.iter().any(|l| l.contains("boom")));
+
+        // No stopped job containers linger.
+        let opts = ListContainersOptions {
+            all: true,
+            filters: Some(HashMap::from([(
+                "label".to_string(),
+                vec![format!("{LABEL_JOB}=true")],
+            )])),
+            ..Default::default()
+        };
+        let leftover = backend.docker.list_containers(Some(opts)).await.unwrap();
+        assert!(leftover.is_empty(), "job containers must be removed");
     }
 
     /// #987: named-volume roundtrip against the real daemon — create

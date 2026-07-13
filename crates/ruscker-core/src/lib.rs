@@ -428,6 +428,34 @@ pub trait ContainerBackend: Send + Sync {
         Ok(())
     }
 
+    /// Named Docker volumes on the host, with how many containers (ANY
+    /// container, not just Ruscker's) reference each — the disk panel
+    /// only offers to remove unreferenced ones (#987). Defaults to an
+    /// error, NOT an empty list: a backend that doesn't implement
+    /// volumes must render as "unavailable", never as "no volumes"
+    /// (the fail-closed rule from #889).
+    async fn list_volumes(&self) -> CoreResult<Vec<VolumeInfo>> {
+        Err(CoreError::Backend(
+            "volume listing is not supported by this backend".into(),
+        ))
+    }
+
+    /// Create a named volume (labelled as Ruscker-created).
+    async fn create_volume(&self, _name: &str) -> CoreResult<()> {
+        Err(CoreError::Backend(
+            "volume creation is not supported by this backend".into(),
+        ))
+    }
+
+    /// Remove a named volume. Never forced — the daemon refuses an
+    /// in-use volume, which is the final backstop under the panel's
+    /// own zero-references check.
+    async fn remove_volume(&self, _name: &str) -> CoreResult<()> {
+        Err(CoreError::Backend(
+            "volume removal is not supported by this backend".into(),
+        ))
+    }
+
     /// Whether `image` is already present on this backend's host — a fast,
     /// pull-free presence check for the spec editor's "image on server"
     /// indicator (#498). `Ok(false)` means "not found" (not an error).
@@ -495,6 +523,22 @@ pub struct ManagedContainer {
     pub status: String,
     /// Whether the container is currently running.
     pub running: bool,
+}
+
+/// A named Docker volume, for the disk panel's volumes card (#987).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VolumeInfo {
+    /// Volume name (the removal handle).
+    pub name: String,
+    /// Volume driver (usually `local`).
+    pub driver: String,
+    /// Creation timestamp as reported by the daemon (RFC 3339), when known.
+    pub created_at: Option<String>,
+    /// Containers (running or stopped, ANY owner) mounting this volume.
+    pub refs: i64,
+    /// Whether the volume carries the `ruscker.created` label (made
+    /// from the admin panel, as opposed to a neighbour's volume).
+    pub ruscker_created: bool,
 }
 
 /// A local image, for the disk panel. `containers` mirrors Docker's

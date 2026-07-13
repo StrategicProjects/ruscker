@@ -21,7 +21,7 @@ use crate::auth::{RequireAdmin, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
-use ruscker_core::{CoreResult, ImageInfo, ManagedContainer};
+use ruscker_core::{CoreResult, ImageInfo, ManagedContainer, VolumeInfo};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -30,6 +30,8 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/disk/containers/prune", post(prune_stopped))
         .route("/admin/disk/images/remove", post(remove_image))
         .route("/admin/disk/images/prune", post(prune_images))
+        .route("/admin/disk/volumes/create", post(create_volume))
+        .route("/admin/disk/volumes/remove", post(remove_volume))
         .route("/admin/disk/reclaim", post(reclaim))
 }
 
@@ -66,6 +68,43 @@ impl ImageRow {
     }
 }
 
+/// One named-volume row, enriched with whether it's safe to remove
+/// (#987). Mirrors [`ImageRow`]: display data + the safety verdict the
+/// template's per-row button keys on.
+struct VolumeRow {
+    /// Volume name — also the removal handle.
+    name: String,
+    /// Volume driver (usually `local`).
+    driver: String,
+    /// Creation date for display (`YYYY-MM-DD`, or `—` when the daemon
+    /// didn't report one).
+    created: String,
+    /// How many containers on the host mount this volume — counted over
+    /// **ALL** containers, running or stopped, Ruscker's or not, so a
+    /// neighbour's mount keeps the volume "in use" here too.
+    refs: i64,
+    /// A spec in the effective catalog names this volume in its
+    /// `container-volumes` — removing it would wipe data the next spawn
+    /// expects, so it's held even at zero container references.
+    catalog_ref: bool,
+    /// Carries the `ruscker.created` label — it was made from this panel,
+    /// as opposed to a neighbour's (e.g. ShinyProxy's) volume.
+    ruscker_created: bool,
+}
+
+impl VolumeRow {
+    /// Safe to offer for removal: no container mounts it, no current spec
+    /// references it, **and** Ruscker created it. A volume WITHOUT the
+    /// `ruscker.created` label is never removable from the panel — even
+    /// unreferenced, it's a third party's DATA, and deleted data is
+    /// irrecoverable (the #894 never-touch-what-isn't-ours rule, applied
+    /// to volumes). The daemon refusing an in-use volume is only the
+    /// final backstop; this check is the policy.
+    fn removable(&self) -> bool {
+        self.refs == 0 && !self.catalog_ref && self.ruscker_created
+    }
+}
+
 #[derive(Template)]
 #[template(path = "admin/disk.html")]
 struct DiskPage<'a> {
@@ -85,12 +124,18 @@ struct DiskPage<'a> {
     containers_unavailable: bool,
     /// The Docker backend exists, but its image inventory failed.
     images_unavailable: bool,
+    /// The volume inventory failed — or this backend doesn't implement
+    /// volumes at all (multihost + mocks: the trait default is `Err`,
+    /// fail closed, never a false "no volumes").
+    volumes_unavailable: bool,
     /// True when the host container listing FAILED, so image in-use can't
     /// be trusted: the page then treats every image as in-use (no remove /
     /// prune) and shows a warning banner (#871 follow-up, fail closed).
     usage_unknown: bool,
     containers: Vec<ManagedContainer>,
     images: Vec<ImageRow>,
+    /// Named host volumes, sorted by name (#987).
+    volumes: Vec<VolumeRow>,
     /// How many of `containers` are stopped (drives the prune button).
     stopped_count: usize,
     /// How many images are unused (drives the "remove all unused" button).
@@ -193,6 +238,9 @@ async fn index(
         Some("reclaimed") => (Some("admin-disk-flash-reclaimed"), false),
         Some("images-pruned") => (Some("admin-disk-flash-images-pruned"), false),
         Some("nothing") => (Some("admin-disk-flash-nothing"), false),
+        Some("volume-created") => (Some("admin-disk-flash-volume-created"), false),
+        Some("volume-removed") => (Some("admin-disk-flash-volume-removed"), false),
+        Some("volume-bad-name") => (Some("admin-disk-flash-volume-bad-name"), true),
         Some("error") => (Some("admin-disk-flash-error"), true),
         _ => (None, false),
     };
@@ -210,9 +258,11 @@ async fn index(
             available: false,
             containers_unavailable: false,
             images_unavailable: false,
+            volumes_unavailable: false,
             usage_unknown: false,
             containers: Vec::new(),
             images: Vec::new(),
+            volumes: Vec::new(),
             stopped_count: 0,
             unused_images_count: 0,
             images_total_bytes: 0,
@@ -231,27 +281,48 @@ async fn index(
         });
     };
 
-    // These five inputs are independent — two Docker round-trips, a
+    // These six inputs are independent — three Docker round-trips, a
     // container-ref enumeration, and two DB reads. Awaiting them serially
     // stacked Docker-daemon latency on every Disk-tab load (#: perf
     // audit); run them concurrently so the page costs ~one round-trip
-    // instead of the sum. (`spec_image_refs` reads the catalog;
-    // `ruscker_images` the provenance table; the rest hit the daemon.)
+    // instead of the sum. (The catalog feeds both the image AND the
+    // named-volume cross-references, so it's fetched once here;
+    // `ruscker_images` is the provenance table; the rest hit the daemon.)
     let ruscker_images_fut = async {
         match state.db.as_ref() {
             Some(db) => crate::db::ruscker_images::all(db).await.unwrap_or_default(),
             None => HashSet::new(),
         }
     };
-    let (containers, images, spec_images, ruscker_images, container_refs) = tokio::join!(
+    let (containers, images, catalog, ruscker_images, container_refs, volumes) = tokio::join!(
         backend.list_managed_containers(),
         backend.list_images(),
-        spec_image_refs(&state),
+        crate::catalog::effective_specs_cached(&state),
         ruscker_images_fut,
         backend.all_container_image_refs(),
+        backend.list_volumes(),
     );
+    let spec_images = catalog_image_refs(&catalog);
     let (containers, containers_unavailable) = inventory_or_empty(containers, "containers");
     let (images, images_unavailable) = inventory_or_empty(images, "images");
+
+    // Named volumes (#987). An `Err` here is expected for backends that
+    // don't do volumes (multihost, mocks — the trait default is Err by
+    // design): render the card as "unavailable", never as an empty list
+    // (the fail-closed rule from #889).
+    let volume_refs = named_volume_refs(&catalog);
+    let (volumes, volumes_unavailable) = match volumes {
+        Ok(v) => {
+            let mut rows: Vec<VolumeRow> =
+                v.into_iter().map(|v| volume_row(v, &volume_refs)).collect();
+            rows.sort_by(|a, b| a.name.cmp(&b.name));
+            (rows, false)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, "disk: volume listing failed or unsupported");
+            (Vec::new(), true)
+        }
+    };
 
     // The image refs **every** container on the host is built from —
     // not just Ruscker-managed ones (#871) — so an image backing a
@@ -333,9 +404,11 @@ async fn index(
         available: true,
         containers_unavailable,
         images_unavailable,
+        volumes_unavailable,
         usage_unknown,
         containers,
         images,
+        volumes,
         stopped_count,
         unused_images_count,
         images_total_bytes,
@@ -375,11 +448,69 @@ fn inventory_or_empty<T>(
 /// image carrying one of these tags is "in use by a spec" and is never
 /// offered for removal.
 async fn spec_image_refs(state: &AppState) -> HashSet<String> {
-    crate::catalog::effective_specs_cached(state)
-        .await
-        .iter()
-        .filter_map(|s| s.container_image.clone())
-        .collect()
+    catalog_image_refs(&crate::catalog::effective_specs_cached(state).await)
+}
+
+/// Pure half of [`spec_image_refs`], for callers that already hold the
+/// catalog (the index fetches it once and derives image + volume refs).
+fn catalog_image_refs(specs: &[ruscker_config::Spec]) -> HashSet<String> {
+    specs.iter().filter_map(|s| s.container_image.clone()).collect()
+}
+
+/// The set of NAMED volumes the live catalog references (#987). A spec's
+/// `container-volumes` entries are Docker `source:dest[:ro]` strings; a
+/// `source` that doesn't start with `/`, `.` or `~` is a named volume (a
+/// path is a bind mount, which isn't a removable object). A referenced
+/// name is never offered for removal even at zero container references —
+/// the next spawn of that spec would silently recreate it EMPTY, losing
+/// whatever the app had stored.
+fn named_volume_refs(specs: &[ruscker_config::Spec]) -> HashSet<String> {
+    let mut named = HashSet::new();
+    for spec in specs {
+        for entry in spec.volumes.iter().flatten() {
+            let source = entry.split(':').next().unwrap_or("");
+            if !source.is_empty() && !source.starts_with(['/', '.', '~']) {
+                named.insert(source.to_string());
+            }
+        }
+    }
+    named
+}
+
+/// Build a display row, resolving the catalog cross-reference. The one
+/// place `VolumeRow`s are made, so the index table and the remove
+/// handler's server-side re-check share the same `removable()` verdict.
+fn volume_row(v: VolumeInfo, volume_refs: &HashSet<String>) -> VolumeRow {
+    VolumeRow {
+        // RFC 3339 → its date part, enough for a disk panel.
+        created: match v.created_at.as_deref() {
+            Some(ts) => ts.chars().take(10).collect(),
+            None => "—".to_string(),
+        },
+        catalog_ref: volume_refs.contains(&v.name),
+        name: v.name,
+        driver: v.driver,
+        refs: v.refs,
+        ruscker_created: v.ruscker_created,
+    }
+}
+
+/// Docker's own volume-name shape (`[a-zA-Z0-9][a-zA-Z0-9_.-]*`), capped
+/// at 100 chars — checked here so a typo gets a friendly flash instead of
+/// a raw daemon error. Written with `chars()` on purpose (no regex crate
+/// in the workspace); ASCII-only, so `len()` (bytes) == char count for
+/// any string that passes the per-char checks.
+fn is_valid_volume_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 100 {
+        return false;
+    }
+    let mut chars = name.chars();
+    // Safe unwrap-less first(): emptiness was checked above.
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    first.is_ascii_alphanumeric()
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
 }
 
 /// True when **any** host container is built from this image (by tag or
@@ -636,6 +767,83 @@ async fn prune_images(_: RequireAdmin, State(state): State<AppState>) -> Respons
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct NameForm {
+    name: String,
+}
+
+/// Create a named volume from the panel (#987). The backend labels it
+/// `ruscker.created=true`, which is exactly what later makes it eligible
+/// for removal here — a volume made outside Ruscker never is.
+async fn create_volume(
+    _: RequireAdmin,
+    State(state): State<AppState>,
+    Form(form): Form<NameForm>,
+) -> Response {
+    let Some(backend) = state.backend.as_ref() else {
+        return redirect("error");
+    };
+    let name = form.name.trim();
+    if !is_valid_volume_name(name) {
+        return redirect("volume-bad-name");
+    }
+    match backend.create_volume(name).await {
+        Ok(()) => redirect("volume-created"),
+        Err(e) => {
+            tracing::warn!(error = %e, name = %name, "disk: create volume failed");
+            redirect("error")
+        }
+    }
+}
+
+/// Remove a named volume — deleting its DATA for good, so this is the
+/// most careful handler on the panel. The button only renders for a
+/// removable volume, but a crafted POST could send any name: re-derive
+/// `removable()` server-side from a fresh listing + the catalog, and
+/// fail CLOSED when the inventory can't be read (#894/#987). Only a
+/// zero-reference, catalog-unreferenced, **Ruscker-created** volume
+/// passes; the daemon refusing an in-use volume (no force) is just the
+/// final backstop behind this check.
+async fn remove_volume(
+    _: RequireAdmin,
+    State(state): State<AppState>,
+    Form(form): Form<NameForm>,
+) -> Response {
+    let Some(backend) = state.backend.as_ref() else {
+        return redirect("error");
+    };
+    let name = form.name.trim();
+    let volumes = match backend.list_volumes().await {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(error = %e, name = %name, "disk: list volumes for remove failed");
+            return redirect("error");
+        }
+    };
+    let volume_refs = named_volume_refs(&crate::catalog::effective_specs_cached(&state).await);
+    let ok = volumes
+        .into_iter()
+        .filter(|v| v.name == name)
+        .any(|v| volume_row(v, &volume_refs).removable());
+    if !ok {
+        tracing::warn!(
+            name = %name,
+            "disk: refusing to remove a volume that is referenced, foreign, or unknown"
+        );
+        return redirect("error");
+    }
+
+    match backend.remove_volume(name).await {
+        Ok(()) => redirect("volume-removed"),
+        Err(e) => {
+            // The daemon refuses a volume that turned in-use between the
+            // check and the removal — generic flash, detail in the log.
+            tracing::warn!(error = %e, name = %name, "disk: remove volume failed");
+            redirect("error")
+        }
+    }
+}
+
 /// Post/redirect/get back to the panel with a one-word flash code. The
 /// base-path response rewriter re-prefixes the `Location` header.
 fn redirect(flash: &str) -> Response {
@@ -687,9 +895,11 @@ mod tests {
             available: true,
             containers_unavailable: true,
             images_unavailable: true,
+            volumes_unavailable: true,
             usage_unknown: false,
             containers: Vec::new(),
             images: Vec::new(),
+            volumes: Vec::new(),
             stopped_count: 0,
             unused_images_count: 0,
             images_total_bytes: 0,
@@ -711,9 +921,11 @@ mod tests {
 
         assert!(html.contains("image inventory"));
         assert!(html.contains("container inventory"));
-        assert_eq!(html.matches("This is a partial view").count(), 2);
+        assert!(html.contains("volume inventory"));
+        assert_eq!(html.matches("This is a partial view").count(), 3);
         assert!(!html.contains("No local images."));
         assert!(!html.contains("No Ruscker-managed containers."));
+        assert!(!html.contains("No named volumes."));
     }
 
     fn img(tags: &[&str], containers: i64) -> ImageInfo {
@@ -787,5 +999,85 @@ mod tests {
 
         let foreign = image_row(img(&["sp/app:1"], 0), &catalog, Some(&none), &ruscker);
         assert!(!foreign.ruscker_managed && !foreign.removable());
+    }
+
+    /// #987: only NAMED volume sources count as catalog references — a
+    /// path source (`/`, `.`, `~`) is a bind mount, not a volume object.
+    #[test]
+    fn named_volume_refs_distinguishes_names_from_bind_paths() {
+        let spec: ruscker_config::Spec = serde_yaml_ng::from_str(
+            "id: x\ncontainer-image: a:1\ncontainer-volumes:\n\
+             \x20 - /srv/x:/data\n\
+             \x20 - meuvol:/data\n\
+             \x20 - outro:/data:ro\n\
+             \x20 - ./rel:/data\n\
+             \x20 - ~/home:/data\n\
+             \x20 - ':/broken'\n",
+        )
+        .expect("parse spec");
+        let refs = named_volume_refs(&[spec]);
+        assert!(refs.contains("meuvol"), "plain named volume");
+        assert!(refs.contains("outro"), "named volume with :ro");
+        assert!(!refs.contains("/srv/x"), "absolute path is a bind mount");
+        assert!(!refs.contains("./rel"), "relative path is a bind mount");
+        assert!(!refs.contains("~/home"), "home path is a bind mount");
+        assert_eq!(refs.len(), 2, "empty source is ignored");
+
+        // A spec without `container-volumes` contributes nothing.
+        let bare: ruscker_config::Spec =
+            serde_yaml_ng::from_str("id: y\ncontainer-image: a:1").expect("parse bare spec");
+        assert!(named_volume_refs(&[bare]).is_empty());
+    }
+
+    /// #987: the create form's name gate (Docker's own volume-name shape).
+    #[test]
+    fn volume_name_validation_matches_dockers_rule() {
+        assert!(is_valid_volume_name("data"));
+        assert!(is_valid_volume_name("my-vol_1.bak"));
+        assert!(is_valid_volume_name("0"));
+        assert!(is_valid_volume_name(&"a".repeat(100)));
+
+        assert!(!is_valid_volume_name(""));
+        assert!(!is_valid_volume_name(&"a".repeat(101)));
+        assert!(!is_valid_volume_name("-leading-dash"));
+        assert!(!is_valid_volume_name(".leading-dot"));
+        assert!(!is_valid_volume_name("has space"));
+        assert!(!is_valid_volume_name("has/slash"));
+        assert!(!is_valid_volume_name("acentuação"));
+    }
+
+    fn vol(name: &str, refs: i64, ruscker_created: bool) -> VolumeInfo {
+        VolumeInfo {
+            name: name.into(),
+            driver: "local".into(),
+            created_at: Some("2026-07-13T10:00:00Z".into()),
+            refs,
+            ruscker_created,
+        }
+    }
+
+    /// #987: a volume is removable only at zero references, unreferenced
+    /// by the catalog, AND Ruscker-created — a neighbour's volume is
+    /// never offered even when idle (its data is irrecoverable, #894).
+    #[test]
+    fn volume_removable_requires_idle_uncatalogued_and_ruscker_created() {
+        let refs: HashSet<String> = ["appdata".to_string()].into_iter().collect();
+
+        // Idle, not in the catalog, ours → removable.
+        assert!(volume_row(vol("scratch", 0, true), &refs).removable());
+        // A container mounts it → held.
+        assert!(!volume_row(vol("scratch", 2, true), &refs).removable());
+        // A catalog spec names it → held even at zero references.
+        assert!(!volume_row(vol("appdata", 0, true), &refs).removable());
+        // No `ruscker.created` label → NEVER removable from the panel.
+        assert!(!volume_row(vol("neighbour", 0, false), &refs).removable());
+
+        // Display bits: RFC 3339 → date part; missing timestamp → em dash.
+        assert_eq!(volume_row(vol("scratch", 0, true), &refs).created, "2026-07-13");
+        let undated = VolumeInfo {
+            created_at: None,
+            ..vol("scratch", 0, true)
+        };
+        assert_eq!(volume_row(undated, &refs).created, "—");
     }
 }

@@ -11,7 +11,7 @@ set -e
 if [ "$1" = "purge" ]; then
     # The catalog DB, images, audit log, showcase-seed marker, etc.
     rm -rf /var/lib/ruscker
-    # dpkg removes the conffiles themselves (application.yml, ruscker.env)
+    # dpkg removes the conffiles themselves (ruscker.yml, ruscker.env)
     # on purge, but can leave behind `.dpkg-{bak,old,dist}` variants and
     # the now-empty directory. Drop the whole dir so nothing — including
     # the admin token / master key in ruscker.env — survives a purge.

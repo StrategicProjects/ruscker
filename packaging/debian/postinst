@@ -36,6 +36,26 @@ case "$1" in
         chown ruscker:ruscker /var/lib/ruscker
         chmod 750 /var/lib/ruscker
 
+        # Config migration (#976): the service config is now
+        # /etc/ruscker/ruscker.yml (application.yml stays as the
+        # ShinyProxy import format). On upgrade from an older package,
+        # an operator-edited application.yml carries real settings
+        # (useForwardHeaders, timeouts…) that the unit would otherwise
+        # stop reading — copy it over ruscker.yml, but ONLY while
+        # ruscker.yml is still the pristine shipped example (never
+        # clobber an operator-edited ruscker.yml). Idempotent: after
+        # the copy, ruscker.yml differs from the example, so later
+        # upgrades leave it alone.
+        CONF=/etc/ruscker/ruscker.yml
+        OLDCONF=/etc/ruscker/application.yml
+        REF=/usr/share/ruscker/ruscker.yml.example
+        if [ -f "$OLDCONF" ] && [ -f "$REF" ] \
+           && { [ ! -f "$CONF" ] || cmp -s "$CONF" "$REF"; }; then
+            cp -p "$OLDCONF" "$CONF"
+            echo "ruscker: migrated service config: $OLDCONF -> $CONF" \
+                 "(application.yml remains for ShinyProxy import)"
+        fi
+
         # The secrets file must not be world-readable.
         ENVF=/etc/ruscker/ruscker.env
         if [ -f "$ENVF" ]; then

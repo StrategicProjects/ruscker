@@ -174,12 +174,27 @@ impl FailureLog {
 static SPAWN_FAILURES: LazyLock<FailureLog> = LazyLock::new(FailureLog::default);
 
 /// Log a spawn failure through the dedup/backoff filter (#204). `phase`
-/// is a short tag for the log message ("scale-up", "saturation").
-fn log_spawn_failure(spec_id: &str, phase: &str, err: &anyhow::Error) {
+/// is a short tag for the log message ("scale-up", "saturation"). The
+/// alert webhook (#930) fires alongside the `Warn` verdict, so it
+/// inherits the same dedup — a crash-looping image alerts once per
+/// warn window, not once per tick (the sink's own cooldown backstops
+/// it further).
+fn log_spawn_failure(
+    alerts: &crate::alerts::AlertSink,
+    spec_id: &str,
+    phase: &str,
+    err: &anyhow::Error,
+) {
     let msg = format!("{err}");
     match SPAWN_FAILURES.observe(spec_id, &msg, Instant::now()) {
         FailVerdict::Warn { count } => {
             warn!(spec = %spec_id, error = %msg, failures = count, "{phase} spawn failed");
+            alerts.notify(crate::alerts::AlertEvent {
+                kind: crate::alerts::AlertKind::SpawnFailed,
+                spec: spec_id.to_string(),
+                replica: None,
+                message: format!("{phase} spawn failed ({count} failure(s)): {msg}"),
+            });
         }
         FailVerdict::Quiet { count } => {
             debug!(spec = %spec_id, error = %msg, failures = count, "{phase} spawn still failing (suppressed)");
@@ -332,6 +347,23 @@ async fn tick_with_interval(
                 state.sessions.drop_replica(id).await;
             }
             warn!(reaped = dead.len(), "pruned replicas whose container is no longer running");
+            // Alert the operator (#930): a container that died outside
+            // Ruscker's control (crash, OOM, external stop) is exactly
+            // the "app down" event a webhook exists for. One alert per
+            // spec per cooldown window (the sink dedups).
+            for id in &dead {
+                if let Some(r) = registry_snap.iter().find(|r| &r.id == id) {
+                    state.alerts.notify(crate::alerts::AlertEvent {
+                        kind: crate::alerts::AlertKind::ReplicaDown,
+                        spec: r.spec_id.clone(),
+                        replica: Some(r.id.to_string()),
+                        message: format!(
+                            "replica {} of `{}` is gone — its container is no longer running",
+                            r.id, r.spec_id
+                        ),
+                    });
+                }
+            }
         }
     }
 
@@ -434,7 +466,7 @@ async fn tick_with_interval(
                 if let Err(e) =
                     spawn_one(state, spec, backend.as_ref(), SpawnIntent::AddCapacity).await
                 {
-                    log_spawn_failure(&spec.id, "scale-up", &e);
+                    log_spawn_failure(&state.alerts, &spec.id, "scale-up", &e);
                     break;
                 }
                 SPAWN_FAILURES.clear(&spec.id);
@@ -475,7 +507,7 @@ async fn tick_with_interval(
                 if let Err(e) =
                     spawn_one(state, spec, backend.as_ref(), SpawnIntent::AddCapacity).await
                 {
-                    log_spawn_failure(&spec.id, "saturation", &e);
+                    log_spawn_failure(&state.alerts, &spec.id, "saturation", &e);
                 } else {
                     SPAWN_FAILURES.clear(&spec.id);
                 }
@@ -486,6 +518,25 @@ async fn tick_with_interval(
             }
             continue;
         }
+
+        // (2b) Saturated but already at `max-replicas`: Ruscker can't
+        //      add capacity, so visitors are being turned away. Worth
+        //      an operator alert (#930) — the sink's per-(kind, spec)
+        //      cooldown keeps a stuck-saturated spec from alerting on
+        //      every tick.
+        if count >= max && count > 0 && scale_up_triggered(&snap, spec.effective_scale_up_threshold())
+        {
+            state.alerts.notify(crate::alerts::AlertEvent {
+                kind: crate::alerts::AlertKind::Saturated,
+                spec: spec.id.clone(),
+                replica: None,
+                message: format!(
+                    "`{}` is saturated at max-replicas ({max}) — visitors may be turned away",
+                    spec.id
+                ),
+            });
+        }
+
         // Not saturated (or at cap) — clear the counter so a
         // future saturation streak starts from zero.
         saturation_ticks.remove(&spec.id);
@@ -1253,6 +1304,7 @@ mod tests {
             spec_cache: Arc::new(dashmap::DashMap::new()),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(crate::access_counter::AccessCounter::default()),
+            alerts: crate::alerts::AlertSink::default(),
         }
     }
 

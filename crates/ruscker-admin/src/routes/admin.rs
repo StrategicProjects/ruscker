@@ -827,6 +827,7 @@ mod tests {
             spec_cache: Arc::new(dashmap::DashMap::new()),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(crate::access_counter::AccessCounter::default()),
+            alerts: crate::alerts::AlertSink::default(),
         }
     }
 

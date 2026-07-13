@@ -22,6 +22,7 @@ use tower_cookies::CookieManagerLayer;
 use tracing::info;
 
 pub mod access_counter;
+pub mod alerts;
 pub mod auth;
 pub mod catalog;
 pub mod crypto;
@@ -201,6 +202,13 @@ pub struct AppState {
     /// not the request rate. Shared so every cloned `AppState` and the
     /// drain task see the same buffer.
     pub access_counter: Arc<access_counter::AccessCounter>,
+
+    /// Alert-webhook sink (#930). Emit sites (scaler, spawn paths)
+    /// call `notify` — a cheap synchronous enqueue with per-(kind,
+    /// spec) cooldown; one sender task (started in `AdminServer::run`
+    /// when a DB is wired) POSTs the events to the operator-configured
+    /// webhook URL.
+    pub alerts: alerts::AlertSink,
 }
 
 impl AppState {
@@ -259,6 +267,7 @@ impl AdminServer {
             spec_cache: Arc::new(dashmap::DashMap::new()),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(access_counter::AccessCounter::default()),
+            alerts: alerts::AlertSink::default(),
         };
         Ok(Self {
             addr,
@@ -474,6 +483,15 @@ impl AdminServer {
         if let Some(db) = self.state.db.clone() {
             #[allow(clippy::let_underscore_future)]
             let _ = access_counter::spawn(self.state.access_counter.clone(), db);
+        }
+
+        // Alert-webhook sender (#930): one task drains the alert queue
+        // and POSTs to the operator-configured URL (settings table).
+        // Detached like the loops above; no shutdown flush — alerts
+        // about a server that is going down on purpose are noise.
+        if let Some(db) = self.state.db.clone() {
+            #[allow(clippy::let_underscore_future)]
+            let _ = alerts::spawn(&self.state.alerts, db);
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

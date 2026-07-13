@@ -2222,6 +2222,7 @@ mod tests {
             spec_cache: StdArc::new(dashmap::DashMap::new()),
             catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
             access_counter: StdArc::new(crate::access_counter::AccessCounter::default()),
+            alerts: crate::alerts::AlertSink::default(),
         }
     }
 

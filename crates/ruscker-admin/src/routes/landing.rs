@@ -420,8 +420,21 @@ async fn index(
             .filter(|t| !t.is_empty())
             .map(str::to_string)
     };
-    let page_title =
-        not_blank(&lc.seo_title).unwrap_or_else(|| state.locales.t(loc, "landing-title", None));
+    // Browser-tab `<title>` + `og:title` (#926 pt. 1): the explicit
+    // `seo-title` wins; otherwise the SAME chain the header uses —
+    // editor title → `proxy.title` → the localized default. This used
+    // to skip `proxy.title` entirely, so a YAML `title:` changed the
+    // header but never the tab, which read as "title doesn't work".
+    let page_title = not_blank(&lc.seo_title)
+        .or_else(|| not_blank(&lc.title))
+        .unwrap_or_else(|| {
+            let cfg = state.config.proxy.title.trim();
+            if cfg.is_empty() {
+                state.locales.t(loc, "landing-title", None)
+            } else {
+                cfg.to_string()
+            }
+        });
     // The meta-description fallback wants PLAIN text — strip the
     // Markdown markers instead of leaking `**` into the tag (#812).
     let seo_description = not_blank(&lc.seo_description)

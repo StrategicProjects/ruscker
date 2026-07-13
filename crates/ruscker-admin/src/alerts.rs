@@ -69,6 +69,8 @@ pub enum AlertKind {
     /// A spec is saturated with every replica at `max-replicas` —
     /// visitors are being turned away and Ruscker can't scale further.
     Saturated,
+    /// A scheduled job (#986) exited non-zero or could not run.
+    JobFailed,
     /// Operator-triggered delivery check.
     Test,
 }
@@ -79,6 +81,7 @@ impl AlertKind {
             AlertKind::SpawnFailed => "spawn-failed",
             AlertKind::ReplicaDown => "replica-down",
             AlertKind::Saturated => "saturated",
+            AlertKind::JobFailed => "job-failed",
             AlertKind::Test => "test",
         }
     }

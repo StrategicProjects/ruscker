@@ -85,6 +85,78 @@ async fn landing_renders_default_locale() {
 }
 
 #[tokio::test]
+async fn page_title_falls_back_to_proxy_title() {
+    // #926 pt. 1: with no seo-title and no editor title, the browser
+    // tab (<title> + og:title) must show the configured `proxy.title`
+    // — it used to skip it and always show the localized default.
+    let yaml = r#"
+proxy:
+  title: Meu Portal
+  specs: []
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(
+        body.contains("<title>Meu Portal</title>"),
+        "tab title uses proxy.title"
+    );
+    assert!(
+        body.contains(r#"<meta property="og:title" content="Meu Portal">"#),
+        "og:title uses proxy.title"
+    );
+}
+
+#[tokio::test]
+async fn page_title_prefers_editor_title_then_seo_title() {
+    // The editor (landing-customization) title outranks proxy.title…
+    let yaml = r#"
+proxy:
+  title: YAML Title
+  landing-customization:
+    title: Editor Title
+  specs: []
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("<title>Editor Title</title>"));
+
+    // …and an explicit seo-title outranks both.
+    let yaml = r#"
+proxy:
+  title: YAML Title
+  landing-customization:
+    title: Editor Title
+    seo-title: SEO Title
+  specs: []
+"#;
+    let app = router(state_from_yaml(yaml));
+    let response = app
+        .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let body = axum::body::to_bytes(response.into_body(), 1024 * 1024)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    assert!(body.contains("<title>SEO Title</title>"));
+}
+
+#[tokio::test]
 async fn sections_layout_groups_cards_by_type() {
     // `catalog-layout: sections` (#701) renders one labeled group per
     // app type, in canonical order, each heading carrying the Alpine

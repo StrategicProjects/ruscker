@@ -10,6 +10,14 @@
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-specs-subtitle") }}</p>
   </div>
   <div class="flex items-center gap-2">
+    {# Reload the list (lead request 2026-07): the page is server-
+       rendered, so a plain same-URL navigation IS the refresh — new
+       replica counts, states and rows appear without hunting for F5. #}
+    <a href="{{ base }}/admin/specs" class="btn"
+       title="{{ self.t("admin-specs-refresh") }}">
+      <i class="ti ti-refresh" aria-hidden="true"></i>
+      {{ self.t("admin-specs-refresh") }}
+    </a>
     <a href="{{ base }}/admin/specs/import" class="btn"
        title="{{ self.t("admin-import-title") }}">
       <i class="ti ti-file-upload" aria-hidden="true"></i>

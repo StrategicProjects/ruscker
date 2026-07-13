@@ -213,6 +213,7 @@ admin-login-back-portal = ← portal público
 
 # Apps list
 admin-specs-title = Aplicações
+admin-specs-refresh = Recarregar
 admin-specs-subtitle = Catálogo de specs no banco
 admin-specs-empty = Nenhuma aplicação ainda. Use { $cmd } para importar de um YAML.
 admin-specs-add = Adicionar aplicação

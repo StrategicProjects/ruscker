@@ -108,7 +108,9 @@ page refresh.
 - [x] Recent events feed
 - [x] Logs streaming page with filter + regex + follow mode
 - [x] Container detail view: live CPU/mem charts, environment, logs
-- [x] Configurable alert thresholds (notification webhooks deferred)
+- [x] Alert notification webhook (#930) — spawn-failed / replica-down /
+      saturated events POST JSON to an operator-configured URL
+      (admin System tab), with retry, cooldown dedup and a test button
 - [x] Prometheus metrics endpoint at `/metrics`
 
 **Deliverable**: open the dashboard, see everything that's running,

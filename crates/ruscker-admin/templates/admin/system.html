@@ -12,6 +12,20 @@
   </div>
 </div>
 
+{% if flash == "alerts-bad-url" || flash == "alerts-no-url" %}
+  <div class="admin-login-error mb-3" role="alert" style="max-width:680px">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {% if flash == "alerts-bad-url" %}{{ self.t("admin-system-alerts-flash-bad-url") }}
+    {% else %}{{ self.t("admin-system-alerts-flash-no-url") }}{% endif %}
+  </div>
+{% else if flash != "" %}
+  <div class="admin-flash-ok mb-3" role="status" style="max-width:680px">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {% if flash == "alerts-test" %}{{ self.t("admin-system-alerts-flash-test") }}
+    {% else %}{{ self.t("admin-system-alerts-flash-saved") }}{% endif %}
+  </div>
+{% endif %}
+
 <div style="background:var(--surface);border:0.5px solid var(--border);border-radius:12px;padding:4px 16px;max-width:680px">
   <table class="admin-table" style="width:100%">
     <tbody>
@@ -31,6 +45,30 @@
       <tr><td class="text-[color:var(--text-muted)]">{{ self.t("admin-system-draining") }}</td><td>{% call yesno(draining) %}{% endcall %}</td></tr>
     </tbody>
   </table>
+</div>
+
+{# Alert webhook (#930): the one operational control on this page.
+   Interesting events (spawn failure, replica down, saturation at max)
+   POST a JSON payload to this URL; empty = off. #}
+<div style="margin-top:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px;padding:16px;max-width:680px">
+  <div class="text-sm font-medium">{{ self.t("admin-system-alerts-title") }}</div>
+  <p class="text-xs text-[color:var(--text-muted)] mt-1 mb-3">{{ self.t("admin-system-alerts-hint") }}</p>
+  <form method="post" action="{{ base }}/admin/system/alerts"
+        style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input type="url" name="webhook_url" value="{{ webhook_url }}" autocapitalize="none"
+           placeholder="https://hooks.example.com/ruscker" aria-label="{{ self.t("admin-system-alerts-url") }}"
+           style="flex:1;min-width:260px">
+    <button type="submit" class="admin-login-btn" style="width:auto">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i>
+      {{ self.t("admin-system-alerts-save") }}
+    </button>
+  </form>
+  <form method="post" action="{{ base }}/admin/system/alerts/test" style="margin-top:8px">
+    <button type="submit" class="dash-action" style="width:auto">
+      <i class="ti ti-send" aria-hidden="true"></i>
+      {{ self.t("admin-system-alerts-test") }}
+    </button>
+  </form>
 </div>
 
 {# Restart is a systemd / operator action, NOT an in-app button: the

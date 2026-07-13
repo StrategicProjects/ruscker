@@ -900,6 +900,15 @@ admin-system-yes = oui
 admin-system-no = non
 admin-system-restart-title = Redémarrer le service
 admin-system-restart-hint = Ruscker ne peut pas se redémarrer en toute sécurité — lancez ceci sur l'hôte (les requêtes en cours se vident au SIGTERM).
+admin-system-alerts-title = Webhook d'alertes
+admin-system-alerts-hint = Les événements notables (échec de démarrage d'une app, réplique tombée, app saturée à sa limite) sont envoyés en POST JSON à cette URL. Vide = désactivé.
+admin-system-alerts-url = URL du webhook
+admin-system-alerts-save = Enregistrer
+admin-system-alerts-test = Envoyer une alerte de test
+admin-system-alerts-flash-saved = Webhook d'alertes enregistré.
+admin-system-alerts-flash-bad-url = URL invalide — utilisez http:// ou https:// (ou laissez vide pour désactiver).
+admin-system-alerts-flash-test = Alerte de test en file — vérifiez la destination (la livraison réessaie 3 fois).
+admin-system-alerts-flash-no-url = Définissez et enregistrez l'URL du webhook avant d'envoyer un test.
 
 # Récupérer de l'espace disque (#766)
 admin-disk-reclaim = Récupérer de l'espace

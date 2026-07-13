@@ -28,6 +28,13 @@ tower-cookies = { workspace = true }
 hyper = { workspace = true }
 hyper-util = { workspace = true }
 http-body-util = { workspace = true }
+# Outbound HTTPS for alert webhooks (#930). Both already compiled
+# transitively via bollard — no new tree weight. The explicit `rustls`
+# dep exists only to name a CryptoProvider: the tree carries BOTH
+# ring and aws-lc-rs, so rustls refuses to pick a process default and
+# the connector must be built with one explicitly.
+hyper-rustls = "0.27"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 futures-util = { workspace = true }
 async-stream = { workspace = true }
 lol_html = { workspace = true }

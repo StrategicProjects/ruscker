@@ -301,6 +301,47 @@ imports) is recorded with actor, action, target and timestamp — and
 since v0.2.5 the dashboard's destructive **replica stop/restart**
 actions are too.
 
+### System
+
+A read-only diagnostic of the running server (version, bind address,
+base path, Docker and database status, catalog and replica counts,
+forwarded-header trust, HA leadership), plus one operational control:
+the **alert webhook**.
+
+Set a URL there and Ruscker `POST`s a JSON payload when something an
+operator should know about happens:
+
+- **`spawn-failed`** — a container failed to start for an app (fires
+  with the same dedup as the log warning, so a crash-looping image
+  doesn't storm the channel);
+- **`replica-down`** — a running container died outside Ruscker's
+  control (crash, OOM, external stop) and was pruned;
+- **`saturated`** — an app is full at `max-replicas` and visitors may
+  be turned away;
+- **`test`** — the *Send test alert* button, for checking the wiring.
+
+The payload:
+
+```json
+{
+  "event": "replica-down",
+  "spec": "sales-dashboard",
+  "replica": "d3f2…",
+  "message": "human-readable summary",
+  "occurred_at": "2026-01-01T12:00:00Z",
+  "ruscker": { "version": "x.y.z" }
+}
+```
+
+Delivery is best-effort: 5 s timeout, three attempts with a doubling
+pause, and a per-`(event, app)` cooldown of 15 minutes so a stuck
+condition re-alerts occasionally instead of continuously. Point it at
+anything that accepts a JSON `POST` — a Slack/Mattermost incoming-
+webhook adapter, ntfy, an n8n/Zapier hook, or your own endpoint.
+Leave the URL empty to turn delivery off. Changes are audited (the
+URL's value itself is never written to the audit log — it may embed a
+token).
+
 ## Config vs. database
 
 `serve --config` drives the public landing and the proxy. The admin

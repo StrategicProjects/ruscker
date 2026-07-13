@@ -4,7 +4,7 @@ Ruscker for Debian/Ubuntu
 Installed layout
 ----------------
   /usr/bin/ruscker                 the binary
-  /etc/ruscker/application.yml     your config (conffile)
+  /etc/ruscker/ruscker.yml         service config (conffile, self-documented)
   /etc/ruscker/ruscker.env         secrets & env, root:ruscker 0640 (conffile)
   /lib/systemd/system/ruscker.service   the service unit
   /var/lib/ruscker/                writable state (SQLite db, etc.)
@@ -37,15 +37,25 @@ filled in on upgrade if an older install was missing them. Log in at
 
 First steps
 -----------
-1. Edit /etc/ruscker/application.yml to add your apps/APIs.
+1. Add your apps/APIs in the admin panel at /admin (they live in the
+   database). Service-level settings (bind, subpath, timeouts) go in
+   /etc/ruscker/ruscker.yml — every option is documented inline there.
 2. Put secrets in /etc/ruscker/ruscker.env (admin token, master key,
    registry password). Generate values with `openssl rand -hex 32`.
 3. `sudo systemctl restart ruscker`
 
+Migrating from ShinyProxy? Your application.yml is the IMPORT format:
+
+  ruscker import /path/to/application.yml --db /var/lib/ruscker/ruscker.db
+
+(Upgrades from older Ruscker packages: an edited
+/etc/ruscker/application.yml is copied to ruscker.yml automatically,
+once, while ruscker.yml is still the pristine example.)
+
 Validate a config before restarting:
 
-  ruscker validate /etc/ruscker/application.yml
-  ruscker validate --strict-compat /etc/ruscker/application.yml   # migrating from ShinyProxy
+  ruscker validate /etc/ruscker/ruscker.yml
+  ruscker validate --strict-compat application.yml   # migrating from ShinyProxy
 
 Enabling the container backend (--docker)
 -----------------------------------------
@@ -84,7 +94,7 @@ If you can't or don't want to use the helper, write the drop-in by hand:
   # then add:
   [Service]
   ExecStart=
-  ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/application.yml \
+  ExecStart=/usr/bin/ruscker serve --config /etc/ruscker/ruscker.yml \
     --bind 0.0.0.0:8080 --docker --db /var/lib/ruscker/ruscker.db
   SupplementaryGroups=docker
 

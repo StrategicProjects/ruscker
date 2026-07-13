@@ -130,9 +130,13 @@ enum Command {
     /// Start the HTTP server (public landing in Phase 1; admin + proxy
     /// land in Phase 2+).
     Serve {
-        /// Path to application.yml
-        #[arg(long, default_value = "application.yml")]
-        config: PathBuf,
+        /// Path to the service config. Omitted ⇒ `ruscker.yml` in the
+        /// working directory, falling back to `application.yml` when
+        /// only it exists (#976 — both parse with the same schema; the
+        /// canonical service file is `ruscker.yml`, `application.yml`
+        /// stays as the ShinyProxy import format).
+        #[arg(long)]
+        config: Option<PathBuf>,
 
         /// Bind address override. Defaults to the value in the YAML.
         #[arg(long)]
@@ -244,7 +248,7 @@ fn main() -> Result<()> {
             admin_session_store_url,
             base_path,
         } => cmd_serve(ServeArgs {
-            config_path: config,
+            config_path: resolve_config_path(config),
             bind_override: bind,
             images_dir_override: images_dir,
             db_path: db,
@@ -489,6 +493,30 @@ struct ServeArgs {
     log_buffer: ruscker_admin::logbuf::LogBuffer,
 }
 
+/// Resolve the service-config path for `serve` (#976). An explicit
+/// `--config` wins verbatim (and must exist — a typo'd path should
+/// fail loudly, not fall back). Without the flag, prefer the canonical
+/// `ruscker.yml`; fall back silently to `application.yml` so existing
+/// deployments keep working unchanged — both parse with the same
+/// schema. `cmd_serve` logs which file was loaded.
+fn resolve_config_path(explicit: Option<PathBuf>) -> PathBuf {
+    resolve_config_path_in(std::path::Path::new("."), explicit)
+}
+
+/// Testable core of [`resolve_config_path`]: same rules, rooted at
+/// `dir` (the working directory in production).
+fn resolve_config_path_in(dir: &std::path::Path, explicit: Option<PathBuf>) -> PathBuf {
+    if let Some(path) = explicit {
+        return path;
+    }
+    let canonical = dir.join("ruscker.yml");
+    if canonical.exists() {
+        canonical
+    } else {
+        dir.join("application.yml")
+    }
+}
+
 fn cmd_serve(args: ServeArgs) -> Result<()> {
     let ServeArgs {
         config_path,
@@ -508,6 +536,11 @@ fn cmd_serve(args: ServeArgs) -> Result<()> {
     let config = Config::from_file(&config_path).with_context(|| {
         format!("failed to load config from {}", config_path.display())
     })?;
+    tracing::info!(
+        target: ruscker_admin::STARTUP_LOG_TARGET,
+        config = %config_path.display(),
+        "service config loaded"
+    );
 
     // Surface validation warnings at startup (#743) — operators who
     // never run `ruscker validate` otherwise miss them entirely, and
@@ -1063,6 +1096,65 @@ fn truncate(s: &str, n: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_resolution_prefers_ruscker_yml_then_falls_back() {
+        let dir = std::env::temp_dir().join(format!(
+            "ruscker-cfg-res-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Explicit --config wins verbatim, even when it doesn't exist
+        // (a typo must fail loudly downstream, not fall back).
+        let explicit = PathBuf::from("/etc/ruscker/custom.yml");
+        assert_eq!(
+            resolve_config_path_in(&dir, Some(explicit.clone())),
+            explicit
+        );
+
+        // Neither file present ⇒ application.yml (the legacy default,
+        // so `serve` errors with the familiar name).
+        assert_eq!(
+            resolve_config_path_in(&dir, None),
+            dir.join("application.yml")
+        );
+
+        // Only application.yml ⇒ silent fallback keeps it working.
+        std::fs::write(dir.join("application.yml"), "proxy: {}\n").unwrap();
+        assert_eq!(
+            resolve_config_path_in(&dir, None),
+            dir.join("application.yml")
+        );
+
+        // ruscker.yml present ⇒ canonical file wins.
+        std::fs::write(dir.join("ruscker.yml"), "proxy: {}\n").unwrap();
+        assert_eq!(resolve_config_path_in(&dir, None), dir.join("ruscker.yml"));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// The shipped `/etc/ruscker/ruscker.yml` must always parse with
+    /// the current schema AND stay warning-free once uncommented paths
+    /// are exercised elsewhere — a stale example is worse than none.
+    #[test]
+    fn packaged_ruscker_yml_example_parses_clean() {
+        let raw = include_str!("../../../packaging/ruscker.yml.example");
+        let config =
+            ruscker_config::Config::from_yaml(raw).expect("packaged ruscker.yml.example parses");
+        let report = config.validate();
+        assert!(
+            report.warnings.is_empty(),
+            "shipped example must be warning-free: {:?}",
+            report.warnings
+        );
+        let compat = ruscker_config::validate::compat_scan(&config, raw);
+        assert!(compat.is_empty(), "no unsupported features: {compat:?}");
+    }
 
     #[test]
     fn truncate_counts_chars_and_never_panics_on_multibyte() {

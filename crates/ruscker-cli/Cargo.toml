@@ -41,11 +41,17 @@ binary with no JVM."""
 assets = [
     ["target/release/ruscker", "usr/bin/", "755"],
     ["../../packaging/debian/ruscker-enable-docker", "usr/sbin/ruscker-enable-docker", "755"],
-    ["../../packaging/application.example.yml", "etc/ruscker/application.yml", "644"],
+    # The service config is ruscker.yml (#976); application.yml is no
+    # longer installed — it stays as the ShinyProxy IMPORT format (and
+    # an edited one from an older package is migrated by postinst).
+    ["../../packaging/ruscker.yml.example", "etc/ruscker/ruscker.yml", "644"],
+    # Pristine reference copy: postinst compares against it to decide
+    # whether /etc/ruscker/ruscker.yml is still untouched on upgrade.
+    ["../../packaging/ruscker.yml.example", "usr/share/ruscker/ruscker.yml.example", "644"],
     ["../../packaging/ruscker.env.example", "etc/ruscker/ruscker.env", "640"],
     ["../../packaging/README.Debian", "usr/share/doc/ruscker/README.Debian", "644"],
 ]
-conf-files = ["/etc/ruscker/application.yml", "/etc/ruscker/ruscker.env"]
+conf-files = ["/etc/ruscker/ruscker.yml", "/etc/ruscker/ruscker.env"]
 maintainer-scripts = "../../packaging/debian/"
 
 [package.metadata.deb.systemd-units]

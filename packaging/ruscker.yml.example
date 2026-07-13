@@ -1,0 +1,99 @@
+# Ruscker service configuration — installed at /etc/ruscker/ruscker.yml
+# and read by the systemd unit (ExecStart --config).
+#
+# Ruscker's configuration lives in FOUR places, each with its own job:
+#
+#   /etc/ruscker/ruscker.yml   HOW THE SERVICE RUNS (this file): bind
+#                              address, subpath, proxy timeouts, metrics.
+#   /etc/ruscker/ruscker.env   SECRETS + environment: admin token,
+#                              master/cookie keys, registry passwords.
+#                              Never put secrets in YAML — reference
+#                              them as ${VAR} and define them there.
+#   The admin panel (/admin)   YOUR PORTAL: apps, APIs, users, landing
+#                              appearance. Stored in the database
+#                              (--db); nothing to edit on disk.
+#   application.yml            ShinyProxy IMPORT format. Migrating?
+#                              `ruscker import application.yml --db …`
+#                              brings your specs into the database.
+#                              (An existing application.yml also still
+#                              works as --config — same schema.)
+#
+# Every setting below ships commented-out with its default; uncomment
+# what you change, then `sudo systemctl restart ruscker`. Full schema
+# reference (including all per-app spec fields, accepted for GitOps
+# setups that prefer YAML over the admin panel):
+# https://github.com/StrategicProjects/ruscker/blob/main/docs/YAML_SCHEMA.md
+
+# ── Reverse proxy / TLS ──────────────────────────────────────────────
+server:
+  # REQUIRED when a reverse proxy (nginx, Caddy, Traefik, an ELB…)
+  # terminates TLS in front of Ruscker. This single switch gates every
+  # read of the client-suppliable X-Forwarded-* headers: the cookie
+  # `Secure` flag (X-Forwarded-Proto), the per-client API rate-limit
+  # key, and the X-Forwarded-For chain forwarded to your apps. Without
+  # it, cookies are minted without `Secure` on HTTPS deployments.
+  #useForwardHeaders: true
+
+  # Serve the whole portal under a URL prefix when you can't dedicate
+  # a (sub)domain — e.g. https://example.org/apps/. Health probes
+  # (/healthz, /readyz) stay at the root. The --base-path CLI flag and
+  # the RUSCKER_BASE_PATH env var override this file.
+  #context-path: /apps
+
+proxy:
+  # Portal title. This is a SEED/fallback: once you set a title in the
+  # admin's Appearance editor, the database value wins (that's the
+  # official, DB-first path — this key exists for first boot and
+  # GitOps).
+  #title: Ruscker
+
+  # Listener. NOTE: the packaged systemd unit passes
+  # `--bind 0.0.0.0:8080` on ExecStart, which OVERRIDES these two —
+  # to drive them from this file, remove the flag with a drop-in
+  # (`systemctl edit ruscker`). Changing ports behind nginx usually
+  # isn't needed.
+  #bind-address: 0.0.0.0
+  #port: 8080
+
+  # Idle session expiry, in ms (-1 = never expire). Per-app override:
+  # `heartbeat-timeout` on the spec (admin → app → Advanced).
+  #heartbeat-timeout: 3600000
+
+  # How long a freshly-spawned container gets to become ready (TCP +
+  # HTTP probe) before the spawn fails, in ms. Raise it for heavy
+  # images on slow disks; ShinyProxy's default is 20000.
+  #container-wait-time: 60000
+
+  # Graceful-shutdown drain window, in ms: on SIGTERM /readyz starts
+  # answering 503 (load balancers deregister) and in-flight sessions
+  # get this long to finish before the process exits.
+  #shutdown-grace-ms: 30000
+
+  # Global cap on proxied request bodies ("10m", "1g", or bytes);
+  # requests over it get 413. Per-app override: `max-body-size` on the
+  # spec. Unset = no cap.
+  #max-body-size: 100m
+
+  # Prometheus /metrics endpoint. UNAUTHENTICATED when enabled —
+  # firewall it or scrape over localhost only.
+  #metrics-enabled: false
+
+  # How often the dashboard polls Docker for per-replica CPU/memory,
+  # in seconds. Raise to 10–15 on a busy host to ease the daemon.
+  #metrics-interval: 5
+
+  # Authentication for the portal itself. `none` (the default) is
+  # correct for apps that handle their own login — Ruscker still gates
+  # the admin panel by account/token, and per-app visibility by
+  # access-groups/users. External SSO (OIDC/SAML) is on the roadmap.
+  #authentication: none
+
+  # Run app containers across SEVERAL Docker hosts (ssh:// tcp:// …).
+  # See the "Multiple Docker hosts" chapter of the deploy guide:
+  # https://ruscker.com/deploying.html
+  #hosts: []
+
+  # Apps and APIs are managed in the admin panel and live in the
+  # database — you don't list them here. (Spec entries ARE still
+  # accepted, same schema as the ShinyProxy import, for GitOps.)
+  specs: []

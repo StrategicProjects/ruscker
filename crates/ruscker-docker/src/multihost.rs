@@ -282,6 +282,21 @@ impl MultiHostDockerBackend {
     /// cluster can start degraded from whoever is reachable; boot fails
     /// only if *no* host connects (#160 D4). This mirrors `list`'s
     /// degraded philosophy.
+    /// Override the readiness budget (`proxy.container-wait-time`,
+    /// #970) on every connected host's backend. Zero keeps the
+    /// default, matching [`LocalDockerBackend::with_readiness_timeout`].
+    pub fn with_readiness_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.hosts = self
+            .hosts
+            .into_iter()
+            .map(|mut h| {
+                h.backend = h.backend.with_readiness_timeout(timeout);
+                h
+            })
+            .collect();
+        self
+    }
+
     pub fn connect(hosts: &[Host]) -> CoreResult<Self> {
         if hosts.is_empty() {
             return Err(CoreError::Backend("no docker hosts configured".into()));

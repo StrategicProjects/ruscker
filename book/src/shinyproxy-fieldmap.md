@@ -47,7 +47,7 @@ Statuses:
 | `proxy.port` | ✅ | Same key |
 | `proxy.bind-address` | ✅ | Same key |
 | `proxy.heartbeat-timeout` | ✅ | Same key (ms; `-1` = never); per-spec override supported |
-| `proxy.container-wait-time` | 🚧 | Parses, but **not consumed today** — the readiness wait is fixed at 60 s and no startup warning fires yet. Wiring it (or warning) is tracked in issue #970 |
+| `proxy.container-wait-time` | ✅ | Same key (ms) — max wait for a spawned container to become ready. Note the default differs: ShinyProxy 20 s, Ruscker 60 s |
 | `proxy.template-path` | ✅ | Read for one purpose: auto-discovering card logos in `<template-path>/assets/img/` next to the config. Thymeleaf templates themselves don't apply — the portal UI is Ruscker's own, themed in the admin **Appearance** tab |
 | `proxy.specs` | ✅ | Same key — see the per-spec table below |
 | `proxy.authentication` | ✅/🚧 | Parsed; **only `none` is implemented today** (apps that do their own auth are the common case). `openid` / `saml` are the Phase 8 roadmap (issue #934). Anything non-`none` is flagged by `--strict-compat` and warned at boot |

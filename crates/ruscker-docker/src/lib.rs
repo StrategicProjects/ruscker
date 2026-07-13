@@ -49,9 +49,12 @@ pub const LABEL_INNER_PORT: &str = "ruscker.inner_port";
 /// argument to [`LocalDockerBackend::spawn_with_port`].
 pub const DEFAULT_INNER_PORT: u16 = 3838;
 
-/// How long to wait for a freshly-started container to accept a
-/// TCP connection on its bound port. Mirrors the ShinyProxy
-/// `container-wait-time` default of 60 s.
+/// Default wait for a freshly-started container to accept a TCP
+/// connection on its bound port. Overridden per backend by
+/// `proxy.container-wait-time` via
+/// [`LocalDockerBackend::with_readiness_timeout`] (#970); this const
+/// is only the fallback (and mirrors ShinyProxy's spirit — their
+/// default is 20 s, ours is a more forgiving 60 s).
 pub const READINESS_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How often to retry the TCP connect during readiness polling.
@@ -85,6 +88,11 @@ pub struct LocalDockerBackend {
     /// (returning 0% only on the very first observation of a
     /// given container, until the next refresh fills the cache).
     prev_stats: DashMap<String, PrevReading>,
+    /// How long a freshly-started container gets to become ready
+    /// before the spawn fails. Defaults to [`READINESS_TIMEOUT`];
+    /// the operator's `proxy.container-wait-time` overrides it via
+    /// [`Self::with_readiness_timeout`] (#970).
+    readiness_timeout: Duration,
 }
 
 /// Cumulative CPU counters from a previous `stats` read,
@@ -132,7 +140,19 @@ impl LocalDockerBackend {
             publish_ip: publish_ip.into(),
             upstream_host: upstream_host.into(),
             prev_stats: DashMap::new(),
+            readiness_timeout: READINESS_TIMEOUT,
         }
+    }
+
+    /// Override how long a spawned container may take to become ready
+    /// (`proxy.container-wait-time`, #970). Zero keeps the default —
+    /// a 0 ms budget would fail every spawn instantly, which no
+    /// operator ever means.
+    pub fn with_readiness_timeout(mut self, timeout: Duration) -> Self {
+        if !timeout.is_zero() {
+            self.readiness_timeout = timeout;
+        }
+        self
     }
 
     /// Spawn a container for `spec_id` with the explicit inner
@@ -1271,7 +1291,8 @@ async fn wait_for_ready(
     container_id: &str,
     addr: SocketAddr,
 ) -> CoreResult<()> {
-    let deadline = std::time::Instant::now() + READINESS_TIMEOUT;
+    let budget = backend.readiness_timeout;
+    let deadline = std::time::Instant::now() + budget;
 
     // Phase 1: TCP connect.
     loop {
@@ -1295,7 +1316,7 @@ async fn wait_for_ready(
                     return Err(readiness_failure(
                         backend,
                         container_id,
-                        format!("container at {addr} never accepted TCP within {:?}: {e}", READINESS_TIMEOUT),
+                        format!("container at {addr} never accepted TCP within {budget:?}: {e}"),
                     )
                     .await);
                 }
@@ -1337,7 +1358,7 @@ async fn wait_for_ready(
                     return Err(readiness_failure(
                         backend,
                         container_id,
-                        format!("container at {addr} accepted TCP but never answered HTTP within {:?}", READINESS_TIMEOUT),
+                        format!("container at {addr} accepted TCP but never answered HTTP within {budget:?}"),
                     )
                     .await);
                 }
@@ -1525,6 +1546,42 @@ fn apply_limits(host_config: &mut HostConfig, limits: &ruscker_core::ResourceLim
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `proxy.container-wait-time` reaches the readiness wait (#970):
+    /// a 300 ms budget against a port nobody listens on must fail in
+    /// well under the 60 s default, and the error names the budget.
+    /// Needs no running daemon — the connect refuses immediately and
+    /// the crash-detection inspect is best-effort (`.ok()?`).
+    #[tokio::test]
+    async fn readiness_wait_honours_configured_timeout() {
+        let Ok(backend) = LocalDockerBackend::local() else {
+            return; // no way to even construct a client handle here
+        };
+        let backend = backend.with_readiness_timeout(Duration::from_millis(300));
+        let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
+        let started = std::time::Instant::now();
+        let err = wait_for_ready(&backend, "no-such-container", addr)
+            .await
+            .expect_err("nothing listens on port 1");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "must give up near the 300 ms budget, not the 60 s default"
+        );
+        assert!(
+            err.to_string().contains("300ms"),
+            "error names the configured budget: {err}"
+        );
+    }
+
+    /// Zero keeps the default — a 0 ms budget would fail every spawn.
+    #[test]
+    fn zero_wait_time_keeps_the_default() {
+        let Ok(backend) = LocalDockerBackend::local() else {
+            return;
+        };
+        let backend = backend.with_readiness_timeout(Duration::ZERO);
+        assert_eq!(backend.readiness_timeout, READINESS_TIMEOUT);
+    }
 
     #[test]
     fn hub_aliases_normalize_to_the_v1_index(){

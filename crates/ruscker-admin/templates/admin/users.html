@@ -180,56 +180,29 @@
           </span>
         </td>
         <td>
-          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/role" style="display:flex;gap:6px;align-items:center">
-            <select name="role">
-              {% for r in self.all_roles() %}
-                <option value="{{ r.as_str() }}"{% if r == u.role %} selected{% endif %}>{{ self.role_label(r) }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-role") }}"><i class="ti ti-check"></i></button>
-          </form>
+          <span class="group-badge" data-group="{{ u.role.as_str() }}">{{ self.role_label(u.role) }}</span>
         </td>
         <td>
           {% if !u.groups.is_empty() %}
           <div class="group-badges">
             {% for g in u.groups %}<span class="group-badge" data-group="{{ g }}">{{ g }}</span>{% endfor %}
           </div>
+          {% else %}
+          <span class="text-[color:var(--text-faint)]">—</span>
           {% endif %}
-          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/groups" style="display:flex;gap:6px;align-items:center">
-            <input type="text" name="groups" value="{{ u.groups|join(", ") }}" autocapitalize="none"
-                   placeholder="{{ self.t("admin-users-groups-placeholder") }}" style="width:160px">
-            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-groups") }}"><i class="ti ti-check"></i></button>
-          </form>
         </td>
-        {# Profile (#856): setor / e-mail / celular, inline save like groups. #}
         <td>
-          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/profile" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-            <input type="text" name="setor" value="{{ u.setor.clone().unwrap_or_default() }}"
-                   placeholder="{{ self.t("admin-users-setor") }}" style="width:110px" aria-label="{{ self.t("admin-users-setor") }}">
-            <input type="email" name="email" value="{{ u.email.clone().unwrap_or_default() }}" autocapitalize="none"
-                   placeholder="{{ self.t("admin-users-email") }}" style="width:170px" aria-label="{{ self.t("admin-users-email") }}">
-            <input type="text" name="celular" value="{{ u.celular.clone().unwrap_or_default() }}" autocapitalize="none"
-                   placeholder="{{ self.t("admin-users-celular") }}" style="width:130px" aria-label="{{ self.t("admin-users-celular") }}">
-            <button type="submit" class="dash-action" title="{{ self.t("admin-users-save-profile") }}"><i class="ti ti-check"></i></button>
-          </form>
+          {% if let Some(setor) = u.setor %}<div>{{ setor }}</div>{% endif %}
+          {% if let Some(email) = u.email %}<div class="text-xs text-[color:var(--text-muted)]">{{ email }}</div>{% endif %}
+          {% if let Some(celular) = u.celular %}<div class="text-xs text-[color:var(--text-muted)]">{{ celular }}</div>{% endif %}
+          {% if u.setor.is_none() && u.email.is_none() && u.celular.is_none() %}<span class="text-[color:var(--text-faint)]">—</span>{% endif %}
         </td>
         <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>
         <td style="text-align:right;white-space:nowrap">
-          {# Reset password — reveals a tiny inline form. #}
-          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/password"
-                style="display:inline-flex;gap:4px;align-items:center" autocomplete="off">
-            <span style="position:relative;display:inline-block">
-              <input type="password" name="password" required minlength="8" placeholder="{{ self.t("admin-users-new-password") }}"
-                     title="{{ self.t("admin-users-password-rule") }}"
-                     style="width:140px;padding-right:1.8rem" autocomplete="new-password">
-              <button type="button" tabindex="-1" class="pw-reveal"
-                      title="{{ self.t("admin-pw-reveal") }}"
-                      style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
-                <i class="ti ti-eye" aria-hidden="true"></i>
-              </button>
-            </span>
-            <button type="submit" class="dash-action" title="{{ self.t("admin-users-reset-password") }}"><i class="ti ti-key"></i></button>
-          </form>
+          <a href="{{ base }}/admin/users/{{ u.username }}/edit" class="dash-action"
+             title="{{ self.t("admin-users-edit") }}" aria-label="{{ self.t("admin-users-edit") }}">
+            <i class="ti ti-edit" aria-hidden="true"></i>
+          </a>
           <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
                 data-confirm="{{ self.t("admin-users-confirm-delete") }}">
             <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>

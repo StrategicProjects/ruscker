@@ -98,7 +98,7 @@ admin-pw-new-label = Nueva contraseña
 admin-pw-confirm-label = Confirmar contraseña
 admin-pw-error-current = La contraseña actual es incorrecta.
 admin-pw-error-mismatch = Las contraseñas no coinciden.
-admin-pw-error-short = La contraseña debe tener al menos 8 caracteres.
+admin-pw-error-short = La contraseña no cumple la política: mínimo 8 caracteres, con 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial.
 admin-pw-submit = Guardar contraseña
 admin-pw-reveal = Mostrar/ocultar contraseña
 # — Gestión de usuarios (admin)
@@ -162,7 +162,9 @@ admin-users-flash-deleted = Usuario eliminado.
 admin-users-flash-last-admin = No se puede eliminar ni degradar al último administrador.
 admin-users-flash-bad-input = Datos inválidos: el usuario solo puede tener letras, números y _ . @ - , y la contraseña necesita al menos 8 caracteres.
 admin-users-username-rule = Solo letras, números y _ . @ - (sin espacios ni acentos).
-admin-users-password-rule = Mínimo 8 caracteres.
+admin-users-password-rule = Mínimo 8 caracteres, con al menos 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial.
+admin-users-flash-weak-password = Contraseña débil — la política exige mínimo 8 caracteres, con 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial.
+admin-users-generate-password = Generar contraseña aleatoria
 admin-users-flash-exists = Ya existe un usuario con ese nombre.
 
 # Admin dashboard

@@ -13,11 +13,12 @@
 {# Flash split (#746): error vs success used to share one class + icon,
    distinguished only by an inline background colour — colour-only state,
    and errors never got role="alert". #}
-{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" %}
+{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" || flash == "weak-password" %}
   <div class="admin-login-error mb-3" role="alert">
     <i class="ti ti-alert-circle" aria-hidden="true"></i>
     {% if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
     {% else if flash == "exists" %}{{ self.t("admin-users-flash-exists") }}
+    {% else if flash == "weak-password" %}{{ self.t("admin-users-flash-weak-password") }}
     {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
   </div>
 {% else if flash != "" %}
@@ -50,13 +51,23 @@
          absent (cf. the #433 images-gallery regression). #}
       <span style="position:relative;display:block">
         <input type="password" name="password" required minlength="8" autocomplete="new-password"
-               placeholder="••••••••" title="{{ self.t("admin-users-password-rule") }}" style="padding-right:2.2rem">
+               placeholder="••••••••" title="{{ self.t("admin-users-password-rule") }}" style="padding-right:3.9rem">
+        {# Generate a policy-compliant random password (#gen): fills the
+           field, reveals it so the admin can read/copy what they will
+           hand over. crypto.getRandomValues — never touches the server
+           before submit. #}
+        <button type="button" tabindex="-1" class="pw-gen"
+                title="{{ self.t("admin-users-generate-password") }}"
+                style="position:absolute;right:32px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
+          <i class="ti ti-refresh" aria-hidden="true"></i>
+        </button>
         <button type="button" tabindex="-1" class="pw-reveal"
                 title="{{ self.t("admin-pw-reveal") }}"
                 style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
           <i class="ti ti-eye" aria-hidden="true"></i>
         </button>
       </span>
+      <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-users-password-rule") }}</span>
     </label>
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
@@ -227,6 +238,36 @@
     input.type = reveal ? 'text' : 'password';
     var icon = btn.querySelector('i');
     if (icon) icon.className = 'ti ' + (reveal ? 'ti-eye-off' : 'ti-eye');
+  });
+
+  // Random policy-compliant password (#gen): one char from each
+  // required class + the rest from an unambiguous alphabet (no 0/O,
+  // 1/l/I), Fisher-Yates shuffled with crypto randomness. 14 chars.
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.pw-gen');
+    if (!btn) return;
+    var input = btn.parentNode.querySelector('input');
+    if (!input) return;
+    var lower = 'abcdefghjkmnpqrstuvwxyz', upper = 'ABCDEFGHJKMNPQRSTUVWXYZ',
+        digit = '23456789', special = '!@#$%&*+-_?';
+    var all = lower + upper + digit + special;
+    var buf = new Uint32Array(14);
+    crypto.getRandomValues(buf);
+    var chars = [lower, upper, digit, special].map(function (set, i) {
+      return set[buf[i] % set.length];
+    });
+    for (var i = 4; i < 14; i++) chars.push(all[buf[i] % all.length]);
+    var mix = new Uint32Array(14);
+    crypto.getRandomValues(mix);
+    for (var j = chars.length - 1; j > 0; j--) {
+      var k = mix[j] % (j + 1);
+      var tmp = chars[j]; chars[j] = chars[k]; chars[k] = tmp;
+    }
+    input.value = chars.join('');
+    input.type = 'text'; // reveal: the admin must see what they hand over
+    var eye = btn.parentNode.querySelector('.pw-reveal i');
+    if (eye) eye.className = 'ti ti-eye-off';
+    input.focus();
   });
 
   // Avatars + group badges (#623): deterministic colour from a name hash,

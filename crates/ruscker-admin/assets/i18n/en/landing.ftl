@@ -98,7 +98,7 @@ admin-pw-new-label = New password
 admin-pw-confirm-label = Confirm password
 admin-pw-error-current = Current password is incorrect.
 admin-pw-error-mismatch = Passwords don't match.
-admin-pw-error-short = Password must be at least 8 characters.
+admin-pw-error-short = Password doesn't meet the policy: at least 8 characters, with 1 uppercase, 1 lowercase, 1 digit and 1 special character.
 admin-pw-submit = Save password
 admin-pw-reveal = Show/hide password
 # — User management (admin)
@@ -162,7 +162,9 @@ admin-users-flash-deleted = User removed.
 admin-users-flash-last-admin = Can't remove or demote the last administrator.
 admin-users-flash-bad-input = Invalid input: the username may contain only letters, digits and _ . @ - , and the password needs at least 8 characters.
 admin-users-username-rule = Letters, digits and _ . @ - only (no spaces or accents).
-admin-users-password-rule = At least 8 characters.
+admin-users-password-rule = At least 8 characters, with at least 1 uppercase, 1 lowercase, 1 digit and 1 special character.
+admin-users-flash-weak-password = Weak password — the policy requires at least 8 characters, with 1 uppercase, 1 lowercase, 1 digit and 1 special character.
+admin-users-generate-password = Generate random password
 admin-users-flash-exists = A user with that name already exists.
 
 # Admin dashboard

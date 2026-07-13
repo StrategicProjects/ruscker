@@ -29,6 +29,7 @@ pub mod crypto;
 pub mod db;
 pub mod i18n;
 pub mod images;
+pub mod jobs;
 pub mod leader;
 pub mod logbuf;
 pub mod markdown;
@@ -483,6 +484,14 @@ impl AdminServer {
         if let Some(db) = self.state.db.clone() {
             #[allow(clippy::let_underscore_future)]
             let _ = access_counter::spawn(self.state.access_counter.clone(), db);
+        }
+
+        // Job scheduler (#986 slice B): leader-only cron runner for
+        // run-to-completion jobs. Needs BOTH a DB (schedules live
+        // there) and a backend (something must run the container).
+        if self.state.db.is_some() && self.state.backend.is_some() {
+            #[allow(clippy::let_underscore_future)]
+            let _ = jobs::spawn(self.state.clone());
         }
 
         // Alert-webhook sender (#930): one task drains the alert queue

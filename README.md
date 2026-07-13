@@ -162,10 +162,10 @@ Linux pulls the prebuilt musl binary; macOS builds from source.
 
 ```bash
 docker run --rm -p 8080:8080 \
-  -v "$PWD/application.yml:/etc/ruscker/application.yml:ro" \
+  -v "$PWD/ruscker.yml:/etc/ruscker/ruscker.yml:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/strategicprojects/ruscker:latest \
-  serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080 --docker
+  serve --config /etc/ruscker/ruscker.yml --bind 0.0.0.0:8080 --docker
 ```
 
 ### Debian / Ubuntu

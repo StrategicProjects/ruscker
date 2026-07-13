@@ -2,6 +2,9 @@
 
 Ruscker reads the **same `application.yml` schema** as ShinyProxy, so
 in most cases you point it at your existing config and it just works.
+(Your file keeps working as `--config` too — Ruscker's canonical
+service config is `ruscker.yml`, same schema; see
+[Configuration](./configuration.md) for how the pieces fit.)
 
 ## 1. Pre-flight check
 

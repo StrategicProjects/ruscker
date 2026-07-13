@@ -1,6 +1,8 @@
 # YAML schema reference
 
-Reference for every field Ruscker understands in `application.yml`.
+Reference for every field Ruscker understands in its YAML config —
+`ruscker.yml` (the canonical **service** config) and `application.yml`
+(kept as the **ShinyProxy import** format) parse with this same schema.
 
 For ShinyProxy users: this document marks which ShinyProxy features
 are **supported**, **extended** by Ruscker, **deferred** to later

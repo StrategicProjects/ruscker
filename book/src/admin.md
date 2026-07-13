@@ -33,17 +33,28 @@ top-right corner shows your current **access level**.
 ## Users and access levels (roles)
 
 Each person gets their own account (username + password). Admins manage
-accounts under **Users** (`/admin/users`): create one, assign a role,
-reset a password, or remove it. Each row shows a coloured avatar with the
-user's initials and their groups as coloured badges (a group keeps the
-same colour on the Groups and Apps pages). A new user gets an initial
-password you choose and is asked — once, on first login — whether to
-change it. **Password fields are masked** (type `password`) throughout the
-panel, so a shoulder-surfer can't read a password as you type it.
+accounts under **Users** (`/admin/users`): create one, or open a row's
+**Edit** button for the consolidated page — role, groups and profile in
+one form with a single save, plus the password reset. Each row shows a
+coloured avatar with the user's initials and their groups as coloured
+badges (a group keeps the same colour on the Groups and Apps pages).
+
+Passwords follow a **policy**: at least 8 characters, with at least one
+uppercase letter, one lowercase letter, one digit and one special
+character — enforced everywhere a password is set (create, reset,
+first-admin setup, self-service change, CSV import). Existing passwords
+aren't retroactively rejected; admin-assigned ones are transitional
+anyway, because the user is asked to change theirs on first login. Next
+to the password field, a **generate button** fills in a strong random
+14-character password (created in your browser, policy-compliant, no
+look-alike characters) and reveals it so you can read what you're about
+to hand over — no more `teste123`. **Password fields are masked** (type
+`password`) throughout the panel otherwise, so a shoulder-surfer can't
+read a password as you type it.
 
 | Role | Can do |
 |---|---|
-| **Viewer** | view the Dashboard only (read-only) |
+| **Viewer** | a **portal** account, not a panel operator: signs in to unlock group-restricted cards on the landing; reaches no admin section |
 | **Editor** | view + manage Apps and Media; view the Dashboard and stop/restart replicas |
 | **Admin** | everything, including managing users, credentials, the landing editor, custom blocks and the audit log |
 
@@ -55,6 +66,10 @@ the only remaining admin (so the portal can't be locked out); the
 `RUSCKER_ADMIN_TOKEN` break-glass login is the other safety net.
 
 ## Screens
+
+The sections below follow the panel's tab order: daily drivers first
+(Dashboard, Apps, Media, Credentials, Appearance), people (Users above,
+Groups), then diagnostics and maintenance (Logs, Disk, Audit, System).
 
 ### Dashboard
 A live view of running replicas, refreshed over Server-Sent Events. The
@@ -155,27 +170,6 @@ default, so the section stays out of the way until you need it.
 
 ![Add/edit app form: the Kind selector and Identity/Visual bands on the left, with a live card preview on the right that updates as you type.](images/admin-spec-form.png)
 
-### Groups
-Groups (`/admin/groups`, admin-only) gate which apps a user sees. They're
-**derived**, not a separate table: a group exists as long as a user belongs
-to it or an app lists it under `access-groups`. The page shows every group
-with its members and the apps it gates, and lets you edit them in place:
-
-- **Rename** a group — the change propagates across every user membership
-  and every app that references it.
-- **Delete** a group — it's removed everywhere (an app left with no groups
-  becomes open to all).
-- **Add / remove members** inline, and **create** a group by adding its
-  first member under a new name.
-
-Edits touch the database-managed users and apps. An app defined in the
-`serve --config` YAML stays read-only here (edit the file for those).
-
-Below the groups, **Public apps** lists every ungated app as a logo
-chip — the thumbnail sits on the catalog's per-type tint colour, so the
-app's kind reads at a glance — with a globe mark; clicking a chip opens
-that app's editor.
-
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
@@ -275,6 +269,36 @@ back at the blocks section.
 > landing. It's admin-only input — the intentional escape hatch — so
 > only paste HTML you trust.
 
+### Groups
+Groups (`/admin/groups`, admin-only) gate which apps a user sees. They're
+**derived**, not a separate table: a group exists as long as a user belongs
+to it or an app lists it under `access-groups`. The page shows every group
+with its members and the apps it gates, and lets you edit them in place:
+
+- **Rename** a group — the change propagates across every user membership
+  and every app that references it.
+- **Delete** a group — it's removed everywhere (an app left with no groups
+  becomes open to all).
+- **Add / remove members** inline, and **create** a group by adding its
+  first member under a new name.
+
+Edits touch the database-managed users and apps. An app defined in the
+`serve --config` YAML stays read-only here (edit the file for those).
+
+Below the groups, **Public apps** lists every ungated app as a logo
+chip — the thumbnail sits on the catalog's per-type tint colour, so the
+app's kind reads at a glance — with a globe mark; clicking a chip opens
+that app's editor.
+
+### Logs
+
+![Logs viewer: a terminal-style live stream with colour-coded levels and a toolbar with pause, level chips, an app filter and download.](images/admin-logs.png)
+
+The server log stream, live over Server-Sent Events. Lines are colour-
+coded by level, with level chips (info / warn / error), an app filter
+dropdown, a line counter, and pause/resume + clear controls. A download
+link grabs the current buffer.
+
 ### Disk
 
 ![Disk panel: a storage hero with a stacked usage bar, above panels listing Ruscker-managed containers and images with remove and prune actions.](images/admin-disk.png)
@@ -285,15 +309,6 @@ other used, and free. Below it, two panels list the Ruscker-managed
 containers and images — each removable, with an "in use" cross-reference
 so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
-
-### Logs
-
-![Logs viewer: a terminal-style live stream with colour-coded levels and a toolbar with pause, level chips, an app filter and download.](images/admin-logs.png)
-
-The server log stream, live over Server-Sent Events. Lines are colour-
-coded by level, with level chips (info / warn / error), an app filter
-dropdown, a line counter, and pause/resume + clear controls. A download
-link grabs the current buffer.
 
 ### Audit log
 Every admin mutation (spec/image/credential/landing/block changes,

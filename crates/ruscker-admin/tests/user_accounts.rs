@@ -647,3 +647,103 @@ async fn last_admin_cannot_be_deleted() {
         1
     );
 }
+
+#[tokio::test]
+async fn consolidated_user_edit_is_prefilled_and_saves_all_fields() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool.clone());
+    ruscker_admin::db::users::create(
+        &db,
+        "root",
+        "rootpass1",
+        Role::Admin,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    ruscker_admin::db::users::create(
+        &db,
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &["old-group".to_string()],
+        Some("root"),
+    )
+    .await
+    .unwrap();
+    ruscker_admin::db::users::update_profile(
+        &db,
+        "alice",
+        Some("Old department"),
+        Some("old@example.com"),
+        None,
+        Some("root"),
+    )
+    .await
+    .unwrap();
+
+    let sid = state
+        .admin_sessions
+        .create(Role::Admin, Some("root".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    let list = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/users")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.status(), StatusCode::OK);
+    let list_body = axum::body::to_bytes(list.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let list_body = std::str::from_utf8(&list_body).unwrap();
+    assert!(list_body.contains(r#"href="/admin/users/alice/edit""#));
+
+    let edit = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/users/alice/edit")
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(edit.status(), StatusCode::OK);
+    let edit_body = axum::body::to_bytes(edit.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let edit_body = std::str::from_utf8(&edit_body).unwrap();
+    assert!(edit_body.contains(r#"value="old-group""#));
+    assert!(edit_body.contains(r#"value="Old department""#));
+    assert!(edit_body.contains(r#"value="old@example.com""#));
+
+    let (status, loc) = post(
+        state,
+        "/admin/users/alice/edit",
+        "role=editor&groups=analysts%2C+managers&setor=Data&email=alice%40example.com&celular=555-0100",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/users?flash=saved");
+
+    let user = ruscker_admin::db::users::fetch(&db, "alice")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(user.role, Role::Editor);
+    assert_eq!(user.groups, vec!["analysts", "managers"]);
+    assert_eq!(user.setor.as_deref(), Some("Data"));
+    assert_eq!(user.email.as_deref(), Some("alice@example.com"));
+    assert_eq!(user.celular.as_deref(), Some("555-0100"));
+}

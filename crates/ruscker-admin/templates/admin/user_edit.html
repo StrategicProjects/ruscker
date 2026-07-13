@@ -1,0 +1,133 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-users-edit-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between mb-3">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-users-edit-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-users-edit-subtitle") }}</p>
+  </div>
+  <a href="{{ base }}/admin/users" class="admin-nav-link" style="width:auto">
+    <i class="ti ti-arrow-left" aria-hidden="true"></i>
+    {{ self.t("admin-users-cancel") }}
+  </a>
+</div>
+
+{% if flash == "last-admin" || flash == "bad-input" %}
+  <div class="admin-login-error mb-3" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {% if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
+    {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
+  </div>
+{% else if flash == "saved" %}
+  <div class="admin-flash-ok mb-3" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {{ self.t("admin-users-flash-saved") }}
+  </div>
+{% endif %}
+
+<section style="padding:18px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <div class="flex items-center gap-3 mb-4">
+    <span class="rk-avatar" data-avatar="{{ user.username }}" aria-hidden="true"></span>
+    <div>
+      <div class="font-medium">{{ user.username }}{% if user.username == me %} <span class="text-xs text-[color:var(--text-faint)]">({{ self.t("admin-users-you") }})</span>{% endif %}</div>
+      <div class="text-xs text-[color:var(--text-faint)]">{{ self.t("admin-users-account") }}</div>
+    </div>
+  </div>
+
+  <form method="post" action="{{ base }}/admin/users/{{ user.username }}/edit" autocomplete="off">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
+        <select name="role">
+          {% for r in self.all_roles() %}
+            <option value="{{ r.as_str() }}"{% if r == user.role %} selected{% endif %}>{{ self.role_label(r) }}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
+        <input type="text" name="groups" value="{{ user.groups|join(", ") }}" autocapitalize="none"
+               placeholder="{{ self.t("admin-users-groups-placeholder") }}">
+        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-users-groups-hint") }}</span>
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-setor") }}</span>
+        <input type="text" name="setor" value="{{ user.setor.clone().unwrap_or_default() }}"
+               placeholder="{{ self.t("admin-users-setor-placeholder") }}">
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-email") }}</span>
+        <input type="email" name="email" value="{{ user.email.clone().unwrap_or_default() }}" autocapitalize="none"
+               placeholder="nome@orgao.gov.br">
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-celular") }}</span>
+        <input type="text" name="celular" value="{{ user.celular.clone().unwrap_or_default() }}" autocapitalize="none"
+               placeholder="(81) 90000-0000">
+      </label>
+    </div>
+
+    <div class="flex items-center gap-3 mt-4">
+      <button type="submit" class="admin-login-btn" style="width:auto">
+        <i class="ti ti-device-floppy" aria-hidden="true"></i>
+        {{ self.t("admin-users-save") }}
+      </button>
+      <a href="{{ base }}/admin/users" class="text-sm text-[color:var(--text-muted)] underline">{{ self.t("admin-users-cancel") }}</a>
+    </div>
+  </form>
+</section>
+
+<section style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <div class="text-sm font-medium">{{ self.t("admin-users-password-section") }}</div>
+  <p class="text-xs text-[color:var(--text-faint)] mt-1 mb-3">{{ self.t("admin-users-password-reset-hint") }}</p>
+  <form method="post" action="{{ base }}/admin/users/{{ user.username }}/password"
+        style="display:flex;gap:8px;align-items:end;flex-wrap:wrap" autocomplete="off">
+    <label class="admin-login-field" style="margin:0;max-width:300px">
+      <span class="admin-login-label">{{ self.t("admin-users-new-password") }}</span>
+      <span style="position:relative;display:block">
+        <input type="password" name="password" required minlength="8" autocomplete="new-password"
+               title="{{ self.t("admin-users-password-rule") }}" style="padding-right:2.2rem">
+        <button type="button" tabindex="-1" class="pw-reveal"
+                title="{{ self.t("admin-pw-reveal") }}"
+                style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;cursor:pointer;color:var(--text-muted);line-height:0;padding:0">
+          <i class="ti ti-eye" aria-hidden="true"></i>
+        </button>
+      </span>
+    </label>
+    <button type="submit" class="admin-login-btn" style="width:auto">
+      <i class="ti ti-key" aria-hidden="true"></i>
+      {{ self.t("admin-users-reset-password") }}
+    </button>
+  </form>
+</section>
+
+<script>
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('.pw-reveal');
+    if (!btn) return;
+    var input = btn.parentNode.querySelector('input');
+    if (!input) return;
+    var reveal = input.type === 'password';
+    input.type = reveal ? 'text' : 'password';
+    var icon = btn.querySelector('i');
+    if (icon) icon.className = 'ti ' + (reveal ? 'ti-eye-off' : 'ti-eye');
+  });
+
+  (function () {
+    var el = document.querySelector('.rk-avatar[data-avatar]');
+    if (!el) return;
+    var name = el.getAttribute('data-avatar');
+    var h = 0; for (var i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+    var color = 'hsl(' + h + ' 55% 45%)';
+    el.style.background = 'color-mix(in srgb, ' + color + ' 18%, var(--surface))';
+    el.style.color = color;
+    el.textContent = name.charAt(0).toUpperCase() || '?';
+  })();
+</script>
+{% endblock %}

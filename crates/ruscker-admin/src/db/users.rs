@@ -463,6 +463,130 @@ pub async fn set_password(
 /// SQLite needs no equivalent — its writes already serialize.
 const ADMIN_MUTATION_LOCK: i64 = 0x7275_7363_6b72_0001;
 
+/// Editable account fields saved together by the consolidated user form.
+/// Password resets remain a separate, deliberately explicit operation.
+pub struct AccountUpdate<'a> {
+    pub role: Role,
+    pub groups: &'a [String],
+    pub setor: Option<&'a str>,
+    pub email: Option<&'a str>,
+    pub celular: Option<&'a str>,
+}
+
+/// Update role, groups and profile in one transaction. The conditional
+/// role predicate is the same last-admin backstop used by [`set_role`],
+/// so a concurrent demotion cannot leave the portal without an admin.
+pub async fn update_account(
+    db: &ConfigDb,
+    username: &str,
+    update: AccountUpdate<'_>,
+    actor: Option<&str>,
+) -> Result<()> {
+    fn norm(s: Option<&str>) -> Option<&str> {
+        s.map(str::trim).filter(|v| !v.is_empty())
+    }
+
+    let username = normalize_username(username);
+    let groups = join_groups(update.groups);
+    let setor = norm(update.setor);
+    let email = norm(update.email);
+    let celular = norm(update.celular);
+    let now = Utc::now();
+    let target = format!("user:{username}");
+    let diff = serde_json::json!({
+        "role": update.role.as_str(),
+        "groups": groups,
+        "setor": setor,
+        "email": email,
+        "celular": celular,
+    })
+    .to_string();
+
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin account update")?;
+            let res = sqlx::query(
+                "UPDATE users
+                    SET role = ?, groups = ?, setor = ?, email = ?, celular = ?, updated_at = ?
+                  WHERE username = ?
+                    AND (role <> 'admin' OR ? = 'admin'
+                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(update.role.as_str())
+            .bind(&groups)
+            .bind(setor)
+            .bind(email)
+            .bind(celular)
+            .bind(now)
+            .bind(&username)
+            .bind(update.role.as_str())
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("update account {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!(
+                    "update account {username}: no-op (not found, or would strip the last admin)"
+                );
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'user.update', ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit account update")?;
+            tx.commit().await.context("commit account update")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin account update")?;
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(ADMIN_MUTATION_LOCK)
+                .execute(&mut *tx)
+                .await
+                .context("acquire admin-mutation lock")?;
+            let res = sqlx::query(
+                "UPDATE users
+                    SET role = $1, groups = $2, setor = $3, email = $4, celular = $5, updated_at = $6
+                  WHERE username = $7
+                    AND (role <> 'admin' OR $1 = 'admin'
+                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
+            )
+            .bind(update.role.as_str())
+            .bind(&groups)
+            .bind(setor)
+            .bind(email)
+            .bind(celular)
+            .bind(now)
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("update account {username}"))?;
+            if res.rows_affected() == 0 {
+                anyhow::bail!(
+                    "update account {username}: no-op (not found, or would strip the last admin)"
+                );
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'user.update', $2, $3, $4)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit account update")?;
+            tx.commit().await.context("commit account update")?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn set_role(
     db: &ConfigDb,
     username: &str,
@@ -923,6 +1047,68 @@ mod tests {
         assert!(fetch(&p, "carol").await.unwrap().unwrap().groups.is_empty());
         // Unknown user ⇒ error.
         assert!(set_groups(&p, "ghost", &[], Some("a")).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn update_account_saves_role_groups_and_profile_together() {
+        let p = pool().await;
+        create(&p, "alice", "pw-alice1", Role::Viewer, false, &[], Some("root"))
+            .await
+            .unwrap();
+        let groups = vec!["analysts".to_string(), "managers".to_string()];
+
+        update_account(
+            &p,
+            "alice",
+            AccountUpdate {
+                role: Role::Editor,
+                groups: &groups,
+                setor: Some(" Data "),
+                email: Some(" alice@example.com "),
+                celular: Some(" 555-0100 "),
+            },
+            Some("root"),
+        )
+        .await
+        .unwrap();
+
+        let user = fetch(&p, "alice").await.unwrap().unwrap();
+        assert_eq!(user.role, Role::Editor);
+        assert_eq!(user.groups, groups);
+        assert_eq!(user.setor.as_deref(), Some("Data"));
+        assert_eq!(user.email.as_deref(), Some("alice@example.com"));
+        assert_eq!(user.celular.as_deref(), Some("555-0100"));
+    }
+
+    #[tokio::test]
+    async fn update_account_rolls_back_fields_when_demoting_last_admin() {
+        let p = pool().await;
+        create(&p, "root", "pw-root12", Role::Admin, false, &[], None)
+            .await
+            .unwrap();
+        let groups = vec!["changed".to_string()];
+
+        let result = update_account(
+            &p,
+            "root",
+            AccountUpdate {
+                role: Role::Viewer,
+                groups: &groups,
+                setor: Some("Changed"),
+                email: Some("changed@example.com"),
+                celular: Some("555"),
+            },
+            Some("root"),
+        )
+        .await;
+        assert!(result.is_err());
+
+        let user = fetch(&p, "root").await.unwrap().unwrap();
+        assert_eq!(user.role, Role::Admin);
+        assert!(user.groups.is_empty());
+        assert!(user.setor.is_none());
+        assert!(user.email.is_none());
+        assert!(user.celular.is_none());
     }
 
     #[tokio::test]

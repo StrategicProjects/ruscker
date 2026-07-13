@@ -9,6 +9,58 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.41 — 2026-07-13
+
+A large batch: ten issues closed, including the whole config-model epic.
+
+- **Alert notification webhooks.** Set a URL in the admin **System** tab
+  and Ruscker `POST`s a JSON payload when something an operator should
+  know about happens: an app's container **failing to start**, a running
+  replica **dying outside Ruscker's control**, or an app **saturated at
+  `max-replicas`** (visitors being turned away). Delivery is best-effort
+  with retries and a per-(event, app) cooldown so a stuck condition
+  doesn't storm the channel; a *Send test alert* button checks the
+  wiring. Payload contract documented in the guide (§ admin/System).
+- **`ruscker.yml` is the canonical service config.** The service's own
+  settings (bind, subpath, forwarded-header trust, timeouts, metrics)
+  now live in a fully **self-documented `/etc/ruscker/ruscker.yml`** —
+  every option commented with its default. `application.yml` remains as
+  the **ShinyProxy import format** (same schema, and still accepted as
+  `--config`); `serve` without `--config` finds `ruscker.yml` first and
+  falls back silently. **Upgrades migrate automatically**: an edited
+  `application.yml` from an older package is copied over `ruscker.yml`
+  once, while the latter is still the pristine example — nothing to do
+  by hand. Changing the port or the subpath no longer ever requires
+  editing the systemd unit (the `--bind` flag left `ExecStart`; the
+  README gained a complete no-systemd subpath recipe).
+- **Consolidated user editing.** Each row in **Users** now has an
+  *Edit* button opening a dedicated page — role, groups and profile in
+  one form with a single save (atomic, with the last-admin guard rolling
+  back *all* fields), and password reset alongside.
+- **`container-wait-time` now works.** The field parsed but was never
+  consumed — the readiness wait was hardcoded at 60 s. It now drives the
+  spawn readiness budget (both single and multi-host), and failure
+  messages name the configured value.
+- **Per-spec access counting no longer writes per request.** API access
+  counts aggregate in memory and flush in batches (one UPSERT per
+  spec/day bucket every couple of seconds, with retry and a final flush
+  on shutdown) — under load, thousands of calls become one write.
+- **Browser-tab title honours your title.** The page `<title>`/`og:title`
+  used to skip `proxy.title`; it now follows the same chain as the
+  header (SEO title → Appearance title → `proxy.title` → default).
+- **Docs: ShinyProxy → Ruscker field map.** A new guide page lists every
+  documented ShinyProxy 3.x option with its status here (supported /
+  warned-and-ignored / planned / out of scope) and the Ruscker
+  equivalent — the field-by-field companion to the migration guide. The
+  Configuration chapter now opens with the four-layer model (service
+  YAML × secrets env × portal DB/admin × ShinyProxy import).
+- **Live WebSocket e2e for Shiny + Streamlit.** A new gated test suite
+  drives the real demo containers through the proxy — cold spawn, URL
+  rewriting, and both directions of the WebSocket pump — closing a
+  validation gap open since the proxy phase.
+
+---
+
 ## v0.2.40 — 2026-06-25
 
 - **Citation metadata + DOI.** Added a `CITATION.cff` at the repo root so

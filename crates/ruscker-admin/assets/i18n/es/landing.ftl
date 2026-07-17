@@ -640,6 +640,8 @@ spec-help-access-groups = Grupos que pueden ver y acceder a la app (separados po
 spec-form-access-users = Usuarios permitidos
 spec-help-access-users = Usuarios que pueden ver y acceder a la app (separados por comas).
 spec-form-access-help = Ambos vacíos = tarjeta abierta a todos (incluido anónimo). Con algún valor, solo usuarios conectados que coincidan — y los admins siempre.
+spec-form-identity-headers = Enviar cabeceras de identidad a la app
+spec-form-identity-headers-hint = Añade X-SP-UserId y X-SP-UserGroups para usuarios autenticados. Desactivado por defecto; actívalo solo para apps que necesiten y confíen en esta identidad.
 spec-form-access-public = Público
 spec-form-access-add-group = + añadir grupo
 spec-form-access-public-hint = vacío = visible para todos

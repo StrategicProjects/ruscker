@@ -132,6 +132,7 @@ async fn serve() -> (AppState, SocketAddr) {
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         spec_cache: Arc::new(dashmap::DashMap::new()),
+        identity_cache: Arc::new(dashmap::DashMap::new()),
         catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),

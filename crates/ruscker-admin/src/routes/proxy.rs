@@ -43,7 +43,7 @@ use ruscker_core::{Replica, ReplicaState};
 use ruscker_proxy::sticky::{self, CookieKey, StickySession, COOKIE_NAME};
 use ruscker_proxy::ws;
 use std::net::SocketAddr;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tower_cookies::cookie::time::Duration;
 use tower_cookies::{Cookie, Cookies};
 
@@ -74,6 +74,23 @@ impl<S: Send + Sync> FromRequestParts<S> for MaybeWs {
 /// — we provide our own infallible wrapper that yields `None`
 /// instead of rejecting.
 struct MaybePeer(Option<SocketAddr>);
+
+/// Authenticated identity resolved once for this proxied request. Group
+/// membership is an `Arc` because cache hits should not clone the vector
+/// for every asset in a page load (#1001).
+struct Identity {
+    username: String,
+    groups: Arc<Vec<String>>,
+}
+
+impl Identity {
+    fn header_pairs(&self) -> Vec<(String, String)> {
+        vec![
+            ("X-SP-UserId".into(), self.username.clone()),
+            ("X-SP-UserGroups".into(), self.groups.join(",")),
+        ]
+    }
+}
 
 impl<S: Send + Sync> FromRequestParts<S> for MaybePeer {
     type Rejection = std::convert::Infallible;
@@ -350,34 +367,40 @@ async fn forward(
     //     match; an Admin role (incl. the break-glass token) passes
     //     everything. This is the *enforcement* that the landing's card
     //     filtering only hints at — hiding a card never stopped a direct
-    //     hit on `/app/{spec}`. We resolve groups per request (only for
-    //     restricted specs) from the same `users` store the landing uses.
+    //     hit on `/app/{spec}`. Group membership comes from the same users
+    //     store as the landing, through the identity hot-path cache (#1001).
+    //
+    // Resolve identity once when either access control or upstream header
+    // disclosure needs it. Open specs with disclosure disabled do no user
+    // lookup at all.
+    let identity = match acting_user.as_ref() {
+        Some(username) if !spec.is_open() || spec.effective_add_default_http_headers() => {
+            Some(Identity {
+                username: username.clone(),
+                groups: find_user_groups(&state, username).await,
+            })
+        }
+        _ => None,
+    };
     if !spec.is_open() {
-        let session = session.0;
         let is_admin = session
+            .0
             .as_ref()
             .map(|s| s.role == crate::auth::Role::Admin)
             .unwrap_or(false);
-        let username = session.as_ref().and_then(|s| s.actor.clone());
-        let groups: Vec<String> = match (username.as_deref(), state.db.as_ref()) {
-            (Some(user), Some(db)) => crate::db::users::fetch(db, user)
-                .await
-                .ok()
-                .flatten()
-                .map(|row| row.groups)
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        };
-        if !spec.access_allows(is_admin, username.as_deref(), &groups) {
+        let groups = identity
+            .as_ref()
+            .map_or(&[][..], |identity| identity.groups.as_slice());
+        if !spec.access_allows(is_admin, acting_user.as_deref(), groups) {
             tracing::info!(
                 spec = %spec.id,
-                user = username.as_deref().unwrap_or("-"),
+                user = acting_user.as_deref().unwrap_or("-"),
                 "access denied to restricted spec"
             );
             // An anonymous visitor hitting a restricted interactive app
             // is sent to log in; everyone else (and all API clients) get
             // a flat 403 (CORS-wrapped for the `/api/` family).
-            if route_prefix == APP_PREFIX && session.is_none() {
+            if route_prefix == APP_PREFIX && session.0.is_none() {
                 // Proxy routes are not wrapped by the chrome's
                 // `prefix_base_path` Location-rewriter, so build the
                 // base-prefixed login URL ourselves (#294) — otherwise a
@@ -549,6 +572,10 @@ async fn forward(
         // this the admin session id (a bearer) leaks to the app container
         // over the WS handshake — the most-used transport for Shiny/
         // Jupyter/RStudio.
+        // The WS connector only forwards explicitly selected headers, but
+        // still scrub the inbound map before building that handshake so the
+        // reserved namespace has one unconditional rule across transports.
+        strip_reserved_identity_headers(req.headers_mut());
         let cookie = req
             .headers()
             .get(header::COOKIE)
@@ -569,10 +596,19 @@ async fn forward(
         // selected can be echoed on our 101 — a browser that offered
         // subprotocols and receives a 101 without one selected must fail
         // the connection (RFC 6455 §4.1).
-        let handshake = match ws::connect(
+        let identity_headers = if spec.effective_add_default_http_headers() {
+            identity
+                .as_ref()
+                .map(Identity::header_pairs)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let handshake = match ws::connect_with_headers(
             &upstream_ws_url,
             cookie.as_deref(),
             subprotocols.as_deref(),
+            &identity_headers,
         )
         .await
         {
@@ -680,6 +716,11 @@ async fn forward(
         is_https,
         req,
         body_cap,
+        if spec.effective_add_default_http_headers() {
+            identity.as_ref()
+        } else {
+            None
+        },
     )
     .await
     {
@@ -961,6 +1002,36 @@ pub(crate) fn apply_public_path(env: &mut [String], cmd: &mut Option<Vec<String>
 /// enough that one page load's burst of subresource requests all hit the
 /// cache instead of the DB.
 pub(crate) const SPEC_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Group memberships change far less often than proxy requests. A 30s TTL
+/// prevents one SELECT per asset while bounding how long an admin edit can
+/// take to reach access checks and injected identity headers (#1001).
+pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
+    std::time::Duration::from_secs(30);
+
+async fn find_user_groups(state: &AppState, username: &str) -> Arc<Vec<String>> {
+    if let Some(entry) = state.identity_cache.get(username) {
+        if entry.0.elapsed() < IDENTITY_CACHE_TTL {
+            return entry.1.clone();
+        }
+    }
+
+    let groups = match state.db.as_ref() {
+        Some(db) => match crate::db::users::fetch(db, username).await {
+            Ok(row) => Arc::new(row.map(|user| user.groups).unwrap_or_default()),
+            Err(error) => {
+                tracing::warn!(user = username, error = ?error, "identity lookup failed");
+                return Arc::new(Vec::new());
+            }
+        },
+        None => Arc::new(Vec::new()),
+    };
+    state.identity_cache.insert(
+        username.to_string(),
+        (std::time::Instant::now(), groups.clone()),
+    );
+    groups
+}
 
 pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
     // Hot path: `find_spec` runs on every proxied request. Serve a recent
@@ -1716,6 +1787,7 @@ async fn do_forward(
     is_https: bool,
     mut req: Request,
     max_body: Option<usize>,
+    identity: Option<&Identity>,
 ) -> anyhow::Result<Response> {
     let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
     let new_uri: Uri = format!("http://{}{}{}", replica.upstream, upstream_path, query)
@@ -1731,10 +1803,25 @@ async fn do_forward(
     let fwd_host = req.headers().get(header::HOST).cloned();
 
     strip_hop_headers(req.headers_mut());
+    // These namespaces are reserved for Ruscker-authenticated identity.
+    // Strip them for every request — anonymous, feature-off, and feature-on
+    // alike — before optionally adding authoritative values (#1001).
+    strip_reserved_identity_headers(req.headers_mut());
     // Never forward Ruscker's own cookies (admin session, sticky,
     // prefs) to the app container — the admin session id is a bearer
     // (#258).
     strip_ruscker_cookies(req.headers_mut());
+
+    if let Some(identity) = identity {
+        for (name, value) in identity.header_pairs() {
+            if let (Ok(name), Ok(value)) = (
+                name.parse::<header::HeaderName>(),
+                HeaderValue::from_str(&value),
+            ) {
+                req.headers_mut().insert(name, value);
+            }
+        }
+    }
 
     // Smart-routing headers — tell the upstream what public prefix,
     // scheme, and host it's mounted behind so it can self-route. Set
@@ -1894,6 +1981,24 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
     }
 }
 
+/// Remove client-supplied identity claims before a request crosses the
+/// trust boundary into an app container. `HeaderName` is normalized to
+/// lowercase, so the comparisons are case-insensitive by construction.
+fn strip_reserved_identity_headers(headers: &mut HeaderMap) {
+    let names: Vec<_> = headers
+        .keys()
+        .filter(|name| {
+            let name = name.as_str();
+            matches!(name, "x-sp-userid" | "x-sp-usergroups")
+                || name.starts_with("x-ruscker-user-")
+        })
+        .cloned()
+        .collect();
+    for name in names {
+        headers.remove(name);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1951,6 +2056,25 @@ mod tests {
         );
         strip_ruscker_cookies(&mut h);
         assert!(!h.contains_key(header::COOKIE), "empty Cookie header should be removed");
+    }
+
+    #[test]
+    fn strip_reserved_identity_headers_drops_sp_and_ruscker_claims() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-sp-userid", HeaderValue::from_static("mallory"));
+        headers.insert("x-sp-usergroups", HeaderValue::from_static("attackers"));
+        headers.insert(
+            "x-ruscker-user-email",
+            HeaderValue::from_static("mallory@example.test"),
+        );
+        headers.insert("x-app-header", HeaderValue::from_static("keep"));
+
+        strip_reserved_identity_headers(&mut headers);
+
+        assert!(!headers.contains_key("x-sp-userid"));
+        assert!(!headers.contains_key("x-sp-usergroups"));
+        assert!(!headers.contains_key("x-ruscker-user-email"));
+        assert_eq!(headers.get("x-app-header").unwrap(), "keep");
     }
 
     #[test]
@@ -2220,6 +2344,7 @@ mod tests {
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: StdArc::new(dashmap::DashMap::new()),
+            identity_cache: StdArc::new(dashmap::DashMap::new()),
             catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
             access_counter: StdArc::new(crate::access_counter::AccessCounter::default()),
             alerts: crate::alerts::AlertSink::default(),
@@ -2717,9 +2842,17 @@ docker-registry-password: hunter2
             .body(Body::empty())
             .unwrap();
 
-        let resp = do_forward(&replica, "/".to_string(), "/app/rstudio", false, req, None)
-            .await
-            .expect("the dead-connection GET should be retried, not surfaced as an error");
+        let resp = do_forward(
+            &replica,
+            "/".to_string(),
+            "/app/rstudio",
+            false,
+            req,
+            None,
+            None,
+        )
+        .await
+        .expect("the dead-connection GET should be retried, not surfaced as an error");
         assert_eq!(resp.status(), StatusCode::OK);
         server.await.unwrap();
     }

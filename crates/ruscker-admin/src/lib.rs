@@ -61,6 +61,10 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// in `ruscker-cli`'s `init_tracing`.
 pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 
+/// Shared short-TTL cache of user group memberships for the proxy hot path.
+pub type IdentityCache =
+    Arc<dashmap::DashMap<String, (std::time::Instant, Arc<Vec<String>>)>>;
+
 /// Shared state injected into every request.
 #[derive(Clone)]
 pub struct AppState {
@@ -184,6 +188,15 @@ pub struct AppState {
     /// sees the same cache.
     pub spec_cache: Arc<dashmap::DashMap<String, (Arc<ruscker_config::Spec>, std::time::Instant)>>,
 
+    /// Short-lived username → group-membership cache for the proxy hot
+    /// path (#1001). Identity-enabled pages fetch many assets; resolving
+    /// the same signed-in user from the DB for each one would turn a page
+    /// load into a burst of identical SELECTs. The TTL is a backstop —
+    /// admin handlers that mutate membership call
+    /// [`AppState::invalidate_identity_cache`] so revocations apply on
+    /// the very next proxied request, matching the pre-cache semantics.
+    pub identity_cache: IdentityCache,
+
     /// Short-circuit cache of the **effective spec catalog** for admin
     /// pages (#902). The admin tabs (Apps/Disk/Media/Groups/System +
     /// landing) each rebuilt the full catalog — `list_all` + a
@@ -218,6 +231,16 @@ impl AppState {
     /// mode they get `None` and 503. See [`db::ConfigDb`].
     pub fn sqlite(&self) -> Option<&SqlitePool> {
         self.db.as_ref().and_then(db::ConfigDb::as_sqlite)
+    }
+
+    /// Drop every cached identity resolution (#1001). Admin handlers
+    /// call this after any mutation that can change group membership or
+    /// remove an account (user edit/delete, group rename/membership,
+    /// CSV import), so a revoked group loses app access on the very
+    /// next proxied request — the 30s TTL is only a backstop for edits
+    /// made outside this process (e.g. another HA node).
+    pub fn invalidate_identity_cache(&self) {
+        self.identity_cache.clear();
     }
 }
 
@@ -266,6 +289,7 @@ impl AdminServer {
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: Arc::new(dashmap::DashMap::new()),
+            identity_cache: Arc::new(dashmap::DashMap::new()),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(access_counter::AccessCounter::default()),
             alerts: alerts::AlertSink::default(),

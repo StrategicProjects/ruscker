@@ -83,6 +83,7 @@ async fn app_state(db: ConfigDb) -> AppState {
         metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
         draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         spec_cache: std::sync::Arc::new(dashmap::DashMap::new()),
+        identity_cache: std::sync::Arc::new(dashmap::DashMap::new()),
         catalog_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: std::sync::Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),

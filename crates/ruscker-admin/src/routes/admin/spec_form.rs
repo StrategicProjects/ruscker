@@ -500,6 +500,9 @@ pub struct SpecForm {
     pub access_groups: String,
     /// Usernames allowed to see + reach this app — comma/newline list.
     pub access_users: String,
+    /// Checkbox ("on") ⇒ forward the signed-in user's ShinyProxy-compatible
+    /// identity headers to this app. Off by default (data minimization).
+    pub add_default_http_headers: String,
 
     // ── Advanced · Resources (requests + body cap) ──────────────
     /// Soft CPU reservation in fractional cores (`container-cpu-request`).
@@ -637,6 +640,7 @@ impl SpecForm {
             docker_registry_credential: spec.docker_registry_credential.clone().unwrap_or_default(),
             access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
+            add_default_http_headers: checkbox(spec.effective_add_default_http_headers()),
             container_cpu_request: spec
                 .container_cpu_request
                 .map(|n| n.to_string())
@@ -816,6 +820,7 @@ impl SpecForm {
             docker_registry_credential: empty_to_none(&self.docker_registry_credential),
             access_groups: list_to_vec(&self.access_groups),
             access_users: list_to_vec(&self.access_users),
+            add_default_http_headers: checkbox_opt(&self.add_default_http_headers),
             container_cpu_request: parse_opt(&self.container_cpu_request),
             container_memory_request: empty_to_none(&self.container_memory_request),
             max_body_size: empty_to_none(&self.max_body_size),
@@ -2029,6 +2034,7 @@ proxy:
         - --ServerApp.base_url=/
       access-groups: [staff, ops]
       access-users: [alice]
+      add-default-http-headers: true
       placement: bin-pack
       anti-affinity: true
       routing-strategy: round-robin
@@ -2056,6 +2062,7 @@ proxy:
         );
         assert_eq!(merged.access_groups.as_deref(), Some(&["staff".into(), "ops".into()][..]));
         assert_eq!(merged.access_users.as_deref(), Some(&["alice".into()][..]));
+        assert!(merged.effective_add_default_http_headers());
         assert_eq!(merged.placement, Some(Placement::BinPack));
         assert_eq!(merged.anti_affinity, Some(true));
         assert_eq!(merged.routing_strategy, Some(RoutingStrategy::RoundRobin));

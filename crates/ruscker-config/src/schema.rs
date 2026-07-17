@@ -924,6 +924,13 @@ pub struct Spec {
     #[serde(rename = "access-users", default)]
     pub access_users: Option<Vec<String>>,
 
+    /// Forward the authenticated user's ShinyProxy-compatible identity
+    /// headers to this app. Deliberately defaults to `false`, unlike
+    /// ShinyProxy: existing apps must opt in before Ruscker discloses a
+    /// username or group membership (#1001).
+    #[serde(rename = "add-default-http-headers")]
+    pub add_default_http_headers: Option<bool>,
+
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
     #[serde(rename = "template-properties", default)]
@@ -1191,6 +1198,15 @@ impl Spec {
     pub fn is_open(&self) -> bool {
         self.access_groups.as_deref().is_none_or(<[String]>::is_empty)
             && self.access_users.as_deref().is_none_or(<[String]>::is_empty)
+    }
+
+    /// Whether authenticated identity headers are disclosed to this app.
+    ///
+    /// ShinyProxy defaults this field to `true`; Ruscker defaults it to
+    /// `false` so an existing registered app never starts receiving user
+    /// identity merely because the server was upgraded (#1001).
+    pub fn effective_add_default_http_headers(&self) -> bool {
+        self.add_default_http_headers.unwrap_or(false)
     }
 
     /// Decorative "requires login" padlock (#839). Purely informational:
@@ -2026,6 +2042,7 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            add_default_http_headers: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -2077,6 +2094,7 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            add_default_http_headers: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -2128,6 +2146,7 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            add_default_http_headers: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,
@@ -2262,6 +2281,19 @@ proxy:
         // empty lists are also "open".
         let e = parse_spec("id: a\ncontainer-image: x\naccess-groups: []");
         assert!(e.is_open());
+    }
+
+    #[test]
+    fn parses_identity_header_opt_in_and_defaults_off() {
+        let default = parse_spec("id: a\ncontainer-image: x");
+        assert_eq!(default.add_default_http_headers, None);
+        assert!(!default.effective_add_default_http_headers());
+
+        let enabled = parse_spec(
+            "id: a\ncontainer-image: x\nadd-default-http-headers: true",
+        );
+        assert_eq!(enabled.add_default_http_headers, Some(true));
+        assert!(enabled.effective_add_default_http_headers());
     }
 
     #[test]

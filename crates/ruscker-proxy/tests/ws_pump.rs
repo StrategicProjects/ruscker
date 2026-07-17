@@ -55,6 +55,44 @@ async fn spawn_closing_upstream() -> String {
     format!("ws://{addr}/")
 }
 
+/// Spawn one upstream handshake that reports the identity headers it saw.
+#[allow(clippy::result_large_err)] // tungstenite's callback error is a full HTTP response
+async fn spawn_header_capture_upstream(
+) -> (String, tokio::sync::oneshot::Receiver<(String, String)>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut ws = tokio_tungstenite::accept_hdr_async(
+            stream,
+            move |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+                  response| {
+                let user = request
+                    .headers()
+                    .get("x-sp-userid")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                let groups = request
+                    .headers()
+                    .get("x-sp-usergroups")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+                let _ = tx.send((user, groups));
+                Ok(response)
+            },
+        )
+        .await
+        .unwrap();
+        let _ = ws.close(None).await;
+    });
+    (format!("ws://{addr}/"), rx)
+}
+
 /// Spawn the axum proxy app (one `/ws` route → `ws::connect` +
 /// `ws::pump`, the #730 two-step shape). Returns its bound address.
 async fn spawn_proxy(upstream_url: String) -> std::net::SocketAddr {
@@ -124,6 +162,23 @@ async fn pump_forwards_both_ways_and_closes_cleanly() {
     })
     .await;
     assert!(drained.is_ok(), "pump tore down without hanging");
+}
+
+#[tokio::test]
+async fn upstream_handshake_includes_extra_headers() {
+    let (url, captured) = spawn_header_capture_upstream().await;
+    let headers = vec![
+        ("X-SP-UserId".to_string(), "alice".to_string()),
+        ("X-SP-UserGroups".to_string(), "analysts,ops".to_string()),
+    ];
+    let handshake = ruscker_proxy::ws::connect_with_headers(&url, None, None, &headers)
+        .await
+        .expect("upstream handshake");
+    assert_eq!(
+        captured.await.unwrap(),
+        ("alice".to_string(), "analysts,ops".to_string())
+    );
+    drop(handshake);
 }
 
 #[tokio::test]

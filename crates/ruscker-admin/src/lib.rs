@@ -61,9 +61,58 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// in `ruscker-cli`'s `init_tracing`.
 pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 
-/// Shared short-TTL cache of user group memberships for the proxy hot path.
-pub type IdentityCache =
-    Arc<dashmap::DashMap<String, (std::time::Instant, Arc<Vec<String>>)>>;
+/// Shared short-TTL cache of user group memberships for the proxy hot
+/// path (#1001).
+///
+/// The generation counter closes an invalidation race (codex review):
+/// a proxied request that read the DB *before* an admin mutation must
+/// not repopulate the cache *after* that mutation cleared it — else a
+/// revoked membership could survive locally for the full TTL. A fill
+/// therefore snapshots [`IdentityCache::generation`] before its DB
+/// read and hands it to [`IdentityCache::store`], which only accepts
+/// still-current fills (double-checked after the insert, so a clear
+/// that lands mid-store can't leave the stale entry behind either).
+#[derive(Default)]
+pub struct IdentityCache {
+    map: dashmap::DashMap<String, (std::time::Instant, Arc<Vec<String>>)>,
+    generation: std::sync::atomic::AtomicU64,
+}
+
+impl IdentityCache {
+    /// Cached groups for `username`, if fresher than `ttl`.
+    pub fn get(&self, username: &str, ttl: std::time::Duration) -> Option<Arc<Vec<String>>> {
+        let entry = self.map.get(username)?;
+        (entry.0.elapsed() < ttl).then(|| entry.1.clone())
+    }
+
+    /// Snapshot to take BEFORE the DB read that will feed [`Self::store`].
+    pub fn generation(&self) -> u64 {
+        self.generation.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Cache a resolved membership, unless an invalidation happened
+    /// since `generation` was snapshotted (the fill is then stale).
+    pub fn store(&self, generation: u64, username: &str, groups: Arc<Vec<String>>) {
+        use std::sync::atomic::Ordering;
+        if self.generation.load(Ordering::Acquire) != generation {
+            return;
+        }
+        self.map
+            .insert(username.to_string(), (std::time::Instant::now(), groups));
+        // An invalidation may have interleaved between the check and the
+        // insert; re-check and undo so the clear always wins.
+        if self.generation.load(Ordering::Acquire) != generation {
+            self.map.remove(username);
+        }
+    }
+
+    /// Drop everything and refuse in-flight fills (generation bump).
+    pub fn invalidate(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        self.map.clear();
+    }
+}
 
 /// Shared state injected into every request.
 #[derive(Clone)]
@@ -195,7 +244,7 @@ pub struct AppState {
     /// admin handlers that mutate membership call
     /// [`AppState::invalidate_identity_cache`] so revocations apply on
     /// the very next proxied request, matching the pre-cache semantics.
-    pub identity_cache: IdentityCache,
+    pub identity_cache: Arc<IdentityCache>,
 
     /// Short-circuit cache of the **effective spec catalog** for admin
     /// pages (#902). The admin tabs (Apps/Disk/Media/Groups/System +
@@ -240,7 +289,7 @@ impl AppState {
     /// next proxied request — the 30s TTL is only a backstop for edits
     /// made outside this process (e.g. another HA node).
     pub fn invalidate_identity_cache(&self) {
-        self.identity_cache.clear();
+        self.identity_cache.invalidate();
     }
 }
 
@@ -289,7 +338,7 @@ impl AdminServer {
             metrics: metrics_cache::MetricsCache::new(),
             draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: Arc::new(dashmap::DashMap::new()),
-            identity_cache: Arc::new(dashmap::DashMap::new()),
+            identity_cache: Default::default(),
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(access_counter::AccessCounter::default()),
             alerts: alerts::AlertSink::default(),

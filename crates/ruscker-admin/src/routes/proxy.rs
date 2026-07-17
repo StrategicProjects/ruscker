@@ -1010,12 +1010,14 @@ pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
 async fn find_user_groups(state: &AppState, username: &str) -> Arc<Vec<String>> {
-    if let Some(entry) = state.identity_cache.get(username) {
-        if entry.0.elapsed() < IDENTITY_CACHE_TTL {
-            return entry.1.clone();
-        }
+    if let Some(groups) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
+        return groups;
     }
 
+    // Snapshot BEFORE the read: `store` rejects this fill if an admin
+    // mutation invalidated the cache while we were at the DB, so a
+    // pre-revocation read can never repopulate the cache (#1001).
+    let generation = state.identity_cache.generation();
     let groups = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
             Ok(row) => Arc::new(row.map(|user| user.groups).unwrap_or_default()),
@@ -1026,10 +1028,7 @@ async fn find_user_groups(state: &AppState, username: &str) -> Arc<Vec<String>> 
         },
         None => Arc::new(Vec::new()),
     };
-    state.identity_cache.insert(
-        username.to_string(),
-        (std::time::Instant::now(), groups.clone()),
-    );
+    state.identity_cache.store(generation, username, groups.clone());
     groups
 }
 
@@ -1982,15 +1981,18 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
 }
 
 /// Remove client-supplied identity claims before a request crosses the
-/// trust boundary into an app container. `HeaderName` is normalized to
+/// trust boundary into an app container. The WHOLE `X-SP-*` and
+/// `X-Ruscker-User-*` namespaces are reserved (codex review, #1001):
+/// stripping only the exact names we inject would let an anonymous
+/// client forge any *other* identity-looking attribute an app might
+/// trust (e.g. `X-SP-UserEmail`). `HeaderName` is normalized to
 /// lowercase, so the comparisons are case-insensitive by construction.
 fn strip_reserved_identity_headers(headers: &mut HeaderMap) {
     let names: Vec<_> = headers
         .keys()
         .filter(|name| {
             let name = name.as_str();
-            matches!(name, "x-sp-userid" | "x-sp-usergroups")
-                || name.starts_with("x-ruscker-user-")
+            name.starts_with("x-sp-") || name.starts_with("x-ruscker-user-")
         })
         .cloned()
         .collect();
@@ -2063,6 +2065,9 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("x-sp-userid", HeaderValue::from_static("mallory"));
         headers.insert("x-sp-usergroups", HeaderValue::from_static("attackers"));
+        // The whole namespace is reserved, not just the injected pair —
+        // an app could trust any X-SP-* attribute (codex review, #1001).
+        headers.insert("x-sp-useremail", HeaderValue::from_static("m@evil.test"));
         headers.insert(
             "x-ruscker-user-email",
             HeaderValue::from_static("mallory@example.test"),
@@ -2073,6 +2078,7 @@ mod tests {
 
         assert!(!headers.contains_key("x-sp-userid"));
         assert!(!headers.contains_key("x-sp-usergroups"));
+        assert!(!headers.contains_key("x-sp-useremail"));
         assert!(!headers.contains_key("x-ruscker-user-email"));
         assert_eq!(headers.get("x-app-header").unwrap(), "keep");
     }
@@ -2344,7 +2350,7 @@ mod tests {
             metrics: crate::metrics_cache::MetricsCache::new(),
             draining: StdArc::new(std::sync::atomic::AtomicBool::new(false)),
             spec_cache: StdArc::new(dashmap::DashMap::new()),
-            identity_cache: StdArc::new(dashmap::DashMap::new()),
+            identity_cache: Default::default(),
             catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
             access_counter: StdArc::new(crate::access_counter::AccessCounter::default()),
             alerts: crate::alerts::AlertSink::default(),

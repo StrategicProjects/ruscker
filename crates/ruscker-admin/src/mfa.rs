@@ -187,6 +187,13 @@ impl ConfirmRateLimiter {
 pub static CONFIRM_LIMITER: std::sync::LazyLock<ConfirmRateLimiter> =
     std::sync::LazyLock::new(|| ConfirmRateLimiter::new(5, Duration::from_secs(60)));
 
+/// Per-username limiter for the password re-authentication at /start
+/// (codex review, #1005): a stolen session cookie must not turn the
+/// enrollment page into an unlimited password oracle (each guess runs a
+/// deliberately-expensive argon2 verify). Same shape as the code limiter.
+pub static REAUTH_LIMITER: std::sync::LazyLock<ConfirmRateLimiter> =
+    std::sync::LazyLock::new(|| ConfirmRateLimiter::new(5, Duration::from_secs(60)));
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -11,6 +11,7 @@
     <div class="admin-login-error mt-3" role="alert" data-mfa-error="{{ error }}">
       <i class="ti ti-alert-circle" aria-hidden="true"></i>
       {% if error == "wrong-password" %}{{ self.t("admin-mfa-error-password") }}
+      {% else if error == "rate-limited" %}{{ self.t("admin-mfa-error-rate") }}
       {% else if error == "break-glass" %}{{ self.t("admin-mfa-break-glass") }}
       {% else %}{{ self.t("admin-mfa-already") }}{% endif %}
     </div>

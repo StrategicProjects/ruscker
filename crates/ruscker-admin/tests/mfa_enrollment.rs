@@ -538,3 +538,41 @@ async fn stale_ceremony_after_restart_cannot_confirm() {
         .confirmed_at
         .is_none());
 }
+
+
+/// Codex review round 2 (#1005): a stolen session cookie must not turn
+/// /start into an unlimited password oracle — five wrong passwords rate-
+/// limit the account, and even the CORRECT password is then refused until
+/// the window passes.
+#[tokio::test]
+async fn start_password_reauth_is_rate_limited() {
+    let (state, db) = state_with_db(true).await;
+    let username = format!("oracle-{}", uuid::Uuid::new_v4().simple());
+    create_user(&db, &username, false).await;
+    let user_cookie = cookie(&state, Role::Viewer, Some(username.clone())).await;
+    for _ in 0..5 {
+        let (status, _, _) = request(
+            state.clone(),
+            "POST",
+            "/admin/account/mfa/start",
+            "current_password=wrong-guess",
+            &user_cookie,
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/start",
+        "current_password=CorrectPass9%21",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(body.contains("data-mfa-error=\"rate-limited\""));
+    assert!(ruscker_admin::db::mfa::fetch(&db, &username)
+        .await
+        .unwrap()
+        .is_none());
+}

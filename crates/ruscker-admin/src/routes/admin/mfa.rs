@@ -254,9 +254,28 @@ async fn start(
         )
             .into_response();
     };
+    if !crate::mfa::REAUTH_LIMITER.allow(&username) {
+        let mut response = render_status(
+            &state,
+            session,
+            loc,
+            theme,
+            "rate-limited",
+            next,
+            StatusCode::TOO_MANY_REQUESTS,
+        )
+        .await;
+        response
+            .headers_mut()
+            .insert(RETRY_AFTER, "60".parse().unwrap());
+        return response;
+    }
     match db::users::verify_login(db, &username, &form.current_password).await {
-        Ok(Some(_)) => {}
+        Ok(Some(_)) => {
+            crate::mfa::REAUTH_LIMITER.record_success(&username);
+        }
         Ok(None) => {
+            crate::mfa::REAUTH_LIMITER.record_failure(&username);
             return render_status(
                 &state,
                 session,

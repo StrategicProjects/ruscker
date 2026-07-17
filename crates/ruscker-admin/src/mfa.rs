@@ -157,26 +157,28 @@ impl ConfirmRateLimiter {
         }
     }
 
-    pub fn allow(&self, username: &str) -> bool {
+    /// Atomically reserve one attempt: prune the window, and either count
+    /// this attempt and allow it, or refuse. Reserving BEFORE the awaited
+    /// argon2/TOTP verification closes the TOCTOU where N concurrent
+    /// requests all pass a read-only check ahead of any failure being
+    /// recorded (codex review, #1005) — the reservation itself is the
+    /// count, under one mutex critical section. A success then clears the
+    /// whole entry, so legitimate flows never accumulate.
+    pub fn try_reserve(&self, username: &str) -> bool {
         let now = Instant::now();
         let mut all = self.failures.lock().unwrap();
-        let failures = all.entry(username.to_string()).or_default();
-        while failures
+        let attempts = all.entry(username.to_string()).or_default();
+        while attempts
             .front()
             .is_some_and(|at| now.duration_since(*at) > self.window)
         {
-            failures.pop_front();
+            attempts.pop_front();
         }
-        failures.len() < self.max
-    }
-
-    pub fn record_failure(&self, username: &str) {
-        self.failures
-            .lock()
-            .unwrap()
-            .entry(username.to_string())
-            .or_default()
-            .push_back(Instant::now());
+        if attempts.len() >= self.max {
+            return false;
+        }
+        attempts.push_back(now);
+        true
     }
 
     pub fn record_success(&self, username: &str) {

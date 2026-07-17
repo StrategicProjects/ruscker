@@ -254,7 +254,7 @@ async fn start(
         )
             .into_response();
     };
-    if !crate::mfa::REAUTH_LIMITER.allow(&username) {
+    if !crate::mfa::REAUTH_LIMITER.try_reserve(&username) {
         let mut response = render_status(
             &state,
             session,
@@ -275,7 +275,6 @@ async fn start(
             crate::mfa::REAUTH_LIMITER.record_success(&username);
         }
         Ok(None) => {
-            crate::mfa::REAUTH_LIMITER.record_failure(&username);
             return render_status(
                 &state,
                 session,
@@ -487,7 +486,7 @@ async fn confirm(
         }
     };
 
-    if !crate::mfa::CONFIRM_LIMITER.allow(username) {
+    if !crate::mfa::CONFIRM_LIMITER.try_reserve(username) {
         let mut response = render_setup(
             &state,
             session.role,
@@ -511,7 +510,6 @@ async fn confirm(
         }
     };
     if !valid {
-        crate::mfa::CONFIRM_LIMITER.record_failure(username);
         return render_setup(
             &state,
             session.role,

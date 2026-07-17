@@ -26,7 +26,7 @@ type-api-abbr = API
 type-link-abbr = LNK
 
 # Admin shell
-admin-nav-dashboard = Dashboard
+admin-nav-dashboard = Containers
 admin-nav-apps = Apps
 admin-nav-images = Media
 admin-nav-credentials = Credentials
@@ -66,7 +66,7 @@ admin-blocks-pos-top = Top
 admin-blocks-pos-bottom = Bottom
 admin-blocks-done = Done
 admin-blocks-delete-block = Delete block
-admin-nav-audit = Audit log
+admin-nav-audit = Activity
 admin-nav-portal = Portal
 admin-nav-logout = Sign out
 role-current = Your access level
@@ -103,8 +103,8 @@ admin-pw-submit = Save password
 admin-pw-reveal = Show/hide password
 # — User management (admin)
 admin-nav-users = Users
-admin-users-title = Users
-admin-users-subtitle = Create and manage who can sign in, and at which level.
+admin-users-title = User Management
+admin-users-subtitle = User creation and editing.
 admin-users-edit = Edit user
 admin-users-edit-title = Edit user
 admin-users-edit-subtitle = Update access and profile in one save.
@@ -145,7 +145,7 @@ admin-users-save-profile = Save profile
 admin-users-import-review = Review import
 admin-users-import-change = Change file
 admin-users-import-choose = Choose CSV file
-admin-users-import-help = Columns: username, role, password, groups, setor, email, celular. First row is the header.
+admin-users-import-help = Columns: username, role, password, groups, setor, email, celular. First row is the header. Separator: comma (,); on Windows, save the CSV as Unix-style UTF-8. Roles are in English: viewer, editor, admin.
 admin-users-import-title = Import users
 admin-users-import-preview-title = Import preview
 admin-users-import-col-status = Status
@@ -178,7 +178,7 @@ admin-users-generate-password = Generate random password
 admin-users-flash-exists = A user with that name already exists.
 
 # Admin dashboard
-admin-dashboard-title = Monitoring dashboard
+admin-dashboard-title = Container Management
 admin-dashboard-subtitle = Live container and session state
 admin-dashboard-live = Live
 admin-dashboard-filter-search = Filter app…
@@ -218,9 +218,9 @@ admin-login-error-wrong = Wrong token. Please try again.
 admin-login-back-portal = ← public portal
 
 # Apps list
-admin-specs-title = Apps
+admin-specs-title = Application Management
 admin-specs-refresh = Refresh
-admin-specs-subtitle = Spec catalog stored in the database
+admin-specs-subtitle = Information and specifications for the application images
 admin-specs-empty = No apps yet. Use { $cmd } to import from a YAML.
 admin-specs-add = Add app
 admin-specs-col-id = ID
@@ -334,7 +334,8 @@ spec-form-error-stale = Someone else saved this app while you were editing. Revi
 
 # Admin image library
 admin-images-title = Media library
-admin-images-subtitle = PNG, JPEG and WebP are converted to WebP. SVG passes through.
+admin-images-subtitle = Images used across the portal
+admin-images-formats-help = PNG, JPEG and WebP are converted to WebP. SVG passes through.
 admin-images-drop-here = Click to pick a file
 admin-images-formats = PNG · JPEG · WebP · SVG · up to 10 MB
 admin-images-upload = Upload
@@ -358,8 +359,8 @@ admin-images-type-all = All types
 admin-images-no-match = No images match your search.
 
 # Admin credentials
-admin-creds-title = Registry credentials
-admin-creds-subtitle = Passwords are encrypted at rest with AES-256-GCM. They never appear in the YAML or in the panel after saving.
+admin-creds-title = Credential Management
+admin-creds-subtitle = Create credentials. They are encrypted at rest with AES-256-GCM and never appear in the YAML or in the panel after saving.
 admin-creds-form-title = Add / update credential
 admin-creds-name = Name
 admin-creds-name-help = Unique identifier. Use the same name in your specs.
@@ -380,9 +381,9 @@ admin-creds-key-missing-title = RUSCKER_MASTER_KEY is not configured
 admin-creds-key-missing-help = The credentials store needs a 32-byte key as hex (64 chars) or base64 (44 chars). Generate one with:
 
 # Admin landing editor
-admin-landing-title = Portal appearance
+admin-landing-title = Portal Appearance
 admin-landing-crumb = Settings · Landing page
-admin-landing-subtitle = Configure how the public portal looks to visitors.
+admin-landing-subtitle = Logo, header bars, footer and other display settings.
 admin-landing-scope-help = These options (colors, intro texts, SEO, custom blocks) apply to the public landing live — saved here, shown on the next view, no restart. It's a fixed set of settings, not an arbitrary-CSS editor.
 admin-landing-open-portal = Open portal
 admin-landing-save = Save
@@ -428,8 +429,8 @@ admin-landing-analytics-key-help = GA4 measurement id (G-XXXX), Plausible domain
 
 
 # Admin audit log
-admin-audit-title = Audit log
-admin-audit-subtitle = Every admin change, newest first. Capped at 100 events per query.
+admin-audit-title = Administrative Activity History
+admin-audit-subtitle = Administrative activity, newest first. Capped at 100 events per query.
 admin-audit-family = Family
 admin-audit-family-all = All actions
 admin-audit-family-spec = Apps
@@ -591,8 +592,8 @@ spec-form-error-volume = Each volume must be /host:/container (optionally :ro).
 spec-form-error-network = Invalid Docker network name (must start with a letter or digit, then letters/digits/_/./-).
 spec-form-error-env = Each environment variable must be NAME=value, with a valid NAME (letters, digits, _; starting with a letter or _). Fix or remove the invalid line.
 admin-nav-logs = Logs
-admin-proclog-title = Logs
-admin-proclog-subtitle = Event stream from the balancer and replicas
+admin-proclog-title = Log Audit
+admin-proclog-subtitle = Event logs from the balancer and replicas.
 admin-proclog-unavailable = Log buffer not wired (the server started without the logging layer).
 admin-proclog-empty = No logs captured yet at this level. New events show up here as they happen; run the server with -v to include info-level logs.
 
@@ -737,8 +738,8 @@ admin-landing-logo-add = Add logo
 
 # — Disk management (admin) #453
 admin-nav-disk = Disk
-admin-disk-title = Disk
-admin-disk-subtitle = Reclaim space from stopped containers and unused images.
+admin-disk-title = Disk Management
+admin-disk-subtitle = Disk monitoring and reclaiming idle space from stopped containers and unused images.
 admin-disk-backend-missing = The Docker backend isn't connected — start the server with `--docker` to manage disk.
 admin-disk-containers-heading = Ruscker containers
 admin-disk-prune = Remove stopped
@@ -866,8 +867,8 @@ admin-landing-show-highlights-help = Shows the carousel of featured apps above t
 
 # Groups page (#503, read-only)
 admin-nav-groups = Groups
-admin-groups-title = Groups
-admin-groups-subtitle = Groups derived from apps (access-groups) and users — read-only. Edit on the user or the app.
+admin-groups-title = Group Management
+admin-groups-subtitle = Create and edit the groups derived from apps and users.
 admin-groups-members = Members
 admin-groups-apps = Apps
 admin-groups-public-title = Public apps

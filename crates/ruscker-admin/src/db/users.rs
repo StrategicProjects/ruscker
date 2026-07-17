@@ -212,6 +212,23 @@ fn like_pattern(term: &str) -> String {
     pat
 }
 
+/// The two case variants of a search pattern for the SQLite arm.
+///
+/// SQLite's `LIKE` only case-folds ASCII, so `JOÃO` would not match a
+/// stored `João` (the `Ã`/`ã` pair doesn't fold) while Postgres'
+/// `ILIKE` folds full Unicode. Rust's `to_lowercase`/`to_uppercase`
+/// ARE Unicode-aware, so matching against both variants covers an
+/// accented query in either case against stored text in the usual
+/// forms (lowercase, Capitalized, ALL CAPS). Text with mixed-case
+/// accents mid-word (`GesTÃo`) can still evade — acceptable for a
+/// search box, and impossible to fix in stock SQLite without ICU.
+fn like_patterns_sqlite(term: &str) -> (String, String) {
+    (
+        like_pattern(&term.to_lowercase()),
+        like_pattern(&term.to_uppercase()),
+    )
+}
+
 /// Count the users matching a search term — the total behind
 /// [`list_page`]'s pagination (#999). A blank `search` counts every
 /// account; otherwise it's the same case-insensitive substring filter
@@ -225,16 +242,18 @@ pub async fn count_filtered(db: &ConfigDb, search: &str) -> Result<i64> {
                     .fetch_one(pool)
                     .await
             } else {
-                // SQLite's LIKE is already case-insensitive for ASCII.
+                // Two case variants per column — see [`like_patterns_sqlite`].
+                let (lo, up) = like_patterns_sqlite(search);
                 sqlx::query_as(
                     "SELECT COUNT(*) FROM users
-                      WHERE username LIKE ?1 ESCAPE '\\'
-                         OR groups LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\'",
+                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
+                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'",
                 )
-                .bind(like_pattern(search))
+                .bind(lo)
+                .bind(up)
                 .fetch_one(pool)
                 .await
             }
@@ -303,18 +322,21 @@ pub async fn list_page(
                 .fetch_all(pool)
                 .await
             } else {
+                // Two case variants per column — see [`like_patterns_sqlite`].
+                let (lo, up) = like_patterns_sqlite(search);
                 sqlx::query_as(
                     "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
                        FROM users
-                      WHERE username LIKE ?1 ESCAPE '\\'
-                         OR groups LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\'
-                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\'
+                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
+                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'
                       ORDER BY created_at DESC, username ASC
-                      LIMIT ?2 OFFSET ?3",
+                      LIMIT ?3 OFFSET ?4",
                 )
-                .bind(like_pattern(search))
+                .bind(lo)
+                .bind(up)
                 .bind(limit)
                 .bind(offset)
                 .fetch_all(pool)
@@ -1430,6 +1452,24 @@ mod tests {
         assert_eq!(count_filtered(&p, "%").await.unwrap(), 0);
         assert_eq!(count_filtered(&p, "a_i").await.unwrap(), 0);
         assert_eq!(count_filtered(&p, "nobody").await.unwrap(), 0);
+
+        // Accented text: SQLite's LIKE only folds ASCII, so the sqlite
+        // arm matches both Rust-cased variants of the term (codex
+        // review, PR #1000). `GESTÃO` must find a stored `Gestão` and
+        // vice-versa.
+        update_profile(&p, "bob", Some("Gestão"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(count_filtered(&p, "GESTÃO").await.unwrap(), 1);
+        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
+        assert_eq!(
+            list_page(&p, "GESTÃO", 50, 0).await.unwrap()[0].username,
+            "bob"
+        );
+        update_profile(&p, "bob", Some("GESTÃO"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
     }
 
     // Full user lifecycle through the `ConfigDb::Postgres` arm against a

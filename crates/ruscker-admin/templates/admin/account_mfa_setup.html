@@ -1,0 +1,40 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-mfa-setup-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-mfa-setup-title") }}</h1>
+  <p class="text-sm text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-setup-help") }}</p>
+
+  {% if error != "" %}
+    <div class="admin-login-error mt-3" role="alert" data-mfa-error="{{ error }}">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      {% if error == "rate-limited" %}{{ self.t("admin-mfa-error-rate") }}
+      {% else %}{{ self.t("admin-mfa-error-code") }}{% endif %}
+    </div>
+  {% endif %}
+
+  <section class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-5" style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+    <div class="flex justify-center items-start" data-mfa-qr>{{ qr_svg|safe }}</div>
+    <div>
+      <div class="text-sm font-medium">{{ self.t("admin-mfa-manual-title") }}</div>
+      <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-mfa-manual-help") }}</p>
+      <code class="block mt-3 p-3 text-sm break-all select-all" style="background:var(--surface-subtle);border-radius:8px" data-mfa-secret>{{ secret }}</code>
+      <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-mfa-profile") }}</p>
+    </div>
+  </section>
+
+  <form method="post" action="{{ base }}/admin/account/mfa/confirm" class="flex flex-col gap-3 mt-4" autocomplete="off">
+    {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+    <label class="admin-login-field" style="max-width:260px">
+      <span class="admin-login-label">{{ self.t("admin-mfa-code-label") }}</span>
+      <input type="text" name="code" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code">
+    </label>
+    <button type="submit" class="admin-login-btn" style="width:auto;align-self:flex-start">
+      <i class="ti ti-check" aria-hidden="true"></i>
+      {{ self.t("admin-mfa-confirm") }}
+    </button>
+  </form>
+</div>
+{% endblock %}

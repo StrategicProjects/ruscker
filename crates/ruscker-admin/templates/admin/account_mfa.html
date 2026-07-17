@@ -1,0 +1,53 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-mfa-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-mfa-title") }}</h1>
+  <p class="text-sm text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-help") }}</p>
+
+  {% if error != "" %}
+    <div class="admin-login-error mt-3" role="alert" data-mfa-error="{{ error }}">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      {% if error == "wrong-password" %}{{ self.t("admin-mfa-error-password") }}
+      {% else if error == "break-glass" %}{{ self.t("admin-mfa-break-glass") }}
+      {% else %}{{ self.t("admin-mfa-already") }}{% endif %}
+    </div>
+  {% endif %}
+
+  {% if enrolled_at != "" %}
+    <section class="mt-4" data-mfa-state="enrolled" style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+      <div class="flex items-center gap-2 text-sm font-medium">
+        <i class="ti ti-circle-check" aria-hidden="true"></i>
+        {{ self.t("admin-mfa-enrolled") }}
+      </div>
+      <p class="text-xs text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-enrolled-since") }} {{ enrolled_at }}</p>
+      <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-mfa-reenroll-note") }}</p>
+      {% if next != "" %}
+        <a href="{{ base }}{{ next }}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
+          {{ self.t("admin-mfa-continue") }}
+        </a>
+      {% endif %}
+    </section>
+  {% else if break_glass %}
+    <div class="admin-login-error mt-4" role="alert" data-mfa-state="break-glass">{{ self.t("admin-mfa-break-glass") }}</div>
+  {% else %}
+    <section class="mt-4" data-mfa-state="not-enrolled" style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+      <div class="text-sm font-medium">{{ self.t("admin-mfa-not-enrolled") }}</div>
+      {% if pending %}<p class="text-xs text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-pending-note") }}</p>{% endif %}
+      <form method="post" action="{{ base }}/admin/account/mfa/start" class="flex flex-col gap-3 mt-4" autocomplete="off">
+        {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+        <label class="admin-login-field">
+          <span class="admin-login-label">{{ self.t("admin-mfa-current-password") }}</span>
+          <input type="password" name="current_password" required autocomplete="current-password">
+        </label>
+        <button type="submit" class="admin-login-btn" style="width:auto;align-self:flex-start">
+          <i class="ti ti-plus" aria-hidden="true"></i>
+          {{ self.t("admin-mfa-start") }}
+        </button>
+      </form>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

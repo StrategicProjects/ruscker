@@ -21,10 +21,10 @@
     {% else if flash == "weak-password" %}{{ self.t("admin-users-flash-weak-password") }}
     {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
   </div>
-{% else if flash == "saved" %}
+{% else if flash == "saved" || flash == "mfa-reset" %}
   <div class="admin-flash-ok mb-3" role="status">
     <i class="ti ti-check" aria-hidden="true"></i>
-    {{ self.t("admin-users-flash-saved") }}
+    {% if flash == "mfa-reset" %}{{ self.t("admin-users-mfa-reset-ok") }}{% else %}{{ self.t("admin-users-flash-saved") }}{% endif %}
   </div>
 {% endif %}
 
@@ -82,6 +82,23 @@
       <a href="{{ base }}/admin/users" class="text-sm text-[color:var(--text-muted)] underline">{{ self.t("admin-users-cancel") }}</a>
     </div>
   </form>
+</section>
+
+<section style="padding:18px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
+  <div class="text-sm font-medium">{{ self.t("admin-users-mfa-section") }}</div>
+  {% if mfa_enrolled_at != "" %}
+    <p class="text-sm mt-2" data-mfa-admin-state="configured"><i class="ti ti-circle-check" aria-hidden="true"></i> {{ self.t("admin-users-mfa-configured") }} {{ mfa_enrolled_at }}</p>
+    <p class="text-xs text-[color:var(--text-faint)] mt-1 mb-3">{{ self.t("admin-users-mfa-reset-hint") }}</p>
+    <form method="post" action="{{ base }}/admin/users/{{ user.username }}/mfa/reset"
+          data-confirm="{{ self.t("admin-users-mfa-reset-confirm") }}">
+      <button type="submit" class="admin-login-btn" style="width:auto;background:var(--danger,#b91c1c)">
+        <i class="ti ti-x" aria-hidden="true"></i>
+        {{ self.t("admin-users-mfa-reset") }}
+      </button>
+    </form>
+  {% else %}
+    <p class="text-sm text-[color:var(--text-muted)] mt-2" data-mfa-admin-state="not-configured">{{ self.t("admin-users-mfa-not-configured") }}</p>
+  {% endif %}
 </section>
 
 <section style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">

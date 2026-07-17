@@ -98,6 +98,11 @@ base64 = { workspace = true }
 # User accounts — password hashing (argon2id)
 argon2 = { workspace = true }
 
+# User TOTP enrollment + dependency-light inline SVG QR rendering (#1005).
+totp-rs = { workspace = true }
+qrcode = { workspace = true }
+ring = { workspace = true }
+
 # Async trait for the SessionStore seam (in-memory now, Postgres in HA)
 async-trait = { workspace = true }
 

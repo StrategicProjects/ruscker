@@ -1,0 +1,21 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-mfa-recovery-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-mfa-recovery-title") }}</h1>
+  <div class="admin-login-error mt-3" role="alert">
+    <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+    {{ self.t("admin-mfa-recovery-warning") }}
+  </div>
+  <p class="text-sm text-[color:var(--text-muted)] mt-3">{{ self.t("admin-mfa-recovery-help") }}</p>
+  <ol class="grid grid-cols-2 gap-2 mt-4 p-4" style="background:var(--surface);border:0.5px solid var(--border);border-radius:12px" data-recovery-codes>
+    {% for code in codes %}<li><code class="select-all">{{ code }}</code></li>{% endfor %}
+  </ol>
+  <a href="{{ base }}{% if next != "" %}{{ next }}{% else %}/{% endif %}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
+    <i class="ti ti-arrow-right" aria-hidden="true"></i>
+    {{ self.t("admin-mfa-continue") }}
+  </a>
+</div>
+{% endblock %}

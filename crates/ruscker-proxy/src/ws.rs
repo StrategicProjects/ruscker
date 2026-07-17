@@ -142,6 +142,19 @@ pub async fn connect(
     cookie: Option<&str>,
     subprotocols: Option<&str>,
 ) -> Result<UpstreamHandshake, tokio_tungstenite::tungstenite::Error> {
+    connect_with_headers(upstream_ws_url, cookie, subprotocols, &[]).await
+}
+
+/// Like [`connect`], with additional authoritative headers supplied by
+/// the proxy. Keeping the original three-argument helper as a wrapper
+/// preserves existing callers while identity-aware proxies can add the
+/// trusted handshake headers they resolved themselves (#1001).
+pub async fn connect_with_headers(
+    upstream_ws_url: &str,
+    cookie: Option<&str>,
+    subprotocols: Option<&str>,
+    extra_headers: &[(String, String)],
+) -> Result<UpstreamHandshake, tokio_tungstenite::tungstenite::Error> {
     let mut request = upstream_ws_url.into_client_request()?;
     // Forward the client's session cookie and requested subprotocol.
     if let Some(v) = cookie.and_then(|s| HeaderValue::from_str(s).ok()) {
@@ -151,6 +164,18 @@ pub async fn connect(
         request
             .headers_mut()
             .insert(header::SEC_WEBSOCKET_PROTOCOL, v);
+    }
+    for (name, value) in extra_headers {
+        // `from_bytes`, not `from_str`: identity values may carry
+        // non-ASCII UTF-8 (a group named `gestão`) which `from_str`
+        // rejects — the bytes go out raw, as ShinyProxy/Spring do,
+        // and a UTF-8-reading app gets the original string (#1001).
+        if let (Ok(name), Ok(value)) = (
+            name.parse::<header::HeaderName>(),
+            HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            request.headers_mut().insert(name, value);
+        }
     }
 
     let (stream, resp) = tokio_tungstenite::connect_async(request).await?;

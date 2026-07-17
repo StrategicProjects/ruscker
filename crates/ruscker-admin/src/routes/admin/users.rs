@@ -396,6 +396,9 @@ async fn save_edit(
                 // Role changes take effect immediately, including self-demotion.
                 state.admin_sessions.revoke_by_actor(&username).await;
             }
+            // Group edits must reach the proxy's access checks and
+            // identity headers now, not at cache expiry (#1001).
+            state.invalidate_identity_cache();
             redirect_flash("saved")
         }
         Err(e) => {
@@ -464,7 +467,10 @@ async fn set_groups(
     };
     let groups = db::users::parse_groups(&form.groups);
     match db::users::set_groups(pool, &username, &groups, Some(admin.actor())).await {
-        Ok(()) => redirect_flash("saved"),
+        Ok(()) => {
+            state.invalidate_identity_cache();
+            redirect_flash("saved")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "set groups failed");
             redirect_flash("bad-input")
@@ -555,6 +561,7 @@ async fn delete(
         Ok(()) => {
             // A deleted user must lose access now, not at session expiry (#544).
             state.admin_sessions.revoke_by_actor(&username).await;
+            state.invalidate_identity_cache();
             redirect_flash("deleted")
         }
         Err(e) => {
@@ -859,6 +866,8 @@ async fn import_confirm(
             Err(_) => skipped += 1,
         }
     }
+    // Imported rows may re-create a recently-deleted username (#1001).
+    state.invalidate_identity_cache();
     Redirect::to(&format!(
         "/admin/users?flash=imported&n={imported}&skipped={skipped}"
     ))

@@ -214,6 +214,8 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
                 tracing::warn!(user = %u.username, error = ?e, "group rewrite (user) failed");
             }
         }
+        // A rename/delete touches many memberships at once (#1001).
+        state.invalidate_identity_cache();
     }
 
     if let Ok(specs) = crate::db::specs::list_all(db).await {
@@ -295,6 +297,7 @@ async fn add_member(
                 groups.push(group);
             }
             let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
+            state.invalidate_identity_cache();
             redirect_flash("member-added")
         }
         _ => redirect_flash("bad-input"),
@@ -312,6 +315,7 @@ async fn remove_member(
     if let Ok(Some(u)) = crate::db::users::fetch(db, &f.username).await {
         let groups: Vec<String> = u.groups.into_iter().filter(|g| g != &f.group).collect();
         let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
+        state.invalidate_identity_cache();
     }
     redirect_flash("member-removed")
 }

@@ -573,6 +573,19 @@
       <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
       </div>{# /x-show restricted #}
 
+      {# Identity disclosure is an explicit per-app opt-in (#1001). #}
+      <label class="toggle-row">
+        <div>
+          <div class="toggle-row__label">{{ self.t("spec-form-identity-headers") }}</div>
+          <div class="toggle-row__hint">{{ self.t("spec-form-identity-headers-hint") }}</div>
+        </div>
+        <span class="switch">
+          <input type="checkbox" name="add_default_http_headers" value="on"
+                 {% if !form.add_default_http_headers.is_empty() %}checked{% endif %}>
+          <span class="switch__track"><span class="switch__dot"></span></span>
+        </span>
+      </label>
+
       {# Initial replicas (#701) — the always-on pool floor (min_replicas),
          surfaced here as part of "scale". Container-backed kinds only; the
          autoscaling ceiling + thresholds stay in Advanced. #}

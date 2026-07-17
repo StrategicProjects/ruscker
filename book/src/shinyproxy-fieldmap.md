@@ -118,7 +118,8 @@ Statuses:
 | `max-instances`, `max-total-instances`, `always-show-switch-instance`, `allow-container-re-use` | ❌ | Per-user-instance model — see the concurrency note in the proxy table above |
 | `scale-down-delay` | ✅ | Equivalents: `scale-down-grace` (idle grace before retiring a replica) and `scale-down-cooldown-secs` (anti-flap) |
 | `websocket-reconnection-mode`, `shiny-force-full-reload`, `track-app-url` | ❌ | WebSockets are pumped transparently; reconnection/reload is the app framework's business |
-| `add-default-http-headers`, `http-headers` | ❌ | No `X-SP-*` identity headers today; Ruscker forwards the standard `X-Forwarded-*` family and its sub-path context headers |
+| `add-default-http-headers` | ⚠️ | Supported for `X-SP-UserId` / `X-SP-UserGroups`, but Ruscker defaults it **off** (ShinyProxy defaults it on). Enable it explicitly per trusted spec |
+| `http-headers` | ❌ | Static custom headers remain unsupported; Ruscker forwards the standard `X-Forwarded-*` family and its sub-path context headers |
 | `cache-headers-mode` | ❌ | App responses pass through untouched |
 | `logo-url`, `logo-height/-width/-classes/-style`, `favicon-path` | ❌ | Card art comes from `template-properties.logo` (the `/assets/img/<file>` convention — `ruscker import --images-dir` ingests the files) or the admin **Media** picker; sizing is the card design's |
 | `template-group` | ❌ | The catalog groups cards by app **type** automatically (`template-properties.type`) |

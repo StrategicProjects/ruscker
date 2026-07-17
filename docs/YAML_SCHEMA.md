@@ -340,6 +340,7 @@ A spec describes one app, API, or external link. Every spec has an
     cost-center: GAPE
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
+  add-default-http-headers: true       # opt in to X-SP-UserId / X-SP-UserGroups
 ```
 
 `container-volumes` is a list of Docker bind specs (`/host:/container`,
@@ -387,6 +388,15 @@ visitors. Otherwise: a logged-in user sees it when their username is in
 always sees everything; an anonymous visitor sees only open apps. Group
 membership is set per user in the admin panel. Enforcement is real (not
 just hiding the card). See the [Roadmap](ROADMAP.md) Phase 8.
+
+`add-default-http-headers` is a ShinyProxy-compatible, per-spec opt-in
+that forwards `X-SP-UserId` and comma-separated `X-SP-UserGroups` on HTTP
+requests and WebSocket handshakes for signed-in users. Ruscker deliberately
+defaults it to **`false`** (ShinyProxy defaults it to `true`) so an upgrade
+does not silently disclose identity to an app that was not already trusted
+to receive it. Anonymous requests and break-glass token sessions carry no
+identity headers. Client-supplied `X-SP-*` identity headers and the reserved
+`X-Ruscker-User-*` namespace are always stripped before proxying.
 
 #### Registry credentials — inline vs. named (`docker-registry-credential`)
 

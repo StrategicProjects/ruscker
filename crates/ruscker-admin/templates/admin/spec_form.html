@@ -593,9 +593,15 @@
           <div class="spec-form-label-row">
             <label for="f-mfa-validity" class="spec-form-label">{{ self.t("spec-form-mfa-validity") }}</label>
           </div>
+          {# :disabled with the x-show (codex review): a merely-hidden input
+             still submits — persisting an inert value — and its native
+             min/max constraints can silently block the WHOLE form while
+             invisible. Disabled inputs neither submit nor validate; the
+             typed value survives re-enabling via x-model. #}
           <input id="f-mfa-validity" type="number" name="mfa_validity_days"
                  min="0" max="30" step="1" placeholder="7"
                  x-model="form.mfa_validity_days"
+                 :disabled="!form.require_mfa"
                  class="spec-form-input">
           <div class="spec-form-help">{{ self.t("spec-form-mfa-validity-hint") }}</div>
           <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-mfa-staged-note") }}</div>

@@ -26,7 +26,7 @@ type-api-abbr = API
 type-link-abbr = LNK
 
 # Admin shell
-admin-nav-dashboard = Panel
+admin-nav-dashboard = Contenedores
 admin-nav-apps = Aplicaciones
 admin-nav-images = Multimedia
 admin-nav-credentials = Credenciales
@@ -66,7 +66,7 @@ admin-blocks-pos-top = Superior
 admin-blocks-pos-bottom = Base
 admin-blocks-done = Listo
 admin-blocks-delete-block = Eliminar bloque
-admin-nav-audit = Auditoría
+admin-nav-audit = Actividades
 admin-nav-portal = Portal
 admin-nav-logout = Salir
 role-current = Tu nivel de acceso
@@ -103,8 +103,8 @@ admin-pw-submit = Guardar contraseña
 admin-pw-reveal = Mostrar/ocultar contraseña
 # — Gestión de usuarios (admin)
 admin-nav-users = Usuarios
-admin-users-title = Usuarios
-admin-users-subtitle = Crea y gestiona quién accede al panel y con qué nivel.
+admin-users-title = Gestión de Usuarios
+admin-users-subtitle = Creación y edición de usuarios.
 admin-users-edit = Editar usuario
 admin-users-edit-title = Editar usuario
 admin-users-edit-subtitle = Actualiza el acceso y el perfil con un único guardado.
@@ -145,7 +145,7 @@ admin-users-save-profile = Guardar perfil
 admin-users-import-review = Revisar importación
 admin-users-import-change = Cambiar archivo
 admin-users-import-choose = Elegir archivo CSV
-admin-users-import-help = Columnas: username, role, password, groups, setor, email, celular. La primera fila es el encabezado.
+admin-users-import-help = Columnas: username, role, password, groups, setor, email, celular. La primera fila es el encabezado. Separador: coma (,); en Windows, guarda el CSV en formato Unix con encoding UTF-8. Los roles van en inglés: viewer, editor, admin.
 admin-users-import-title = Importar usuarios
 admin-users-import-preview-title = Vista previa de importación
 admin-users-import-col-status = Estado
@@ -178,7 +178,7 @@ admin-users-generate-password = Generar contraseña aleatoria
 admin-users-flash-exists = Ya existe un usuario con ese nombre.
 
 # Admin dashboard
-admin-dashboard-title = Panel de monitoreo
+admin-dashboard-title = Gestión de Contenedores
 admin-dashboard-subtitle = Estado de contenedores y sesiones en tiempo real
 admin-dashboard-live = En vivo
 admin-dashboard-filter-search = Filtrar app…
@@ -218,9 +218,9 @@ admin-login-error-wrong = Token incorrecto. Intente de nuevo.
 admin-login-back-portal = ← portal público
 
 # Apps list
-admin-specs-title = Aplicaciones
+admin-specs-title = Gestión de Aplicaciones
 admin-specs-refresh = Recargar
-admin-specs-subtitle = Catálogo de specs en la base de datos
+admin-specs-subtitle = Información y especificaciones de las imágenes de las aplicaciones
 admin-specs-empty = Aún no hay aplicaciones. Use { $cmd } para importar desde YAML.
 admin-specs-add = Añadir aplicación
 admin-specs-col-id = ID
@@ -334,7 +334,8 @@ spec-form-error-stale = Otra persona guardó esta app mientras editabas. Revisa 
 
 # Admin image library
 admin-images-title = Biblioteca multimedia
-admin-images-subtitle = PNG, JPEG y WebP se convierten a WebP. SVG pasa directo.
+admin-images-subtitle = Imágenes utilizadas por el portal
+admin-images-formats-help = PNG, JPEG y WebP se convierten a WebP. SVG pasa directo.
 admin-images-drop-here = Haga clic para elegir un archivo
 admin-images-formats = PNG · JPEG · WebP · SVG · hasta 10 MB
 admin-images-upload = Subir
@@ -358,8 +359,8 @@ admin-images-type-all = Todos los tipos
 admin-images-no-match = Ninguna imagen coincide con la búsqueda.
 
 # Admin credentials
-admin-creds-title = Credenciales del registry
-admin-creds-subtitle = Las contraseñas se cifran en reposo con AES-256-GCM. Nunca aparecen en el YAML ni en el panel después de guardarlas.
+admin-creds-title = Gestión de Credenciales
+admin-creds-subtitle = Creación de credenciales. Se cifran en reposo con AES-256-GCM y nunca aparecen en el YAML ni en el panel después de guardarlas.
 admin-creds-form-title = Añadir / actualizar credencial
 admin-creds-name = Nombre
 admin-creds-name-help = Identificador único. Use el mismo nombre en sus specs.
@@ -380,9 +381,9 @@ admin-creds-key-missing-title = RUSCKER_MASTER_KEY no está configurada
 admin-creds-key-missing-help = El store de credenciales necesita una clave de 32 bytes en hex (64 chars) o base64 (44 chars). Genere una con:
 
 # Admin landing editor
-admin-landing-title = Apariencia del portal
+admin-landing-title = Apariencia del Portal
 admin-landing-crumb = Ajustes · Landing page
-admin-landing-subtitle = Configure cómo se ve el portal público para los visitantes.
+admin-landing-subtitle = Configuración de logo, barras, pies de página, etc.
 admin-landing-scope-help = Estas opciones (colores, textos de introducción, SEO, bloques personalizados) se aplican a la portada pública en vivo — guardadas aquí, mostradas en la próxima visita, sin reinicio. Es un conjunto fijo de ajustes, no un editor de CSS arbitrario.
 admin-landing-open-portal = Abrir portal
 admin-landing-save = Guardar
@@ -428,8 +429,8 @@ admin-landing-analytics-key-help = ID de medición de GA4 (G-XXXX), dominio de P
 
 
 # Admin audit log
-admin-audit-title = Auditoría
-admin-audit-subtitle = Todos los cambios del admin, del más reciente al más antiguo. Tope de 100 eventos por consulta.
+admin-audit-title = Historial de Actividades Administrativas
+admin-audit-subtitle = Visualización de actividades administrativas, de la más reciente a la más antigua. Tope de 100 eventos por consulta.
 admin-audit-family = Familia
 admin-audit-family-all = Todas las acciones
 admin-audit-family-spec = Aplicaciones
@@ -591,8 +592,8 @@ spec-form-error-volume = Cada volumen debe ser /host:/contenedor (opcional :ro).
 spec-form-error-network = Nombre de red Docker inválido (debe empezar con letra o número, luego letras/números/_/./-).
 spec-form-error-env = Cada variable de entorno debe ser NOMBRE=valor, con un NOMBRE válido (letras, números, _; empezando por letra o _). Corrige o elimina la línea inválida.
 admin-nav-logs = Registros
-admin-proclog-title = Registros
-admin-proclog-subtitle = Flujo de eventos del balanceador y las réplicas
+admin-proclog-title = Auditoría de Logs
+admin-proclog-subtitle = Visualización de los logs de eventos del balanceador y las réplicas.
 admin-proclog-unavailable = Búfer de registro no disponible (el servidor inició sin la capa de logging).
 admin-proclog-empty = Aún no se ha capturado ningún registro en este nivel. Los nuevos eventos aparecen aquí a medida que ocurren; ejecuta el servidor con -v para incluir registros de nivel info.
 
@@ -737,8 +738,8 @@ admin-landing-logo-add = Añadir logo
 
 # — Gestión de disco (admin) #453
 admin-nav-disk = Disco
-admin-disk-title = Disco
-admin-disk-subtitle = Recupera espacio de contenedores detenidos e imágenes sin usar.
+admin-disk-title = Gestión del Disco
+admin-disk-subtitle = Monitoreo del disco y recuperación de espacio ocioso de contenedores detenidos e imágenes sin usar.
 admin-disk-backend-missing = El backend de Docker no está conectado — inicia el servidor con `--docker` para gestionar el disco.
 admin-disk-containers-heading = Contenedores de Ruscker
 admin-disk-prune = Eliminar detenidos
@@ -866,8 +867,8 @@ admin-landing-show-highlights-help = Muestra el carrusel de apps destacadas enci
 
 # Groups page (#503, read-only)
 admin-nav-groups = Grupos
-admin-groups-title = Grupos
-admin-groups-subtitle = Grupos derivados de los apps (access-groups) y usuarios — solo lectura. Edita en el usuario o el app.
+admin-groups-title = Gestión de Grupos
+admin-groups-subtitle = Creación y edición de los grupos derivados de los apps y usuarios.
 admin-groups-members = Miembros
 admin-groups-apps = Apps
 admin-groups-public-title = Apps públicas

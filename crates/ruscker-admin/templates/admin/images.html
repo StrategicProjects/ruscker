@@ -52,6 +52,9 @@
     {{ self.t("admin-images-choose") }}
   </label>
   <span class="image-upload-hint">{{ self.t("admin-images-drop-here") }} · {{ self.t("admin-images-formats") }}</span>
+  {# Conversion note (#989): moved out of the page subtitle — it's upload
+     detail, not the module's purpose. #}
+  <span class="image-upload-hint">{{ self.t("admin-images-formats-help") }}</span>
 </form>
 
 {# ── Gallery grid ─────────────────────────────────────────── #}

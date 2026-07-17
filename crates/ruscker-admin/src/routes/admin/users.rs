@@ -441,7 +441,12 @@ async fn set_profile(
     )
     .await
     {
-        Ok(()) => redirect_flash("saved"),
+        Ok(()) => {
+            // email/setor are cached for identity claims (#1001 slice B) —
+            // a profile edit/clear must reach the proxy now, not at TTL.
+            state.invalidate_identity_cache();
+            redirect_flash("saved")
+        }
         Err(e) => {
             tracing::warn!(error = ?e, %username, "set profile failed");
             redirect_flash("bad-input")

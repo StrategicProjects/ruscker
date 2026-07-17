@@ -34,6 +34,22 @@ proxy:
       display-name: Identity off
       type: api
       container-image: test/api
+    - id: claims-both
+      display-name: Both additional claims
+      type: api
+      container-image: test/api
+      identity-claims: [email, setor]
+    - id: claims-email
+      display-name: Email claim only
+      type: api
+      container-image: test/api
+      identity-claims: [email]
+    - id: identity-all
+      display-name: Default and additional identity
+      type: api
+      container-image: test/api
+      add-default-http-headers: true
+      identity-claims: [email, setor]
 "#;
 
 struct ReadyBackend;
@@ -172,7 +188,8 @@ async fn send(
         request = request
             .header("X-SP-UserId", "mallory")
             .header("X-SP-UserGroups", "attackers")
-            .header("X-Ruscker-User-Email", "mallory@example.test");
+            .header("X-Ruscker-User-Email", "mallory@example.test")
+            .header("X-Ruscker-User-Setor", "Attackers");
     }
     let response = router(state)
         .oneshot(request.body(Body::empty()).unwrap())
@@ -201,6 +218,16 @@ async fn logged_in_state(
         Role::Viewer,
         false,
         &["analysts".into(), "ops".into()],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    ruscker_admin::db::users::update_profile(
+        &db,
+        "alice",
+        Some("Gestão"),
+        Some("alice@example.test"),
+        Some("+55 81 99999-9999"),
         Some("admin"),
     )
     .await
@@ -294,15 +321,100 @@ async fn feature_off_sends_no_identity_for_logged_in_user() {
 }
 
 #[tokio::test]
+async fn declared_email_and_setor_are_forwarded_without_x_sp_headers() {
+    let (state, cookie, capture) = logged_in_state("claims-both").await;
+    send(state, "/app/claims-both/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+
+    assert_eq!(
+        headers.get("x-ruscker-user-email").map(String::as_str),
+        Some("alice@example.test")
+    );
+    assert_eq!(
+        headers.get("x-ruscker-user-setor").map(String::as_str),
+        Some("Gestão")
+    );
+    assert!(!headers.contains_key("x-sp-userid"));
+    assert!(!headers.contains_key("x-sp-usergroups"));
+    assert!(!headers.contains_key("x-ruscker-user-celular"));
+}
+
+#[tokio::test]
+async fn email_only_spec_does_not_receive_setor() {
+    let (state, cookie, capture) = logged_in_state("claims-email").await;
+    send(state, "/api/claims-email/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+
+    assert_eq!(
+        headers.get("x-ruscker-user-email").map(String::as_str),
+        Some("alice@example.test")
+    );
+    assert!(!headers.contains_key("x-ruscker-user-setor"));
+}
+
+#[tokio::test]
+async fn missing_declared_email_is_omitted_instead_of_sent_empty() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "bruno",
+        "brunopass1",
+        Role::Viewer,
+        false,
+        &[],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    ruscker_admin::db::users::update_profile(
+        &db,
+        "bruno",
+        Some("Financeiro"),
+        None,
+        None,
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "claims-email", upstream).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("bruno".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    send(state, "/api/claims-email/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+    assert!(!headers.contains_key("x-ruscker-user-email"));
+    assert!(!headers.contains_key("x-ruscker-user-setor"));
+}
+
+#[tokio::test]
+async fn anonymous_request_cannot_forge_declared_claims() {
+    let db = open_db().await;
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "claims-both", upstream).await;
+    send(state, "/api/claims-both/data", None, true).await;
+    let headers = capture.await.unwrap();
+
+    assert!(!headers.contains_key("x-ruscker-user-email"));
+    assert!(!headers.contains_key("x-ruscker-user-setor"));
+    assert!(!headers.contains_key("x-sp-userid"));
+}
+
+#[tokio::test]
 async fn break_glass_session_has_no_identity_headers() {
     let db = open_db().await;
     let (upstream, capture) = echo_upstream().await;
-    let state = state(db, "identity-on", upstream).await;
+    let state = state(db, "identity-all", upstream).await;
     let sid = state.admin_sessions.create(Role::Admin, None).await;
     let cookie = format!("{COOKIE_NAME}={sid}");
-    send(state, "/api/identity-on/data", Some(&cookie), false).await;
+    send(state, "/api/identity-all/data", Some(&cookie), false).await;
     let headers = capture.await.unwrap();
 
     assert!(!headers.contains_key("x-sp-userid"));
     assert!(!headers.contains_key("x-sp-usergroups"));
+    assert!(!headers.contains_key("x-ruscker-user-email"));
+    assert!(!headers.contains_key("x-ruscker-user-setor"));
 }

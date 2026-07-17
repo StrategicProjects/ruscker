@@ -341,6 +341,7 @@ A spec describes one app, API, or external link. Every spec has an
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
   add-default-http-headers: true       # opt in to X-SP-UserId / X-SP-UserGroups
+  identity-claims: [email, setor]      # opt in to selected profile claims
 ```
 
 `container-volumes` is a list of Docker bind specs (`/host:/container`,
@@ -397,6 +398,16 @@ does not silently disclose identity to an app that was not already trusted
 to receive it. Anonymous requests and break-glass token sessions carry no
 identity headers. Client-supplied `X-SP-*` identity headers and the reserved
 `X-Ruscker-User-*` namespace are always stripped before proxying.
+
+`identity-claims` is a Ruscker-native, per-spec list of additional profile
+attributes to disclose. Allowed values are `email` and `setor`, forwarded as
+`X-Ruscker-User-Email` and `X-Ruscker-User-Setor` respectively for signed-in
+users. It defaults to empty and is independent of `add-default-http-headers`,
+so a spec can request only an e-mail without receiving the username/group
+pair. A selected claim with no stored value is omitted, never sent as an empty
+header. Unknown claim names are retained by the schema but ignored by the
+runtime for forward compatibility. These values are PII; enable each one only
+for an app that needs and is trusted to receive it.
 
 #### Registry credentials — inline vs. named (`docker-registry-credential`)
 

@@ -20,7 +20,8 @@ use axum::{
 };
 use chrono::Utc;
 use ruscker_config::{
-    ApiSpec, OrderedFloat, Placement, RoutingStrategy, Spec, SpecKindOverride, TemplateProperties,
+    ApiSpec, IdentityClaim, OrderedFloat, Placement, RoutingStrategy, Spec, SpecKindOverride,
+    TemplateProperties,
 };
 use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
@@ -503,6 +504,10 @@ pub struct SpecForm {
     /// Checkbox ("on") ⇒ forward the signed-in user's ShinyProxy-compatible
     /// identity headers to this app. Off by default (data minimization).
     pub add_default_http_headers: String,
+    /// Checkbox ("on") ⇒ disclose the user's e-mail to this app.
+    pub identity_claim_email: String,
+    /// Checkbox ("on") ⇒ disclose the user's setor/department to this app.
+    pub identity_claim_setor: String,
 
     // ── Advanced · Resources (requests + body cap) ──────────────
     /// Soft CPU reservation in fractional cores (`container-cpu-request`).
@@ -540,6 +545,7 @@ impl SpecForm {
     pub fn from_spec(spec: &Spec) -> Self {
         let tp = &spec.template_properties;
         let dt = DisplayType::from_spec(spec);
+        let identity_claims = spec.effective_identity_claims();
         Self {
             id: spec.id.clone(),
             base_version: String::new(),
@@ -641,6 +647,8 @@ impl SpecForm {
             access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             add_default_http_headers: checkbox(spec.effective_add_default_http_headers()),
+            identity_claim_email: checkbox(identity_claims.contains(&IdentityClaim::Email)),
+            identity_claim_setor: checkbox(identity_claims.contains(&IdentityClaim::Setor)),
             container_cpu_request: spec
                 .container_cpu_request
                 .map(|n| n.to_string())
@@ -756,6 +764,23 @@ impl SpecForm {
             None
         };
 
+        // Preserve unknown/future claim names from the base spec while the
+        // two recognized checkboxes remain authoritative for email/setor.
+        let mut identity_claims: Vec<String> = base
+            .and_then(|spec| spec.identity_claims.as_ref())
+            .into_iter()
+            .flatten()
+            .filter(|name| !matches!(name.trim(), "email" | "setor"))
+            .cloned()
+            .collect();
+        if !self.identity_claim_email.trim().is_empty() {
+            identity_claims.push("email".into());
+        }
+        if !self.identity_claim_setor.trim().is_empty() {
+            identity_claims.push("setor".into());
+        }
+        let identity_claims = (!identity_claims.is_empty()).then_some(identity_claims);
+
         Ok(Spec {
             id: self.id.trim().to_string(),
             display_name: empty_to_none(&self.display_name),
@@ -821,6 +846,7 @@ impl SpecForm {
             access_groups: list_to_vec(&self.access_groups),
             access_users: list_to_vec(&self.access_users),
             add_default_http_headers: checkbox_opt(&self.add_default_http_headers),
+            identity_claims,
             container_cpu_request: parse_opt(&self.container_cpu_request),
             container_memory_request: empty_to_none(&self.container_memory_request),
             max_body_size: empty_to_none(&self.max_body_size),
@@ -2035,6 +2061,7 @@ proxy:
       access-groups: [staff, ops]
       access-users: [alice]
       add-default-http-headers: true
+      identity-claims: [email, future-claim, setor]
       placement: bin-pack
       anti-affinity: true
       routing-strategy: round-robin
@@ -2063,6 +2090,14 @@ proxy:
         assert_eq!(merged.access_groups.as_deref(), Some(&["staff".into(), "ops".into()][..]));
         assert_eq!(merged.access_users.as_deref(), Some(&["alice".into()][..]));
         assert!(merged.effective_add_default_http_headers());
+        assert_eq!(
+            merged.effective_identity_claims(),
+            vec![IdentityClaim::Email, IdentityClaim::Setor]
+        );
+        assert!(merged
+            .identity_claims
+            .as_deref()
+            .is_some_and(|claims| claims.iter().any(|claim| claim == "future-claim")));
         assert_eq!(merged.placement, Some(Placement::BinPack));
         assert_eq!(merged.anti_affinity, Some(true));
         assert_eq!(merged.routing_strategy, Some(RoutingStrategy::RoundRobin));

@@ -732,6 +732,17 @@ pub enum AuthScheme {
     Simple,
 }
 
+/// Additional authenticated user attributes a spec may opt in to receive.
+///
+/// The YAML stores claim names as strings so an older Ruscker can continue
+/// loading a config authored with future claim names. Runtime forwarding uses
+/// only the recognized variants returned by [`Spec::effective_identity_claims`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityClaim {
+    Email,
+    Setor,
+}
+
 /// A single spec — an app, API, or external link surfaced on the landing
 /// page and (if containerized) orchestrated by Ruscker.
 ///
@@ -930,6 +941,13 @@ pub struct Spec {
     /// username or group membership (#1001).
     #[serde(rename = "add-default-http-headers")]
     pub add_default_http_headers: Option<bool>,
+
+    /// Additional authenticated user attributes disclosed to this app.
+    /// Ruscker-native and deliberately empty by default. Unknown strings are
+    /// retained in the config but ignored by the runtime for forward
+    /// compatibility (#1001).
+    #[serde(rename = "identity-claims", default)]
+    pub identity_claims: Option<Vec<String>>,
 
     /// Free-form properties consumed by the landing page template.
     /// Common keys: `logo`, `icon`, `type`, `updated`, `state`, `link`.
@@ -1207,6 +1225,26 @@ impl Spec {
     /// identity merely because the server was upgraded (#1001).
     pub fn effective_add_default_http_headers(&self) -> bool {
         self.add_default_http_headers.unwrap_or(false)
+    }
+
+    /// Recognized additional identity claims this app opted in to receive.
+    ///
+    /// Unknown names are ignored instead of rejecting the whole config. This
+    /// lets hand-edited/imported configs carry claims introduced by a newer
+    /// Ruscker version without breaking startup.
+    pub fn effective_identity_claims(&self) -> Vec<IdentityClaim> {
+        let mut claims = Vec::new();
+        for name in self.identity_claims.as_deref().unwrap_or_default() {
+            let claim = match name.trim() {
+                "email" => IdentityClaim::Email,
+                "setor" => IdentityClaim::Setor,
+                _ => continue,
+            };
+            if !claims.contains(&claim) {
+                claims.push(claim);
+            }
+        }
+        claims
     }
 
     /// Decorative "requires login" padlock (#839). Purely informational:
@@ -2043,6 +2081,7 @@ proxy:
             access_groups: None,
             access_users: None,
             add_default_http_headers: None,
+            identity_claims: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -2095,6 +2134,7 @@ proxy:
             access_groups: None,
             access_users: None,
             add_default_http_headers: None,
+            identity_claims: None,
             template_properties: TemplateProperties::default(),
             kind_override: None,
             api: None,
@@ -2147,6 +2187,7 @@ proxy:
             access_groups: None,
             access_users: None,
             add_default_http_headers: None,
+            identity_claims: None,
             template_properties: TemplateProperties::default(),
             kind_override: Some(SpecKindOverride::Api),
             api: None,
@@ -2294,6 +2335,30 @@ proxy:
         );
         assert_eq!(enabled.add_default_http_headers, Some(true));
         assert!(enabled.effective_add_default_http_headers());
+    }
+
+    #[test]
+    fn identity_claims_parse_recognized_values_and_ignore_unknown_ones() {
+        let default = parse_spec("id: a\ncontainer-image: x");
+        assert_eq!(default.identity_claims, None);
+        assert!(default.effective_identity_claims().is_empty());
+
+        let spec = parse_spec(
+            "id: a\ncontainer-image: x\nidentity-claims: [email, future-claim, setor, email]",
+        );
+        assert_eq!(
+            spec.identity_claims.as_deref(),
+            Some(&[
+                "email".to_string(),
+                "future-claim".to_string(),
+                "setor".to_string(),
+                "email".to_string(),
+            ][..])
+        );
+        assert_eq!(
+            spec.effective_identity_claims(),
+            vec![IdentityClaim::Email, IdentityClaim::Setor]
+        );
     }
 
     #[test]

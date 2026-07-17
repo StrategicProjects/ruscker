@@ -330,6 +330,7 @@ spec-form-error-id-shape = ID deve começar com letra e conter apenas letras, n�
 spec-form-error-id-duplicate = Já existe uma aplicação com esse ID.
 spec-form-error-name-required = Nome de exibição é obrigatório.
 spec-form-error-number = Um campo numérico tem valor não numérico.
+spec-form-error-mfa-days = “Solicitar novamente após N dias” deve ser um inteiro entre 0 e 30.
 spec-form-error-max-replicas-zero = Máx. de containers deve ser ao menos 1 (0 faz o app nunca iniciar).
 spec-form-error-cpu = O limite de CPU deve ser um número positivo (ex.: 0.5).
 spec-form-error-memory = O limite de memória deve ser um tamanho como 512m ou 1.5g.

@@ -919,6 +919,18 @@ impl SpecForm {
         {
             errs.push("spec-form-error-number");
         }
+        // The MFA validity window is a u16 clamped to 30. A crafted POST
+        // bypassing the HTML min/max (e.g. -1 or 65536) parses as i64 —
+        // passing the generic check above — but fails `parse_opt::<u16>`
+        // in into_spec and would silently become None = the 7-day default,
+        // changing the policy instead of rejecting the request (codex
+        // review; same class as #877).
+        if matches!(
+            self.mfa_validity_days.trim().parse::<i64>(),
+            Ok(n) if !(0..=i64::from(ruscker_config::MAX_MFA_VALIDITY_DAYS)).contains(&n)
+        ) {
+            errs.push("spec-form-error-mfa-days");
+        }
         // A max-containers ceiling of 0 refuses every spawn (`live >= max`),
         // so the app can never start. Reject it server-side, not just via
         // the HTML `min=1` a crafted POST can bypass (#877).
@@ -1891,6 +1903,25 @@ proxy:
         let mut f = valid_form();
         f.container_cpu_limit = "0,5".into(); // pt-BR comma
         assert!(f.validate(FormMode::New).contains(&"spec-form-error-cpu"));
+
+        // MFA validity: a crafted POST past the HTML min/max must be
+        // rejected, not silently become None → the 7-day default.
+        for bad in ["-1", "65536", "31"] {
+            let mut f = valid_form();
+            f.mfa_validity_days = bad.into();
+            assert!(
+                f.validate(FormMode::New).contains(&"spec-form-error-mfa-days"),
+                "{bad} must be rejected"
+            );
+        }
+        for ok in ["", "0", "7", "30"] {
+            let mut f = valid_form();
+            f.mfa_validity_days = ok.into();
+            assert!(
+                !f.validate(FormMode::New).contains(&"spec-form-error-mfa-days"),
+                "{ok} must pass"
+            );
+        }
 
         let mut f = valid_form();
         f.container_memory_limit = "512mb".into(); // typo

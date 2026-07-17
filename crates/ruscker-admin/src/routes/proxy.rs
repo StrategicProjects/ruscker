@@ -38,7 +38,7 @@ use http_body_util::BodyExt;
 use hyper_util::client::legacy::connect::HttpConnector;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioTimer};
-use ruscker_config::{RoutingStrategy, Spec, SpecKind};
+use ruscker_config::{IdentityClaim, RoutingStrategy, Spec, SpecKind};
 use ruscker_core::{Replica, ReplicaState};
 use ruscker_proxy::sticky::{self, CookieKey, StickySession, COOKIE_NAME};
 use ruscker_proxy::ws;
@@ -49,7 +49,7 @@ use tower_cookies::{Cookie, Cookies};
 
 use super::rewrite;
 use crate::ratelimit;
-use crate::AppState;
+use crate::{AppState, CachedIdentity};
 
 /// Wrapper extractor: `WebSocketUpgrade::FromRequestParts` returns
 /// an error for non-upgrade requests; axum 0.8 doesn't blanket-
@@ -81,14 +81,31 @@ struct MaybePeer(Option<SocketAddr>);
 struct Identity {
     username: String,
     groups: Arc<Vec<String>>,
+    email: Option<String>,
+    setor: Option<String>,
 }
 
 impl Identity {
-    fn header_pairs(&self) -> Vec<(String, String)> {
-        vec![
-            ("X-SP-UserId".into(), self.username.clone()),
-            ("X-SP-UserGroups".into(), self.groups.join(",")),
-        ]
+    fn header_pairs(
+        &self,
+        add_default_http_headers: bool,
+        claims: &[IdentityClaim],
+    ) -> Vec<(String, String)> {
+        let mut headers = Vec::new();
+        if add_default_http_headers {
+            headers.push(("X-SP-UserId".into(), self.username.clone()));
+            headers.push(("X-SP-UserGroups".into(), self.groups.join(",")));
+        }
+        for claim in claims {
+            let (name, value) = match claim {
+                IdentityClaim::Email => ("X-Ruscker-User-Email", self.email.as_deref()),
+                IdentityClaim::Setor => ("X-Ruscker-User-Setor", self.setor.as_deref()),
+            };
+            if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
+                headers.push((name.into(), value.to_string()));
+            }
+        }
+        headers
     }
 }
 
@@ -373,15 +390,32 @@ async fn forward(
     // Resolve identity once when either access control or upstream header
     // disclosure needs it. Open specs with disclosure disabled do no user
     // lookup at all.
+    let identity_claims = spec.effective_identity_claims();
     let identity = match acting_user.as_ref() {
-        Some(username) if !spec.is_open() || spec.effective_add_default_http_headers() => {
+        Some(username)
+            if !spec.is_open()
+                || spec.effective_add_default_http_headers()
+                || !identity_claims.is_empty() =>
+        {
+            let cached = resolve_identity(&state, username).await;
             Some(Identity {
                 username: username.clone(),
-                groups: find_user_groups(&state, username).await,
+                groups: cached.groups.clone(),
+                email: cached.email.clone(),
+                setor: cached.setor.clone(),
             })
         }
         _ => None,
     };
+    let identity_headers = identity
+        .as_ref()
+        .map(|identity| {
+            identity.header_pairs(
+                spec.effective_add_default_http_headers(),
+                &identity_claims,
+            )
+        })
+        .unwrap_or_default();
     if !spec.is_open() {
         let is_admin = session
             .0
@@ -596,14 +630,6 @@ async fn forward(
         // selected can be echoed on our 101 — a browser that offered
         // subprotocols and receives a 101 without one selected must fail
         // the connection (RFC 6455 §4.1).
-        let identity_headers = if spec.effective_add_default_http_headers() {
-            identity
-                .as_ref()
-                .map(Identity::header_pairs)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
         let handshake = match ws::connect_with_headers(
             &upstream_ws_url,
             cookie.as_deref(),
@@ -716,11 +742,7 @@ async fn forward(
         is_https,
         req,
         body_cap,
-        if spec.effective_add_default_http_headers() {
-            identity.as_ref()
-        } else {
-            None
-        },
+        &identity_headers,
     )
     .await
     {
@@ -1003,33 +1025,40 @@ pub(crate) fn apply_public_path(env: &mut [String], cmd: &mut Option<Vec<String>
 /// cache instead of the DB.
 pub(crate) const SPEC_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Group memberships change far less often than proxy requests. A 30s TTL
+/// Identity attributes change far less often than proxy requests. A 30s TTL
 /// prevents one SELECT per asset while bounding how long an admin edit can
 /// take to reach access checks and injected identity headers (#1001).
 pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-async fn find_user_groups(state: &AppState, username: &str) -> Arc<Vec<String>> {
-    if let Some(groups) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
-        return groups;
+async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
+    if let Some(identity) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
+        return identity;
     }
 
-    // Snapshot BEFORE the read: `store` rejects this fill if an admin
-    // mutation invalidated the cache while we were at the DB, so a
-    // pre-revocation read can never repopulate the cache (#1001).
+    // Snapshot BEFORE the read: `get` rejects this fill after it lands if
+    // an admin mutation invalidated the cache while we were at the DB, so a
+    // pre-revocation read can never become readable again (#1001).
     let generation = state.identity_cache.generation();
-    let groups = match state.db.as_ref() {
+    let identity = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
-            Ok(row) => Arc::new(row.map(|user| user.groups).unwrap_or_default()),
+            Ok(Some(user)) => Arc::new(CachedIdentity {
+                groups: Arc::new(user.groups),
+                email: user.email,
+                setor: user.setor,
+            }),
+            Ok(None) => Arc::new(CachedIdentity::default()),
             Err(error) => {
                 tracing::warn!(user = username, error = ?error, "identity lookup failed");
-                return Arc::new(Vec::new());
+                return Arc::new(CachedIdentity::default());
             }
         },
-        None => Arc::new(Vec::new()),
+        None => Arc::new(CachedIdentity::default()),
     };
-    state.identity_cache.store(generation, username, groups.clone());
-    groups
+    state
+        .identity_cache
+        .store(generation, username, identity.clone());
+    identity
 }
 
 pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {
@@ -1786,7 +1815,7 @@ async fn do_forward(
     is_https: bool,
     mut req: Request,
     max_body: Option<usize>,
-    identity: Option<&Identity>,
+    identity_headers: &[(String, String)],
 ) -> anyhow::Result<Response> {
     let query = req.uri().query().map(|q| format!("?{q}")).unwrap_or_default();
     let new_uri: Uri = format!("http://{}{}{}", replica.upstream, upstream_path, query)
@@ -1811,24 +1840,20 @@ async fn do_forward(
     // (#258).
     strip_ruscker_cookies(req.headers_mut());
 
-    if let Some(identity) = identity {
-        for (name, value) in identity.header_pairs() {
-            // `from_bytes`, not `from_str`: group names are free-form
-            // UTF-8 (`gestão`) and `from_str` only accepts visible
-            // ASCII — it would silently drop X-SP-UserGroups (codex
-            // review, #1001). The raw UTF-8 bytes are what ShinyProxy
-            // (Spring) sends too. A value that still fails (embedded
-            // control chars can't reach here via parse_groups) is
-            // logged, never silently omitted.
-            match (
-                name.parse::<header::HeaderName>(),
-                HeaderValue::from_bytes(value.as_bytes()),
-            ) {
-                (Ok(name), Ok(value)) => {
-                    req.headers_mut().insert(name, value);
-                }
-                _ => tracing::warn!(header = %name, "identity header value not encodable; omitted"),
+    for (name, value) in identity_headers {
+        // `from_bytes`, not `from_str`: group/claim values are free-form
+        // UTF-8 (`gestão`) and `from_str` only accepts visible ASCII — it
+        // would silently drop an accented value (codex review, #1001).
+        // A value that still fails (e.g. embedded control characters) is
+        // logged, never silently omitted.
+        match (
+            name.parse::<header::HeaderName>(),
+            HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            (Ok(name), Ok(value)) => {
+                req.headers_mut().insert(name, value);
             }
+            _ => tracing::warn!(header = %name, "identity header value not encodable; omitted"),
         }
     }
 
@@ -2091,6 +2116,34 @@ mod tests {
         assert!(!headers.contains_key("x-sp-useremail"));
         assert!(!headers.contains_key("x-ruscker-user-email"));
         assert_eq!(headers.get("x-app-header").unwrap(), "keep");
+    }
+
+    #[test]
+    fn identity_header_pairs_minimize_claims_and_omit_blank_values() {
+        let identity = Identity {
+            username: "alice".into(),
+            groups: Arc::new(vec!["staff".into()]),
+            email: Some("alice@example.test".into()),
+            setor: Some("  ".into()),
+        };
+
+        let headers = identity.header_pairs(false, &[IdentityClaim::Email, IdentityClaim::Setor]);
+        assert_eq!(
+            headers,
+            vec![(
+                "X-Ruscker-User-Email".to_string(),
+                "alice@example.test".to_string(),
+            )]
+        );
+
+        let defaults_only = identity.header_pairs(true, &[]);
+        assert_eq!(
+            defaults_only,
+            vec![
+                ("X-SP-UserId".to_string(), "alice".to_string()),
+                ("X-SP-UserGroups".to_string(), "staff".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -2865,7 +2918,7 @@ docker-registry-password: hunter2
             false,
             req,
             None,
-            None,
+            &[],
         )
         .await
         .expect("the dead-connection GET should be retried, not surfaced as an error");

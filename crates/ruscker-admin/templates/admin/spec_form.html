@@ -586,6 +586,23 @@
         </span>
       </label>
 
+      <fieldset class="spec-form-field">
+        <legend class="spec-form-label">{{ self.t("spec-form-identity-claims") }}</legend>
+        <div class="spec-form-help">{{ self.t("spec-form-identity-claims-hint") }}</div>
+        <div class="flex flex-wrap gap-4 mt-2">
+          <label class="spec-form-check">
+            <input type="checkbox" name="identity_claim_email" value="on"
+                   {% if !form.identity_claim_email.is_empty() %}checked{% endif %}>
+            <span>{{ self.t("spec-form-identity-claim-email") }}</span>
+          </label>
+          <label class="spec-form-check">
+            <input type="checkbox" name="identity_claim_setor" value="on"
+                   {% if !form.identity_claim_setor.is_empty() %}checked{% endif %}>
+            <span>{{ self.t("spec-form-identity-claim-setor") }}</span>
+          </label>
+        </div>
+      </fieldset>
+
       {# Initial replicas (#701) — the always-on pool floor (min_replicas),
          surfaced here as part of "scale". Container-backed kinds only; the
          autoscaling ceiling + thresholds stay in Advanced. #}

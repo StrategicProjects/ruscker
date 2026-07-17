@@ -47,6 +47,14 @@ struct UsersPage<'a> {
     nav_section: &'static str,
     role: Role,
     users: Vec<db::users::UserRow>,
+    /// Server-side pagination state (#999): 1-based current page,
+    /// total page count, and how many users match the search.
+    page: i64,
+    pages: i64,
+    total: i64,
+    /// The active search term, echoed back into the search box and
+    /// carried on the pager links; `""` when unfiltered.
+    q: String,
     /// Username of the logged-in admin — flags the "you" row.
     me: String,
     /// "" | "saved" | "created" | "deleted" | "last-admin" | "bad-input"
@@ -60,6 +68,17 @@ struct UsersPage<'a> {
 impl UsersPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// Localized "Page X of Y · N users" line under the table (#999).
+    fn pager_status(&self) -> String {
+        use fluent_bundle::FluentArgs;
+        let mut args = FluentArgs::new();
+        args.set("page", self.page);
+        args.set("pages", self.pages);
+        args.set("total", self.total);
+        self.locales
+            .t(self.locale, "admin-users-pager-status", Some(&args))
     }
 
     /// Human label for a role (Fluent).
@@ -103,6 +122,11 @@ impl UserEditPage<'_> {
     }
 }
 
+/// Rows per page on the users table (#999). The page paginates
+/// server-side so a large user base (e.g. a big CSV import) doesn't
+/// fetch and render thousands of rows per view.
+const USERS_PER_PAGE: i64 = 50;
+
 #[derive(Debug, Deserialize)]
 pub struct UsersQuery {
     pub flash: Option<String>,
@@ -111,6 +135,13 @@ pub struct UsersQuery {
     pub n: Option<usize>,
     #[serde(default)]
     pub skipped: Option<usize>,
+    /// 1-based page of the users table (#999); out-of-range clamps.
+    #[serde(default)]
+    pub page: Option<i64>,
+    /// Server-side search term (#999) — substring over username,
+    /// groups and the profile fields.
+    #[serde(default)]
+    pub q: Option<String>,
 }
 
 fn redirect_flash(flash: &str) -> Response {
@@ -135,7 +166,22 @@ async fn index(
         )
             .into_response();
     };
-    let users = match db::users::list_all(pool).await {
+    // Server-side pagination + search (#999): count first, clamp the
+    // requested page into range, then fetch only that page's rows.
+    let search = q.q.as_deref().unwrap_or("").trim().to_string();
+    let total = match db::users::count_filtered(pool, &search).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!(error = ?e, "count users failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    // Ceiling division (i64::div_ceil is still unstable on our floor).
+    let pages = ((total + USERS_PER_PAGE - 1) / USERS_PER_PAGE).max(1);
+    let page = q.page.unwrap_or(1).clamp(1, pages);
+    let users = match db::users::list_page(pool, &search, USERS_PER_PAGE, (page - 1) * USERS_PER_PAGE)
+        .await
+    {
         Ok(u) => u,
         Err(e) => {
             tracing::error!(error = ?e, "list users failed");
@@ -164,6 +210,10 @@ async fn index(
         nav_section: "users",
         role: admin.role,
         users,
+        page,
+        pages,
+        total,
+        q: search,
         me: admin.actor().to_string(),
         flash,
         import_summary,

@@ -195,6 +195,193 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
         .collect())
 }
 
+/// Escape `%`, `_` and `\` in a user-typed search term so each matches
+/// literally under SQL `LIKE`, then wrap it in `%…%` for a substring
+/// match. Both dialects use `\` as the escape character (Postgres by
+/// default; SQLite via an explicit `ESCAPE '\'` clause).
+fn like_pattern(term: &str) -> String {
+    let mut pat = String::with_capacity(term.len() + 2);
+    pat.push('%');
+    for c in term.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            pat.push('\\');
+        }
+        pat.push(c);
+    }
+    pat.push('%');
+    pat
+}
+
+/// The two case variants of a search pattern for the SQLite arm.
+///
+/// SQLite's `LIKE` only case-folds ASCII, so `JOÃO` would not match a
+/// stored `João` (the `Ã`/`ã` pair doesn't fold) while Postgres'
+/// `ILIKE` folds full Unicode. Rust's `to_lowercase`/`to_uppercase`
+/// ARE Unicode-aware, so matching against both variants covers an
+/// accented query in either case against stored text in the usual
+/// forms (lowercase, Capitalized, ALL CAPS). Text with mixed-case
+/// accents mid-word (`GesTÃo`) can still evade — acceptable for a
+/// search box, and impossible to fix in stock SQLite without ICU.
+fn like_patterns_sqlite(term: &str) -> (String, String) {
+    (
+        like_pattern(&term.to_lowercase()),
+        like_pattern(&term.to_uppercase()),
+    )
+}
+
+/// Count the users matching a search term — the total behind
+/// [`list_page`]'s pagination (#999). A blank `search` counts every
+/// account; otherwise it's the same case-insensitive substring filter
+/// over username, groups and the profile fields.
+pub async fn count_filtered(db: &ConfigDb, search: &str) -> Result<i64> {
+    let search = search.trim();
+    let (n,): (i64,) = match db {
+        ConfigDb::Sqlite(pool) => {
+            if search.is_empty() {
+                sqlx::query_as("SELECT COUNT(*) FROM users")
+                    .fetch_one(pool)
+                    .await
+            } else {
+                // Two case variants per column — see [`like_patterns_sqlite`].
+                let (lo, up) = like_patterns_sqlite(search);
+                sqlx::query_as(
+                    "SELECT COUNT(*) FROM users
+                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
+                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'",
+                )
+                .bind(lo)
+                .bind(up)
+                .fetch_one(pool)
+                .await
+            }
+        }
+        ConfigDb::Postgres(pool) => {
+            if search.is_empty() {
+                sqlx::query_as("SELECT COUNT(*) FROM users")
+                    .fetch_one(pool)
+                    .await
+            } else {
+                // ILIKE for case-insensitivity; `\` is pg's default escape.
+                sqlx::query_as(
+                    "SELECT COUNT(*) FROM users
+                      WHERE username ILIKE $1
+                         OR groups ILIKE $1
+                         OR COALESCE(setor, '') ILIKE $1
+                         OR COALESCE(email, '') ILIKE $1
+                         OR COALESCE(celular, '') ILIKE $1",
+                )
+                .bind(like_pattern(search))
+                .fetch_one(pool)
+                .await
+            }
+        }
+    }
+    .context("count users (filtered)")?;
+    Ok(n)
+}
+
+/// One page of users (no hashes), most-recent first — the paginated
+/// sibling of [`list_all`] (#999), so the users admin page stays fast
+/// with thousands of accounts. `search` filters by a case-insensitive
+/// substring over username, groups, setor, email and celular; blank
+/// means no filter. The caller derives `limit`/`offset` from its page
+/// number.
+pub async fn list_page(
+    db: &ConfigDb,
+    search: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<UserRow>> {
+    type Row = (
+        String,
+        String,
+        String,
+        bool,
+        String,
+        DateTime<Utc>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let search = search.trim();
+    let rows: Vec<Row> = match db {
+        ConfigDb::Sqlite(pool) => {
+            if search.is_empty() {
+                sqlx::query_as(
+                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                       FROM users
+                      ORDER BY created_at DESC, username ASC
+                      LIMIT ?1 OFFSET ?2",
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+            } else {
+                // Two case variants per column — see [`like_patterns_sqlite`].
+                let (lo, up) = like_patterns_sqlite(search);
+                sqlx::query_as(
+                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                       FROM users
+                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
+                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
+                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'
+                      ORDER BY created_at DESC, username ASC
+                      LIMIT ?3 OFFSET ?4",
+                )
+                .bind(lo)
+                .bind(up)
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+            }
+        }
+        ConfigDb::Postgres(pool) => {
+            if search.is_empty() {
+                sqlx::query_as(
+                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                       FROM users
+                      ORDER BY created_at DESC, username ASC
+                      LIMIT $1 OFFSET $2",
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+            } else {
+                sqlx::query_as(
+                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                       FROM users
+                      WHERE username ILIKE $1
+                         OR groups ILIKE $1
+                         OR COALESCE(setor, '') ILIKE $1
+                         OR COALESCE(email, '') ILIKE $1
+                         OR COALESCE(celular, '') ILIKE $1
+                      ORDER BY created_at DESC, username ASC
+                      LIMIT $2 OFFSET $3",
+                )
+                .bind(like_pattern(search))
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(pool)
+                .await
+            }
+        }
+    }
+    .context("list users (page)")?;
+    Ok(rows
+        .into_iter()
+        .map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce))
+        .collect())
+}
+
 /// Fetch one user by (normalized) username, without the hash.
 pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
     type Row = (
@@ -1218,6 +1405,73 @@ mod tests {
         assert!(verify_login(&p, "bob", "init-pw").await.unwrap().is_none());
     }
 
+    #[tokio::test]
+    async fn list_page_and_count_filtered() {
+        let p = pool().await;
+        create(&p, "alice", "pw-a", Role::Admin, false, &[], None)
+            .await
+            .unwrap();
+        create(&p, "bob", "pw-b", Role::Viewer, false, &["ops".to_string()], None)
+            .await
+            .unwrap();
+        create(&p, "carol", "pw-c", Role::Viewer, false, &[], None)
+            .await
+            .unwrap();
+        update_profile(&p, "carol", None, Some("carol@example.com"), None, None)
+            .await
+            .unwrap();
+
+        // Unfiltered: pages partition the full set with no overlap.
+        assert_eq!(count_filtered(&p, "").await.unwrap(), 3);
+        let first = list_page(&p, "", 2, 0).await.unwrap();
+        let rest = list_page(&p, "", 2, 2).await.unwrap();
+        assert_eq!(first.len(), 2);
+        assert_eq!(rest.len(), 1);
+        let mut all: Vec<String> = first
+            .iter()
+            .chain(rest.iter())
+            .map(|u| u.username.clone())
+            .collect();
+        all.sort();
+        assert_eq!(all, vec!["alice", "bob", "carol"]);
+        // Past the end ⇒ empty page, not an error.
+        assert!(list_page(&p, "", 2, 4).await.unwrap().is_empty());
+
+        // Search is a case-insensitive substring over username, groups
+        // and profile fields.
+        assert_eq!(count_filtered(&p, "ALI").await.unwrap(), 1);
+        let hit = list_page(&p, "ALI", 50, 0).await.unwrap();
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].username, "alice");
+        assert_eq!(list_page(&p, "ops", 50, 0).await.unwrap()[0].username, "bob");
+        assert_eq!(
+            list_page(&p, "@example", 50, 0).await.unwrap()[0].username,
+            "carol"
+        );
+        // LIKE wildcards in the term match literally, not as patterns.
+        assert_eq!(count_filtered(&p, "%").await.unwrap(), 0);
+        assert_eq!(count_filtered(&p, "a_i").await.unwrap(), 0);
+        assert_eq!(count_filtered(&p, "nobody").await.unwrap(), 0);
+
+        // Accented text: SQLite's LIKE only folds ASCII, so the sqlite
+        // arm matches both Rust-cased variants of the term (codex
+        // review, PR #1000). `GESTÃO` must find a stored `Gestão` and
+        // vice-versa.
+        update_profile(&p, "bob", Some("Gestão"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(count_filtered(&p, "GESTÃO").await.unwrap(), 1);
+        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
+        assert_eq!(
+            list_page(&p, "GESTÃO", 50, 0).await.unwrap()[0].username,
+            "bob"
+        );
+        update_profile(&p, "bob", Some("GESTÃO"), None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
+    }
+
     // Full user lifecycle through the `ConfigDb::Postgres` arm against a
     // real daemon (BOOLEAN `must_change_password`, argon2 verify, audit,
     // last-admin count). Gated on `postgres-it`.
@@ -1244,6 +1498,15 @@ mod tests {
         assert_eq!(count_admins(&db).await.unwrap(), 1);
         assert!(any_user_exists(&db).await.unwrap());
         assert_eq!(list_all(&db).await.unwrap().len(), 2);
+
+        // Pagination + ILIKE search through the Postgres arm (#999).
+        assert_eq!(count_filtered(&db, "").await.unwrap(), 2);
+        assert_eq!(list_page(&db, "", 1, 0).await.unwrap().len(), 1);
+        assert_eq!(list_page(&db, "", 10, 2).await.unwrap().len(), 0);
+        let hit = list_page(&db, "ED", 10, 0).await.unwrap();
+        assert_eq!(hit.len(), 1);
+        assert_eq!(hit[0].username, "ed");
+        assert_eq!(count_filtered(&db, "%").await.unwrap(), 0);
 
         // Case-insensitive login + must_change BOOLEAN round-trip.
         let u = verify_login(&db, "ed", "edpw1234")

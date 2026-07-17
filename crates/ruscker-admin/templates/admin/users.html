@@ -166,7 +166,24 @@
 </script>
 
 {# ── Existing users ────────────────────────────────────────────── #}
-<table class="admin-table" data-enhance>
+{# Search + pagination are SERVER-side (#999): with a large user base
+   only one page of rows is fetched and rendered, so the shared table
+   enhancer's client-side search would only see the current page —
+   `data-no-search` disables it and this form queries the DB instead.
+   Column sort (still client-side) stays and sorts the visible page. #}
+<form method="get" action="{{ base }}/admin/users" class="admin-table-toolbar"
+      style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+  <input type="search" name="q" value="{{ q }}" autocapitalize="none"
+         placeholder="{{ self.t("admin-table-search") }}"
+         class="admin-table-search" style="max-width:280px">
+  <button type="submit" class="admin-nav-link" style="width:auto;cursor:pointer">
+    <i class="ti ti-search" aria-hidden="true"></i> {{ self.t("admin-users-search") }}
+  </button>
+  {% if !q.is_empty() %}
+    <a href="{{ base }}/admin/users" class="text-xs text-[color:var(--text-faint)] underline">{{ self.t("admin-users-search-clear") }}</a>
+  {% endif %}
+</form>
+<table class="admin-table" data-enhance data-no-search>
   <thead>
     <tr>
       <th>{{ self.t("admin-users-col-user") }}</th>
@@ -223,6 +240,27 @@
     {% endfor %}
   </tbody>
 </table>
+
+{% if users.is_empty() && !q.is_empty() %}
+  <p class="text-sm text-[color:var(--text-muted)] mt-3">{{ self.t("admin-users-search-none") }}</p>
+{% endif %}
+
+{# ── Pager (#999) — links preserve the search term. #}
+<div class="flex items-center gap-3 mt-3 text-xs text-[color:var(--text-muted)]" style="flex-wrap:wrap">
+  {% if page > 1 %}
+    <a class="admin-nav-link" style="width:auto"
+       href="{{ base }}/admin/users?page={{ page - 1 }}{% if !q.is_empty() %}&q={{ q|urlencode }}{% endif %}">
+      <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
+    </a>
+  {% endif %}
+  <span>{{ self.pager_status() }}</span>
+  {% if page < pages %}
+    <a class="admin-nav-link" style="width:auto"
+       href="{{ base }}/admin/users?page={{ page + 1 }}{% if !q.is_empty() %}&q={{ q|urlencode }}{% endif %}">
+      {{ self.t("admin-users-next") }} <i class="ti ti-chevron-right" aria-hidden="true"></i>
+    </a>
+  {% endif %}
+</div>
 
 <script>
   // Reveal/hide toggle for the admin user password inputs (#430). One

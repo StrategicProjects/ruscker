@@ -9,6 +9,46 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.44 — 2026-07-17
+
+- **Identity headers for apps (ShinyProxy compat).** Apps that need to
+  know *who* is using them can now receive the authenticated identity
+  per request. Setting **`add-default-http-headers: true`** on a spec
+  (or its toggle in the app form's Access section) forwards
+  `X-SP-UserId` and `X-SP-UserGroups` — the ShinyProxy contract, so
+  migrated apps that attributed writes to a user work again. Unlike
+  ShinyProxy, Ruscker defaults this **off**: upgrading never silently
+  discloses identity to an app that wasn't already trusted with it.
+- **Extra identity claims, opt-in per app.** A Ruscker-native
+  **`identity-claims: [email, setor]`** list (checkboxes in the same
+  form section) additionally forwards `X-Ruscker-User-Email` /
+  `X-Ruscker-User-Setor`. Data minimization throughout: each app gets
+  only the claims it declared, a claim with no stored value is omitted
+  (never sent empty), and the claims work with or without the X-SP
+  pair. Anonymous visitors and token sessions carry no identity.
+- **Spoofing-proof by construction.** The whole `X-SP-*` and
+  `X-Ruscker-User-*` namespaces are stripped from every incoming
+  request — HTTP and WebSocket alike — before Ruscker injects its own
+  authoritative values, so an app can trust what it receives (see the
+  trust-boundary note in the security guide: the container port must
+  only be reachable through Ruscker). Accented values (`Gestão`)
+  arrive as clean UTF-8. No extra database work per asset: identity is
+  resolved once per request through a short-lived cache that admin
+  edits invalidate immediately.
+- **Users page scales.** `/admin/users` now paginates server-side (50
+  per page) with a server-side search over username, groups and the
+  profile fields — a large user base (big CSV imports) no longer
+  renders thousands of rows per view. Search is accent-tolerant on
+  both SQLite and Postgres.
+- **Clearer module titles.** Every admin screen's title/subtitle was
+  standardized to state what the module is for ("Gestão de X" +
+  purpose line, per the design doc): the nav now says **Containers**
+  (was Painel) and **Atividades** (was Auditoria), the Logs tab is
+  titled "Auditoria de Logs", and technical notes (media formats,
+  CSV import details) moved from subtitles into in-context helper
+  text. The Groups subtitle no longer claims the page is read-only —
+  it hasn't been since groups became editable.
+
 ## v0.2.43 — 2026-07-13
 
 - **Scheduled jobs (cron).** A new **Schedules** page in the admin runs

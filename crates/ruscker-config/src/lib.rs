@@ -49,7 +49,7 @@ pub use schema::{
     is_valid_memory_size, normalize_base_path, ApiSpec, Config, Host, HostTls, IdentityClaim,
     LandingBlock, LandingCustomization, LandingLogo, Logging, Placement, Proxy, RatePolicy,
     RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties, ThemeColors,
-    ThemePalette, DEFAULT_SCALE_DOWN_COOLDOWN_SECS,
+    ThemePalette, DEFAULT_SCALE_DOWN_COOLDOWN_SECS, MAX_MFA_VALIDITY_DAYS,
 };
 pub use validate::{
     is_reserved_label_key, is_valid_label_key, is_valid_network_name, is_valid_volume_bind,

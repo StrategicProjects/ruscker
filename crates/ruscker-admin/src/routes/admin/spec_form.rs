@@ -652,9 +652,14 @@ impl SpecForm {
             access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             require_mfa: checkbox(spec.effective_require_mfa()),
+            // Render the CLAMPED value: an imported `mfa-validity-days: 31`
+            // in the `max=30` number input would make the browser's
+            // constraint validation block the WHOLE form submit — silently,
+            // when the field is hidden by the require-mfa x-show (codex
+            // review, #1005). The clamp is what runtime applies anyway.
             mfa_validity_days: spec
                 .mfa_validity_days
-                .map(|days| days.to_string())
+                .map(|days| days.min(ruscker_config::MAX_MFA_VALIDITY_DAYS).to_string())
                 .unwrap_or_default(),
             add_default_http_headers: checkbox(spec.effective_add_default_http_headers()),
             identity_claim_email: checkbox(identity_claims.contains(&IdentityClaim::Email)),
@@ -2146,6 +2151,13 @@ proxy:
         let merged = form.into_spec(Some(&base), Role::Admin).expect("merge zero days");
         assert_eq!(merged.require_mfa, Some(true));
         assert_eq!(merged.mfa_validity_days, Some(0));
+
+        // An imported out-of-range value renders CLAMPED in the form —
+        // else the browser's max=30 constraint blocks the whole submit
+        // (silently when the field is hidden by x-show).
+        let mut over = base.clone();
+        over.mfa_validity_days = Some(31);
+        assert_eq!(SpecForm::from_spec(&over).mfa_validity_days, "30");
 
         let mut form = SpecForm::from_spec(&base);
         form.require_mfa.clear();

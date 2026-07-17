@@ -61,7 +61,17 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// in `ruscker-cli`'s `init_tracing`.
 pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 
-/// Shared short-TTL cache of user group memberships for the proxy hot
+/// Identity attributes cached together for the proxy hot path (#1001).
+/// `celular`, roles, and authentication tokens are intentionally absent:
+/// they are not supported upstream identity claims.
+#[derive(Default)]
+pub struct CachedIdentity {
+    pub(crate) groups: Arc<Vec<String>>,
+    pub(crate) email: Option<String>,
+    pub(crate) setor: Option<String>,
+}
+
+/// Shared short-TTL cache of user identity attributes for the proxy hot
 /// path (#1001).
 ///
 /// The generation counter closes an invalidation race (codex review):
@@ -75,18 +85,18 @@ pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 /// unreadable — no check-then-insert window exists by construction.
 #[derive(Default)]
 pub struct IdentityCache {
-    map: dashmap::DashMap<String, (u64, std::time::Instant, Arc<Vec<String>>)>,
+    map: dashmap::DashMap<String, (u64, std::time::Instant, Arc<CachedIdentity>)>,
     generation: std::sync::atomic::AtomicU64,
 }
 
 impl IdentityCache {
-    /// Cached groups for `username`, if fresher than `ttl` AND filled
+    /// Cached identity for `username`, if fresher than `ttl` AND filled
     /// under the current generation (i.e. not invalidated since).
-    pub fn get(&self, username: &str, ttl: std::time::Duration) -> Option<Arc<Vec<String>>> {
+    pub fn get(&self, username: &str, ttl: std::time::Duration) -> Option<Arc<CachedIdentity>> {
         let entry = self.map.get(username)?;
-        let (generation, filled_at, groups) = entry.value();
+        let (generation, filled_at, identity) = entry.value();
         (*generation == self.generation() && filled_at.elapsed() < ttl)
-            .then(|| groups.clone())
+            .then(|| identity.clone())
     }
 
     /// Snapshot to take BEFORE the DB read that will feed [`Self::store`].
@@ -94,13 +104,13 @@ impl IdentityCache {
         self.generation.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Cache a resolved membership, tagged with the generation that was
+    /// Cache a resolved identity, tagged with the generation that was
     /// current when the fill began — if an invalidation raced this fill,
     /// the entry lands already-expired and `get` never serves it.
-    pub fn store(&self, generation: u64, username: &str, groups: Arc<Vec<String>>) {
+    pub fn store(&self, generation: u64, username: &str, identity: Arc<CachedIdentity>) {
         self.map.insert(
             username.to_string(),
-            (generation, std::time::Instant::now(), groups),
+            (generation, std::time::Instant::now(), identity),
         );
     }
 

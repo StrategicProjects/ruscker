@@ -407,8 +407,11 @@ actually flows, and why it is **deliberately not TLS**:
   on a single host, or the private app network in a multi-host deployment.
   Exposing a container's published port lets a caller bypass the proxy and
   forge those headers directly. Ruscker strips inbound claims and injects
-  authoritative `X-SP-UserId` / `X-SP-UserGroups` only on opted-in specs,
-  but it cannot protect a separate network path around the proxy.
+  authoritative `X-SP-UserId` / `X-SP-UserGroups` and explicitly selected
+  `X-Ruscker-User-Email` / `X-Ruscker-User-Setor` claims only on opted-in
+  specs, but it cannot protect a separate network path around the proxy.
+  E-mail and department/unit values are PII; operators should enable each
+  claim only for apps that need and are trusted to process it.
 
 ### Forwarded-header trust model
 

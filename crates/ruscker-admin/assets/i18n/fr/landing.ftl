@@ -642,6 +642,10 @@ spec-help-access-users = Utilisateurs qui peuvent voir et atteindre l'app (sépa
 spec-form-access-help = Les deux vides = carte ouverte à tous (y compris anonyme). Avec une valeur, seuls les utilisateurs connectés correspondants — et toujours les admins.
 spec-form-identity-headers = Envoyer les en-têtes d’identité à l’app
 spec-form-identity-headers-hint = Ajoute X-SP-UserId et X-SP-UserGroups pour les utilisateurs connectés. Désactivé par défaut ; activez uniquement pour les apps qui ont besoin de cette identité et lui font confiance.
+spec-form-identity-claims = Attributs d’identité supplémentaires
+spec-form-identity-claims-hint = Envoie uniquement les données de profil sélectionnées à cette app. Ces attributs sont indépendants des en-têtes d’identité X-SP.
+spec-form-identity-claim-email = E-mail
+spec-form-identity-claim-setor = Service / unité
 spec-form-access-public = Public
 spec-form-access-add-group = + ajouter
 spec-form-access-public-hint = vide = visible par tous

@@ -129,6 +129,10 @@ Statuses:
 
 ## Ruscker extensions (no ShinyProxy counterpart)
 
+- `identity-claims` opts a trusted spec in to selected additional profile
+  headers (`email` and/or `setor`); it is independent of
+  `add-default-http-headers` and defaults to none.
+
 These are additions, not compat concerns — listed so a reviewed config
 is fully accounted for. Details in the
 [YAML schema reference](./configuration.md): per-spec `type`,

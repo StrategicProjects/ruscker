@@ -642,6 +642,10 @@ spec-help-access-users = Usuarios que pueden ver y acceder a la app (separados p
 spec-form-access-help = Ambos vacíos = tarjeta abierta a todos (incluido anónimo). Con algún valor, solo usuarios conectados que coincidan — y los admins siempre.
 spec-form-identity-headers = Enviar cabeceras de identidad a la app
 spec-form-identity-headers-hint = Añade X-SP-UserId y X-SP-UserGroups para usuarios autenticados. Desactivado por defecto; actívalo solo para apps que necesiten y confíen en esta identidad.
+spec-form-identity-claims = Datos de identidad adicionales
+spec-form-identity-claims-hint = Envía solo los datos de perfil seleccionados a esta app. Estos datos son independientes de las cabeceras de identidad X-SP.
+spec-form-identity-claim-email = Correo electrónico
+spec-form-identity-claim-setor = Sector / unidad
 spec-form-access-public = Público
 spec-form-access-add-group = + añadir grupo
 spec-form-access-public-hint = vacío = visible para todos

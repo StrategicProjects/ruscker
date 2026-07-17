@@ -935,6 +935,18 @@ pub struct Spec {
     #[serde(rename = "access-users", default)]
     pub access_users: Option<Vec<String>>,
 
+    /// Require a fresh user-owned MFA proof before this app is trusted for
+    /// access (#1005). The factor belongs to the user and is enrolled once;
+    /// this per-app switch only decides whether that proof is required.
+    #[serde(rename = "require-mfa")]
+    pub require_mfa: Option<bool>,
+
+    /// Maximum age, in days, of the user-owned MFA proof this app trusts
+    /// (#1005). `0` deliberately limits trust to the current login session;
+    /// values above [`MAX_MFA_VALIDITY_DAYS`] are clamped.
+    #[serde(rename = "mfa-validity-days")]
+    pub mfa_validity_days: Option<u16>,
+
     /// Forward the authenticated user's ShinyProxy-compatible identity
     /// headers to this app. Deliberately defaults to `false`, unlike
     /// ShinyProxy: existing apps must opt in before Ruscker discloses a
@@ -1137,6 +1149,16 @@ pub const DEFAULT_SCALE_DOWN_COOLDOWN_SECS: u64 = 60;
 /// comes from `max-replicas`). APIs keep 100.
 pub const DEFAULT_SEATS_PER_APP: u32 = 10;
 
+/// Default age, in days, for an MFA proof trusted by a protected app (#1005).
+/// Seven days balances proof freshness with avoiding needless prompts when an
+/// operator enables MFA without choosing a custom remembered-device window.
+pub const DEFAULT_MFA_VALIDITY_DAYS: u16 = 7;
+
+/// Maximum age, in days, for an MFA proof trusted by a protected app (#1005).
+/// Bounding remembered-device trust to 30 days prevents a typo from silently
+/// creating a much longer security window.
+pub const MAX_MFA_VALIDITY_DAYS: u16 = 30;
+
 impl Spec {
     /// Container environment as Docker `NAME=value` strings, sorted for
     /// determinism (the field is a `BTreeMap`). Empty when no
@@ -1216,6 +1238,20 @@ impl Spec {
     pub fn is_open(&self) -> bool {
         self.access_groups.as_deref().is_none_or(<[String]>::is_empty)
             && self.access_users.as_deref().is_none_or(<[String]>::is_empty)
+    }
+
+    /// Whether this app requires a user-owned MFA proof (#1005).
+    pub fn effective_require_mfa(&self) -> bool {
+        self.require_mfa.unwrap_or(false)
+    }
+
+    /// Maximum age, in days, of the MFA proof this app trusts (#1005).
+    /// Unset uses seven days, `0` remains session-only, and larger authored
+    /// values are capped at the validated 30-day maximum.
+    pub fn effective_mfa_validity_days(&self) -> u16 {
+        self.mfa_validity_days
+            .unwrap_or(DEFAULT_MFA_VALIDITY_DAYS)
+            .min(MAX_MFA_VALIDITY_DAYS)
     }
 
     /// Whether authenticated identity headers are disclosed to this app.
@@ -2080,6 +2116,8 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            require_mfa: None,
+            mfa_validity_days: None,
             add_default_http_headers: None,
             identity_claims: None,
             template_properties: TemplateProperties::default(),
@@ -2133,6 +2171,8 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            require_mfa: None,
+            mfa_validity_days: None,
             add_default_http_headers: None,
             identity_claims: None,
             template_properties: TemplateProperties::default(),
@@ -2186,6 +2226,8 @@ proxy:
             labels: None,
             access_groups: None,
             access_users: None,
+            require_mfa: None,
+            mfa_validity_days: None,
             add_default_http_headers: None,
             identity_claims: None,
             template_properties: TemplateProperties::default(),
@@ -2335,6 +2377,27 @@ proxy:
         );
         assert_eq!(enabled.add_default_http_headers, Some(true));
         assert!(enabled.effective_add_default_http_headers());
+    }
+
+    #[test]
+    fn parses_mfa_policy_defaults_and_bounds() {
+        let default = parse_spec("id: a\ncontainer-image: x");
+        assert_eq!(default.require_mfa, None);
+        assert!(!default.effective_require_mfa());
+        assert_eq!(default.mfa_validity_days, None);
+        assert_eq!(default.effective_mfa_validity_days(), DEFAULT_MFA_VALIDITY_DAYS);
+
+        let session_only = parse_spec(
+            "id: a\ncontainer-image: x\nrequire-mfa: true\nmfa-validity-days: 0",
+        );
+        assert_eq!(session_only.require_mfa, Some(true));
+        assert!(session_only.effective_require_mfa());
+        assert_eq!(session_only.mfa_validity_days, Some(0));
+        assert_eq!(session_only.effective_mfa_validity_days(), 0);
+
+        let clamped = parse_spec("id: a\ncontainer-image: x\nmfa-validity-days: 31");
+        assert_eq!(clamped.mfa_validity_days, Some(31));
+        assert_eq!(clamped.effective_mfa_validity_days(), MAX_MFA_VALIDITY_DAYS);
     }
 
     #[test]

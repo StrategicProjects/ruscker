@@ -501,6 +501,11 @@ pub struct SpecForm {
     pub access_groups: String,
     /// Usernames allowed to see + reach this app — comma/newline list.
     pub access_users: String,
+    /// Checkbox ("on") ⇒ this app requires a user-owned MFA proof (#1005).
+    pub require_mfa: String,
+    /// Maximum MFA-proof age in days. Blank ⇒ schema default; `0` is a
+    /// deliberate session-only window and must not collapse to blank.
+    pub mfa_validity_days: String,
     /// Checkbox ("on") ⇒ forward the signed-in user's ShinyProxy-compatible
     /// identity headers to this app. Off by default (data minimization).
     pub add_default_http_headers: String,
@@ -646,6 +651,11 @@ impl SpecForm {
             docker_registry_credential: spec.docker_registry_credential.clone().unwrap_or_default(),
             access_groups: spec.access_groups.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
             access_users: spec.access_users.as_ref().map(|v| v.join(", ")).unwrap_or_default(),
+            require_mfa: checkbox(spec.effective_require_mfa()),
+            mfa_validity_days: spec
+                .mfa_validity_days
+                .map(|days| days.to_string())
+                .unwrap_or_default(),
             add_default_http_headers: checkbox(spec.effective_add_default_http_headers()),
             identity_claim_email: checkbox(identity_claims.contains(&IdentityClaim::Email)),
             identity_claim_setor: checkbox(identity_claims.contains(&IdentityClaim::Setor)),
@@ -845,6 +855,8 @@ impl SpecForm {
             docker_registry_credential: empty_to_none(&self.docker_registry_credential),
             access_groups: list_to_vec(&self.access_groups),
             access_users: list_to_vec(&self.access_users),
+            require_mfa: checkbox_opt(&self.require_mfa),
+            mfa_validity_days: parse_opt(&self.mfa_validity_days),
             add_default_http_headers: checkbox_opt(&self.add_default_http_headers),
             identity_claims,
             container_cpu_request: parse_opt(&self.container_cpu_request),
@@ -891,6 +903,7 @@ impl SpecForm {
             &self.api_port,
             &self.container_port,
             &self.container_lifetime,
+            &self.mfa_validity_days,
             &self.scale_down_grace,
             &self.scale_down_cooldown_secs,
             &self.drain_timeout,
@@ -2060,6 +2073,8 @@ proxy:
         - --ServerApp.base_url=/
       access-groups: [staff, ops]
       access-users: [alice]
+      require-mfa: true
+      mfa-validity-days: 12
       add-default-http-headers: true
       identity-claims: [email, future-claim, setor]
       placement: bin-pack
@@ -2089,6 +2104,8 @@ proxy:
         );
         assert_eq!(merged.access_groups.as_deref(), Some(&["staff".into(), "ops".into()][..]));
         assert_eq!(merged.access_users.as_deref(), Some(&["alice".into()][..]));
+        assert_eq!(merged.require_mfa, Some(true));
+        assert_eq!(merged.mfa_validity_days, Some(12));
         assert!(merged.effective_add_default_http_headers());
         assert_eq!(
             merged.effective_identity_claims(),
@@ -2105,6 +2122,36 @@ proxy:
         assert_eq!(merged.scale_down_grace, Some(45));
         assert_eq!(merged.scale_down_cooldown_secs, Some(90));
         assert_eq!(merged.drain_timeout, Some(20));
+    }
+
+    #[test]
+    fn mfa_form_preserves_blank_zero_and_checkbox_state() {
+        let base = Config::from_yaml(
+            "proxy:\n  specs:\n    - id: guarded\n      container-image: a:1\n      require-mfa: true\n",
+        )
+        .expect("parse fixture")
+        .proxy
+        .specs
+        .remove(0);
+
+        let form = SpecForm::from_spec(&base);
+        assert_eq!(form.require_mfa, "on");
+        assert_eq!(form.mfa_validity_days, "");
+        let merged = form.into_spec(Some(&base), Role::Admin).expect("merge blank days");
+        assert_eq!(merged.require_mfa, Some(true));
+        assert_eq!(merged.mfa_validity_days, None);
+
+        let mut form = SpecForm::from_spec(&base);
+        form.mfa_validity_days = "0".into();
+        let merged = form.into_spec(Some(&base), Role::Admin).expect("merge zero days");
+        assert_eq!(merged.require_mfa, Some(true));
+        assert_eq!(merged.mfa_validity_days, Some(0));
+
+        let mut form = SpecForm::from_spec(&base);
+        form.require_mfa.clear();
+        let merged = form.into_spec(Some(&base), Role::Admin).expect("merge unchecked");
+        assert_eq!(merged.require_mfa, None);
+        assert_eq!(merged.mfa_validity_days, None);
     }
 
     #[test]

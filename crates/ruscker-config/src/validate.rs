@@ -23,7 +23,7 @@
 //! [`scan_raw_text`] runs against raw YAML; [`run`] runs against the
 //! parsed model. [`Config::validate`] merges results from both.
 
-use crate::schema::{AuthScheme, Config, Spec, SpecKind};
+use crate::schema::{AuthScheme, Config, Spec, SpecKind, MAX_MFA_VALIDITY_DAYS};
 use std::sync::LazyLock;
 use regex::Regex;
 use serde::Serialize;
@@ -81,6 +81,24 @@ pub enum Warning {
     },
     SpecLackingContainerHasContainerFields {
         spec_id: String,
+    },
+    /// `mfa-validity-days` exceeds the maximum remembered-proof trust
+    /// window. The effective value is clamped, so report both the authored
+    /// value and the behavior the operator will actually get (#1005).
+    MfaValidityOutOfRange {
+        spec: String,
+        days: u16,
+    },
+    /// `mfa-validity-days` is configured while MFA itself is off, so the
+    /// trust window is parsed but inert (#1005).
+    MfaValidityWithoutRequire {
+        spec: String,
+    },
+    /// TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
+    /// `require-mfa` is security-sensitive but not consumed at runtime yet;
+    /// this warning prevents a silent false sense of protection.
+    MfaNotYetEnforced {
+        spec: String,
     },
     /// `api.rate-limit` is set but doesn't parse as `N/unit`
     /// (e.g. `100/min`). The proxy ignores an unparseable limit
@@ -531,6 +549,26 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
         });
     }
 
+    if let Some(days) = spec.mfa_validity_days {
+        if days > MAX_MFA_VALIDITY_DAYS {
+            warnings.push(Warning::MfaValidityOutOfRange {
+                spec: spec.id.clone(),
+                days,
+            });
+        }
+        if !spec.effective_require_mfa() {
+            warnings.push(Warning::MfaValidityWithoutRequire {
+                spec: spec.id.clone(),
+            });
+        }
+    }
+    // TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
+    if spec.effective_require_mfa() {
+        warnings.push(Warning::MfaNotYetEnforced {
+            spec: spec.id.clone(),
+        });
+    }
+
     if let Some(t) = spec.template_properties.type_field() {
         if !KNOWN_TYPES.contains(&t) {
             warnings.push(Warning::UnknownTypeProperty {
@@ -810,6 +848,98 @@ fn collect_stats(config: &Config) -> Stats {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn is_mfa_warning(warning: &Warning) -> bool {
+        matches!(
+            warning,
+            Warning::MfaValidityOutOfRange { .. }
+                | Warning::MfaValidityWithoutRequire { .. }
+                | Warning::MfaNotYetEnforced { .. }
+        )
+    }
+
+    #[test]
+    fn flags_mfa_validity_above_maximum_only_when_out_of_range() {
+        let yaml = "proxy:\n  specs:\n    - id: guarded\n      container-image: a:1\n      require-mfa: true\n      mfa-validity-days: 31\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert_eq!(
+            report
+                .warnings
+                .iter()
+                .filter(|w| matches!(w, Warning::MfaValidityOutOfRange { .. }))
+                .count(),
+            1
+        );
+        assert!(report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::MfaValidityOutOfRange { spec, days }
+                if spec == "guarded" && *days == 31
+        )));
+
+        let at_max = yaml.replace("31", "30");
+        let report = Config::from_yaml(&at_max).expect("parse").validate();
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MfaValidityOutOfRange { .. })));
+    }
+
+    #[test]
+    fn flags_mfa_validity_without_requirement_only_when_inert() {
+        let yaml = "proxy:\n  specs:\n    - id: inert\n      container-image: a:1\n      mfa-validity-days: 7\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert_eq!(
+            report
+                .warnings
+                .iter()
+                .filter(|w| matches!(w, Warning::MfaValidityWithoutRequire { .. }))
+                .count(),
+            1
+        );
+        assert!(report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::MfaValidityWithoutRequire { spec } if spec == "inert"
+        )));
+
+        let enabled = yaml.replace("      mfa-validity-days", "      require-mfa: true\n      mfa-validity-days");
+        let report = Config::from_yaml(&enabled).expect("parse").validate();
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MfaValidityWithoutRequire { .. })));
+    }
+
+    #[test]
+    fn flags_required_mfa_as_not_yet_enforced_only_when_enabled() {
+        let yaml = "proxy:\n  specs:\n    - id: staged\n      container-image: a:1\n      require-mfa: true\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert_eq!(
+            report
+                .warnings
+                .iter()
+                .filter(|w| matches!(w, Warning::MfaNotYetEnforced { .. }))
+                .count(),
+            1
+        );
+        assert!(report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::MfaNotYetEnforced { spec } if spec == "staged"
+        )));
+
+        let disabled = yaml.replace("true", "false");
+        let report = Config::from_yaml(&disabled).expect("parse").validate();
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MfaNotYetEnforced { .. })));
+    }
+
+    #[test]
+    fn spec_without_mfa_fields_has_no_mfa_warning() {
+        let yaml = "proxy:\n  specs:\n    - id: plain\n      container-image: a:1\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(!report.warnings.iter().any(is_mfa_warning));
+    }
 
     #[test]
     fn raw_scan_flags_plain_credential() {

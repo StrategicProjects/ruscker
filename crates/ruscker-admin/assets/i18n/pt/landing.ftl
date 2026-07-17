@@ -645,6 +645,11 @@ spec-help-access-groups = Grupos que podem ver e acessar o app (separados por v�
 spec-form-access-users = Usuários permitidos
 spec-help-access-users = Usuários que podem ver e acessar o app (separados por vírgula).
 spec-form-access-help = Ambos em branco = card aberto a todos (inclusive anônimos). Com algum valor, só usuários logados que combinam — e admins sempre.
+spec-form-require-mfa = Exigir 2FA
+spec-form-require-mfa-hint = Usuários sem um fator TOTP configurado serão orientados a cadastrá-lo no primeiro acesso a um app protegido.
+spec-form-mfa-validity = Solicitar novamente após N dias
+spec-form-mfa-validity-hint = Em branco = 7 dias. Use 0 para exigir nova prova em cada sessão de login, sem dispositivo lembrado.
+spec-form-mfa-staged-note = A exigência de 2FA chega em uma próxima versão; por enquanto, este app ainda não está protegido.
 spec-form-identity-headers = Enviar cabeçalhos de identidade ao app
 spec-form-identity-headers-hint = Adiciona X-SP-UserId e X-SP-UserGroups para usuários autenticados. Desativado por padrão; ative apenas para apps que precisam e confiam nessa identidade.
 spec-form-identity-claims = Dados adicionais de identidade

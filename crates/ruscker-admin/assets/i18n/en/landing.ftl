@@ -123,6 +123,16 @@ admin-users-col-role = Role
 admin-users-col-created = Created
 admin-users-col-actions = Actions
 admin-users-you = you
+# Server-side search + pagination on the users table (#999)
+admin-users-search = Search
+admin-users-search-clear = Clear search
+admin-users-search-none = No users match the search.
+admin-users-pager-status = Page { $page } of { $pages } · { $total } { $total ->
+        [one] user
+       *[other] users
+    }
+admin-users-prev = Previous
+admin-users-next = Next
 admin-users-must-change = Still using the initial password
 admin-users-save-role = Save role
 admin-users-groups = Groups

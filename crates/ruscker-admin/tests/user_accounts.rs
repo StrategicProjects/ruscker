@@ -821,3 +821,70 @@ async fn password_policy_enforced_on_create_and_reset() {
         .unwrap()
         .is_some());
 }
+
+/// The users list paginates + searches server-side (#999): `?q=` filters
+/// against the DB (not the rendered DOM) and an out-of-range `?page=`
+/// clamps instead of 404ing or rendering an empty table.
+#[tokio::test]
+async fn users_list_server_side_search_and_page_clamp() {
+    let (state, _pool) = state_with_db().await;
+    let db = state.db.clone().unwrap();
+    for (name, pw) in [
+        ("root", "Root!pass1"),
+        ("alice", "Alice!pass1"),
+        ("bob", "Bob!pass12"),
+    ] {
+        ruscker_admin::db::users::create(
+            &db,
+            name,
+            pw,
+            if name == "root" { Role::Admin } else { Role::Viewer },
+            false,
+            &[],
+            None,
+        )
+        .await
+        .unwrap();
+    }
+    let sid = state
+        .admin_sessions
+        .create(Role::Admin, Some("root".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+
+    let get_body = |uri: String| {
+        let state = state.clone();
+        let cookie = cookie.clone();
+        async move {
+            let resp = router(state)
+                .oneshot(
+                    Request::builder()
+                        .uri(uri)
+                        .header("cookie", cookie)
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(resp.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+            String::from_utf8(body.to_vec()).unwrap()
+        }
+    };
+
+    // The search hits the DB, so it filters rows before they render.
+    let body = get_body("/admin/users?q=alice".to_string()).await;
+    assert!(body.contains(r#"href="/admin/users/alice/edit""#));
+    assert!(!body.contains(r#"href="/admin/users/bob/edit""#));
+    // The term is echoed back into the search box (HTML-escaped by Askama).
+    assert!(body.contains(r#"value="alice""#));
+
+    // No match ⇒ empty table, no user rows.
+    let body = get_body("/admin/users?q=zzz-no-such-user".to_string()).await;
+    assert!(!body.contains("/edit\""));
+
+    // An out-of-range page clamps back into range (all 3 fit on page 1).
+    let body = get_body("/admin/users?page=999".to_string()).await;
+    assert!(body.contains(r#"href="/admin/users/alice/edit""#));
+    assert!(body.contains(r#"href="/admin/users/bob/edit""#));
+}

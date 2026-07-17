@@ -123,6 +123,16 @@ admin-users-col-role = Nivel
 admin-users-col-created = Creado
 admin-users-col-actions = Acciones
 admin-users-you = tú
+# Búsqueda + paginación en el servidor en la tabla de usuarios (#999)
+admin-users-search = Buscar
+admin-users-search-clear = Limpiar búsqueda
+admin-users-search-none = Ningún usuario coincide con la búsqueda.
+admin-users-pager-status = Página { $page } de { $pages } · { $total } { $total ->
+        [one] usuario
+       *[other] usuarios
+    }
+admin-users-prev = Anterior
+admin-users-next = Siguiente
 admin-users-must-change = Aún usa la contraseña inicial
 admin-users-save-role = Guardar nivel
 admin-users-groups = Grupos

@@ -3,6 +3,11 @@ CREATE TABLE user_mfa (
     username       TEXT PRIMARY KEY REFERENCES users(username) ON DELETE CASCADE,
     secret_enc     BYTEA NOT NULL,
     secret_nonce   BYTEA NOT NULL,
+    -- Random per-enrollment ceremony token: binds the pending secret to
+    -- the browser that passed the password re-auth (cookie) and makes the
+    -- confirm UPDATE conditional, so a racing re-start can never get its
+    -- replacement secret confirmed by a code proving the old one.
+    ceremony       TEXT NOT NULL,
     confirmed_at   TIMESTAMPTZ,
     created_at     TIMESTAMPTZ NOT NULL,
     updated_at     TIMESTAMPTZ NOT NULL,

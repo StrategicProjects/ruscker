@@ -13,6 +13,12 @@ pub struct MfaRow {
     pub username: String,
     pub secret_enc: Vec<u8>,
     pub secret_nonce: Vec<u8>,
+    /// Random per-enrollment token binding the pending secret to the
+    /// browser that passed the password re-auth (codex review, #1005):
+    /// confirm requires it both to re-render the secret and in the
+    /// conditional UPDATE, so neither a hijacked same-user session nor a
+    /// racing re-start can act on a ceremony it didn't begin.
+    pub ceremony: String,
     pub confirmed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
@@ -24,6 +30,7 @@ type StoredRow = (
     String,
     Vec<u8>,
     Vec<u8>,
+    String,
     Option<DateTime<Utc>>,
     DateTime<Utc>,
     DateTime<Utc>,
@@ -37,17 +44,19 @@ pub async fn begin_enrollment(
     username: &str,
     secret_enc: &[u8],
     nonce: &[u8],
+    ceremony: &str,
 ) -> Result<()> {
     let username = crate::db::users::normalize_username(username);
     let now = Utc::now();
     let affected = match db {
         ConfigDb::Sqlite(pool) => sqlx::query(
             "INSERT INTO user_mfa
-                (username, secret_enc, secret_nonce, confirmed_at, created_at, updated_at, last_used_step)
-             VALUES (?, ?, ?, NULL, ?, ?, NULL)
+                (username, secret_enc, secret_nonce, ceremony, confirmed_at, created_at, updated_at, last_used_step)
+             VALUES (?, ?, ?, ?, NULL, ?, ?, NULL)
              ON CONFLICT(username) DO UPDATE SET
                 secret_enc = excluded.secret_enc,
                 secret_nonce = excluded.secret_nonce,
+                ceremony = excluded.ceremony,
                 confirmed_at = NULL,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at,
@@ -57,6 +66,7 @@ pub async fn begin_enrollment(
         .bind(&username)
         .bind(secret_enc)
         .bind(nonce)
+        .bind(ceremony)
         .bind(now)
         .bind(now)
         .execute(pool)
@@ -65,11 +75,12 @@ pub async fn begin_enrollment(
         .rows_affected(),
         ConfigDb::Postgres(pool) => sqlx::query(
             "INSERT INTO user_mfa
-                (username, secret_enc, secret_nonce, confirmed_at, created_at, updated_at, last_used_step)
-             VALUES ($1, $2, $3, NULL, $4, $5, NULL)
+                (username, secret_enc, secret_nonce, ceremony, confirmed_at, created_at, updated_at, last_used_step)
+             VALUES ($1, $2, $3, $4, NULL, $5, $6, NULL)
              ON CONFLICT(username) DO UPDATE SET
                 secret_enc = excluded.secret_enc,
                 secret_nonce = excluded.secret_nonce,
+                ceremony = excluded.ceremony,
                 confirmed_at = NULL,
                 created_at = excluded.created_at,
                 updated_at = excluded.updated_at,
@@ -79,6 +90,7 @@ pub async fn begin_enrollment(
         .bind(&username)
         .bind(secret_enc)
         .bind(nonce)
+        .bind(ceremony)
         .bind(now)
         .bind(now)
         .execute(pool)
@@ -93,8 +105,13 @@ pub async fn begin_enrollment(
 }
 
 /// Mark a pending factor confirmed and atomically audit `mfa.enroll`.
-pub async fn confirm_enrollment(db: &ConfigDb, username: &str, actor: &str) -> Result<()> {
-    confirm_with_recovery_codes(db, username, actor, None).await
+pub async fn confirm_enrollment(
+    db: &ConfigDb,
+    username: &str,
+    actor: &str,
+    ceremony: &str,
+) -> Result<()> {
+    confirm_with_recovery_codes(db, username, actor, None, ceremony).await
 }
 
 /// Confirm enrollment, replace the recovery-code hashes, and write the audit
@@ -106,6 +123,7 @@ pub async fn confirm_with_recovery_codes(
     username: &str,
     actor: &str,
     recovery_hashes: Option<&[String]>,
+    ceremony: &str,
 ) -> Result<()> {
     let username = crate::db::users::normalize_username(username);
     let target = format!("user:{username}");
@@ -116,11 +134,12 @@ pub async fn confirm_with_recovery_codes(
             let result = sqlx::query(
                 "UPDATE user_mfa
                     SET confirmed_at = ?, updated_at = ?
-                  WHERE username = ? AND confirmed_at IS NULL",
+                  WHERE username = ? AND confirmed_at IS NULL AND ceremony = ?",
             )
             .bind(now)
             .bind(now)
             .bind(&username)
+            .bind(ceremony)
             .execute(&mut *tx)
             .await
             .context("confirm MFA enrollment")?;
@@ -165,11 +184,12 @@ pub async fn confirm_with_recovery_codes(
             let result = sqlx::query(
                 "UPDATE user_mfa
                     SET confirmed_at = $1, updated_at = $2
-                  WHERE username = $3 AND confirmed_at IS NULL",
+                  WHERE username = $3 AND confirmed_at IS NULL AND ceremony = $4",
             )
             .bind(now)
             .bind(now)
             .bind(&username)
+            .bind(ceremony)
             .execute(&mut *tx)
             .await
             .context("confirm MFA enrollment")?;
@@ -218,7 +238,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
     let row: Option<StoredRow> = match db {
         ConfigDb::Sqlite(pool) => {
             sqlx::query_as(
-                "SELECT username, secret_enc, secret_nonce, confirmed_at,
+                "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
                     created_at, updated_at, last_used_step
                FROM user_mfa WHERE username = ?",
             )
@@ -228,7 +248,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
         }
         ConfigDb::Postgres(pool) => {
             sqlx::query_as(
-                "SELECT username, secret_enc, secret_nonce, confirmed_at,
+                "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
                     created_at, updated_at, last_used_step
                FROM user_mfa WHERE username = $1",
             )
@@ -243,6 +263,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
             username,
             secret_enc,
             secret_nonce,
+            ceremony,
             confirmed_at,
             created_at,
             updated_at,
@@ -252,6 +273,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
                 username,
                 secret_enc,
                 secret_nonce,
+                ceremony,
                 confirmed_at,
                 created_at,
                 updated_at,
@@ -502,11 +524,11 @@ mod tests {
     #[tokio::test]
     async fn confirmed_factor_cannot_be_overwritten_without_reset() {
         let db = db_with_user("alice").await;
-        begin_enrollment(&db, "alice", b"cipher", b"nonce")
+        begin_enrollment(&db, "alice", b"cipher", b"nonce", "cer-1")
             .await
             .unwrap();
-        confirm_enrollment(&db, "alice", "alice").await.unwrap();
-        assert!(begin_enrollment(&db, "alice", b"new", b"nonce")
+        confirm_enrollment(&db, "alice", "alice", "cer-1").await.unwrap();
+        assert!(begin_enrollment(&db, "alice", b"new", b"nonce", "cer-2")
             .await
             .is_err());
     }
@@ -527,7 +549,7 @@ mod tests {
     #[tokio::test]
     async fn reset_removes_factor_and_codes_and_audits() {
         let db = db_with_user("alice").await;
-        begin_enrollment(&db, "alice", b"cipher", b"nonce")
+        begin_enrollment(&db, "alice", b"cipher", b"nonce", "cer-1")
             .await
             .unwrap();
         replace_recovery_codes(
@@ -567,7 +589,7 @@ mod tests {
         )
         .await
         .unwrap();
-        begin_enrollment(&db, &username, b"cipher", b"nonce")
+        begin_enrollment(&db, &username, b"cipher", b"nonce", "cer-pg")
             .await
             .unwrap();
         assert!(fetch(&db, &username)
@@ -576,7 +598,7 @@ mod tests {
             .unwrap()
             .confirmed_at
             .is_none());
-        confirm_enrollment(&db, &username, &username).await.unwrap();
+        confirm_enrollment(&db, &username, &username, "cer-pg").await.unwrap();
         assert!(is_enrolled(&db, &username).await.unwrap());
         reset(&db, &username, "root").await.unwrap();
         assert!(fetch(&db, &username).await.unwrap().is_none());

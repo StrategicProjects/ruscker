@@ -11,6 +11,8 @@ use axum::{
 use serde::Deserialize;
 
 use crate::auth::{AdminSession, Role};
+use axum::http::HeaderMap;
+use tower_cookies::{Cookie, Cookies};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -187,9 +189,44 @@ async fn render_status(
     (status, axum::response::Html(body)).into_response()
 }
 
+/// Cookie binding the pending enrollment ceremony to the browser that
+/// passed the password re-auth (codex review, #1005). Without it, ANY
+/// session for the same username — e.g. a stolen cookie that never
+/// re-authenticated — could post a wrong code and be handed the decrypted
+/// secret + QR via the retry re-render. Short-lived; scoped to the MFA
+/// pages; cleared on success.
+const CEREMONY_COOKIE: &str = "__ruscker_mfa_ceremony";
+
+fn ceremony_cookie_path(base: &str) -> String {
+    format!("{base}/admin/account/mfa")
+}
+
+fn issue_ceremony_cookie(state: &AppState, cookies: &Cookies, headers: &HeaderMap, value: String) {
+    let mut c = Cookie::new(CEREMONY_COOKIE, value);
+    c.set_path(ceremony_cookie_path(&state.base_path));
+    c.set_http_only(true);
+    c.set_same_site(tower_cookies::cookie::SameSite::Strict);
+    c.set_secure(crate::auth::request_is_https(
+        headers,
+        crate::routes::proxy::forward_headers_trusted(&state.config.server),
+    ));
+    c.set_max_age(tower_cookies::cookie::time::Duration::minutes(15));
+    cookies.add(c);
+}
+
+fn clear_ceremony_cookie(state: &AppState, cookies: &Cookies) {
+    let mut c = Cookie::new(CEREMONY_COOKIE, "");
+    // The removal path MUST match the issuing path — a Path-less removal
+    // never clears a scoped cookie (the #923 lesson).
+    c.set_path(ceremony_cookie_path(&state.base_path));
+    cookies.remove(c);
+}
+
 async fn start(
     session: AdminSession,
     State(state): State<AppState>,
+    cookies: Cookies,
+    headers: HeaderMap,
     loc: Locale,
     theme: Theme,
     Form(form): Form<StartForm>,
@@ -274,7 +311,10 @@ async fn start(
             return key_missing(&state, loc);
         }
     };
-    if let Err(err) = db::mfa::begin_enrollment(db, &username, &secret_enc, &nonce).await {
+    let ceremony = uuid::Uuid::new_v4().to_string();
+    if let Err(err) =
+        db::mfa::begin_enrollment(db, &username, &secret_enc, &nonce, &ceremony).await
+    {
         tracing::warn!(error = ?err, %username, "persist pending MFA enrollment failed");
         return render_status(
             &state,
@@ -290,6 +330,7 @@ async fn start(
     // A password-reauthenticated restart is a new setup ceremony, so stale
     // mistakes against the previous pending secret must not carry over.
     crate::mfa::CONFIRM_LIMITER.record_success(&username);
+    issue_ceremony_cookie(&state, &cookies, &headers, ceremony);
     render_setup(
         &state,
         session.role,
@@ -344,6 +385,7 @@ fn render_setup(
 async fn confirm(
     session: AdminSession,
     State(state): State<AppState>,
+    cookies: Cookies,
     loc: Locale,
     theme: Theme,
     Form(form): Form<ConfirmForm>,
@@ -374,6 +416,32 @@ async fn confirm(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Ceremony gate BEFORE any decrypt/re-render (codex review, #1005):
+    // only the browser that passed the password re-auth holds this cookie,
+    // so another session for the same user can never fish the secret out
+    // of the wrong-code retry path, and a raced re-start (new ceremony)
+    // invalidates in-flight confirms instead of confirming the wrong
+    // secret. Generic 409 — no secret material in the response.
+    let ceremony_ok = cookies
+        .get(CEREMONY_COOKIE)
+        .is_some_and(|c| {
+            // Constant-time compare: the token gates secret disclosure.
+            let got = c.value().as_bytes();
+            let want = row.ceremony.as_bytes();
+            got.len() == want.len()
+                && got
+                    .iter()
+                    .zip(want)
+                    .fold(0u8, |acc, (a, b)| acc | (a ^ b))
+                    == 0
+        });
+    if !ceremony_ok {
+        return (
+            StatusCode::CONFLICT,
+            "this browser did not start the pending enrollment — restart it",
+        )
+            .into_response();
+    }
     let plaintext = match state.master_key.decrypt(&row.secret_enc, &row.secret_nonce) {
         Ok(plaintext) => plaintext,
         Err(err) => {
@@ -454,13 +522,20 @@ async fn confirm(
             }
         }
     }
-    if let Err(err) =
-        db::mfa::confirm_with_recovery_codes(db, username, username, Some(&hashes)).await
+    if let Err(err) = db::mfa::confirm_with_recovery_codes(
+        db,
+        username,
+        username,
+        Some(&hashes),
+        &row.ceremony,
+    )
+    .await
     {
         tracing::warn!(error = ?err, %username, "confirm MFA enrollment failed");
         return (StatusCode::CONFLICT, "MFA enrollment was already confirmed").into_response();
     }
     crate::mfa::CONFIRM_LIMITER.record_success(username);
+    clear_ceremony_cookie(&state, &cookies);
     let page = AccountMfaRecoveryPage {
         locale: loc,
         theme,

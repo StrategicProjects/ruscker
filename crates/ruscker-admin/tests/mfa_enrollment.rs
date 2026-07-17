@@ -76,6 +76,20 @@ async fn request(
     body: &str,
     cookie: &str,
 ) -> (StatusCode, String, Option<String>) {
+    let (status, body, location, _) = request_full(state, method, uri, body, cookie).await;
+    (status, body, location)
+}
+
+/// Like [`request`], also returning the response's `Set-Cookie` values so a
+/// test can carry the enrollment-ceremony cookie from start to confirm the
+/// way a real browser would (#1005 ceremony binding).
+async fn request_full(
+    state: AppState,
+    method: &str,
+    uri: &str,
+    body: &str,
+    cookie: &str,
+) -> (StatusCode, String, Option<String>, Vec<String>) {
     let response = router(state)
         .oneshot(
             Request::builder()
@@ -94,12 +108,41 @@ async fn request(
         .get("location")
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let set_cookies: Vec<String> = response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(str::to_string)
+        .collect();
     let body = to_bytes(response.into_body(), 2 << 20).await.unwrap();
-    (status, String::from_utf8(body.to_vec()).unwrap(), location)
+    (
+        status,
+        String::from_utf8(body.to_vec()).unwrap(),
+        location,
+        set_cookies,
+    )
+}
+
+/// The `name=value` pair of the ceremony cookie from a start response.
+fn ceremony_pair(set_cookies: &[String]) -> String {
+    set_cookies
+        .iter()
+        .find(|c| c.starts_with("__ruscker_mfa_ceremony="))
+        .and_then(|c| c.split(';').next())
+        .expect("start must set the ceremony cookie")
+        .to_string()
 }
 
 async fn start(state: AppState, cookie: &str) -> (StatusCode, String) {
-    let (status, body, _) = request(
+    let (status, body, _) = start_with_ceremony(state, cookie).await;
+    (status, body)
+}
+
+/// Start enrollment and return the session+ceremony cookie header a real
+/// browser would send on the following confirm.
+async fn start_with_ceremony(state: AppState, cookie: &str) -> (StatusCode, String, String) {
+    let (status, body, _, set_cookies) = request_full(
         state,
         "POST",
         "/admin/account/mfa/start",
@@ -107,7 +150,12 @@ async fn start(state: AppState, cookie: &str) -> (StatusCode, String) {
         cookie,
     )
     .await;
-    (status, body)
+    let combined = if status == StatusCode::OK {
+        format!("{cookie}; {}", ceremony_pair(&set_cookies))
+    } else {
+        cookie.to_string()
+    };
+    (status, body, combined)
 }
 
 fn decrypted_secret(state: &AppState, row: &ruscker_admin::db::mfa::MfaRow) -> String {
@@ -124,7 +172,8 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
     create_user(&db, "alice", false).await;
     let user_cookie = cookie(&state, Role::Viewer, Some("alice".into())).await;
 
-    let (start_status, setup) = start(state.clone(), &user_cookie).await;
+    let (start_status, setup, browser_cookie) =
+        start_with_ceremony(state.clone(), &user_cookie).await;
     assert_eq!(start_status, StatusCode::OK);
     assert!(setup.contains("data-mfa-qr"));
     assert!(setup.contains("data-mfa-secret"));
@@ -147,7 +196,7 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
         "POST",
         "/admin/account/mfa/confirm",
         &format!("code={code}&next=%2Fapp%2Fdemo%2F"),
-        &user_cookie,
+        &browser_cookie,
     )
     .await;
     assert_eq!(confirm_status, StatusCode::OK);
@@ -213,7 +262,9 @@ async fn wrong_password_is_rejected_and_wrong_code_preserves_pending_for_retry()
         .unwrap()
         .is_none());
 
-    assert_eq!(start(state.clone(), &user_cookie).await.0, StatusCode::OK);
+    let (start_status, _, browser_cookie) =
+        start_with_ceremony(state.clone(), &user_cookie).await;
+    assert_eq!(start_status, StatusCode::OK);
     let pending = ruscker_admin::db::mfa::fetch(&db, &username)
         .await
         .unwrap()
@@ -224,7 +275,7 @@ async fn wrong_password_is_rejected_and_wrong_code_preserves_pending_for_retry()
         "POST",
         "/admin/account/mfa/confirm",
         "code=garbage",
-        &user_cookie,
+        &browser_cookie,
     )
     .await;
     assert_eq!(wrong, StatusCode::UNAUTHORIZED);
@@ -245,7 +296,7 @@ async fn wrong_password_is_rejected_and_wrong_code_preserves_pending_for_retry()
         "POST",
         "/admin/account/mfa/confirm",
         &format!("code={code}"),
-        &user_cookie,
+        &browser_cookie,
     )
     .await;
     assert_eq!(retry, StatusCode::OK);
@@ -257,14 +308,16 @@ async fn confirm_rate_limit_trips_after_five_wrong_codes() {
     let username = format!("limited-{}", uuid::Uuid::new_v4().simple());
     create_user(&db, &username, false).await;
     let user_cookie = cookie(&state, Role::Viewer, Some(username)).await;
-    assert_eq!(start(state.clone(), &user_cookie).await.0, StatusCode::OK);
+    let (start_status, _, browser_cookie) =
+        start_with_ceremony(state.clone(), &user_cookie).await;
+    assert_eq!(start_status, StatusCode::OK);
     for _ in 0..5 {
         let (status, _, _) = request(
             state.clone(),
             "POST",
             "/admin/account/mfa/confirm",
             "code=garbage",
-            &user_cookie,
+            &browser_cookie,
         )
         .await;
         assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -274,7 +327,7 @@ async fn confirm_rate_limit_trips_after_five_wrong_codes() {
         "POST",
         "/admin/account/mfa/confirm",
         "code=garbage",
-        &user_cookie,
+        &browser_cookie,
     )
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
@@ -301,7 +354,9 @@ async fn admin_reset_removes_factor_and_codes_audits_and_allows_reenrollment() {
     create_user(&db, "carol", false).await;
     create_user(&db, "root", false).await;
     let user_cookie = cookie(&state, Role::Viewer, Some("carol".into())).await;
-    assert_eq!(start(state.clone(), &user_cookie).await.0, StatusCode::OK);
+    let (start_status, _, browser_cookie) =
+        start_with_ceremony(state.clone(), &user_cookie).await;
+    assert_eq!(start_status, StatusCode::OK);
     let pending = ruscker_admin::db::mfa::fetch(&db, "carol")
         .await
         .unwrap()
@@ -317,7 +372,7 @@ async fn admin_reset_removes_factor_and_codes_audits_and_allows_reenrollment() {
             "POST",
             "/admin/account/mfa/confirm",
             &format!("code={code}"),
-            &user_cookie,
+            &browser_cookie,
         )
         .await
         .0,
@@ -386,4 +441,100 @@ async fn break_glass_cannot_enroll_and_must_change_user_is_pinned_to_password() 
         request(state, "GET", "/admin/account/mfa", "", &first_cookie).await;
     assert_eq!(status, StatusCode::SEE_OTHER);
     assert_eq!(location.as_deref(), Some("/admin/account/password"));
+}
+
+
+/// P1 from the codex review (#1005): a second session for the SAME user —
+/// e.g. a stolen session cookie that never passed the password re-auth —
+/// must not be able to fish the pending secret out of the wrong-code retry
+/// re-render, nor confirm the enrollment.
+#[tokio::test]
+async fn another_session_without_ceremony_cookie_never_sees_the_secret() {
+    let (state, db) = state_with_db(true).await;
+    create_user(&db, "dana", false).await;
+    let enrolling = cookie(&state, Role::Viewer, Some("dana".into())).await;
+    let (start_status, _, _browser) = start_with_ceremony(state.clone(), &enrolling).await;
+    assert_eq!(start_status, StatusCode::OK);
+    let secret = decrypted_secret(
+        &state,
+        &ruscker_admin::db::mfa::fetch(&db, "dana").await.unwrap().unwrap(),
+    );
+
+    // A different session for the same user, WITHOUT the ceremony cookie.
+    let hijacker = cookie(&state, Role::Viewer, Some("dana".into())).await;
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/confirm",
+        "code=000000",
+        &hijacker,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        !body.contains(&secret),
+        "the retry path must never disclose the secret to a session without the ceremony"
+    );
+    // And a correct code without the ceremony cannot confirm either.
+    let code = ruscker_admin::mfa::totp(&secret, "dana")
+        .unwrap()
+        .generate_current()
+        .unwrap();
+    let (status, _, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/confirm",
+        &format!("code={code}"),
+        &hijacker,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(ruscker_admin::db::mfa::fetch(&db, "dana")
+        .await
+        .unwrap()
+        .unwrap()
+        .confirmed_at
+        .is_none());
+}
+
+/// P2 from the codex review (#1005): a re-started enrollment replaces the
+/// pending secret AND the ceremony, so a confirm still carrying the OLD
+/// ceremony must fail — never confirm secret B with a proof of secret A.
+#[tokio::test]
+async fn stale_ceremony_after_restart_cannot_confirm() {
+    let (state, db) = state_with_db(true).await;
+    create_user(&db, "erik", false).await;
+    let user_cookie = cookie(&state, Role::Viewer, Some("erik".into())).await;
+
+    let (s1, _, old_browser) = start_with_ceremony(state.clone(), &user_cookie).await;
+    assert_eq!(s1, StatusCode::OK);
+    let old_secret = decrypted_secret(
+        &state,
+        &ruscker_admin::db::mfa::fetch(&db, "erik").await.unwrap().unwrap(),
+    );
+
+    // Re-start: new secret + new ceremony replace the pending row.
+    let (s2, _, _new_browser) = start_with_ceremony(state.clone(), &user_cookie).await;
+    assert_eq!(s2, StatusCode::OK);
+
+    // The old browser proves the OLD secret with its OLD ceremony: rejected.
+    let code = ruscker_admin::mfa::totp(&old_secret, "erik")
+        .unwrap()
+        .generate_current()
+        .unwrap();
+    let (status, _, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/confirm",
+        &format!("code={code}"),
+        &old_browser,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(ruscker_admin::db::mfa::fetch(&db, "erik")
+        .await
+        .unwrap()
+        .unwrap()
+        .confirmed_at
+        .is_none());
 }

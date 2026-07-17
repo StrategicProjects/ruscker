@@ -232,6 +232,44 @@ async fn enabled_app_gets_authoritative_user_and_db_groups() {
     assert!(!headers.contains_key("x-ruscker-user-email"));
 }
 
+/// Group names are free-form UTF-8 (`gestão` is a perfectly normal
+/// pt-BR group) — the header value must go out as raw UTF-8 bytes, not
+/// be silently dropped by an ASCII-only conversion (codex review, #1001).
+#[tokio::test]
+async fn accented_group_names_reach_the_upstream() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "joana",
+        "joanapass1",
+        Role::Viewer,
+        false,
+        &["gestão".into()],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "identity-on", upstream).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("joana".into()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    send(state, "/api/identity-on/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+
+    assert_eq!(
+        headers.get("x-sp-userid").map(String::as_str),
+        Some("joana")
+    );
+    assert_eq!(
+        headers.get("x-sp-usergroups").map(String::as_str),
+        Some("gestão"),
+        "captured headers: {headers:?}"
+    );
+}
+
 #[tokio::test]
 async fn anonymous_api_request_cannot_forge_reserved_identity() {
     let db = open_db().await;

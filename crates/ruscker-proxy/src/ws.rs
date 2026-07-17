@@ -166,9 +166,13 @@ pub async fn connect_with_headers(
             .insert(header::SEC_WEBSOCKET_PROTOCOL, v);
     }
     for (name, value) in extra_headers {
+        // `from_bytes`, not `from_str`: identity values may carry
+        // non-ASCII UTF-8 (a group named `gestão`) which `from_str`
+        // rejects — the bytes go out raw, as ShinyProxy/Spring do,
+        // and a UTF-8-reading app gets the original string (#1001).
         if let (Ok(name), Ok(value)) = (
             name.parse::<header::HeaderName>(),
-            HeaderValue::from_str(value),
+            HeaderValue::from_bytes(value.as_bytes()),
         ) {
             request.headers_mut().insert(name, value);
         }

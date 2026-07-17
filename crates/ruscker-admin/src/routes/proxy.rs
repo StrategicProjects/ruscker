@@ -1813,11 +1813,21 @@ async fn do_forward(
 
     if let Some(identity) = identity {
         for (name, value) in identity.header_pairs() {
-            if let (Ok(name), Ok(value)) = (
+            // `from_bytes`, not `from_str`: group names are free-form
+            // UTF-8 (`gestão`) and `from_str` only accepts visible
+            // ASCII — it would silently drop X-SP-UserGroups (codex
+            // review, #1001). The raw UTF-8 bytes are what ShinyProxy
+            // (Spring) sends too. A value that still fails (embedded
+            // control chars can't reach here via parse_groups) is
+            // logged, never silently omitted.
+            match (
                 name.parse::<header::HeaderName>(),
-                HeaderValue::from_str(&value),
+                HeaderValue::from_bytes(value.as_bytes()),
             ) {
-                req.headers_mut().insert(name, value);
+                (Ok(name), Ok(value)) => {
+                    req.headers_mut().insert(name, value);
+                }
+                _ => tracing::warn!(header = %name, "identity header value not encodable; omitted"),
             }
         }
     }

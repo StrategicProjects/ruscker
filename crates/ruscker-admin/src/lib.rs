@@ -66,23 +66,27 @@ pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 ///
 /// The generation counter closes an invalidation race (codex review):
 /// a proxied request that read the DB *before* an admin mutation must
-/// not repopulate the cache *after* that mutation cleared it — else a
-/// revoked membership could survive locally for the full TTL. A fill
-/// therefore snapshots [`IdentityCache::generation`] before its DB
-/// read and hands it to [`IdentityCache::store`], which only accepts
-/// still-current fills (double-checked after the insert, so a clear
-/// that lands mid-store can't leave the stale entry behind either).
+/// not repopulate the cache *after* that mutation invalidated it —
+/// else a revoked membership could survive locally for the full TTL.
+/// Every entry records the generation that was current when its fill
+/// STARTED (snapshotted before the DB read), and [`IdentityCache::get`]
+/// rejects entries from an older generation. A stale fill may thus
+/// physically land in the map after an invalidation, but it is
+/// unreadable — no check-then-insert window exists by construction.
 #[derive(Default)]
 pub struct IdentityCache {
-    map: dashmap::DashMap<String, (std::time::Instant, Arc<Vec<String>>)>,
+    map: dashmap::DashMap<String, (u64, std::time::Instant, Arc<Vec<String>>)>,
     generation: std::sync::atomic::AtomicU64,
 }
 
 impl IdentityCache {
-    /// Cached groups for `username`, if fresher than `ttl`.
+    /// Cached groups for `username`, if fresher than `ttl` AND filled
+    /// under the current generation (i.e. not invalidated since).
     pub fn get(&self, username: &str, ttl: std::time::Duration) -> Option<Arc<Vec<String>>> {
         let entry = self.map.get(username)?;
-        (entry.0.elapsed() < ttl).then(|| entry.1.clone())
+        let (generation, filled_at, groups) = entry.value();
+        (*generation == self.generation() && filled_at.elapsed() < ttl)
+            .then(|| groups.clone())
     }
 
     /// Snapshot to take BEFORE the DB read that will feed [`Self::store`].
@@ -90,23 +94,18 @@ impl IdentityCache {
         self.generation.load(std::sync::atomic::Ordering::Acquire)
     }
 
-    /// Cache a resolved membership, unless an invalidation happened
-    /// since `generation` was snapshotted (the fill is then stale).
+    /// Cache a resolved membership, tagged with the generation that was
+    /// current when the fill began — if an invalidation raced this fill,
+    /// the entry lands already-expired and `get` never serves it.
     pub fn store(&self, generation: u64, username: &str, groups: Arc<Vec<String>>) {
-        use std::sync::atomic::Ordering;
-        if self.generation.load(Ordering::Acquire) != generation {
-            return;
-        }
-        self.map
-            .insert(username.to_string(), (std::time::Instant::now(), groups));
-        // An invalidation may have interleaved between the check and the
-        // insert; re-check and undo so the clear always wins.
-        if self.generation.load(Ordering::Acquire) != generation {
-            self.map.remove(username);
-        }
+        self.map.insert(
+            username.to_string(),
+            (generation, std::time::Instant::now(), groups),
+        );
     }
 
-    /// Drop everything and refuse in-flight fills (generation bump).
+    /// Expire every entry — current AND in-flight (generation bump);
+    /// the clear just reclaims memory early.
     pub fn invalidate(&self) {
         self.generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);

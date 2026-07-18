@@ -983,9 +983,9 @@ fn format_warning(w: &Warning) -> String {
                 "spec {spec} sets mfa-validity-days but require-mfa is not true — the validity setting has no effect"
             )
         }
-        Warning::MfaNotYetEnforced { spec } => {
+        Warning::MfaOnExternalSpec { spec } => {
             format!(
-                "spec {spec} sets require-mfa: true, but MFA is not yet enforced — this app is NOT protected; enforcement ships in an upcoming release (#1005)"
+                "spec {spec} sets require-mfa but is an external link — Ruscker never proxies it, so MFA is NOT enforced on the linked app"
             )
         }
         Warning::InvalidRateLimit { spec_id, value } => {

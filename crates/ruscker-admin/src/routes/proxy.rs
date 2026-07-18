@@ -170,6 +170,19 @@ const API_PREFIX: &str = "/api/";
 static INFLIGHT: std::sync::LazyLock<dashmap::DashMap<ruscker_core::ReplicaId, u32>> =
     std::sync::LazyLock::new(dashmap::DashMap::new);
 
+/// Break-glass MFA bypasses are deliberately loud, but a browser page load
+/// can generate dozens of proxied subrequests. Deduplicate the persistent
+/// audit row per `(admin session, spec)` while retaining a WARN for every
+/// request. Reserving the entry before the database write also prevents two
+/// concurrent first requests from inserting duplicate rows.
+static MFA_BREAK_GLASS_AUDITS: std::sync::LazyLock<
+    dashmap::DashMap<(String, String), std::time::Instant>,
+> = std::sync::LazyLock::new(dashmap::DashMap::new);
+
+const MFA_BREAK_GLASS_AUDIT_COOLDOWN: std::time::Duration =
+    std::time::Duration::from_secs(15 * 60);
+const MFA_BREAK_GLASS_AUDIT_CAP: usize = 256;
+
 /// RAII guard: bumps a replica's in-flight count on creation and drops
 /// it on `Drop`, covering every return/error path of the forward.
 pub(crate) struct InflightGuard(ruscker_core::ReplicaId);
@@ -435,6 +448,13 @@ async fn forward(
             // is sent to log in; everyone else (and all API clients) get
             // a flat 403 (CORS-wrapped for the `/api/` family).
             if route_prefix == APP_PREFIX && session.0.is_none() {
+                if ws_upgrade.0.is_some() {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        "authentication required before WebSocket upgrade\n",
+                    )
+                        .into_response();
+                }
                 // Proxy routes are not wrapped by the chrome's
                 // `prefix_base_path` Location-rewriter, so build the
                 // base-prefixed login URL ourselves (#294) — otherwise a
@@ -458,6 +478,94 @@ async fn forward(
                 (StatusCode::FORBIDDEN, "access denied\n").into_response(),
                 cors_on,
             );
+        }
+    }
+
+    // 2e. Per-app MFA step-up (#1005). This MUST stay ahead of every
+    //     backend/replica path below: an enrollment/challenge redirect may
+    //     never wake or start a container. Unprotected specs skip this block
+    //     entirely, including all MFA database reads.
+    if spec.effective_require_mfa() {
+        let admin_session = session.0.as_ref();
+        let session_id = cookies
+            .get(crate::auth::COOKIE_NAME)
+            .map(|cookie| cookie.value().to_string());
+
+        if admin_session.is_some_and(|session| {
+            session.role == crate::auth::Role::Admin && session.actor.is_none()
+        }) {
+            let session_id = session_id.as_deref().unwrap_or("missing-session-cookie");
+            tracing::warn!(
+                spec = %spec.id,
+                "break-glass admin session bypassed per-app MFA"
+            );
+            audit_mfa_break_glass_bypass(&state, session_id, &spec.id).await;
+        } else {
+            let Some(admin_session) = admin_session else {
+                if route_prefix == API_PREFIX {
+                    return with_cors(
+                        (
+                            StatusCode::UNAUTHORIZED,
+                            "MFA-protected API requires an authenticated user session\n",
+                        )
+                            .into_response(),
+                        cors_on,
+                    );
+                }
+                if ws_upgrade.0.is_some() {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        "MFA proof required before WebSocket upgrade\n",
+                    )
+                        .into_response();
+                }
+                return mfa_app_redirect(&state, &spec.id, &upstream_path, &req, "login");
+            };
+
+            let (Some(username), Some(session_id)) =
+                (admin_session.actor.as_deref(), session_id.as_deref())
+            else {
+                return with_cors(
+                    (
+                        StatusCode::FORBIDDEN,
+                        "MFA proof required for this protected app\n",
+                    )
+                        .into_response(),
+                    cors_on,
+                );
+            };
+            let decision = crate::mfa::evaluate(&state, username, session_id, &cookies, &spec).await;
+            if decision != crate::mfa::MfaDecision::Satisfied {
+                if route_prefix == API_PREFIX {
+                    return with_cors(
+                        (
+                            StatusCode::FORBIDDEN,
+                            "MFA proof required for this API; complete it in the web portal\n",
+                        )
+                            .into_response(),
+                        cors_on,
+                    );
+                }
+                if ws_upgrade.0.is_some() {
+                    return (
+                        StatusCode::UNAUTHORIZED,
+                        "MFA proof required before WebSocket upgrade\n",
+                    )
+                        .into_response();
+                }
+                let destination = match decision {
+                    crate::mfa::MfaDecision::EnrollmentRequired => "enroll",
+                    crate::mfa::MfaDecision::ChallengeRequired => "challenge",
+                    crate::mfa::MfaDecision::Satisfied => unreachable!(),
+                };
+                return mfa_app_redirect(
+                    &state,
+                    &spec.id,
+                    &upstream_path,
+                    &req,
+                    destination,
+                );
+            }
         }
     }
 
@@ -822,6 +930,105 @@ async fn forward(
     match inflight {
         Some(guard) => attach_inflight_to_body(resp, guard),
         None => resp,
+    }
+}
+
+/// Preserve the route's raw percent-encoding and query string for the MFA
+/// round trip. Axum has already matched this request as `/app/{spec}/{rest}`;
+/// the decoded route values provide a safe fallback, and `local_next_path`
+/// applies the same open-redirect guard used by the challenge handlers.
+fn mfa_app_next(spec_id: &str, upstream_path: &str, req: &Request) -> String {
+    let raw = req
+        .uri()
+        .path_and_query()
+        .map(|value| value.as_str())
+        .unwrap_or_else(|| req.uri().path());
+    if let Some(next) = super::local_next_path(Some(raw)) {
+        return next.to_string();
+    }
+
+    let mut fallback = format!("{APP_PREFIX}{spec_id}{upstream_path}");
+    if let Some(query) = req.uri().query() {
+        fallback.push('?');
+        fallback.push_str(query);
+    }
+    super::local_next_path(Some(&fallback))
+        .unwrap_or("/")
+        .to_string()
+}
+
+fn mfa_app_redirect(
+    state: &AppState,
+    spec_id: &str,
+    upstream_path: &str,
+    req: &Request,
+    destination: &str,
+) -> Response {
+    let next = mfa_app_next(spec_id, upstream_path, req);
+    let path = match destination {
+        "login" => format!("{}/admin/login", state.base_path),
+        "enroll" => format!("{}/admin/account/mfa", state.base_path),
+        "challenge" => format!("{}/admin/account/mfa/challenge", state.base_path),
+        _ => unreachable!(),
+    };
+    Redirect::to(&super::with_next_query(&path, &next)).into_response()
+}
+
+async fn audit_mfa_break_glass_bypass(state: &AppState, session_id: &str, spec_id: &str) {
+    let now = std::time::Instant::now();
+    let key = (session_id.to_string(), spec_id.to_string());
+    let should_record = match MFA_BREAK_GLASS_AUDITS.entry(key) {
+        dashmap::mapref::entry::Entry::Occupied(mut entry) => {
+            if now.duration_since(*entry.get()) < MFA_BREAK_GLASS_AUDIT_COOLDOWN {
+                false
+            } else {
+                entry.insert(now);
+                true
+            }
+        }
+        dashmap::mapref::entry::Entry::Vacant(entry) => {
+            entry.insert(now);
+            true
+        }
+    };
+    if !should_record {
+        return;
+    }
+
+    if MFA_BREAK_GLASS_AUDITS.len() > MFA_BREAK_GLASS_AUDIT_CAP {
+        MFA_BREAK_GLASS_AUDITS
+            .retain(|_, at| now.duration_since(*at) < MFA_BREAK_GLASS_AUDIT_COOLDOWN);
+    }
+
+    let Some(db) = state.db.as_ref() else {
+        // No DB to persist to: drop the dedup reservation so this bypass is
+        // re-attempted if a database is later attached, rather than being
+        // silently suppressed for 15 minutes (codex review, #1005).
+        MFA_BREAK_GLASS_AUDITS.remove(&(session_id.to_string(), spec_id.to_string()));
+        tracing::warn!(
+            spec = %spec_id,
+            "cannot persist break-glass MFA bypass audit without a config database"
+        );
+        return;
+    };
+    let target = format!("spec:{spec_id}");
+    if let Err(err) = crate::db::audit::record(
+        db,
+        "token",
+        "mfa.break_glass_bypass",
+        &target,
+        None,
+    )
+    .await
+    {
+        // Roll back the reservation on a transient write failure so the
+        // NEXT bypass retries the audit instead of the key suppressing it
+        // for the whole cooldown, leaving a persistent audit gap even after
+        // the DB recovers (codex review, #1005). Over-auditing (a possible
+        // duplicate row if a concurrent write succeeded) is safe; an audit
+        // gap is not.
+        MFA_BREAK_GLASS_AUDITS.remove(&(session_id.to_string(), spec_id.to_string()));
+        tracing::warn!(error = ?err, spec = %spec_id, "audit break-glass MFA bypass failed");
     }
 }
 

@@ -94,10 +94,11 @@ pub enum Warning {
     MfaValidityWithoutRequire {
         spec: String,
     },
-    /// TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
-    /// `require-mfa` is security-sensitive but not consumed at runtime yet;
-    /// this warning prevents a silent false sense of protection.
-    MfaNotYetEnforced {
+    /// `require-mfa` is set on an External spec. External specs are plain
+    /// links — Ruscker never proxies them, so the MFA guard can't run and
+    /// the flag has no effect. Warn so an operator doesn't believe the
+    /// linked app is protected (#1005; same transparency policy as #970).
+    MfaOnExternalSpec {
         spec: String,
     },
     /// `api.rate-limit` is set but doesn't parse as `N/unit`
@@ -562,13 +563,13 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             });
         }
     }
-    // TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
-    if spec.effective_require_mfa() {
-        warnings.push(Warning::MfaNotYetEnforced {
+    // External specs are never proxied, so the MFA guard can't run on them
+    // (#1005). Warn instead of silently ignoring the flag.
+    if spec.effective_require_mfa() && spec.kind() == SpecKind::External {
+        warnings.push(Warning::MfaOnExternalSpec {
             spec: spec.id.clone(),
         });
     }
-
     if let Some(t) = spec.template_properties.type_field() {
         if !KNOWN_TYPES.contains(&t) {
             warnings.push(Warning::UnknownTypeProperty {
@@ -854,8 +855,26 @@ mod tests {
             warning,
             Warning::MfaValidityOutOfRange { .. }
                 | Warning::MfaValidityWithoutRequire { .. }
-                | Warning::MfaNotYetEnforced { .. }
+                | Warning::MfaOnExternalSpec { .. }
         )
+    }
+
+    #[test]
+    fn flags_require_mfa_on_external_spec() {
+        let yaml = "proxy:\n  specs:\n    - id: linked\n      external-url: https://example.test\n      require-mfa: true\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::MfaOnExternalSpec { spec } if spec == "linked"
+        )));
+        // A proxied (container) spec with require-mfa is fine — the guard
+        // runs there, so no such warning.
+        let ok = "proxy:\n  specs:\n    - id: app\n      container-image: a:1\n      require-mfa: true\n";
+        let report = Config::from_yaml(ok).expect("parse").validate();
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MfaOnExternalSpec { .. })));
     }
 
     #[test]
@@ -910,33 +929,15 @@ mod tests {
     }
 
     #[test]
-    fn flags_required_mfa_as_not_yet_enforced_only_when_enabled() {
-        let yaml = "proxy:\n  specs:\n    - id: staged\n      container-image: a:1\n      require-mfa: true\n";
+    fn spec_without_mfa_fields_has_no_mfa_warning() {
+        let yaml = "proxy:\n  specs:\n    - id: plain\n      container-image: a:1\n";
         let report = Config::from_yaml(yaml).expect("parse").validate();
-        assert_eq!(
-            report
-                .warnings
-                .iter()
-                .filter(|w| matches!(w, Warning::MfaNotYetEnforced { .. }))
-                .count(),
-            1
-        );
-        assert!(report.warnings.iter().any(|w| matches!(
-            w,
-            Warning::MfaNotYetEnforced { spec } if spec == "staged"
-        )));
-
-        let disabled = yaml.replace("true", "false");
-        let report = Config::from_yaml(&disabled).expect("parse").validate();
-        assert!(!report
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::MfaNotYetEnforced { .. })));
+        assert!(!report.warnings.iter().any(is_mfa_warning));
     }
 
     #[test]
-    fn spec_without_mfa_fields_has_no_mfa_warning() {
-        let yaml = "proxy:\n  specs:\n    - id: plain\n      container-image: a:1\n";
+    fn required_mfa_is_enforced_and_needs_no_staged_rollout_warning() {
+        let yaml = "proxy:\n  specs:\n    - id: guarded\n      display-name: Guarded\n      description: Protected\n      container-image: a:1\n      require-mfa: true\n";
         let report = Config::from_yaml(yaml).expect("parse").validate();
         assert!(!report.warnings.iter().any(is_mfa_warning));
     }

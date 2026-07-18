@@ -2126,6 +2126,8 @@ async fn do_forward(
     let body = Body::new(body.map_err(std::io::Error::other));
     let mut resp = Response::from_parts(parts, body);
     strip_hop_headers(resp.headers_mut());
+    strip_reserved_set_cookies(resp.headers_mut(), &replica.spec_id);
+    sanitize_clear_site_data(resp.headers_mut(), &replica.spec_id);
     Ok(resp)
 }
 
@@ -2228,6 +2230,125 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
     }
 }
 
+/// Drop app-supplied `Set-Cookie` headers for names owned by Ruscker,
+/// preserving every app-owned cookie in the response. Apps share the
+/// portal's origin, so allowing them to overwrite a root-scoped session,
+/// preference, sticky, or MFA cookie would let a container disrupt the
+/// user's portal session (#1010).
+/// Neutralise a same-origin app's attempt to CLEAR the shared origin's
+/// cookies via `Clear-Site-Data` (#1010 review). `Clear-Site-Data:
+/// "cookies"` (or `"*"`) wipes every cookie for the origin — including the
+/// HttpOnly admin session, sticky, and MFA device cookies — regardless of
+/// the per-name `Set-Cookie` strip. There is no per-cookie granularity, so
+/// we drop the `cookies` and `*` directives while preserving any explicit
+/// non-cookie directive (`cache`, `storage`, `executionContexts`) the app
+/// legitimately wants for its own state; if nothing else remains, the
+/// header is removed.
+fn sanitize_clear_site_data(headers: &mut HeaderMap, spec_id: &str) {
+    let values: Vec<HeaderValue> = headers
+        .get_all(header::HeaderName::from_static("clear-site-data"))
+        .iter()
+        .cloned()
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+    headers.remove(header::HeaderName::from_static("clear-site-data"));
+    let mut neutralised = false;
+    for value in values {
+        let Ok(raw) = value.to_str() else {
+            // Undecodable — a valid Clear-Site-Data value is ASCII quoted
+            // tokens, so this can't be a legitimate directive; drop it.
+            neutralised = true;
+            continue;
+        };
+        // Fail CLOSED with an allowlist (codex review): a quoted-pair like
+        // `"cook\ies"` or `"\*"` decodes to `cookies`/`*` in the browser, so
+        // matching the raw token would miss it. Keep ONLY directives that are
+        // provably one of the safe non-cookie tokens — exact quoting, no
+        // backslash escapes — and drop everything else (cookies, *, escaped,
+        // malformed, or unknown).
+        // The full set of standardized NON-cookie directives — apps may use
+        // any of these for their own state without touching portal cookies.
+        const SAFE: &[&str] = &["cache", "storage", "executionContexts", "clientHints"];
+        let kept: Vec<&str> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| {
+                let inner = entry
+                    .strip_prefix('"')
+                    .and_then(|e| e.strip_suffix('"'))
+                    .filter(|inner| !inner.contains('\\'));
+                let safe = inner.is_some_and(|inner| {
+                    SAFE.iter().any(|d| d.eq_ignore_ascii_case(inner))
+                });
+                if !safe && !entry.is_empty() {
+                    neutralised = true;
+                }
+                safe
+            })
+            .collect();
+        if !kept.is_empty() {
+            if let Ok(v) = HeaderValue::from_str(&kept.join(", ")) {
+                headers.append(header::HeaderName::from_static("clear-site-data"), v);
+            }
+        }
+    }
+    if neutralised {
+        tracing::warn!(
+            spec = %spec_id,
+            "upstream app tried to clear the shared origin's cookies via Clear-Site-Data"
+        );
+    }
+}
+
+fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
+    let values: Vec<HeaderValue> = headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .cloned()
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+
+    headers.remove(header::SET_COOKIE);
+    let mut stripped = 0usize;
+    for value in values {
+        // Parse the cookie NAME from the raw bytes, not the decoded string
+        // (codex review, #1010): a value like `ruscker_admin_session=EVIL;
+        // Foo=\x80` has an ASCII reserved name but non-UTF-8 bytes later, so
+        // `to_str()` on the whole header would fail and fail OPEN. The name
+        // (before the first `=`, itself before the first `;`) is ASCII for
+        // any reserved cookie; decode only that slice.
+        let name = value
+            .as_bytes()
+            .split(|&b| b == b';')
+            .next()
+            .unwrap_or(&[])
+            .split(|&b| b == b'=')
+            .next()
+            .unwrap_or(&[])
+            .trim_ascii();
+        let reserved = std::str::from_utf8(name)
+            .ok()
+            .is_some_and(is_ruscker_cookie);
+        if reserved {
+            stripped += 1;
+        } else {
+            headers.append(header::SET_COOKIE, value);
+        }
+    }
+
+    if stripped > 0 {
+        tracing::warn!(
+            spec = %spec_id,
+            stripped,
+            "upstream app attempted to set reserved Ruscker cookie"
+        );
+    }
+}
+
 /// Remove client-supplied identity claims before a request crosses the
 /// trust boundary into an app container. The WHOLE `X-SP-*` and
 /// `X-Ruscker-User-*` namespaces are reserved (codex review, #1001):
@@ -2306,6 +2427,92 @@ mod tests {
         );
         strip_ruscker_cookies(&mut h);
         assert!(!h.contains_key(header::COOKIE), "empty Cookie header should be removed");
+    }
+
+    #[test]
+    fn strip_reserved_set_cookies_drops_ours_keeps_app_cookies() {
+        let mut h = HeaderMap::new();
+        for value in [
+            "sid=abc; Path=/",
+            "__ruscker_mfa_device=x; Path=/",
+            "ruscker_admin_session=y; Path=/",
+            "__ruscker_session_alpha=z; Path=/",
+            "ruscker_theme=dark; Path=/",
+        ] {
+            h.append(header::SET_COOKIE, HeaderValue::from_static(value));
+        }
+
+        strip_reserved_set_cookies(&mut h, "my-app");
+
+        let remaining: Vec<&str> = h
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(remaining, ["sid=abc; Path=/"]);
+    }
+
+    #[test]
+    fn strip_reserved_set_cookies_matches_name_despite_opaque_bytes() {
+        // Non-UTF-8 bytes AFTER the (ASCII, reserved) name must not let the
+        // header fail open (codex review, #1010).
+        let mut h = HeaderMap::new();
+        h.append(
+            header::SET_COOKIE,
+            HeaderValue::from_bytes(b"ruscker_admin_session=EVIL; Foo=\x80").unwrap(),
+        );
+        h.append(header::SET_COOKIE, HeaderValue::from_static("keep=1"));
+        strip_reserved_set_cookies(&mut h, "app");
+        let remaining: Vec<_> = h.get_all(header::SET_COOKIE).iter().collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].as_bytes(), b"keep=1");
+    }
+
+    #[test]
+    fn sanitize_clear_site_data_drops_cookie_directive_keeps_others() {
+        // "cookies" and "*" clear the shared origin's cookies (#1010 review).
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"cache\", \"cookies\", \"storage\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        let v = h.get("clear-site-data").unwrap().to_str().unwrap();
+        assert!(!v.to_ascii_lowercase().contains("cookies"), "got: {v}");
+        assert!(v.contains("cache") && v.contains("storage"));
+
+        // clientHints is a standardized non-cookie directive — it survives.
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"clientHints\", \"cookies\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        let v = h.get("clear-site-data").unwrap().to_str().unwrap();
+        assert!(v.contains("clientHints") && !v.to_ascii_lowercase().contains("cookies"));
+
+        // A lone "*" (clears everything incl. cookies) → header removed.
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"*\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        assert!(h.get("clear-site-data").is_none());
+
+        // Quoted-pair obfuscation must not slip through the allowlist.
+        for evil in [r#""cook\ies""#, r#""\*""#, r#""cookies""#, "bogus"] {
+            let mut h = HeaderMap::new();
+            h.append(
+                header::HeaderName::from_static("clear-site-data"),
+                HeaderValue::from_str(evil).unwrap(),
+            );
+            sanitize_clear_site_data(&mut h, "app");
+            assert!(
+                h.get("clear-site-data").is_none(),
+                "must fail closed on: {evil}"
+            );
+        }
     }
 
     #[test]

@@ -449,3 +449,81 @@ async fn mfa_device_cookie_never_reaches_the_upstream() {
         "MFA cookies must never reach a container: {cookie}"
     );
 }
+
+/// An upstream that answers with several `Set-Cookie` headers, so we can
+/// prove the proxy strips the ones whose names Ruscker owns (#1010) — a
+/// same-origin app must not be able to overwrite the user's session,
+/// sticky, or MFA device cookie — while the app's own cookie passes.
+async fn set_cookie_upstream() -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        // Accumulate across reads: the CRLFCRLF terminator can split across
+        // TCP segments (codex review), which a per-chunk check would miss.
+        let mut raw = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            let n = stream.read(&mut chunk).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            raw.extend_from_slice(&chunk[..n]);
+            if raw.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        stream
+            .write_all(
+                b"HTTP/1.1 200 OK\r\n\
+                  Set-Cookie: app_pref=dark; Path=/\r\n\
+                  Set-Cookie: __ruscker_mfa_device=EVIL; Path=/\r\n\
+                  Set-Cookie: ruscker_admin_session=EVIL; Path=/\r\n\
+                  Set-Cookie: __ruscker_session_identity-off=EVIL; Path=/\r\n\
+                  Content-Length: 2\r\nConnection: close\r\n\r\nok",
+            )
+            .await
+            .unwrap();
+    });
+    (addr, task)
+}
+
+#[tokio::test]
+async fn reserved_set_cookies_from_the_app_never_reach_the_client() {
+    let db = open_db().await;
+    let (upstream, task) = set_cookie_upstream().await;
+    let state = state(db, "identity-off", upstream).await;
+    let response = router(state)
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/identity-off/data")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let set_cookies: Vec<String> = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .map(|v| v.to_str().unwrap().to_string())
+        .collect();
+    let _ = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+    task.await.unwrap();
+
+    // The app's own cookie survives…
+    assert!(
+        set_cookies.iter().any(|c| c.starts_with("app_pref=dark")),
+        "app cookie must pass through: {set_cookies:?}"
+    );
+    // …but every reserved Ruscker cookie the app tried to set is gone.
+    assert!(
+        !set_cookies.iter().any(|c| {
+            let name = c.split(';').next().unwrap_or("").split('=').next().unwrap_or("");
+            name.starts_with("ruscker_") || name.starts_with("__ruscker_")
+        }),
+        "reserved cookies must be stripped: {set_cookies:?}"
+    );
+}

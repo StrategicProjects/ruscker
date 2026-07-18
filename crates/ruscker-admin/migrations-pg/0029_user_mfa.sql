@@ -12,12 +12,7 @@ CREATE TABLE user_mfa (
     created_at     TIMESTAMPTZ NOT NULL,
     updated_at     TIMESTAMPTZ NOT NULL,
     -- Reserved for slice 3's TOTP replay prevention.
-    last_used_step BIGINT,
-    -- Bumped by every trust revocation (password set/change, forget-all).
-    -- Grant issuance is conditional on the epoch read BEFORE the TOTP
-    -- verification, so a revocation that lands mid-challenge wins: the
-    -- in-flight grant INSERT sees a stale epoch and fails (#1005).
-    security_epoch BIGINT NOT NULL DEFAULT 0
+    last_used_step BIGINT
 );
 
 CREATE TABLE user_mfa_recovery (

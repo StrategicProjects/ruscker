@@ -273,6 +273,13 @@ pub async fn evaluate(
         || grant.username != crate::db::users::normalize_username(username)
         || grant.expires_at <= now
         || Some(grant.factor_confirmed_at) != factor.confirmed_at
+        // Epoch binding (codex review, #1005): a grant that slipped past a
+        // racing revocation on pg (READ COMMITTED lets the conditional
+        // INSERT…SELECT read the pre-revocation epoch) carries the OLD
+        // epoch — the live factor row has the bumped one, so the grant is
+        // simply never accepted. Read-time validation makes issuance-time
+        // races harmless.
+        || grant.security_epoch != factor.security_epoch
     {
         return MfaDecision::ChallengeRequired;
     }

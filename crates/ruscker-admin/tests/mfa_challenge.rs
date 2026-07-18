@@ -675,3 +675,46 @@ async fn revocation_racing_a_challenge_prevents_grant_issuance() {
     assert!(refused.is_none(), "stale-epoch grant must be refused");
     assert_eq!(grant_count(&db, "race").await, 0);
 }
+
+
+/// Belt for the pg MVCC case (codex review r3, #1005): even if a grant's
+/// conditional INSERT slips past a racing revocation (READ COMMITTED can
+/// read the pre-revocation epoch), the grant carries that OLD epoch and
+/// evaluate rejects it against the live factor row.
+#[tokio::test]
+async fn grant_issued_under_old_epoch_is_rejected_at_read_time() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "mvcc").await;
+    let (session_id, session_cookie) = session(&state, "mvcc").await;
+    let _secret = enroll(&state, &db, "mvcc", &session_cookie).await;
+    let row = ruscker_admin::db::mfa::fetch(&db, "mvcc").await.unwrap().unwrap();
+    let token = "f".repeat(64);
+    let id = ruscker_admin::db::mfa_grants::create(
+        &db,
+        "mvcc",
+        &ruscker_admin::mfa::hash_device_token(&token).unwrap(),
+        &ruscker_admin::mfa::session_binding(&session_id),
+        row.confirmed_at.unwrap(),
+        Utc::now(),
+        Utc::now() + Duration::days(30),
+        row.security_epoch,
+    )
+    .await
+    .unwrap()
+    .expect("issued under current epoch");
+
+    // Simulate the revocation whose DELETE snapshot missed this grant:
+    // bump the epoch directly, leaving the grant row in place.
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+    sqlx::query("UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = 'mvcc'")
+        .execute(pool)
+        .await
+        .unwrap();
+
+    let cookies = jar(&format!("{DEVICE_COOKIE}={id}.{token}"));
+    assert_eq!(
+        ruscker_admin::mfa::evaluate(&state, "mvcc", &session_id, &cookies, &spec(7)).await,
+        MfaDecision::ChallengeRequired,
+        "an old-epoch grant must never be accepted"
+    );
+}

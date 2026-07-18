@@ -16,6 +16,10 @@ pub struct GrantRow {
     pub token_hash: String,
     pub session_binding: String,
     pub factor_confirmed_at: DateTime<Utc>,
+    /// Epoch the factor had when this grant was issued — validated against
+    /// the live user_mfa.security_epoch on every evaluate, so a grant that
+    /// slipped past a racing revocation (pg MVCC) is never accepted.
+    pub security_epoch: i64,
     pub mfa_verified_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
@@ -27,11 +31,13 @@ type StoredRow = (
     String,
     String,
     DateTime<Utc>,
+    i64,
     DateTime<Utc>,
     DateTime<Utc>,
     DateTime<Utc>,
 );
 
+#[allow(clippy::too_many_arguments)] // grant issuance is one atomic fact
 pub async fn create(
     db: &ConfigDb,
     username: &str,
@@ -54,8 +60,8 @@ pub async fn create(
         ConfigDb::Sqlite(pool) => sqlx::query(
             "INSERT INTO user_mfa_grants
                 (id, username, token_hash, session_binding, factor_confirmed_at,
-                 mfa_verified_at, expires_at, created_at)
-             SELECT ?, ?, ?, ?, ?, ?, ?, ?
+                 security_epoch, mfa_verified_at, expires_at, created_at)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
                FROM user_mfa
               WHERE username = ? AND security_epoch = ?",
         )
@@ -64,6 +70,7 @@ pub async fn create(
         .bind(token_hash)
         .bind(session_binding)
         .bind(factor_confirmed_at)
+        .bind(expected_epoch)
         .bind(verified_at)
         .bind(expires_at)
         .bind(verified_at)
@@ -76,16 +83,17 @@ pub async fn create(
         ConfigDb::Postgres(pool) => sqlx::query(
             "INSERT INTO user_mfa_grants
                 (id, username, token_hash, session_binding, factor_confirmed_at,
-                 mfa_verified_at, expires_at, created_at)
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8
+                 security_epoch, mfa_verified_at, expires_at, created_at)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
                FROM user_mfa
-              WHERE username = $9 AND security_epoch = $10",
+              WHERE username = $10 AND security_epoch = $11",
         )
         .bind(&id)
         .bind(&username)
         .bind(token_hash)
         .bind(session_binding)
         .bind(factor_confirmed_at)
+        .bind(expected_epoch)
         .bind(verified_at)
         .bind(expires_at)
         .bind(verified_at)
@@ -107,7 +115,8 @@ pub async fn fetch_valid(db: &ConfigDb, id: &str) -> Result<Option<GrantRow>> {
         ConfigDb::Sqlite(pool) => {
             sqlx::query_as(
                 "SELECT id, username, token_hash, session_binding,
-                        factor_confirmed_at, mfa_verified_at, expires_at, created_at
+                        factor_confirmed_at, security_epoch, mfa_verified_at,
+                        expires_at, created_at
                    FROM user_mfa_grants
                   WHERE id = ? AND expires_at > ?",
             )
@@ -119,7 +128,8 @@ pub async fn fetch_valid(db: &ConfigDb, id: &str) -> Result<Option<GrantRow>> {
         ConfigDb::Postgres(pool) => {
             sqlx::query_as(
                 "SELECT id, username, token_hash, session_binding,
-                        factor_confirmed_at, mfa_verified_at, expires_at, created_at
+                        factor_confirmed_at, security_epoch, mfa_verified_at,
+                        expires_at, created_at
                    FROM user_mfa_grants
                   WHERE id = $1 AND expires_at > $2",
             )
@@ -137,6 +147,7 @@ pub async fn fetch_valid(db: &ConfigDb, id: &str) -> Result<Option<GrantRow>> {
             token_hash,
             session_binding,
             factor_confirmed_at,
+            security_epoch,
             mfa_verified_at,
             expires_at,
             created_at,
@@ -146,6 +157,7 @@ pub async fn fetch_valid(db: &ConfigDb, id: &str) -> Result<Option<GrantRow>> {
             token_hash,
             session_binding,
             factor_confirmed_at,
+            security_epoch,
             mfa_verified_at,
             expires_at,
             created_at,

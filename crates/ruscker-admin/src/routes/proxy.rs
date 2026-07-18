@@ -2262,19 +2262,28 @@ fn sanitize_clear_site_data(headers: &mut HeaderMap, spec_id: &str) {
             neutralised = true;
             continue;
         };
+        // Fail CLOSED with an allowlist (codex review): a quoted-pair like
+        // `"cook\ies"` or `"\*"` decodes to `cookies`/`*` in the browser, so
+        // matching the raw token would miss it. Keep ONLY directives that are
+        // provably one of the safe non-cookie tokens — exact quoting, no
+        // backslash escapes — and drop everything else (cookies, *, escaped,
+        // malformed, or unknown).
+        const SAFE: &[&str] = &["cache", "storage", "executionContexts"];
         let kept: Vec<&str> = raw
             .split(',')
             .map(str::trim)
             .filter(|entry| {
-                // Directives are quoted, e.g. "cookies". Match the unquoted,
-                // lowercased token; `"cookies"` and the `"*"` wildcard both
-                // clear cookies for the origin.
-                let token = entry.trim_matches('"').trim().to_ascii_lowercase();
-                let clears_cookies = token == "cookies" || token == "*";
-                if clears_cookies {
+                let inner = entry
+                    .strip_prefix('"')
+                    .and_then(|e| e.strip_suffix('"'))
+                    .filter(|inner| !inner.contains('\\'));
+                let safe = inner.is_some_and(|inner| {
+                    SAFE.iter().any(|d| d.eq_ignore_ascii_case(inner))
+                });
+                if !safe && !entry.is_empty() {
                     neutralised = true;
                 }
-                !clears_cookies && !entry.is_empty()
+                safe
             })
             .collect();
         if !kept.is_empty() {
@@ -2478,6 +2487,20 @@ mod tests {
         );
         sanitize_clear_site_data(&mut h, "app");
         assert!(h.get("clear-site-data").is_none());
+
+        // Quoted-pair obfuscation must not slip through the allowlist.
+        for evil in [r#""cook\ies""#, r#""\*""#, r#""cookies""#, "bogus"] {
+            let mut h = HeaderMap::new();
+            h.append(
+                header::HeaderName::from_static("clear-site-data"),
+                HeaderValue::from_str(evil).unwrap(),
+            );
+            sanitize_clear_site_data(&mut h, "app");
+            assert!(
+                h.get("clear-site-data").is_none(),
+                "must fail closed on: {evil}"
+            );
+        }
     }
 
     #[test]

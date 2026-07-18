@@ -365,19 +365,25 @@ pub async fn issue(
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
             // Lock + validate user_mfa FIRST, on EVERY path (codex review
-            // r9): the recovery path has no TOTP-step UPDATE, so without
-            // this a revocation committing after the snapshot could still
-            // let an old-epoch grant insert AND the recovery code be spent.
-            // SQLite serialises writers, so a read here is consistent within
-            // the transaction; the epoch check turns a raced revocation into
-            // a clean StaleEpoch that rolls the whole thing back.
-            let live_epoch: Option<(i64,)> =
-                sqlx::query_as("SELECT security_epoch FROM user_mfa WHERE username = ?")
-                    .bind(&username)
-                    .fetch_optional(&mut *tx)
-                    .await
-                    .context("read MFA epoch during issue")?;
-            if live_epoch.map(|(e,)| e) != Some(expected_epoch) {
+            // r9/r10). A no-op conditional UPDATE (not a SELECT) is used so
+            // this transaction takes the WRITE lock immediately: SQLite's
+            // deferred transaction would otherwise establish a read snapshot,
+            // and a revocation committing before our later write would fail
+            // with SQLITE_BUSY_SNAPSHOT (a 500) instead of a clean recheck.
+            // rows_affected == 1 means the epoch still matched under the
+            // lock; 0 means a revocation raced us → StaleEpoch rollback (the
+            // recovery-code spend below never happens).
+            let epoch_ok = sqlx::query(
+                "UPDATE user_mfa SET security_epoch = security_epoch
+                  WHERE username = ? AND security_epoch = ?",
+            )
+            .bind(&username)
+            .bind(expected_epoch)
+            .execute(&mut *tx)
+            .await
+            .context("lock+validate MFA epoch during issue")?
+            .rows_affected();
+            if epoch_ok != 1 {
                 let _ = tx.rollback().await;
                 return Ok(Err(IssueRefusal::StaleEpoch));
             }
@@ -480,11 +486,23 @@ pub async fn issue(
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
-            // Lock + validate user_mfa FIRST, on EVERY path (codex review
-            // r9) — FOR UPDATE so a revocation's epoch bump can't slip
-            // between this snapshot and the grant insert on the recovery
-            // path (which has no TOTP-step UPDATE to take the lock). A raced
-            // revocation then makes the epoch check fail cleanly here.
+            // Parent-before-child lock order (codex review r10): lock the
+            // parent `users` row (KEY SHARE — blocks deletion, allows normal
+            // updates) BEFORE user_mfa. The grant INSERT's FK check needs a
+            // key-share lock on this parent anyway; user deletion locks
+            // `users` then cascades to the children, so taking the parent
+            // first here makes both paths lock parent→child and can't
+            // deadlock.
+            sqlx::query("SELECT 1 FROM users WHERE username = $1 FOR KEY SHARE")
+                .bind(&username)
+                .fetch_optional(&mut *tx)
+                .await
+                .context("lock parent user row during issue")?;
+            // Lock + validate user_mfa on EVERY path (codex review r9/r10):
+            // FOR UPDATE so a revocation's epoch bump can't slip between this
+            // and the grant insert on the recovery path (no TOTP-step UPDATE
+            // to take the lock). A raced revocation fails the epoch check
+            // cleanly as StaleEpoch.
             let live_epoch: Option<(i64,)> = sqlx::query_as(
                 "SELECT security_epoch FROM user_mfa WHERE username = $1 FOR UPDATE",
             )

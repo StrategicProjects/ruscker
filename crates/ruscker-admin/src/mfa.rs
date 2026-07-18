@@ -246,25 +246,42 @@ pub async fn evaluate(
     let Some(db) = state.db.as_ref() else {
         return MfaDecision::ChallengeRequired;
     };
-    let factor = match crate::db::mfa::fetch(db, username).await {
-        Ok(Some(row)) if row.confirmed_at.is_some() => row,
-        Ok(_) => return MfaDecision::EnrollmentRequired,
-        Err(err) => {
-            tracing::warn!(error = ?err, %username, "MFA decision factor fetch failed");
-            return MfaDecision::ChallengeRequired;
-        }
+    // Read order matters (codex review r5, #1005): the factor row is read
+    // AFTER the grant, so its security_epoch is at least as fresh as the
+    // grant's — a stale-epoch grant that slipped in behind a racing
+    // revocation can never match a pre-revocation cached factor. Without
+    // a device cookie there is no grant read, so the factor is fetched
+    // directly (one SELECT either way — this runs on the proxy hot path
+    // in slice 4).
+    let cookie_parts = cookies
+        .get(DEVICE_COOKIE)
+        .and_then(|cookie| device_cookie_parts(cookie.value()).map(|(id, token)| (id.to_string(), token.to_string())));
+    let Some((id, token)) = cookie_parts else {
+        return match crate::db::mfa::fetch(db, username).await {
+            Ok(Some(row)) if row.confirmed_at.is_some() => MfaDecision::ChallengeRequired,
+            Ok(_) => MfaDecision::EnrollmentRequired,
+            Err(err) => {
+                tracing::warn!(error = ?err, %username, "MFA decision factor fetch failed");
+                MfaDecision::ChallengeRequired
+            }
+        };
     };
-    let Some(cookie) = cookies.get(DEVICE_COOKIE) else {
-        return MfaDecision::ChallengeRequired;
-    };
-    let Some((id, token)) = device_cookie_parts(cookie.value()) else {
-        return MfaDecision::ChallengeRequired;
-    };
+    let (id, token) = (id.as_str(), token.as_str());
     let grant = match crate::db::mfa_grants::fetch_valid(db, id).await {
         Ok(Some(grant)) => grant,
         Ok(None) => return MfaDecision::ChallengeRequired,
         Err(err) => {
             tracing::warn!(error = ?err, %username, "MFA decision grant fetch failed");
+            return MfaDecision::ChallengeRequired;
+        }
+    };
+    // AUTHORITATIVE factor read — after the grant, so this epoch is at
+    // least as fresh as the grant's (see the ordering note above).
+    let factor = match crate::db::mfa::fetch(db, username).await {
+        Ok(Some(row)) if row.confirmed_at.is_some() => row,
+        Ok(_) => return MfaDecision::EnrollmentRequired,
+        Err(err) => {
+            tracing::warn!(error = ?err, %username, "MFA decision factor re-read failed");
             return MfaDecision::ChallengeRequired;
         }
     };

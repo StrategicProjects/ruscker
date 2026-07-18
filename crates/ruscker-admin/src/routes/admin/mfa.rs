@@ -806,7 +806,7 @@ async fn challenge_submit(
         return response;
     }
 
-    let (audit_action, recovery_id) = match form.kind.as_str() {
+    let (audit_action, recovery_id, totp_step) = match form.kind.as_str() {
         "totp" => {
             let plaintext = match state.master_key.decrypt(&row.secret_enc, &row.secret_nonce) {
                 Ok(plaintext) => plaintext,
@@ -843,33 +843,17 @@ async fn challenge_submit(
                     StatusCode::UNAUTHORIZED,
                 );
             };
-            match db::mfa::record_used_step(db, username, step).await {
-                Ok(true) => ("mfa.verify", None),
-                Ok(false) => {
-                    return render_challenge(
-                        &state,
-                        session.role,
-                        loc,
-                        theme,
-                        false,
-                        "replayed",
-                        next,
-                        StatusCode::UNAUTHORIZED,
-                    );
-                }
-                Err(err) => {
-                    tracing::error!(error = ?err, %username, "record challenge TOTP step failed");
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error")
-                        .into_response();
-                }
-            }
+            // Step consumption happens INSIDE the issuance transaction
+            // (codex review r5): a refused issuance rolls it back so the
+            // current 30s code stays usable for the retry.
+            ("mfa.verify", None, Some(step))
         }
         "recovery" => match db::mfa::find_recovery_candidate(db, username, form.code.trim()).await
         {
             // Consumption is deferred into the issue() transaction so a
             // failed grant (stale epoch) rolls the spend back (codex
             // review, #1005).
-            Ok(Some(id)) => ("mfa.recovery_used", Some(id)),
+            Ok(Some(id)) => ("mfa.recovery_used", Some(id), None),
             Ok(None) => {
                 return render_challenge(
                     &state,
@@ -943,6 +927,7 @@ async fn challenge_submit(
         row.security_epoch,
         previous_grant_id.as_deref(),
         recovery_id.as_deref(),
+        totp_step,
         audit_action,
         username,
     )
@@ -961,6 +946,18 @@ async fn challenge_submit(
                 "device trust was revoked during this verification — try again",
             )
                 .into_response();
+        }
+        Ok(Err(db::mfa_grants::IssueRefusal::Replayed)) => {
+            return render_challenge(
+                &state,
+                session.role,
+                loc,
+                theme,
+                false,
+                "replayed",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
         }
         Ok(Err(db::mfa_grants::IssueRefusal::RecoverySpent)) => {
             // The matched recovery code raced another consumer between the

@@ -324,6 +324,9 @@ pub enum IssueRefusal {
     StaleEpoch,
     /// The recovery code raced another consumer.
     RecoverySpent,
+    /// The TOTP step was already consumed (replay or a concurrent
+    /// challenge won the race).
+    Replayed,
 }
 
 /// Atomically: consume the matched recovery code (when the proof came from
@@ -343,6 +346,7 @@ pub async fn issue(
     expected_epoch: i64,
     replace_grant_id: Option<&str>,
     consume_recovery_id: Option<&str>,
+    consume_totp_step: Option<i64>,
     audit_action: &str,
     actor: &str,
 ) -> Result<std::result::Result<String, IssueRefusal>> {
@@ -368,6 +372,28 @@ pub async fn issue(
                 if spent != 1 {
                     let _ = tx.rollback().await;
                     return Ok(Err(IssueRefusal::RecoverySpent));
+                }
+            }
+            if let Some(step) = consume_totp_step {
+                // Replay guard INSIDE the issuance transaction (codex
+                // review r5): a refused issuance must not burn the
+                // current 30s code — the step consumption rolls back
+                // with everything else.
+                let fresh = sqlx::query(
+                    "UPDATE user_mfa SET last_used_step = ?
+                      WHERE username = ?
+                        AND (last_used_step IS NULL OR last_used_step < ?)",
+                )
+                .bind(step)
+                .bind(&username)
+                .bind(step)
+                .execute(&mut *tx)
+                .await
+                .context("consume TOTP step during issue")?
+                .rows_affected();
+                if fresh != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::Replayed));
                 }
             }
             if let Some(gid) = replace_grant_id {
@@ -435,6 +461,28 @@ pub async fn issue(
                 if spent != 1 {
                     let _ = tx.rollback().await;
                     return Ok(Err(IssueRefusal::RecoverySpent));
+                }
+            }
+            if let Some(step) = consume_totp_step {
+                // Replay guard INSIDE the issuance transaction (codex
+                // review r5): a refused issuance must not burn the
+                // current 30s code — the step consumption rolls back
+                // with everything else.
+                let fresh = sqlx::query(
+                    "UPDATE user_mfa SET last_used_step = $1
+                      WHERE username = $2
+                        AND (last_used_step IS NULL OR last_used_step < $3)",
+                )
+                .bind(step)
+                .bind(&username)
+                .bind(step)
+                .execute(&mut *tx)
+                .await
+                .context("consume TOTP step during issue")?
+                .rows_affected();
+                if fresh != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::Replayed));
                 }
             }
             if let Some(gid) = replace_grant_id {

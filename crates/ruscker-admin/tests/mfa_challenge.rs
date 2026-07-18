@@ -750,6 +750,7 @@ async fn stale_epoch_rolls_back_recovery_consumption() {
         row.security_epoch + 1, // stale on purpose: epoch moved
         None,
         Some(&rid),
+        None,
         "mfa.recovery_used",
         "rollback",
     )

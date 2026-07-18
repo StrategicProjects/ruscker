@@ -314,6 +314,181 @@ pub async fn revoke_one(db: &ConfigDb, id: &str, username: &str, actor: &str) ->
     Ok(changed)
 }
 
+
+/// Why [`issue`] refused to mint a grant. Both cases roll the whole
+/// transaction back — including a recovery-code consumption, so a finite
+/// code is never spent without a grant to show for it (codex review).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueRefusal {
+    /// A revocation moved the security epoch mid-challenge.
+    StaleEpoch,
+    /// The recovery code raced another consumer.
+    RecoverySpent,
+}
+
+/// Atomically: consume the matched recovery code (when the proof came from
+/// one), retire the browser's PREVIOUS grant (cookie rotation — the old
+/// cookie value must die with its replacement, else a copied cookie stays
+/// valid forever), insert the new epoch-conditional grant, and audit — one
+/// transaction per dialect. Any refusal rolls everything back.
+#[allow(clippy::too_many_arguments)] // grant issuance is one atomic fact
+pub async fn issue(
+    db: &ConfigDb,
+    username: &str,
+    token_hash: &str,
+    session_binding: &str,
+    factor_confirmed_at: DateTime<Utc>,
+    verified_at: DateTime<Utc>,
+    expires_at: DateTime<Utc>,
+    expected_epoch: i64,
+    replace_grant_id: Option<&str>,
+    consume_recovery_id: Option<&str>,
+    audit_action: &str,
+    actor: &str,
+) -> Result<std::result::Result<String, IssueRefusal>> {
+    let username = crate::db::users::normalize_username(username);
+    let id = uuid::Uuid::new_v4().to_string();
+    let target = format!("user:{username}");
+    let now = Utc::now();
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin MFA grant issue")?;
+            if let Some(rid) = consume_recovery_id {
+                let spent = sqlx::query(
+                    "UPDATE user_mfa_recovery SET used_at = ?
+                      WHERE id = ? AND username = ? AND used_at IS NULL",
+                )
+                .bind(now)
+                .bind(rid)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("consume recovery code during issue")?
+                .rows_affected();
+                if spent != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::RecoverySpent));
+                }
+            }
+            if let Some(gid) = replace_grant_id {
+                sqlx::query("DELETE FROM user_mfa_grants WHERE id = ? AND username = ?")
+                    .bind(gid)
+                    .bind(&username)
+                    .execute(&mut *tx)
+                    .await
+                    .context("retire previous device grant")?;
+            }
+            let inserted = sqlx::query(
+                "INSERT INTO user_mfa_grants
+                    (id, username, token_hash, session_binding, factor_confirmed_at,
+                     security_epoch, mfa_verified_at, expires_at, created_at)
+                 SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+                   FROM user_mfa
+                  WHERE username = ? AND security_epoch = ?",
+            )
+            .bind(&id)
+            .bind(&username)
+            .bind(token_hash)
+            .bind(session_binding)
+            .bind(factor_confirmed_at)
+            .bind(expected_epoch)
+            .bind(verified_at)
+            .bind(expires_at)
+            .bind(verified_at)
+            .bind(&username)
+            .bind(expected_epoch)
+            .execute(&mut *tx)
+            .await
+            .context("issue MFA device grant")?
+            .rows_affected();
+            if inserted != 1 {
+                let _ = tx.rollback().await;
+                return Ok(Err(IssueRefusal::StaleEpoch));
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, ?, ?, NULL, ?)",
+            )
+            .bind(actor)
+            .bind(audit_action)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit MFA proof")?;
+            tx.commit().await.context("commit MFA grant issue")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin MFA grant issue")?;
+            if let Some(rid) = consume_recovery_id {
+                let spent = sqlx::query(
+                    "UPDATE user_mfa_recovery SET used_at = $1
+                      WHERE id = $2 AND username = $3 AND used_at IS NULL",
+                )
+                .bind(now)
+                .bind(rid)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("consume recovery code during issue")?
+                .rows_affected();
+                if spent != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::RecoverySpent));
+                }
+            }
+            if let Some(gid) = replace_grant_id {
+                sqlx::query("DELETE FROM user_mfa_grants WHERE id = $1 AND username = $2")
+                    .bind(gid)
+                    .bind(&username)
+                    .execute(&mut *tx)
+                    .await
+                    .context("retire previous device grant")?;
+            }
+            let inserted = sqlx::query(
+                "INSERT INTO user_mfa_grants
+                    (id, username, token_hash, session_binding, factor_confirmed_at,
+                     security_epoch, mfa_verified_at, expires_at, created_at)
+                 SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+                   FROM user_mfa
+                  WHERE username = $10 AND security_epoch = $11",
+            )
+            .bind(&id)
+            .bind(&username)
+            .bind(token_hash)
+            .bind(session_binding)
+            .bind(factor_confirmed_at)
+            .bind(expected_epoch)
+            .bind(verified_at)
+            .bind(expires_at)
+            .bind(verified_at)
+            .bind(&username)
+            .bind(expected_epoch)
+            .execute(&mut *tx)
+            .await
+            .context("issue MFA device grant")?
+            .rows_affected();
+            if inserted != 1 {
+                let _ = tx.rollback().await;
+                return Ok(Err(IssueRefusal::StaleEpoch));
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, NULL, $4)",
+            )
+            .bind(actor)
+            .bind(audit_action)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit MFA proof")?;
+            tx.commit().await.context("commit MFA grant issue")?;
+        }
+    }
+    Ok(Ok(id))
+}
+
 /// Silent cleanup for already-audited security events (password reset/change,
 /// factor reset). Keeping this inside the caller's transaction makes the
 /// security mutation and grant invalidation atomic without duplicate audit

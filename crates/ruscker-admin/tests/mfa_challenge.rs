@@ -718,3 +718,92 @@ async fn grant_issued_under_old_epoch_is_rejected_at_read_time() {
         "an old-epoch grant must never be accepted"
     );
 }
+
+
+/// Codex review r4 (#1005): a recovery code must never be burned when the
+/// grant issuance is refused — the transactional issue() rolls the spend
+/// back on a stale epoch, leaving the code usable for the next attempt.
+#[tokio::test]
+async fn stale_epoch_rolls_back_recovery_consumption() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "rollback").await;
+    let (session_id, session_cookie) = session(&state, "rollback").await;
+    let _secret = enroll(&state, &db, "rollback", &session_cookie).await;
+    let row = ruscker_admin::db::mfa::fetch(&db, "rollback").await.unwrap().unwrap();
+    // One known recovery code: replace the set with a hash we control.
+    let code = "abcd2efgh3";
+    let hash = ruscker_admin::mfa::hash_recovery_code(code).unwrap();
+    ruscker_admin::db::mfa::replace_recovery_codes(&db, "rollback", &[hash]).await.unwrap();
+    let rid = ruscker_admin::db::mfa::find_recovery_candidate(&db, "rollback", code)
+        .await
+        .unwrap()
+        .expect("candidate");
+
+    let refused = ruscker_admin::db::mfa_grants::issue(
+        &db,
+        "rollback",
+        &ruscker_admin::mfa::hash_device_token(&"a".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding(&session_id),
+        row.confirmed_at.unwrap(),
+        Utc::now(),
+        Utc::now() + Duration::days(30),
+        row.security_epoch + 1, // stale on purpose: epoch moved
+        None,
+        Some(&rid),
+        "mfa.recovery_used",
+        "rollback",
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        refused,
+        Err(ruscker_admin::db::mfa_grants::IssueRefusal::StaleEpoch)
+    );
+    // The code survived the refusal and still matches.
+    assert!(ruscker_admin::db::mfa::find_recovery_candidate(&db, "rollback", code)
+        .await
+        .unwrap()
+        .is_some());
+    assert_eq!(grant_count(&db, "rollback").await, 0);
+}
+
+/// Codex review r4 (#1005): a successful re-challenge must retire the
+/// browser's previous grant — the overwritten cookie's old value cannot
+/// remain a live bearer.
+#[tokio::test]
+async fn rechallenge_rotates_the_previous_grant() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "rotate").await;
+    let (_session_id, session_cookie) = session(&state, "rotate").await;
+    let secret = enroll(&state, &db, "rotate", &session_cookie).await;
+
+    let first = next_totp(&secret, "rotate");
+    let (status, set_cookies) = challenge_totp(&state, &session_cookie, &first).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let old_device = cookie_pair(&set_cookies, DEVICE_COOKIE);
+    assert_eq!(grant_count(&db, "rotate").await, 1);
+
+    // Second challenge FROM THE SAME BROWSER (carries the old device
+    // cookie): the old grant must be replaced, not accumulated. A second
+    // step inside the same 30s wall-clock window can't beat the replay
+    // guard, so simulate time passing by lowering the recorded step.
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+    sqlx::query("UPDATE user_mfa SET last_used_step = 0 WHERE username = 'rotate'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let with_device = format!("{session_cookie}; {old_device}");
+    let code = next_totp(&secret, "rotate");
+    let (status, _, set_cookies2, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/challenge",
+        &format!("kind=totp&code={code}"),
+        &with_device,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let new_device = cookie_pair(&set_cookies2, DEVICE_COOKIE);
+    assert_ne!(old_device, new_device, "cookie must rotate");
+    assert_eq!(grant_count(&db, "rotate").await, 1, "old grant retired, not accumulated");
+}

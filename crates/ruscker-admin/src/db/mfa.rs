@@ -349,6 +349,43 @@ pub async fn replace_recovery_codes(
     Ok(())
 }
 
+/// Find the id of the unused recovery code matching `code`, WITHOUT
+/// consuming it. Consumption happens inside [`crate::db::mfa_grants::issue`]
+/// so a failed grant issuance rolls the spend back — a finite code must
+/// never be burned with nothing to show for it (codex review, #1005).
+pub async fn find_recovery_candidate(
+    db: &ConfigDb,
+    username: &str,
+    code: &str,
+) -> Result<Option<String>> {
+    let username = crate::db::users::normalize_username(username);
+    let rows: Vec<(String, String)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT id, code_hash FROM user_mfa_recovery
+                  WHERE username = ? AND used_at IS NULL",
+            )
+            .bind(&username)
+            .fetch_all(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT id, code_hash FROM user_mfa_recovery
+                  WHERE username = $1 AND used_at IS NULL",
+            )
+            .bind(&username)
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .context("fetch recovery candidates")?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, hash)| crate::mfa::verify_recovery_code(code, hash))
+        .map(|(id, _)| id))
+}
+
 /// Consume a matching unused recovery code exactly once. At most ten hashes
 /// are checked; every digest comparison is constant-time in `crate::mfa`.
 pub async fn consume_recovery_code(db: &ConfigDb, username: &str, code: &str) -> Result<bool> {

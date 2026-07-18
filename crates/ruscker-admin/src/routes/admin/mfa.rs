@@ -806,7 +806,7 @@ async fn challenge_submit(
         return response;
     }
 
-    let audit_action = match form.kind.as_str() {
+    let (audit_action, recovery_id) = match form.kind.as_str() {
         "totp" => {
             let plaintext = match state.master_key.decrypt(&row.secret_enc, &row.secret_nonce) {
                 Ok(plaintext) => plaintext,
@@ -844,7 +844,7 @@ async fn challenge_submit(
                 );
             };
             match db::mfa::record_used_step(db, username, step).await {
-                Ok(true) => "mfa.verify",
+                Ok(true) => ("mfa.verify", None),
                 Ok(false) => {
                     return render_challenge(
                         &state,
@@ -864,9 +864,13 @@ async fn challenge_submit(
                 }
             }
         }
-        "recovery" => match db::mfa::consume_recovery_code(db, username, form.code.trim()).await {
-            Ok(true) => "mfa.recovery_used",
-            Ok(false) => {
+        "recovery" => match db::mfa::find_recovery_candidate(db, username, form.code.trim()).await
+        {
+            // Consumption is deferred into the issue() transaction so a
+            // failed grant (stale epoch) rolls the spend back (codex
+            // review, #1005).
+            Ok(Some(id)) => ("mfa.recovery_used", Some(id)),
+            Ok(None) => {
                 return render_challenge(
                     &state,
                     session.role,
@@ -879,7 +883,7 @@ async fn challenge_submit(
                 );
             }
             Err(err) => {
-                tracing::error!(error = ?err, %username, "consume MFA recovery code failed");
+                tracing::error!(error = ?err, %username, "match MFA recovery code failed");
                 return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error")
                     .into_response();
             }
@@ -921,7 +925,14 @@ async fn challenge_submit(
     let Some(factor_confirmed_at) = row.confirmed_at else {
         return (StatusCode::CONFLICT, "MFA factor is not confirmed").into_response();
     };
-    let id = match db::mfa_grants::create(
+    // Rotate the browser's previous grant: the new cookie overwrites the
+    // old value, so the old grant must die with it — else a copied cookie
+    // stays valid until hard expiry (codex review, #1005). Scoped to this
+    // username, so a forged id can only retire the user's own grant.
+    let previous_grant_id = cookies
+        .get(crate::mfa::DEVICE_COOKIE)
+        .and_then(|c| c.value().split_once('.').map(|(id, _)| id.to_string()));
+    let id = match db::mfa_grants::issue(
         db,
         username,
         &token_hash,
@@ -930,15 +941,20 @@ async fn challenge_submit(
         verified_at,
         expires_at,
         row.security_epoch,
+        previous_grant_id.as_deref(),
+        recovery_id.as_deref(),
+        audit_action,
+        username,
     )
     .await
     {
-        Ok(Some(id)) => id,
-        Ok(None) => {
+        Ok(Ok(id)) => id,
+        Ok(Err(db::mfa_grants::IssueRefusal::StaleEpoch)) => {
             // A revocation (password change, forget-all) landed while this
             // challenge was in flight: the epoch moved, so no grant was
-            // issued (codex review, #1005). The proof itself was valid —
-            // ask the user to challenge again under the new epoch.
+            // issued — and a consumed recovery code was rolled back with
+            // it (codex review, #1005). The proof itself was valid — ask
+            // the user to challenge again under the new epoch.
             tracing::info!(%username, "MFA grant refused: security epoch moved mid-challenge");
             return (
                 StatusCode::CONFLICT,
@@ -946,23 +962,25 @@ async fn challenge_submit(
             )
                 .into_response();
         }
+        Ok(Err(db::mfa_grants::IssueRefusal::RecoverySpent)) => {
+            // The matched recovery code raced another consumer between the
+            // lookup and the transactional spend — treat as a wrong code.
+            return render_challenge(
+                &state,
+                session.role,
+                loc,
+                theme,
+                false,
+                "wrong-code",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
+        }
         Err(err) => {
-            tracing::error!(error = ?err, %username, "create MFA device grant failed");
+            tracing::error!(error = ?err, %username, "issue MFA device grant failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "MFA grant error").into_response();
         }
     };
-    if let Err(err) = db::audit::record(
-        db,
-        username,
-        audit_action,
-        &format!("user:{username}"),
-        None,
-    )
-    .await
-    {
-        tracing::error!(error = ?err, %username, "audit MFA proof failed");
-        return (StatusCode::INTERNAL_SERVER_ERROR, "audit error").into_response();
-    }
     crate::mfa::CHALLENGE_LIMITER.record_success(username);
     issue_device_cookie(&state, &cookies, &headers, &id, &token);
     let destination = if next.is_empty() {

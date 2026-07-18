@@ -9,6 +9,45 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.45 — 2026-07-18
+
+- **Two-factor authentication for selected apps (step-up MFA).** A spec
+  can now require a second factor: set **`require-mfa: true`** (with an
+  optional **`mfa-validity-days`**) on the app, or flip "Exigir 2FA" in
+  its form. Users enrol a TOTP factor once — Google/Microsoft
+  Authenticator, Authy, 1Password and the like — by scanning a QR code
+  on their own **Account → 2FA** page, and get one-time recovery codes
+  shown once. The factor belongs to the user, so one proof satisfies
+  every protected app; each app decides how recent that proof must be
+  (`mfa-validity-days`, default 7; `0` = only within the current login
+  session). Enrolment establishes the first proof, so a user who just
+  set up 2FA flows straight into the app.
+  - **Enforced at the proxy, before anything starts:** an unenrolled or
+    unproven visit to a protected `/app` is redirected to enrolment or
+    the challenge **without waking or spawning a container**; a
+    protected `/api` fails closed with `401`/`403`. Break-glass
+    (`RUSCKER_ADMIN_TOKEN`) sessions bypass the factor so an operator
+    can't be locked out — every bypass is logged and audited.
+  - **Device trust with real revocation:** a successful challenge
+    remembers the browser (an opaque, hash-only, `HttpOnly` cookie)
+    within the app's window. Changing/resetting a password, resetting
+    the factor, deleting the user, or "Forget devices" on the account
+    page all revoke the remembered device immediately; a normal logout
+    keeps it. TOTP replay is blocked, and the trusted-device cookies
+    never reach an app container.
+  - Secrets are encrypted at rest with `RUSCKER_MASTER_KEY` and never
+    appear in logs, the audit trail, or config export; recovery codes
+    are stored only as salted hashes. Admins see only "2FA configured"
+    and an audited reset — never the QR code or secret. Works on SQLite
+    and Postgres/HA. Migrations **0029** + **0030**.
+- **Hardened cookie boundary for hosted apps.** Because apps share the
+  portal's origin, a compromised app's HTTP **responses** could
+  previously overwrite or clear the user's Ruscker cookies (session,
+  sticky, the new MFA device cookie). The proxy now strips reserved
+  `Set-Cookie` headers from app responses and neutralises
+  cookie-clearing `Clear-Site-Data` directives, while leaving the app's
+  own cookies and non-cookie directives untouched.
+
 ## v0.2.44 — 2026-07-17
 
 - **Identity headers for apps (ShinyProxy compat).** Apps that need to

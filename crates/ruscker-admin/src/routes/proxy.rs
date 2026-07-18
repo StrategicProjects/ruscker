@@ -2268,7 +2268,9 @@ fn sanitize_clear_site_data(headers: &mut HeaderMap, spec_id: &str) {
         // provably one of the safe non-cookie tokens — exact quoting, no
         // backslash escapes — and drop everything else (cookies, *, escaped,
         // malformed, or unknown).
-        const SAFE: &[&str] = &["cache", "storage", "executionContexts"];
+        // The full set of standardized NON-cookie directives — apps may use
+        // any of these for their own state without touching portal cookies.
+        const SAFE: &[&str] = &["cache", "storage", "executionContexts", "clientHints"];
         let kept: Vec<&str> = raw
             .split(',')
             .map(str::trim)
@@ -2478,6 +2480,16 @@ mod tests {
         let v = h.get("clear-site-data").unwrap().to_str().unwrap();
         assert!(!v.to_ascii_lowercase().contains("cookies"), "got: {v}");
         assert!(v.contains("cache") && v.contains("storage"));
+
+        // clientHints is a standardized non-cookie directive — it survives.
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"clientHints\", \"cookies\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        let v = h.get("clear-site-data").unwrap().to_str().unwrap();
+        assert!(v.contains("clientHints") && !v.to_ascii_lowercase().contains("cookies"));
 
         // A lone "*" (clears everything incl. cookies) → header removed.
         let mut h = HeaderMap::new();

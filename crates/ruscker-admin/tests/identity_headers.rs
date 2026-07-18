@@ -418,3 +418,34 @@ async fn break_glass_session_has_no_identity_headers() {
     assert!(!headers.contains_key("x-ruscker-user-email"));
     assert!(!headers.contains_key("x-ruscker-user-setor"));
 }
+
+
+/// The trusted-device MFA grant cookie is root-scoped (#1005 slice 4 needs
+/// it on /app/*), so browsers send it on proxied requests — it is an MFA
+/// BEARER and must be stripped before the container, like every Ruscker
+/// cookie (#258; codex review of slice 3).
+#[tokio::test]
+async fn mfa_device_cookie_never_reaches_the_upstream() {
+    let db = open_db().await;
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "identity-off", upstream).await;
+    let request = Request::builder()
+        .method("GET")
+        .uri("/api/identity-off/data")
+        .header(
+            header::COOKIE,
+            "app_own=keep; __ruscker_mfa_device=g1.deadbeef; __ruscker_mfa_ceremony=c1",
+        )
+        .body(Body::empty())
+        .unwrap();
+    let response = router(state).oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let _ = axum::body::to_bytes(response.into_body(), 1024).await.unwrap();
+    let headers = capture.await.unwrap();
+    let cookie = headers.get("cookie").cloned().unwrap_or_default();
+    assert!(cookie.contains("app_own=keep"), "app cookies must pass: {cookie}");
+    assert!(
+        !cookie.contains("__ruscker_mfa"),
+        "MFA cookies must never reach a container: {cookie}"
+    );
+}

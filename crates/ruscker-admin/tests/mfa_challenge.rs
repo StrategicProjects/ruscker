@@ -854,3 +854,44 @@ async fn recovery_challenge_works_without_master_key() {
     assert!(set_cookies.iter().any(|c| c.starts_with(DEVICE_COOKIE)));
     assert_eq!(grant_count(&db, "nokey").await, 1);
 }
+
+/// Codex review r7 (#1005): rotation must be exclusive. Two challenges from
+/// the same browser carry the same previous grant id — only one may retire
+/// it and issue; the loser is refused (Superseded), so a browser never ends
+/// up with two live grants for one cookie.
+#[tokio::test]
+async fn concurrent_rotation_of_the_same_previous_grant_is_refused() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "rot2").await;
+    let (session_id, session_cookie) = session(&state, "rot2").await;
+    let secret = enroll(&state, &db, "rot2", &session_cookie).await;
+    // First grant (the browser's current device cookie).
+    let code = next_totp(&secret, "rot2");
+    let (status, set_cookies) = challenge_totp(&state, &session_cookie, &code).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let device = cookie_pair(&set_cookies, DEVICE_COOKIE);
+    let prev_id = device.trim_start_matches(&format!("{DEVICE_COOKIE}="));
+    let prev_id = prev_id.split('.').next().unwrap().to_string();
+    let row = ruscker_admin::db::mfa::fetch(&db, "rot2").await.unwrap().unwrap();
+
+    // Two issues both naming that same previous grant: first wins…
+    let ok = ruscker_admin::db::mfa_grants::issue(
+        &db, "rot2",
+        &ruscker_admin::mfa::hash_device_token(&"a".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding(&session_id),
+        row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
+        row.security_epoch, Some(&prev_id), None, None, "mfa.verify", "rot2",
+    ).await.unwrap();
+    assert!(ok.is_ok());
+    // …second, naming the now-retired grant, is refused, not double-issued.
+    let refused = ruscker_admin::db::mfa_grants::issue(
+        &db, "rot2",
+        &ruscker_admin::mfa::hash_device_token(&"b".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding(&session_id),
+        row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
+        row.security_epoch, Some(&prev_id), None, None, "mfa.verify", "rot2",
+    ).await.unwrap();
+    assert_eq!(refused, Err(ruscker_admin::db::mfa_grants::IssueRefusal::Superseded));
+    // Exactly one live grant remains.
+    assert_eq!(grant_count(&db, "rot2").await, 1);
+}

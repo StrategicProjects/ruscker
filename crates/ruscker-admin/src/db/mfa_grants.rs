@@ -179,14 +179,12 @@ pub async fn revoke_all(
     let changed = match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant revocation")?;
-            let changed = sqlx::query("DELETE FROM user_mfa_grants WHERE username = ?")
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .context("revoke all MFA device grants")?
-                .rows_affected();
-            // Epoch bump in the SAME transaction: an in-flight challenge
-            // that read the old epoch can no longer issue a grant (#1005).
+            // Lock ORDER: bump the epoch (locks user_mfa) BEFORE deleting
+            // grants, matching issue()'s user_mfa-then-grants order — else a
+            // re-challenge and a revocation grab the two rows in opposite
+            // order and deadlock on Postgres (codex review, #1005). The bump
+            // also stops an in-flight challenge that read the old epoch from
+            // issuing.
             sqlx::query(
                 "UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = ?",
             )
@@ -194,6 +192,12 @@ pub async fn revoke_all(
             .execute(&mut *tx)
             .await
             .context("bump MFA security epoch")?;
+            let changed = sqlx::query("DELETE FROM user_mfa_grants WHERE username = ?")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("revoke all MFA device grants")?
+                .rows_affected();
             if changed > 0 {
                 sqlx::query(
                     "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -212,14 +216,7 @@ pub async fn revoke_all(
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant revocation")?;
-            let changed = sqlx::query("DELETE FROM user_mfa_grants WHERE username = $1")
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .context("revoke all MFA device grants")?
-                .rows_affected();
-            // Epoch bump in the SAME transaction: an in-flight challenge
-            // that read the old epoch can no longer issue a grant (#1005).
+            // Lock ORDER (see the SQLite arm): user_mfa before grants.
             sqlx::query(
                 "UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = $1",
             )
@@ -227,6 +224,12 @@ pub async fn revoke_all(
             .execute(&mut *tx)
             .await
             .context("bump MFA security epoch")?;
+            let changed = sqlx::query("DELETE FROM user_mfa_grants WHERE username = $1")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("revoke all MFA device grants")?
+                .rows_affected();
             if changed > 0 {
                 sqlx::query(
                     "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -327,6 +330,10 @@ pub enum IssueRefusal {
     /// The TOTP step was already consumed (replay or a concurrent
     /// challenge won the race).
     Replayed,
+    /// The browser's previous grant (cookie rotation) was already replaced
+    /// by a concurrent challenge, so issuing again would leave two live
+    /// grants for one browser (codex review, #1005).
+    Superseded,
 }
 
 /// Atomically: consume the matched recovery code (when the proof came from
@@ -397,12 +404,22 @@ pub async fn issue(
                 }
             }
             if let Some(gid) = replace_grant_id {
-                sqlx::query("DELETE FROM user_mfa_grants WHERE id = ? AND username = ?")
+                // Rotation must be exclusive (codex review, #1005): if the
+                // browser's old grant is already gone, a concurrent
+                // challenge from the same browser already rotated it —
+                // issuing again would leave TWO live grants for one cookie.
+                // Refuse instead; the user simply re-challenges.
+                let retired = sqlx::query("DELETE FROM user_mfa_grants WHERE id = ? AND username = ?")
                     .bind(gid)
                     .bind(&username)
                     .execute(&mut *tx)
                     .await
-                    .context("retire previous device grant")?;
+                    .context("retire previous device grant")?
+                    .rows_affected();
+                if retired != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::Superseded));
+                }
             }
             let inserted = sqlx::query(
                 "INSERT INTO user_mfa_grants
@@ -486,12 +503,18 @@ pub async fn issue(
                 }
             }
             if let Some(gid) = replace_grant_id {
-                sqlx::query("DELETE FROM user_mfa_grants WHERE id = $1 AND username = $2")
+                // Rotation must be exclusive (see the SQLite arm).
+                let retired = sqlx::query("DELETE FROM user_mfa_grants WHERE id = $1 AND username = $2")
                     .bind(gid)
                     .bind(&username)
                     .execute(&mut *tx)
                     .await
-                    .context("retire previous device grant")?;
+                    .context("retire previous device grant")?
+                    .rows_affected();
+                if retired != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::Superseded));
+                }
             }
             let inserted = sqlx::query(
                 "INSERT INTO user_mfa_grants
@@ -545,19 +568,20 @@ pub(crate) async fn delete_all_sqlite(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     username: &str,
 ) -> Result<()> {
-    sqlx::query("DELETE FROM user_mfa_grants WHERE username = ?")
-        .bind(username)
-        .execute(&mut **tx)
-        .await
-        .context("silently revoke MFA grants")?;
-    // Epoch bump in the SAME transaction (#1005): a challenge in flight
-    // across this revocation read the old epoch and can no longer issue
-    // a grant (its conditional INSERT sees 0 matching rows).
+    // Lock ORDER: user_mfa (epoch bump) before grants, matching issue() —
+    // opposite order deadlocks with a concurrent re-challenge on Postgres
+    // (codex review, #1005). The bump also stops an in-flight challenge
+    // that read the old epoch from issuing.
     sqlx::query("UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = ?")
         .bind(username)
         .execute(&mut **tx)
         .await
         .context("bump MFA security epoch")?;
+    sqlx::query("DELETE FROM user_mfa_grants WHERE username = ?")
+        .bind(username)
+        .execute(&mut **tx)
+        .await
+        .context("silently revoke MFA grants")?;
     Ok(())
 }
 
@@ -565,18 +589,16 @@ pub(crate) async fn delete_all_postgres(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     username: &str,
 ) -> Result<()> {
-    sqlx::query("DELETE FROM user_mfa_grants WHERE username = $1")
-        .bind(username)
-        .execute(&mut **tx)
-        .await
-        .context("silently revoke MFA grants")?;
-    // Epoch bump in the SAME transaction (#1005): a challenge in flight
-    // across this revocation read the old epoch and can no longer issue
-    // a grant (its conditional INSERT sees 0 matching rows).
+    // Lock ORDER (see delete_all_sqlite): user_mfa before grants.
     sqlx::query("UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = $1")
         .bind(username)
         .execute(&mut **tx)
         .await
         .context("bump MFA security epoch")?;
+    sqlx::query("DELETE FROM user_mfa_grants WHERE username = $1")
+        .bind(username)
+        .execute(&mut **tx)
+        .await
+        .context("silently revoke MFA grants")?;
     Ok(())
 }

@@ -952,6 +952,17 @@ async fn challenge_submit(
             )
                 .into_response();
         }
+        Ok(Err(db::mfa_grants::IssueRefusal::Superseded)) => {
+            // Two challenges from this browser raced (both carried the same
+            // old device cookie); the other won the rotation. Benign — the
+            // browser already holds a valid grant. Ask to retry (#1005).
+            tracing::info!(%username, "MFA grant refused: device rotation superseded by a concurrent challenge");
+            return (
+                StatusCode::CONFLICT,
+                "this device was verified in another tab — reload the app",
+            )
+                .into_response();
+        }
         Ok(Err(db::mfa_grants::IssueRefusal::Replayed)) => {
             return render_challenge(
                 &state,

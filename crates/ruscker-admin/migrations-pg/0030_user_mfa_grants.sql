@@ -11,7 +11,9 @@ CREATE TABLE user_mfa_grants (
     security_epoch  BIGINT NOT NULL,
     mfa_verified_at     TIMESTAMPTZ NOT NULL,
     expires_at          TIMESTAMPTZ NOT NULL,
-    created_at          TIMESTAMPTZ NOT NULL
+    created_at          TIMESTAMPTZ NOT NULL,
+    -- One live grant per browser-session (#1005).
+    UNIQUE(username, session_binding)
 );
 
 CREATE INDEX idx_user_mfa_grants_username

@@ -232,11 +232,15 @@ async fn create_eval_grant(
     expires_at: chrono::DateTime<Utc>,
 ) -> String {
     let hash = ruscker_admin::mfa::hash_device_token(token).unwrap();
+    // One grant per (username, session_binding) now (#1005), so give each
+    // eval scenario a distinct binding — they model separate browsers. The
+    // 7-day specs these exercise don't check the binding, so this is inert
+    // for the behavior under test.
     ruscker_admin::db::mfa_grants::create(
         db,
         username,
         &hash,
-        &ruscker_admin::mfa::session_binding(session_id),
+        &ruscker_admin::mfa::session_binding(&format!("{session_id}:{token}")),
         factor,
         verified_at,
         expires_at,
@@ -390,11 +394,12 @@ async fn password_reset_factor_reset_and_forget_revoke_grants() {
         .confirmed_at
         .unwrap();
     for token in ["all-one", "all-two"] {
+        // Distinct bindings = two browsers; revoke-all must clear both.
         ruscker_admin::db::mfa_grants::create(
             &db,
             "revoke",
             &ruscker_admin::mfa::hash_device_token(token).unwrap(),
-            "binding",
+            &format!("binding-{token}"),
             factor,
             Utc::now(),
             Utc::now() + Duration::days(30),
@@ -748,7 +753,6 @@ async fn stale_epoch_rolls_back_recovery_consumption() {
         Utc::now(),
         Utc::now() + Duration::days(30),
         row.security_epoch + 1, // stale on purpose: epoch moved
-        None,
         Some(&rid),
         None,
         "mfa.recovery_used",
@@ -855,43 +859,54 @@ async fn recovery_challenge_works_without_master_key() {
     assert_eq!(grant_count(&db, "nokey").await, 1);
 }
 
-/// Codex review r7 (#1005): rotation must be exclusive. Two challenges from
-/// the same browser carry the same previous grant id — only one may retire
-/// it and issue; the loser is refused (Superseded), so a browser never ends
-/// up with two live grants for one cookie.
+/// Codex review r8 (#1005): one grant per browser-session. Issuing twice for
+/// the same session_binding UPSERTs the single row (no double grant), and —
+/// crucially — a stale device cookie after a revocation is NOT a lockout:
+/// the next challenge simply issues a fresh grant.
 #[tokio::test]
-async fn concurrent_rotation_of_the_same_previous_grant_is_refused() {
+async fn issuance_keeps_one_grant_per_session_and_recovers_after_revocation() {
     let (state, db) = state_with_db().await;
     create_user(&db, "rot2").await;
     let (session_id, session_cookie) = session(&state, "rot2").await;
-    let secret = enroll(&state, &db, "rot2", &session_cookie).await;
-    // First grant (the browser's current device cookie).
-    let code = next_totp(&secret, "rot2");
-    let (status, set_cookies) = challenge_totp(&state, &session_cookie, &code).await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    let device = cookie_pair(&set_cookies, DEVICE_COOKIE);
-    let prev_id = device.trim_start_matches(&format!("{DEVICE_COOKIE}="));
-    let prev_id = prev_id.split('.').next().unwrap().to_string();
+    let _secret = enroll(&state, &db, "rot2", &session_cookie).await;
     let row = ruscker_admin::db::mfa::fetch(&db, "rot2").await.unwrap().unwrap();
+    let binding = ruscker_admin::mfa::session_binding(&session_id);
 
-    // Two issues both naming that same previous grant: first wins…
-    let ok = ruscker_admin::db::mfa_grants::issue(
+    let mint = |token: &str| {
+        let db = db.clone();
+        let binding = binding.clone();
+        let confirmed = row.confirmed_at.unwrap();
+        let epoch = row.security_epoch;
+        let token = token.to_string();
+        async move {
+            ruscker_admin::db::mfa_grants::issue(
+                &db, "rot2",
+                &ruscker_admin::mfa::hash_device_token(&token).unwrap(),
+                &binding, confirmed, Utc::now(), Utc::now() + Duration::days(30),
+                epoch, None, None, "mfa.verify", "rot2",
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // Two issues for the SAME session_binding → UPSERT → exactly one grant.
+    assert!(mint(&"a".repeat(64)).await.is_ok());
+    assert!(mint(&"b".repeat(64)).await.is_ok());
+    assert_eq!(grant_count(&db, "rot2").await, 1);
+
+    // A revocation deletes the grant; the browser still holds its (now stale)
+    // cookie. The next challenge must ISSUE, not refuse/lock out.
+    ruscker_admin::db::mfa_grants::revoke_all(&db, "rot2", "rot2", "test").await.unwrap();
+    assert_eq!(grant_count(&db, "rot2").await, 0);
+    // revoke_all bumped the epoch — re-read it, as a real challenge would.
+    let row = ruscker_admin::db::mfa::fetch(&db, "rot2").await.unwrap().unwrap();
+    let fresh = ruscker_admin::db::mfa_grants::issue(
         &db, "rot2",
-        &ruscker_admin::mfa::hash_device_token(&"a".repeat(64)).unwrap(),
-        &ruscker_admin::mfa::session_binding(&session_id),
-        row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
-        row.security_epoch, Some(&prev_id), None, None, "mfa.verify", "rot2",
+        &ruscker_admin::mfa::hash_device_token(&"c".repeat(64)).unwrap(),
+        &binding, row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
+        row.security_epoch, None, None, "mfa.verify", "rot2",
     ).await.unwrap();
-    assert!(ok.is_ok());
-    // …second, naming the now-retired grant, is refused, not double-issued.
-    let refused = ruscker_admin::db::mfa_grants::issue(
-        &db, "rot2",
-        &ruscker_admin::mfa::hash_device_token(&"b".repeat(64)).unwrap(),
-        &ruscker_admin::mfa::session_binding(&session_id),
-        row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
-        row.security_epoch, Some(&prev_id), None, None, "mfa.verify", "rot2",
-    ).await.unwrap();
-    assert_eq!(refused, Err(ruscker_admin::db::mfa_grants::IssueRefusal::Superseded));
-    // Exactly one live grant remains.
+    assert!(fresh.is_ok(), "a stale cookie after revocation must not lock the user out");
     assert_eq!(grant_count(&db, "rot2").await, 1);
 }

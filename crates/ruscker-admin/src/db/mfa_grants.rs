@@ -318,9 +318,9 @@ pub async fn revoke_one(db: &ConfigDb, id: &str, username: &str, actor: &str) ->
 }
 
 
-/// Why [`issue`] refused to mint a grant. Both cases roll the whole
-/// transaction back — including a recovery-code consumption, so a finite
-/// code is never spent without a grant to show for it (codex review).
+/// Why [`issue`] refused to mint a grant. Every case rolls the whole
+/// transaction back — including a recovery-code consumption or TOTP-step
+/// spend — so a finite code is never burned without a grant to show for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssueRefusal {
     /// A revocation moved the security epoch mid-challenge.
@@ -330,17 +330,18 @@ pub enum IssueRefusal {
     /// The TOTP step was already consumed (replay or a concurrent
     /// challenge won the race).
     Replayed,
-    /// The browser's previous grant (cookie rotation) was already replaced
-    /// by a concurrent challenge, so issuing again would leave two live
-    /// grants for one browser (codex review, #1005).
-    Superseded,
 }
 
-/// Atomically: consume the matched recovery code (when the proof came from
-/// one), retire the browser's PREVIOUS grant (cookie rotation — the old
-/// cookie value must die with its replacement, else a copied cookie stays
-/// valid forever), insert the new epoch-conditional grant, and audit — one
-/// transaction per dialect. Any refusal rolls everything back.
+/// Issue (or rotate) the trusted-device grant for one browser-session, one
+/// transaction per dialect. UPSERT on `(username, session_binding)`: a
+/// re-challenge from the same browser replaces its single row (new id +
+/// token, so the old cookie dies), a stale cookie after a revocation just
+/// gets a fresh grant, and two concurrent challenges from one browser can
+/// never leave two live grants (#1005). Lock order is uniformly
+/// user_mfa -> user_mfa_grants -> user_mfa_recovery, matching the
+/// revocation/reset paths so a challenge can't deadlock them on Postgres.
+/// The epoch-conditional source (`SELECT ... FROM user_mfa WHERE
+/// security_epoch = ?`) makes a revocation that raced this issuance win.
 #[allow(clippy::too_many_arguments)] // grant issuance is one atomic fact
 pub async fn issue(
     db: &ConfigDb,
@@ -351,7 +352,6 @@ pub async fn issue(
     verified_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
     expected_epoch: i64,
-    replace_grant_id: Option<&str>,
     consume_recovery_id: Option<&str>,
     consume_totp_step: Option<i64>,
     audit_action: &str,
@@ -364,28 +364,8 @@ pub async fn issue(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
-            if let Some(rid) = consume_recovery_id {
-                let spent = sqlx::query(
-                    "UPDATE user_mfa_recovery SET used_at = ?
-                      WHERE id = ? AND username = ? AND used_at IS NULL",
-                )
-                .bind(now)
-                .bind(rid)
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .context("consume recovery code during issue")?
-                .rows_affected();
-                if spent != 1 {
-                    let _ = tx.rollback().await;
-                    return Ok(Err(IssueRefusal::RecoverySpent));
-                }
-            }
+            // Lock order 1/3 — user_mfa (TOTP replay guard).
             if let Some(step) = consume_totp_step {
-                // Replay guard INSIDE the issuance transaction (codex
-                // review r5): a refused issuance must not burn the
-                // current 30s code — the step consumption rolls back
-                // with everything else.
                 let fresh = sqlx::query(
                     "UPDATE user_mfa SET last_used_step = ?
                       WHERE username = ?
@@ -403,31 +383,22 @@ pub async fn issue(
                     return Ok(Err(IssueRefusal::Replayed));
                 }
             }
-            if let Some(gid) = replace_grant_id {
-                // Rotation must be exclusive (codex review, #1005): if the
-                // browser's old grant is already gone, a concurrent
-                // challenge from the same browser already rotated it —
-                // issuing again would leave TWO live grants for one cookie.
-                // Refuse instead; the user simply re-challenges.
-                let retired = sqlx::query("DELETE FROM user_mfa_grants WHERE id = ? AND username = ?")
-                    .bind(gid)
-                    .bind(&username)
-                    .execute(&mut *tx)
-                    .await
-                    .context("retire previous device grant")?
-                    .rows_affected();
-                if retired != 1 {
-                    let _ = tx.rollback().await;
-                    return Ok(Err(IssueRefusal::Superseded));
-                }
-            }
+            // Lock order 2/3 — user_mfa_grants (UPSERT the browser's row).
             let inserted = sqlx::query(
                 "INSERT INTO user_mfa_grants
                     (id, username, token_hash, session_binding, factor_confirmed_at,
                      security_epoch, mfa_verified_at, expires_at, created_at)
                  SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
                    FROM user_mfa
-                  WHERE username = ? AND security_epoch = ?",
+                  WHERE username = ? AND security_epoch = ?
+                 ON CONFLICT(username, session_binding) DO UPDATE SET
+                    id = excluded.id,
+                    token_hash = excluded.token_hash,
+                    factor_confirmed_at = excluded.factor_confirmed_at,
+                    security_epoch = excluded.security_epoch,
+                    mfa_verified_at = excluded.mfa_verified_at,
+                    expires_at = excluded.expires_at,
+                    created_at = excluded.created_at",
             )
             .bind(&id)
             .bind(&username)
@@ -448,6 +419,24 @@ pub async fn issue(
                 let _ = tx.rollback().await;
                 return Ok(Err(IssueRefusal::StaleEpoch));
             }
+            // Lock order 3/3 — user_mfa_recovery (consume, if that was the proof).
+            if let Some(rid) = consume_recovery_id {
+                let spent = sqlx::query(
+                    "UPDATE user_mfa_recovery SET used_at = ?
+                      WHERE id = ? AND username = ? AND used_at IS NULL",
+                )
+                .bind(now)
+                .bind(rid)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("consume recovery code during issue")?
+                .rows_affected();
+                if spent != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::RecoverySpent));
+                }
+            }
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, ?, ?, NULL, ?)",
@@ -463,28 +452,8 @@ pub async fn issue(
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
-            if let Some(rid) = consume_recovery_id {
-                let spent = sqlx::query(
-                    "UPDATE user_mfa_recovery SET used_at = $1
-                      WHERE id = $2 AND username = $3 AND used_at IS NULL",
-                )
-                .bind(now)
-                .bind(rid)
-                .bind(&username)
-                .execute(&mut *tx)
-                .await
-                .context("consume recovery code during issue")?
-                .rows_affected();
-                if spent != 1 {
-                    let _ = tx.rollback().await;
-                    return Ok(Err(IssueRefusal::RecoverySpent));
-                }
-            }
+            // Lock order 1/3 — user_mfa (TOTP replay guard).
             if let Some(step) = consume_totp_step {
-                // Replay guard INSIDE the issuance transaction (codex
-                // review r5): a refused issuance must not burn the
-                // current 30s code — the step consumption rolls back
-                // with everything else.
                 let fresh = sqlx::query(
                     "UPDATE user_mfa SET last_used_step = $1
                       WHERE username = $2
@@ -502,27 +471,22 @@ pub async fn issue(
                     return Ok(Err(IssueRefusal::Replayed));
                 }
             }
-            if let Some(gid) = replace_grant_id {
-                // Rotation must be exclusive (see the SQLite arm).
-                let retired = sqlx::query("DELETE FROM user_mfa_grants WHERE id = $1 AND username = $2")
-                    .bind(gid)
-                    .bind(&username)
-                    .execute(&mut *tx)
-                    .await
-                    .context("retire previous device grant")?
-                    .rows_affected();
-                if retired != 1 {
-                    let _ = tx.rollback().await;
-                    return Ok(Err(IssueRefusal::Superseded));
-                }
-            }
+            // Lock order 2/3 — user_mfa_grants (UPSERT the browser's row).
             let inserted = sqlx::query(
                 "INSERT INTO user_mfa_grants
                     (id, username, token_hash, session_binding, factor_confirmed_at,
                      security_epoch, mfa_verified_at, expires_at, created_at)
                  SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
                    FROM user_mfa
-                  WHERE username = $10 AND security_epoch = $11",
+                  WHERE username = $10 AND security_epoch = $11
+                 ON CONFLICT(username, session_binding) DO UPDATE SET
+                    id = excluded.id,
+                    token_hash = excluded.token_hash,
+                    factor_confirmed_at = excluded.factor_confirmed_at,
+                    security_epoch = excluded.security_epoch,
+                    mfa_verified_at = excluded.mfa_verified_at,
+                    expires_at = excluded.expires_at,
+                    created_at = excluded.created_at",
             )
             .bind(&id)
             .bind(&username)
@@ -542,6 +506,24 @@ pub async fn issue(
             if inserted != 1 {
                 let _ = tx.rollback().await;
                 return Ok(Err(IssueRefusal::StaleEpoch));
+            }
+            // Lock order 3/3 — user_mfa_recovery.
+            if let Some(rid) = consume_recovery_id {
+                let spent = sqlx::query(
+                    "UPDATE user_mfa_recovery SET used_at = $1
+                      WHERE id = $2 AND username = $3 AND used_at IS NULL",
+                )
+                .bind(now)
+                .bind(rid)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("consume recovery code during issue")?
+                .rows_affected();
+                if spent != 1 {
+                    let _ = tx.rollback().await;
+                    return Ok(Err(IssueRefusal::RecoverySpent));
+                }
             }
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)

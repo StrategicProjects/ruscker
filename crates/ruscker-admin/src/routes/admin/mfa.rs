@@ -914,13 +914,10 @@ async fn challenge_submit(
     let Some(factor_confirmed_at) = row.confirmed_at else {
         return (StatusCode::CONFLICT, "MFA factor is not confirmed").into_response();
     };
-    // Rotate the browser's previous grant: the new cookie overwrites the
-    // old value, so the old grant must die with it — else a copied cookie
-    // stays valid until hard expiry (codex review, #1005). Scoped to this
-    // username, so a forged id can only retire the user's own grant.
-    let previous_grant_id = cookies
-        .get(crate::mfa::DEVICE_COOKIE)
-        .and_then(|c| c.value().split_once('.').map(|(id, _)| id.to_string()));
+    // Grant issuance UPSERTs the single row for this browser-session
+    // (keyed by session_binding), so rotation, stale-cookie-after-revocation
+    // and concurrent challenges all resolve to exactly one live grant — no
+    // previous-id juggling from the cookie needed (codex review, #1005).
     let id = match db::mfa_grants::issue(
         db,
         username,
@@ -930,7 +927,6 @@ async fn challenge_submit(
         verified_at,
         expires_at,
         row.security_epoch,
-        previous_grant_id.as_deref(),
         recovery_id.as_deref(),
         totp_step,
         audit_action,
@@ -949,17 +945,6 @@ async fn challenge_submit(
             return (
                 StatusCode::CONFLICT,
                 "device trust was revoked during this verification — try again",
-            )
-                .into_response();
-        }
-        Ok(Err(db::mfa_grants::IssueRefusal::Superseded)) => {
-            // Two challenges from this browser raced (both carried the same
-            // old device cookie); the other won the rotation. Benign — the
-            // browser already holds a valid grant. Ask to retry (#1005).
-            tracing::info!(%username, "MFA grant refused: device rotation superseded by a concurrent challenge");
-            return (
-                StatusCode::CONFLICT,
-                "this device was verified in another tab — reload the app",
             )
                 .into_response();
         }

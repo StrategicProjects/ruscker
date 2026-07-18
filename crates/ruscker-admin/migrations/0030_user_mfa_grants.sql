@@ -13,7 +13,11 @@ CREATE TABLE user_mfa_grants (
     security_epoch  BIGINT NOT NULL,
     mfa_verified_at     TEXT NOT NULL,
     expires_at          TEXT NOT NULL,
-    created_at          TEXT NOT NULL
+    created_at          TEXT NOT NULL,
+    -- One live grant per browser-session (#1005): a re-challenge UPSERTs
+    -- the single row, so a browser can never hold two valid grants and a
+    -- stale cookie after a revocation just gets a fresh grant.
+    UNIQUE(username, session_binding)
 );
 
 CREATE INDEX idx_user_mfa_grants_username

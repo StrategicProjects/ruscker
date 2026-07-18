@@ -340,6 +340,8 @@ A spec describes one app, API, or external link. Every spec has an
     cost-center: GAPE
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
+  require-mfa: true                   # require a user-owned MFA proof (Ruscker-native)
+  mfa-validity-days: 7                # remembered-proof window; 0 = session-only
   add-default-http-headers: true       # opt in to X-SP-UserId / X-SP-UserGroups
   identity-claims: [email, setor]      # opt in to selected profile claims
 ```
@@ -389,6 +391,15 @@ visitors. Otherwise: a logged-in user sees it when their username is in
 always sees everything; an anonymous visitor sees only open apps. Group
 membership is set per user in the admin panel. Enforcement is real (not
 just hiding the card). See the [Roadmap](ROADMAP.md) Phase 8.
+
+`require-mfa` and `mfa-validity-days` are Ruscker-native per-spec controls
+for step-up MFA (#1005). MFA is off by default. When enabled, the app trusts
+a successful user-owned TOTP proof for 7 days unless
+`mfa-validity-days` overrides the window; `0` means proof is valid only in
+the current login session (no remembered device), and values above 30 clamp
+to 30. A user without an enrolled TOTP factor will be guided through
+enrollment on first access to a protected app. **Staged rollout: not yet
+enforced; the proxy guard ships in an upcoming release (#1005).**
 
 `add-default-http-headers` is a ShinyProxy-compatible, per-spec opt-in
 that forwards `X-SP-UserId` and comma-separated `X-SP-UserGroups` on HTTP

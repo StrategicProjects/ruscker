@@ -326,6 +326,7 @@ spec-form-error-id-shape = ID must start with a letter and contain only letters,
 spec-form-error-id-duplicate = An app with that ID already exists.
 spec-form-error-name-required = Display name is required.
 spec-form-error-number = A numeric field has a non-numeric value.
+spec-form-error-mfa-days = “Ask again after N days” must be an integer between 0 and 30.
 spec-form-error-max-replicas-zero = Max containers must be at least 1 (0 means the app can never start).
 spec-form-error-cpu = CPU limit must be a positive number (e.g. 0.5).
 spec-form-error-memory = Memory limit must be a size like 512m or 1.5g.
@@ -641,6 +642,11 @@ spec-help-access-groups = Groups that may see and reach the app (comma-separated
 spec-form-access-users = Allowed users
 spec-help-access-users = Usernames that may see and reach the app (comma-separated).
 spec-form-access-help = Both blank = card is open to everyone (including anonymous). With any value, only matching logged-in users — and admins always.
+spec-form-require-mfa = Require 2FA
+spec-form-require-mfa-hint = Users without a configured TOTP factor will be guided through enrollment on first access to a protected app.
+spec-form-mfa-validity = Ask again after N days
+spec-form-mfa-validity-hint = Blank = 7 days. Use 0 to require a new proof in every login session, with no remembered device.
+spec-form-mfa-staged-note = 2FA enforcement arrives in an upcoming release; for now, this app is not yet protected.
 spec-form-identity-headers = Send identity headers to the app
 spec-form-identity-headers-hint = Adds X-SP-UserId and X-SP-UserGroups for signed-in users. Off by default; enable only for apps that need and trust this identity.
 spec-form-identity-claims = Additional identity claims

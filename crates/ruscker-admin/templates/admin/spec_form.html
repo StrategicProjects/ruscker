@@ -573,6 +573,41 @@
       <div class="spec-form-help">{{ self.t("spec-form-access-help") }}</div>
       </div>{# /x-show restricted #}
 
+      {# Per-app step-up MFA policy (#1005 slice 1). The factor belongs to
+         the user; this spec only chooses whether and how recently the user
+         must have proved it. Runtime enforcement arrives in slice 4. #}
+      <label class="toggle-row">
+        <div>
+          <div class="toggle-row__label">{{ self.t("spec-form-require-mfa") }}</div>
+          <div class="toggle-row__hint">{{ self.t("spec-form-require-mfa-hint") }}</div>
+        </div>
+        <span class="switch">
+          <input type="checkbox" name="require_mfa" value="on"
+                 x-model="form.require_mfa"
+                 {% if !form.require_mfa.is_empty() %}checked{% endif %}>
+          <span class="switch__track"><span class="switch__dot"></span></span>
+        </span>
+      </label>
+      <div x-show="form.require_mfa" x-cloak>
+        <div class="spec-form-field">
+          <div class="spec-form-label-row">
+            <label for="f-mfa-validity" class="spec-form-label">{{ self.t("spec-form-mfa-validity") }}</label>
+          </div>
+          {# :disabled with the x-show (codex review): a merely-hidden input
+             still submits — persisting an inert value — and its native
+             min/max constraints can silently block the WHOLE form while
+             invisible. Disabled inputs neither submit nor validate; the
+             typed value survives re-enabling via x-model. #}
+          <input id="f-mfa-validity" type="number" name="mfa_validity_days"
+                 min="0" max="30" step="1" placeholder="7"
+                 x-model="form.mfa_validity_days"
+                 :disabled="!form.require_mfa"
+                 class="spec-form-input">
+          <div class="spec-form-help">{{ self.t("spec-form-mfa-validity-hint") }}</div>
+          <div class="spec-form-help" style="color:var(--color-lock)">{{ self.t("spec-form-mfa-staged-note") }}</div>
+        </div>
+      </div>
+
       {# Identity disclosure is an explicit per-app opt-in (#1001). #}
       <label class="toggle-row">
         <div>

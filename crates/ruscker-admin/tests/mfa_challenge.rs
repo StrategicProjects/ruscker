@@ -916,3 +916,47 @@ async fn issuance_keeps_one_grant_per_session_and_recovers_after_revocation() {
     assert!(fresh.is_ok(), "a stale cookie after revocation must not lock the user out");
     assert_eq!(grant_count(&db, "rot2").await, 1);
 }
+
+/// Codex review r9 (#1005): issuance opportunistically purges the user's
+/// expired grants, so session-only MFA can't accumulate rows forever.
+#[tokio::test]
+async fn issuance_sweeps_the_users_expired_grants() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "sweep").await;
+    let (_session_id, session_cookie) = session(&state, "sweep").await;
+    let _secret = enroll(&state, &db, "sweep", &session_cookie).await;
+    let row = ruscker_admin::db::mfa::fetch(&db, "sweep").await.unwrap().unwrap();
+
+    // An already-expired grant from an old browser-session.
+    ruscker_admin::db::mfa_grants::create(
+        &db, "sweep",
+        &ruscker_admin::mfa::hash_device_token(&"a".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding("old-login"),
+        row.confirmed_at.unwrap(),
+        Utc::now() - Duration::days(40),
+        Utc::now() - Duration::days(10), // expired
+        row.security_epoch,
+    ).await.unwrap().expect("seed expired grant");
+    // enroll's initial grant + this expired one.
+    assert_eq!(grant_count(&db, "sweep").await, 2);
+
+    // A fresh issuance for yet another session sweeps the expired row.
+    ruscker_admin::db::mfa_grants::issue(
+        &db, "sweep",
+        &ruscker_admin::mfa::hash_device_token(&"b".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding("new-login"),
+        row.confirmed_at.unwrap(), Utc::now(), Utc::now() + Duration::days(30),
+        row.security_epoch, None, None, "mfa.verify", "sweep",
+    ).await.unwrap().expect("issue");
+    // enroll grant + new grant; the expired one is gone.
+    assert_eq!(grant_count(&db, "sweep").await, 2);
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+    let (expired,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM user_mfa_grants WHERE username = 'sweep' AND expires_at < ?",
+    )
+    .bind(Utc::now())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(expired, 0, "expired grants must be swept");
+}

@@ -364,7 +364,24 @@ pub async fn issue(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
-            // Lock order 1/3 — user_mfa (TOTP replay guard).
+            // Lock + validate user_mfa FIRST, on EVERY path (codex review
+            // r9): the recovery path has no TOTP-step UPDATE, so without
+            // this a revocation committing after the snapshot could still
+            // let an old-epoch grant insert AND the recovery code be spent.
+            // SQLite serialises writers, so a read here is consistent within
+            // the transaction; the epoch check turns a raced revocation into
+            // a clean StaleEpoch that rolls the whole thing back.
+            let live_epoch: Option<(i64,)> =
+                sqlx::query_as("SELECT security_epoch FROM user_mfa WHERE username = ?")
+                    .bind(&username)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("read MFA epoch during issue")?;
+            if live_epoch.map(|(e,)| e) != Some(expected_epoch) {
+                let _ = tx.rollback().await;
+                return Ok(Err(IssueRefusal::StaleEpoch));
+            }
+            // Lock order — user_mfa (TOTP replay guard).
             if let Some(step) = consume_totp_step {
                 let fresh = sqlx::query(
                     "UPDATE user_mfa SET last_used_step = ?
@@ -437,6 +454,17 @@ pub async fn issue(
                     return Ok(Err(IssueRefusal::RecoverySpent));
                 }
             }
+            // Opportunistic retention (codex review r9): session-only MFA
+            // mints a row per login, and expired rows are otherwise only
+            // filtered at read time — never deleted until a revocation. Sweep
+            // this user's expired grants on each issuance so the table can't
+            // grow unboundedly on long-running installs.
+            sqlx::query("DELETE FROM user_mfa_grants WHERE username = ? AND expires_at < ?")
+                .bind(&username)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("sweep expired MFA grants")?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, ?, ?, NULL, ?)",
@@ -452,7 +480,23 @@ pub async fn issue(
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin MFA grant issue")?;
-            // Lock order 1/3 — user_mfa (TOTP replay guard).
+            // Lock + validate user_mfa FIRST, on EVERY path (codex review
+            // r9) — FOR UPDATE so a revocation's epoch bump can't slip
+            // between this snapshot and the grant insert on the recovery
+            // path (which has no TOTP-step UPDATE to take the lock). A raced
+            // revocation then makes the epoch check fail cleanly here.
+            let live_epoch: Option<(i64,)> = sqlx::query_as(
+                "SELECT security_epoch FROM user_mfa WHERE username = $1 FOR UPDATE",
+            )
+            .bind(&username)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("lock MFA row during issue")?;
+            if live_epoch.map(|(e,)| e) != Some(expected_epoch) {
+                let _ = tx.rollback().await;
+                return Ok(Err(IssueRefusal::StaleEpoch));
+            }
+            // Lock order — user_mfa (TOTP replay guard).
             if let Some(step) = consume_totp_step {
                 let fresh = sqlx::query(
                     "UPDATE user_mfa SET last_used_step = $1
@@ -525,6 +569,13 @@ pub async fn issue(
                     return Ok(Err(IssueRefusal::RecoverySpent));
                 }
             }
+            // Opportunistic retention sweep (see the SQLite arm).
+            sqlx::query("DELETE FROM user_mfa_grants WHERE username = $1 AND expires_at < $2")
+                .bind(&username)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("sweep expired MFA grants")?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES ($1, $2, $3, NULL, $4)",

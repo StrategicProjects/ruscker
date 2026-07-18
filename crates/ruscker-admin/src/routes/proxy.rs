@@ -2126,6 +2126,7 @@ async fn do_forward(
     let body = Body::new(body.map_err(std::io::Error::other));
     let mut resp = Response::from_parts(parts, body);
     strip_hop_headers(resp.headers_mut());
+    strip_reserved_set_cookies(resp.headers_mut(), &replica.spec_id);
     Ok(resp)
 }
 
@@ -2228,6 +2229,47 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
     }
 }
 
+/// Drop app-supplied `Set-Cookie` headers for names owned by Ruscker,
+/// preserving every app-owned cookie in the response. Apps share the
+/// portal's origin, so allowing them to overwrite a root-scoped session,
+/// preference, sticky, or MFA cookie would let a container disrupt the
+/// user's portal session (#1010).
+fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
+    let values: Vec<HeaderValue> = headers
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .cloned()
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+
+    headers.remove(header::SET_COOKIE);
+    let mut stripped = 0usize;
+    for value in values {
+        let reserved = value
+            .to_str()
+            .ok()
+            .and_then(|raw| raw.split(';').next())
+            .and_then(|pair| pair.split('=').next())
+            .map(str::trim)
+            .is_some_and(is_ruscker_cookie);
+        if reserved {
+            stripped += 1;
+        } else {
+            headers.append(header::SET_COOKIE, value);
+        }
+    }
+
+    if stripped > 0 {
+        tracing::warn!(
+            spec = %spec_id,
+            stripped,
+            "upstream app attempted to set reserved Ruscker cookie"
+        );
+    }
+}
+
 /// Remove client-supplied identity claims before a request crosses the
 /// trust boundary into an app container. The WHOLE `X-SP-*` and
 /// `X-Ruscker-User-*` namespaces are reserved (codex review, #1001):
@@ -2306,6 +2348,29 @@ mod tests {
         );
         strip_ruscker_cookies(&mut h);
         assert!(!h.contains_key(header::COOKIE), "empty Cookie header should be removed");
+    }
+
+    #[test]
+    fn strip_reserved_set_cookies_drops_ours_keeps_app_cookies() {
+        let mut h = HeaderMap::new();
+        for value in [
+            "sid=abc; Path=/",
+            "__ruscker_mfa_device=x; Path=/",
+            "ruscker_admin_session=y; Path=/",
+            "__ruscker_session_alpha=z; Path=/",
+            "ruscker_theme=dark; Path=/",
+        ] {
+            h.append(header::SET_COOKIE, HeaderValue::from_static(value));
+        }
+
+        strip_reserved_set_cookies(&mut h, "my-app");
+
+        let remaining: Vec<&str> = h
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|value| value.to_str().unwrap())
+            .collect();
+        assert_eq!(remaining, ["sid=abc; Path=/"]);
     }
 
     #[test]

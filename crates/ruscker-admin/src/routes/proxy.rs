@@ -2127,6 +2127,7 @@ async fn do_forward(
     let mut resp = Response::from_parts(parts, body);
     strip_hop_headers(resp.headers_mut());
     strip_reserved_set_cookies(resp.headers_mut(), &replica.spec_id);
+    sanitize_clear_site_data(resp.headers_mut(), &replica.spec_id);
     Ok(resp)
 }
 
@@ -2234,6 +2235,62 @@ fn strip_ruscker_cookies(headers: &mut HeaderMap) {
 /// portal's origin, so allowing them to overwrite a root-scoped session,
 /// preference, sticky, or MFA cookie would let a container disrupt the
 /// user's portal session (#1010).
+/// Neutralise a same-origin app's attempt to CLEAR the shared origin's
+/// cookies via `Clear-Site-Data` (#1010 review). `Clear-Site-Data:
+/// "cookies"` (or `"*"`) wipes every cookie for the origin — including the
+/// HttpOnly admin session, sticky, and MFA device cookies — regardless of
+/// the per-name `Set-Cookie` strip. There is no per-cookie granularity, so
+/// we drop the `cookies` and `*` directives while preserving any explicit
+/// non-cookie directive (`cache`, `storage`, `executionContexts`) the app
+/// legitimately wants for its own state; if nothing else remains, the
+/// header is removed.
+fn sanitize_clear_site_data(headers: &mut HeaderMap, spec_id: &str) {
+    let values: Vec<HeaderValue> = headers
+        .get_all(header::HeaderName::from_static("clear-site-data"))
+        .iter()
+        .cloned()
+        .collect();
+    if values.is_empty() {
+        return;
+    }
+    headers.remove(header::HeaderName::from_static("clear-site-data"));
+    let mut neutralised = false;
+    for value in values {
+        let Ok(raw) = value.to_str() else {
+            // Undecodable — a valid Clear-Site-Data value is ASCII quoted
+            // tokens, so this can't be a legitimate directive; drop it.
+            neutralised = true;
+            continue;
+        };
+        let kept: Vec<&str> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| {
+                // Directives are quoted, e.g. "cookies". Match the unquoted,
+                // lowercased token; `"cookies"` and the `"*"` wildcard both
+                // clear cookies for the origin.
+                let token = entry.trim_matches('"').trim().to_ascii_lowercase();
+                let clears_cookies = token == "cookies" || token == "*";
+                if clears_cookies {
+                    neutralised = true;
+                }
+                !clears_cookies && !entry.is_empty()
+            })
+            .collect();
+        if !kept.is_empty() {
+            if let Ok(v) = HeaderValue::from_str(&kept.join(", ")) {
+                headers.append(header::HeaderName::from_static("clear-site-data"), v);
+            }
+        }
+    }
+    if neutralised {
+        tracing::warn!(
+            spec = %spec_id,
+            "upstream app tried to clear the shared origin's cookies via Clear-Site-Data"
+        );
+    }
+}
+
 fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
     let values: Vec<HeaderValue> = headers
         .get_all(header::SET_COOKIE)
@@ -2398,6 +2455,29 @@ mod tests {
         let remaining: Vec<_> = h.get_all(header::SET_COOKIE).iter().collect();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].as_bytes(), b"keep=1");
+    }
+
+    #[test]
+    fn sanitize_clear_site_data_drops_cookie_directive_keeps_others() {
+        // "cookies" and "*" clear the shared origin's cookies (#1010 review).
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"cache\", \"cookies\", \"storage\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        let v = h.get("clear-site-data").unwrap().to_str().unwrap();
+        assert!(!v.to_ascii_lowercase().contains("cookies"), "got: {v}");
+        assert!(v.contains("cache") && v.contains("storage"));
+
+        // A lone "*" (clears everything incl. cookies) → header removed.
+        let mut h = HeaderMap::new();
+        h.append(
+            header::HeaderName::from_static("clear-site-data"),
+            HeaderValue::from_static("\"*\""),
+        );
+        sanitize_clear_site_data(&mut h, "app");
+        assert!(h.get("clear-site-data").is_none());
     }
 
     #[test]

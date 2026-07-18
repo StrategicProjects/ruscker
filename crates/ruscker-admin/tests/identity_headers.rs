@@ -459,13 +459,17 @@ async fn set_cookie_upstream() -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let addr = listener.local_addr().unwrap();
     let task = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
+        // Accumulate across reads: the CRLFCRLF terminator can split across
+        // TCP segments (codex review), which a per-chunk check would miss.
+        let mut raw = Vec::new();
         let mut chunk = [0_u8; 4096];
         loop {
             let n = stream.read(&mut chunk).await.unwrap();
             if n == 0 {
                 break;
             }
-            if chunk[..n].windows(4).any(|w| w == b"\r\n\r\n") {
+            raw.extend_from_slice(&chunk[..n]);
+            if raw.windows(4).any(|w| w == b"\r\n\r\n") {
                 break;
             }
         }

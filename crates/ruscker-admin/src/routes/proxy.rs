@@ -2247,12 +2247,23 @@ fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
     headers.remove(header::SET_COOKIE);
     let mut stripped = 0usize;
     for value in values {
-        let reserved = value
-            .to_str()
+        // Parse the cookie NAME from the raw bytes, not the decoded string
+        // (codex review, #1010): a value like `ruscker_admin_session=EVIL;
+        // Foo=\x80` has an ASCII reserved name but non-UTF-8 bytes later, so
+        // `to_str()` on the whole header would fail and fail OPEN. The name
+        // (before the first `=`, itself before the first `;`) is ASCII for
+        // any reserved cookie; decode only that slice.
+        let name = value
+            .as_bytes()
+            .split(|&b| b == b';')
+            .next()
+            .unwrap_or(&[])
+            .split(|&b| b == b'=')
+            .next()
+            .unwrap_or(&[])
+            .trim_ascii();
+        let reserved = std::str::from_utf8(name)
             .ok()
-            .and_then(|raw| raw.split(';').next())
-            .and_then(|pair| pair.split('=').next())
-            .map(str::trim)
             .is_some_and(is_ruscker_cookie);
         if reserved {
             stripped += 1;
@@ -2371,6 +2382,22 @@ mod tests {
             .map(|value| value.to_str().unwrap())
             .collect();
         assert_eq!(remaining, ["sid=abc; Path=/"]);
+    }
+
+    #[test]
+    fn strip_reserved_set_cookies_matches_name_despite_opaque_bytes() {
+        // Non-UTF-8 bytes AFTER the (ASCII, reserved) name must not let the
+        // header fail open (codex review, #1010).
+        let mut h = HeaderMap::new();
+        h.append(
+            header::SET_COOKIE,
+            HeaderValue::from_bytes(b"ruscker_admin_session=EVIL; Foo=\x80").unwrap(),
+        );
+        h.append(header::SET_COOKIE, HeaderValue::from_static("keep=1"));
+        strip_reserved_set_cookies(&mut h, "app");
+        let remaining: Vec<_> = h.get_all(header::SET_COOKIE).iter().collect();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].as_bytes(), b"keep=1");
     }
 
     #[test]

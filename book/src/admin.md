@@ -65,6 +65,30 @@ acting username. A **last-admin guard** stops you deleting or demoting
 the only remaining admin (so the portal can't be locked out); the
 `RUSCKER_ADMIN_TOKEN` break-glass login is the other safety net.
 
+### Two-factor authentication for selected apps
+
+In an app's **Access & scale** settings, enable **Require 2FA**
+(`require-mfa`) to require a user-owned authenticator-app code before the
+proxy will select or start that app's container. The same enrolled TOTP
+factor is reused across protected apps; the switch is a per-app step-up
+policy, not a separate enrollment for every app.
+
+On first access, a signed-in user without a factor is guided through setup
+and receives recovery codes. Later access redirects to a challenge when the
+browser has no current trusted-device proof. **MFA validity days** controls
+that cadence (7 days by default, at most 30); `0` means every new login
+session must prove MFA, even if the browser still has a trusted-device
+cookie. API routes do not redirect: they return `401` without a login and
+`403` when MFA is still required.
+
+Users can open **Two-factor authentication** in their account to **forget
+this device** or **forget all trusted devices** without ending their login
+sessions. If a phone or recovery-code set is lost, an Admin can open the
+user's edit page and **Reset 2FA**; this deletes the factor, recovery codes
+and device grants, so the next protected-app visit starts guided enrollment
+again. The `RUSCKER_ADMIN_TOKEN` remains an audited break-glass bypass for
+emergencies and should not be used for routine app access.
+
 ## Screens
 
 The sections below follow the panel's tab order: daily drivers first

@@ -94,12 +94,6 @@ pub enum Warning {
     MfaValidityWithoutRequire {
         spec: String,
     },
-    /// TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
-    /// `require-mfa` is security-sensitive but not consumed at runtime yet;
-    /// this warning prevents a silent false sense of protection.
-    MfaNotYetEnforced {
-        spec: String,
-    },
     /// `api.rate-limit` is set but doesn't parse as `N/unit`
     /// (e.g. `100/min`). The proxy ignores an unparseable limit
     /// — applying no limit at all — so the operator should know
@@ -562,13 +556,6 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             });
         }
     }
-    // TODO(#1005 slice 4): remove once the proxy guard enforces MFA.
-    if spec.effective_require_mfa() {
-        warnings.push(Warning::MfaNotYetEnforced {
-            spec: spec.id.clone(),
-        });
-    }
-
     if let Some(t) = spec.template_properties.type_field() {
         if !KNOWN_TYPES.contains(&t) {
             warnings.push(Warning::UnknownTypeProperty {
@@ -854,7 +841,6 @@ mod tests {
             warning,
             Warning::MfaValidityOutOfRange { .. }
                 | Warning::MfaValidityWithoutRequire { .. }
-                | Warning::MfaNotYetEnforced { .. }
         )
     }
 
@@ -910,33 +896,15 @@ mod tests {
     }
 
     #[test]
-    fn flags_required_mfa_as_not_yet_enforced_only_when_enabled() {
-        let yaml = "proxy:\n  specs:\n    - id: staged\n      container-image: a:1\n      require-mfa: true\n";
+    fn spec_without_mfa_fields_has_no_mfa_warning() {
+        let yaml = "proxy:\n  specs:\n    - id: plain\n      container-image: a:1\n";
         let report = Config::from_yaml(yaml).expect("parse").validate();
-        assert_eq!(
-            report
-                .warnings
-                .iter()
-                .filter(|w| matches!(w, Warning::MfaNotYetEnforced { .. }))
-                .count(),
-            1
-        );
-        assert!(report.warnings.iter().any(|w| matches!(
-            w,
-            Warning::MfaNotYetEnforced { spec } if spec == "staged"
-        )));
-
-        let disabled = yaml.replace("true", "false");
-        let report = Config::from_yaml(&disabled).expect("parse").validate();
-        assert!(!report
-            .warnings
-            .iter()
-            .any(|w| matches!(w, Warning::MfaNotYetEnforced { .. })));
+        assert!(!report.warnings.iter().any(is_mfa_warning));
     }
 
     #[test]
-    fn spec_without_mfa_fields_has_no_mfa_warning() {
-        let yaml = "proxy:\n  specs:\n    - id: plain\n      container-image: a:1\n";
+    fn required_mfa_is_enforced_and_needs_no_staged_rollout_warning() {
+        let yaml = "proxy:\n  specs:\n    - id: guarded\n      display-name: Guarded\n      description: Protected\n      container-image: a:1\n      require-mfa: true\n";
         let report = Config::from_yaml(yaml).expect("parse").validate();
         assert!(!report.warnings.iter().any(is_mfa_warning));
     }

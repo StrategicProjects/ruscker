@@ -398,8 +398,13 @@ a successful user-owned TOTP proof for 7 days unless
 `mfa-validity-days` overrides the window; `0` means proof is valid only in
 the current login session (no remembered device), and values above 30 clamp
 to 30. A user without an enrolled TOTP factor will be guided through
-enrollment on first access to a protected app. **Staged rollout: not yet
-enforced; the proxy guard ships in an upcoming release (#1005).**
+enrollment on first access to a protected app. The proxy enforces this guard
+before selecting, waking or spawning a replica: `/app` navigation redirects
+to enrollment or the MFA challenge, while `/api` fails closed with `401`
+(no login session) or `403` (MFA unsatisfied) and no HTML redirect. Emergency
+Admin sessions created with `RUSCKER_ADMIN_TOKEN` bypass the factor so an
+operator cannot be locked out; every bypass is warned and audit-logged as
+`mfa.break_glass_bypass` (deduplicated per session and app for 15 minutes).
 
 `add-default-http-headers` is a ShinyProxy-compatible, per-spec opt-in
 that forwards `X-SP-UserId` and comma-separated `X-SP-UserGroups` on HTTP

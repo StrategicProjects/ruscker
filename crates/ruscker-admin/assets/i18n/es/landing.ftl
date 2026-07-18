@@ -646,7 +646,6 @@ spec-form-require-mfa = Exigir 2FA
 spec-form-require-mfa-hint = Los usuarios sin un factor TOTP configurado recibirán instrucciones para registrarlo en el primer acceso a una app protegida.
 spec-form-mfa-validity = Volver a solicitar después de N días
 spec-form-mfa-validity-hint = Vacío = 7 días. Usa 0 para exigir una nueva prueba en cada sesión de inicio de sesión, sin dispositivo recordado.
-spec-form-mfa-staged-note = La aplicación de 2FA llegará en una próxima versión; por ahora, esta app aún no está protegida.
 spec-form-identity-headers = Enviar cabeceras de identidad a la app
 spec-form-identity-headers-hint = Añade X-SP-UserId y X-SP-UserGroups para usuarios autenticados. Desactivado por defecto; actívalo solo para apps que necesiten y confíen en esta identidad.
 spec-form-identity-claims = Datos de identidad adicionales

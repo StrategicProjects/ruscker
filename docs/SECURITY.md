@@ -99,6 +99,18 @@ Status: living document. Tracks the Phase 5 security audit
   (`InMemoryAdminSessionStore`); for HA, point Ruscker at a shared
   Postgres via `--admin-session-store-url` (#185) so sessions survive
   a load-balancer hop.
+- **[implemented]** Per-app TOTP step-up MFA (#1005) — the factor belongs
+  to the user and is enrolled once; each spec may opt in with
+  `require-mfa` and choose how long a successful proof is trusted. Device
+  grants store only salted token hashes, are bound to the factor's security
+  epoch and confirmation time, and are revoked by password/factor resets or
+  the user's **forget devices** actions. A zero-day policy additionally binds
+  the proof to the current opaque login session. The proxy guard runs before
+  replica selection/spawn. `RUSCKER_ADMIN_TOKEN` break-glass sessions bypass
+  the user factor but emit a warning on every request and a cooldown-deduped
+  `mfa.break_glass_bypass` audit row. The reserved `__ruscker_mfa_*` cookies
+  are consumed by Ruscker and stripped before proxying, so trusted-device and
+  enrollment bearers never reach app containers (#258).
 - **[implemented]** Role-based access control (#101/#107) — three
   roles (**Viewer** = dashboard read-only; **Editor** = apps + media +
   dashboard incl. stop/restart; **Admin** = everything, incl. user

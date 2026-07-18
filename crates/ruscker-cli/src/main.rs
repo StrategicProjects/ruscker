@@ -983,11 +983,6 @@ fn format_warning(w: &Warning) -> String {
                 "spec {spec} sets mfa-validity-days but require-mfa is not true — the validity setting has no effect"
             )
         }
-        Warning::MfaNotYetEnforced { spec } => {
-            format!(
-                "spec {spec} sets require-mfa: true, but MFA is not yet enforced — this app is NOT protected; enforcement ships in an upcoming release (#1005)"
-            )
-        }
         Warning::InvalidRateLimit { spec_id, value } => {
             format!(
                 "spec {spec_id} has an invalid api.rate-limit `{value}` \

@@ -94,6 +94,13 @@ pub enum Warning {
     MfaValidityWithoutRequire {
         spec: String,
     },
+    /// `require-mfa` is set on an External spec. External specs are plain
+    /// links — Ruscker never proxies them, so the MFA guard can't run and
+    /// the flag has no effect. Warn so an operator doesn't believe the
+    /// linked app is protected (#1005; same transparency policy as #970).
+    MfaOnExternalSpec {
+        spec: String,
+    },
     /// `api.rate-limit` is set but doesn't parse as `N/unit`
     /// (e.g. `100/min`). The proxy ignores an unparseable limit
     /// — applying no limit at all — so the operator should know
@@ -556,6 +563,13 @@ fn check_spec(spec: &Spec, warnings: &mut Vec<Warning>) {
             });
         }
     }
+    // External specs are never proxied, so the MFA guard can't run on them
+    // (#1005). Warn instead of silently ignoring the flag.
+    if spec.effective_require_mfa() && spec.kind() == SpecKind::External {
+        warnings.push(Warning::MfaOnExternalSpec {
+            spec: spec.id.clone(),
+        });
+    }
     if let Some(t) = spec.template_properties.type_field() {
         if !KNOWN_TYPES.contains(&t) {
             warnings.push(Warning::UnknownTypeProperty {
@@ -841,7 +855,26 @@ mod tests {
             warning,
             Warning::MfaValidityOutOfRange { .. }
                 | Warning::MfaValidityWithoutRequire { .. }
+                | Warning::MfaOnExternalSpec { .. }
         )
+    }
+
+    #[test]
+    fn flags_require_mfa_on_external_spec() {
+        let yaml = "proxy:\n  specs:\n    - id: linked\n      external-url: https://example.test\n      require-mfa: true\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(report.warnings.iter().any(|w| matches!(
+            w,
+            Warning::MfaOnExternalSpec { spec } if spec == "linked"
+        )));
+        // A proxied (container) spec with require-mfa is fine — the guard
+        // runs there, so no such warning.
+        let ok = "proxy:\n  specs:\n    - id: app\n      container-image: a:1\n      require-mfa: true\n";
+        let report = Config::from_yaml(ok).expect("parse").validate();
+        assert!(!report
+            .warnings
+            .iter()
+            .any(|w| matches!(w, Warning::MfaOnExternalSpec { .. })));
     }
 
     #[test]

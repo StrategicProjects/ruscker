@@ -983,6 +983,11 @@ fn format_warning(w: &Warning) -> String {
                 "spec {spec} sets mfa-validity-days but require-mfa is not true — the validity setting has no effect"
             )
         }
+        Warning::MfaOnExternalSpec { spec } => {
+            format!(
+                "spec {spec} sets require-mfa but is an external link — Ruscker never proxies it, so MFA is NOT enforced on the linked app"
+            )
+        }
         Warning::InvalidRateLimit { spec_id, value } => {
             format!(
                 "spec {spec_id} has an invalid api.rate-limit `{value}` \

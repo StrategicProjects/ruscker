@@ -1001,6 +1001,10 @@ async fn audit_mfa_break_glass_bypass(state: &AppState, session_id: &str, spec_i
     }
 
     let Some(db) = state.db.as_ref() else {
+        // No DB to persist to: drop the dedup reservation so this bypass is
+        // re-attempted if a database is later attached, rather than being
+        // silently suppressed for 15 minutes (codex review, #1005).
+        MFA_BREAK_GLASS_AUDITS.remove(&(session_id.to_string(), spec_id.to_string()));
         tracing::warn!(
             spec = %spec_id,
             "cannot persist break-glass MFA bypass audit without a config database"
@@ -1017,6 +1021,13 @@ async fn audit_mfa_break_glass_bypass(state: &AppState, session_id: &str, spec_i
     )
     .await
     {
+        // Roll back the reservation on a transient write failure so the
+        // NEXT bypass retries the audit instead of the key suppressing it
+        // for the whole cooldown, leaving a persistent audit gap even after
+        // the DB recovers (codex review, #1005). Over-auditing (a possible
+        // duplicate row if a concurrent write succeeded) is safe; an audit
+        // gap is not.
+        MFA_BREAK_GLASS_AUDITS.remove(&(session_id.to_string(), spec_id.to_string()));
         tracing::warn!(error = ?err, spec = %spec_id, "audit break-glass MFA bypass failed");
     }
 }

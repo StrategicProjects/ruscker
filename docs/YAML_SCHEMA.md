@@ -405,6 +405,9 @@ to enrollment or the MFA challenge, while `/api` fails closed with `401`
 Admin sessions created with `RUSCKER_ADMIN_TOKEN` bypass the factor so an
 operator cannot be locked out; every bypass is warned and audit-logged as
 `mfa.break_glass_bypass` (deduplicated per session and app for 15 minutes).
+`require-mfa` has **no effect on External-link specs** — Ruscker never
+proxies them, so there is no request to guard; `validate` warns if you set
+it there.
 
 `add-default-http-headers` is a ShinyProxy-compatible, per-spec opt-in
 that forwards `X-SP-UserId` and comma-separated `X-SP-UserGroups` on HTTP

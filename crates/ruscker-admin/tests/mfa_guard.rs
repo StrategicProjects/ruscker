@@ -231,7 +231,6 @@ async fn issue_grant(
         factor.security_epoch,
         None,
         None,
-        None,
         "mfa.verify",
         username,
     )

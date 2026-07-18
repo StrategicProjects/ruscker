@@ -768,9 +768,11 @@ async fn challenge_submit(
             StatusCode::FORBIDDEN,
         );
     };
-    if !state.master_key.is_configured() {
-        return key_missing(&state, loc);
-    }
+    // NOTE: no blanket master-key check here (codex review r6, #1005):
+    // only the TOTP branch decrypts the secret. Recovery codes compare
+    // salted hashes and must keep working on a node that restarted
+    // without RUSCKER_MASTER_KEY — they are exactly the break-in-case-
+    // of-emergency path.
     let Some(db) = state.db.as_ref() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -808,6 +810,9 @@ async fn challenge_submit(
 
     let (audit_action, recovery_id, totp_step) = match form.kind.as_str() {
         "totp" => {
+            if !state.master_key.is_configured() {
+                return key_missing(&state, loc);
+            }
             let plaintext = match state.master_key.decrypt(&row.secret_enc, &row.secret_nonce) {
                 Ok(plaintext) => plaintext,
                 Err(err) => {

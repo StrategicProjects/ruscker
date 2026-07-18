@@ -808,3 +808,49 @@ async fn rechallenge_rotates_the_previous_grant() {
     assert_ne!(old_device, new_device, "cookie must rotate");
     assert_eq!(grant_count(&db, "rotate").await, 1, "old grant retired, not accumulated");
 }
+
+
+/// Codex review r6 (#1005): recovery codes are the break-glass-in-your-
+/// wallet path — they compare salted hashes and must keep working on a
+/// node that restarted WITHOUT the master key. Only TOTP (which decrypts
+/// the stored secret) requires the key.
+#[tokio::test]
+async fn recovery_challenge_works_without_master_key() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "nokey").await;
+    let (_sid, session_cookie) = session(&state, "nokey").await;
+    let _secret = enroll(&state, &db, "nokey", &session_cookie).await;
+    let code = "abcd2efgh3";
+    let hash = ruscker_admin::mfa::hash_recovery_code(code).unwrap();
+    ruscker_admin::db::mfa::replace_recovery_codes(&db, "nokey", &[hash]).await.unwrap();
+
+    // The same deployment, restarted without RUSCKER_MASTER_KEY.
+    let keyless = AppState {
+        master_key: ruscker_admin::crypto::MasterKey::default(),
+        ..state.clone()
+    };
+
+    // TOTP fails closed with the configuration hint…
+    let (status, _, _, _) = request(
+        keyless.clone(),
+        "POST",
+        "/admin/account/mfa/challenge",
+        "kind=totp&code=123456",
+        &session_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+
+    // …but a valid recovery code still proves possession and issues a grant.
+    let (status, _, set_cookies, _) = request(
+        keyless,
+        "POST",
+        "/admin/account/mfa/challenge",
+        &format!("kind=recovery&code={code}"),
+        &session_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert!(set_cookies.iter().any(|c| c.starts_with(DEVICE_COOKIE)));
+    assert_eq!(grant_count(&db, "nokey").await, 1);
+}

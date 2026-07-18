@@ -25,6 +25,22 @@
       </div>
       <p class="text-xs text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-enrolled-since") }} {{ enrolled_at }}</p>
       <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-mfa-reenroll-note") }}</p>
+      <div class="flex flex-wrap gap-2 mt-4">
+        <form method="post" action="{{ base }}/admin/account/mfa/device/forget"
+              data-confirm="{{ self.t("admin-mfa-forget-confirm") }}">
+          <button type="submit" class="admin-btn admin-btn-secondary">
+            <i class="ti ti-device-desktop" aria-hidden="true"></i>
+            {{ self.t("admin-mfa-forget-device") }}
+          </button>
+        </form>
+        <form method="post" action="{{ base }}/admin/account/mfa/devices/revoke"
+              data-confirm="{{ self.t("admin-mfa-revoke-all-confirm") }}">
+          <button type="submit" class="admin-btn admin-btn-danger">
+            <i class="ti ti-logout" aria-hidden="true"></i>
+            {{ self.t("admin-mfa-revoke-all") }}
+          </button>
+        </form>
+      </div>
       {% if next != "" %}
         <a href="{{ base }}{{ next }}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
           {{ self.t("admin-mfa-continue") }}

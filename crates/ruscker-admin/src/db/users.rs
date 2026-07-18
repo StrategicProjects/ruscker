@@ -599,6 +599,7 @@ pub async fn set_password(
             if res.rows_affected() == 0 {
                 anyhow::bail!("user {username} not found");
             }
+            crate::db::mfa_grants::delete_all_sqlite(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, 'user.password', ?, NULL, ?)",
@@ -628,6 +629,7 @@ pub async fn set_password(
             if res.rows_affected() == 0 {
                 anyhow::bail!("user {username} not found");
             }
+            crate::db::mfa_grants::delete_all_postgres(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES ($1, 'user.password', $2, NULL, $3)",
@@ -1029,6 +1031,9 @@ pub async fn delete(db: &ConfigDb, username: &str, actor: Option<&str>) -> Resul
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin user delete")?;
             // Conditional so it can never delete the last admin (#872).
+            // `user_mfa_grants.username` has ON DELETE CASCADE, so this
+            // already-audited user deletion revokes grants atomically without
+            // a duplicate trusted-device audit row.
             let res = sqlx::query(
                 "DELETE FROM users WHERE username = ?
                    AND (role <> 'admin'

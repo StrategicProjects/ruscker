@@ -24,6 +24,9 @@ pub struct MfaRow {
     pub updated_at: DateTime<Utc>,
     /// Reserved for slice 3's accepted-step replay prevention.
     pub last_used_step: Option<i64>,
+    /// Trust-revocation epoch: grant issuance is conditional on the value
+    /// read before verification, so revocations racing a challenge win.
+    pub security_epoch: i64,
 }
 
 type StoredRow = (
@@ -35,6 +38,7 @@ type StoredRow = (
     DateTime<Utc>,
     DateTime<Utc>,
     Option<i64>,
+    i64,
 );
 
 /// Start or replace a pending enrollment. A confirmed factor is never
@@ -239,7 +243,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
         ConfigDb::Sqlite(pool) => {
             sqlx::query_as(
                 "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
-                    created_at, updated_at, last_used_step
+                    created_at, updated_at, last_used_step, security_epoch
                FROM user_mfa WHERE username = ?",
             )
             .bind(&username)
@@ -249,7 +253,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
         ConfigDb::Postgres(pool) => {
             sqlx::query_as(
                 "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
-                    created_at, updated_at, last_used_step
+                    created_at, updated_at, last_used_step, security_epoch
                FROM user_mfa WHERE username = $1",
             )
             .bind(&username)
@@ -268,6 +272,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
             created_at,
             updated_at,
             last_used_step,
+            security_epoch,
         )| {
             MfaRow {
                 username,
@@ -278,6 +283,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
                 created_at,
                 updated_at,
                 last_used_step,
+                security_epoch,
             }
         },
     ))
@@ -341,6 +347,43 @@ pub async fn replace_recovery_codes(
         }
     }
     Ok(())
+}
+
+/// Find the id of the unused recovery code matching `code`, WITHOUT
+/// consuming it. Consumption happens inside [`crate::db::mfa_grants::issue`]
+/// so a failed grant issuance rolls the spend back — a finite code must
+/// never be burned with nothing to show for it (codex review, #1005).
+pub async fn find_recovery_candidate(
+    db: &ConfigDb,
+    username: &str,
+    code: &str,
+) -> Result<Option<String>> {
+    let username = crate::db::users::normalize_username(username);
+    let rows: Vec<(String, String)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT id, code_hash FROM user_mfa_recovery
+                  WHERE username = ? AND used_at IS NULL",
+            )
+            .bind(&username)
+            .fetch_all(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT id, code_hash FROM user_mfa_recovery
+                  WHERE username = $1 AND used_at IS NULL",
+            )
+            .bind(&username)
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .context("fetch recovery candidates")?;
+    Ok(rows
+        .into_iter()
+        .find(|(_, hash)| crate::mfa::verify_recovery_code(code, hash))
+        .map(|(id, _)| id))
 }
 
 /// Consume a matching unused recovery code exactly once. At most ten hashes
@@ -440,6 +483,37 @@ pub async fn is_enrolled(db: &ConfigDb, username: &str) -> Result<bool> {
     Ok(exists)
 }
 
+/// Atomically accept a TOTP time-step only when it is newer than the last
+/// successful one for this enrollment. This closes replay races across both
+/// challenge and enrollment-confirm requests, including active-active nodes.
+pub async fn record_used_step(db: &ConfigDb, username: &str, step: i64) -> Result<bool> {
+    let username = crate::db::users::normalize_username(username);
+    let changed = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query(
+            "UPDATE user_mfa SET last_used_step = ?
+              WHERE username = ? AND (last_used_step IS NULL OR last_used_step < ?)",
+        )
+        .bind(step)
+        .bind(&username)
+        .bind(step)
+        .execute(pool)
+        .await
+        .with_context(|| format!("record MFA TOTP step for {username}"))?
+        .rows_affected(),
+        ConfigDb::Postgres(pool) => sqlx::query(
+            "UPDATE user_mfa SET last_used_step = $1
+              WHERE username = $2 AND (last_used_step IS NULL OR last_used_step < $1)",
+        )
+        .bind(step)
+        .bind(&username)
+        .execute(pool)
+        .await
+        .with_context(|| format!("record MFA TOTP step for {username}"))?
+        .rows_affected(),
+    };
+    Ok(changed == 1)
+}
+
 /// Delete the factor and every recovery code, then audit `mfa.reset` in the
 /// same transaction. This is shared by the admin UI and later MFA slices.
 pub async fn reset(db: &ConfigDb, username: &str, actor: &str) -> Result<()> {
@@ -449,6 +523,7 @@ pub async fn reset(db: &ConfigDb, username: &str, actor: &str) -> Result<()> {
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin MFA reset")?;
+            crate::db::mfa_grants::delete_all_sqlite(&mut tx, &username).await?;
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = ?")
                 .bind(&username)
                 .execute(&mut *tx)
@@ -473,6 +548,7 @@ pub async fn reset(db: &ConfigDb, username: &str, actor: &str) -> Result<()> {
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin MFA reset")?;
+            crate::db::mfa_grants::delete_all_postgres(&mut tx, &username).await?;
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = $1")
                 .bind(&username)
                 .execute(&mut *tx)
@@ -600,6 +676,43 @@ mod tests {
             .is_none());
         confirm_enrollment(&db, &username, &username, "cer-pg").await.unwrap();
         assert!(is_enrolled(&db, &username).await.unwrap());
+        let factor_confirmed_at = fetch(&db, &username)
+            .await
+            .unwrap()
+            .unwrap()
+            .confirmed_at
+            .unwrap();
+        assert!(record_used_step(&db, &username, 42).await.unwrap());
+        assert!(!record_used_step(&db, &username, 42).await.unwrap());
+        let verified_at = Utc::now();
+        let grant_id = crate::db::mfa_grants::create(
+            &db,
+            &username,
+            "salt:hash",
+            "session-binding",
+            factor_confirmed_at,
+            verified_at,
+            verified_at + chrono::Duration::days(30),
+            0,
+        )
+        .await
+        .unwrap()
+        .expect("grant issued under current epoch");
+        let grant = crate::db::mfa_grants::fetch_valid(&db, &grant_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(grant.username, username);
+        assert_eq!(
+            crate::db::mfa_grants::revoke_all(&db, &username, "root", "postgres-test")
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(crate::db::mfa_grants::fetch_valid(&db, &grant_id)
+            .await
+            .unwrap()
+            .is_none());
         reset(&db, &username, "root").await.unwrap();
         assert!(fetch(&db, &username).await.unwrap().is_none());
         crate::db::users::delete(&db, &username, Some("test"))

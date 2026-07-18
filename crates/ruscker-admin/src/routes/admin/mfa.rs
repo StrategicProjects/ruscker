@@ -3,26 +3,31 @@
 use askama::Template;
 use axum::{
     extract::{Form, Query, State},
-    http::{header::CACHE_CONTROL, header::RETRY_AFTER, StatusCode},
-    response::{IntoResponse, Response},
+    http::{header::CACHE_CONTROL, header::RETRY_AFTER, HeaderMap, StatusCode},
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Router,
 };
 use serde::Deserialize;
 
-use crate::auth::{AdminSession, Role};
-use axum::http::HeaderMap;
-use tower_cookies::{Cookie, Cookies};
+use crate::auth::{AdminSession, Role, COOKIE_NAME};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
+use tower_cookies::{Cookie, Cookies};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/account/mfa", get(status))
         .route("/admin/account/mfa/start", post(start))
         .route("/admin/account/mfa/confirm", post(confirm))
+        .route(
+            "/admin/account/mfa/challenge",
+            get(challenge).post(challenge_submit),
+        )
+        .route("/admin/account/mfa/device/forget", post(forget_device))
+        .route("/admin/account/mfa/devices/revoke", post(revoke_devices))
 }
 
 #[derive(Template)]
@@ -90,6 +95,27 @@ impl AccountMfaRecoveryPage<'_> {
     }
 }
 
+#[derive(Template)]
+#[template(path = "admin/account_mfa_challenge.html")]
+struct AccountMfaChallengePage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    base: std::sync::Arc<str>,
+    nav_section: &'static str,
+    role: Role,
+    break_glass: bool,
+    error: &'static str,
+    next: String,
+}
+
+impl AccountMfaChallengePage<'_> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 struct NextQuery {
     next: Option<String>,
@@ -104,6 +130,13 @@ struct StartForm {
 #[derive(Debug, Deserialize)]
 struct ConfirmForm {
     code: String,
+    next: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ChallengeForm {
+    code: String,
+    kind: String,
     next: Option<String>,
 }
 
@@ -219,6 +252,42 @@ fn clear_ceremony_cookie(state: &AppState, cookies: &Cookies) {
     // The removal path MUST match the issuing path — a Path-less removal
     // never clears a scoped cookie (the #923 lesson).
     c.set_path(ceremony_cookie_path(&state.base_path));
+    cookies.remove(c);
+}
+
+fn device_cookie_path(base: &str) -> String {
+    if base.is_empty() {
+        "/".to_string()
+    } else {
+        format!("{base}/")
+    }
+}
+
+fn issue_device_cookie(
+    state: &AppState,
+    cookies: &Cookies,
+    headers: &HeaderMap,
+    id: &str,
+    token: &str,
+) {
+    let mut c = Cookie::new(crate::mfa::DEVICE_COOKIE, format!("{id}.{token}"));
+    c.set_path(device_cookie_path(&state.base_path));
+    c.set_http_only(true);
+    c.set_same_site(tower_cookies::cookie::SameSite::Strict);
+    c.set_secure(crate::auth::request_is_https(
+        headers,
+        crate::routes::proxy::forward_headers_trusted(&state.config.server),
+    ));
+    c.set_max_age(tower_cookies::cookie::time::Duration::days(i64::from(
+        ruscker_config::MAX_MFA_VALIDITY_DAYS,
+    )));
+    cookies.add(c);
+}
+
+fn clear_device_cookie(state: &AppState, cookies: &Cookies) {
+    let mut c = Cookie::new(crate::mfa::DEVICE_COOKIE, "");
+    // The removal path must exactly match the issuing path (#923).
+    c.set_path(device_cookie_path(&state.base_path));
     cookies.remove(c);
 }
 
@@ -404,6 +473,7 @@ async fn confirm(
     session: AdminSession,
     State(state): State<AppState>,
     cookies: Cookies,
+    headers: HeaderMap,
     loc: Locale,
     theme: Theme,
     Form(form): Form<ConfirmForm>,
@@ -502,14 +572,14 @@ async fn confirm(
             .insert(RETRY_AFTER, "60".parse().unwrap());
         return response;
     }
-    let valid = match crate::mfa::verify_totp(secret, username, form.code.trim()) {
-        Ok(valid) => valid,
+    let accepted_step = match crate::mfa::verify_totp_step(secret, username, form.code.trim()) {
+        Ok(step) => step,
         Err(err) => {
             tracing::error!(error = ?err, %username, "verify enrollment TOTP failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error").into_response();
         }
     };
-    if !valid {
+    let Some(accepted_step) = accepted_step else {
         return render_setup(
             &state,
             session.role,
@@ -520,6 +590,25 @@ async fn confirm(
             next,
             StatusCode::UNAUTHORIZED,
         );
+    };
+    match db::mfa::record_used_step(db, username, accepted_step).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return render_setup(
+                &state,
+                session.role,
+                loc,
+                theme,
+                enrollment,
+                "wrong-code",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "record enrollment TOTP step failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error").into_response();
+        }
     }
 
     let codes = match crate::mfa::generate_recovery_codes() {
@@ -553,6 +642,58 @@ async fn confirm(
     }
     crate::mfa::CONFIRM_LIMITER.record_success(username);
     clear_ceremony_cookie(&state, &cookies);
+
+    // The confirmation code just entered IS a valid MFA proof, so mint the
+    // browser's initial device grant now — otherwise the recovery page's
+    // "Continue to app" link is immediately bounced to a challenge for the
+    // same code, which the replay guard rejects until the next TOTP
+    // interval (codex review, #1005). The enrollment already consumed the
+    // step, so this issuance passes no step/recovery to consume; it records
+    // the device proof (audited mfa.verify — the device is verified, beside
+    // the mfa.enroll already written). Non-fatal: the recovery codes must
+    // still render even if issuance fails; worst case is one extra
+    // challenge.
+    if let Some(session_id) = cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) {
+        if let Ok(Some(confirmed)) = db::mfa::fetch(db, username).await {
+            if let Some(factor_confirmed_at) = confirmed.confirmed_at {
+                if let (Ok(token), verified_at) =
+                    (crate::mfa::generate_device_token(), chrono::Utc::now())
+                {
+                    if let Ok(token_hash) = crate::mfa::hash_device_token(&token) {
+                        let expires_at = verified_at
+                            + chrono::Duration::days(i64::from(
+                                ruscker_config::MAX_MFA_VALIDITY_DAYS,
+                            ));
+                        match db::mfa_grants::issue(
+                            db,
+                            username,
+                            &token_hash,
+                            &crate::mfa::session_binding(&session_id),
+                            factor_confirmed_at,
+                            verified_at,
+                            expires_at,
+                            confirmed.security_epoch,
+                            None,
+                            None,
+                            "mfa.verify",
+                            username,
+                        )
+                        .await
+                        {
+                            Ok(Ok(id)) => {
+                                issue_device_cookie(&state, &cookies, &headers, &id, &token)
+                            }
+                            other => tracing::warn!(
+                                %username, result = ?other,
+                                "initial MFA grant after enrollment not issued; user will challenge once"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let page = AccountMfaRecoveryPage {
         locale: loc,
         theme,
@@ -569,4 +710,378 @@ async fn confirm(
         .headers_mut()
         .insert(CACHE_CONTROL, "no-store".parse().unwrap());
     response
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_challenge(
+    state: &AppState,
+    role: Role,
+    loc: Locale,
+    theme: Theme,
+    break_glass: bool,
+    error: &'static str,
+    next: String,
+    status: StatusCode,
+) -> Response {
+    let page = AccountMfaChallengePage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "account",
+        role,
+        break_glass,
+        error,
+        next,
+    };
+    match page.render() {
+        Ok(body) => {
+            let mut response = (status, axum::response::Html(body)).into_response();
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, "no-store".parse().unwrap());
+            response
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, "render MFA challenge failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "render error").into_response()
+        }
+    }
+}
+
+async fn challenge(
+    session: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    Query(query): Query<NextQuery>,
+) -> Response {
+    let next = safe_next(query.next.as_deref(), &state.base_path);
+    let Some(username) = session.actor.as_deref() else {
+        return render_challenge(
+            &state,
+            session.role,
+            loc,
+            theme,
+            true,
+            "",
+            next,
+            StatusCode::OK,
+        );
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    };
+    match db::mfa::is_enrolled(db, username).await {
+        Ok(true) => render_challenge(
+            &state,
+            session.role,
+            loc,
+            theme,
+            false,
+            "",
+            next,
+            StatusCode::OK,
+        ),
+        Ok(false) => {
+            let path = format!("{}/admin/account/mfa", state.base_path);
+            Redirect::to(&crate::routes::with_next_query(&path, &next)).into_response()
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "fetch MFA status for challenge failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response()
+        }
+    }
+}
+
+async fn challenge_submit(
+    session: AdminSession,
+    State(state): State<AppState>,
+    cookies: Cookies,
+    headers: HeaderMap,
+    loc: Locale,
+    theme: Theme,
+    Form(form): Form<ChallengeForm>,
+) -> Response {
+    let next = safe_next(form.next.as_deref(), &state.base_path);
+    let Some(username) = session.actor.as_deref() else {
+        return render_challenge(
+            &state,
+            session.role,
+            loc,
+            theme,
+            true,
+            "",
+            next,
+            StatusCode::FORBIDDEN,
+        );
+    };
+    // NOTE: no blanket master-key check here (codex review r6, #1005):
+    // only the TOTP branch decrypts the secret. Recovery codes compare
+    // salted hashes and must keep working on a node that restarted
+    // without RUSCKER_MASTER_KEY — they are exactly the break-in-case-
+    // of-emergency path.
+    let Some(db) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    };
+    let row = match db::mfa::fetch(db, username).await {
+        Ok(Some(row)) if row.confirmed_at.is_some() => row,
+        Ok(_) => {
+            let path = format!("{}/admin/account/mfa", state.base_path);
+            return Redirect::to(&crate::routes::with_next_query(&path, &next)).into_response();
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "fetch MFA factor for challenge failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    if !crate::mfa::CHALLENGE_LIMITER.try_reserve(username) {
+        let mut response = render_challenge(
+            &state,
+            session.role,
+            loc,
+            theme,
+            false,
+            "rate-limited",
+            next,
+            StatusCode::TOO_MANY_REQUESTS,
+        );
+        response
+            .headers_mut()
+            .insert(RETRY_AFTER, "60".parse().unwrap());
+        return response;
+    }
+
+    let (audit_action, recovery_id, totp_step) = match form.kind.as_str() {
+        "totp" => {
+            if !state.master_key.is_configured() {
+                return key_missing(&state, loc);
+            }
+            let plaintext = match state.master_key.decrypt(&row.secret_enc, &row.secret_nonce) {
+                Ok(plaintext) => plaintext,
+                Err(err) => {
+                    tracing::error!(error = ?err, %username, "decrypt MFA challenge secret failed");
+                    return key_missing(&state, loc);
+                }
+            };
+            let secret = match std::str::from_utf8(&plaintext) {
+                Ok(secret) => secret,
+                Err(err) => {
+                    tracing::error!(error = ?err, %username, "MFA challenge secret is not UTF-8");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "invalid MFA state")
+                        .into_response();
+                }
+            };
+            let step = match crate::mfa::verify_totp_step(secret, username, form.code.trim()) {
+                Ok(step) => step,
+                Err(err) => {
+                    tracing::error!(error = ?err, %username, "verify challenge TOTP failed");
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error")
+                        .into_response();
+                }
+            };
+            let Some(step) = step else {
+                return render_challenge(
+                    &state,
+                    session.role,
+                    loc,
+                    theme,
+                    false,
+                    "wrong-code",
+                    next,
+                    StatusCode::UNAUTHORIZED,
+                );
+            };
+            // Step consumption happens INSIDE the issuance transaction
+            // (codex review r5): a refused issuance rolls it back so the
+            // current 30s code stays usable for the retry.
+            ("mfa.verify", None, Some(step))
+        }
+        "recovery" => match db::mfa::find_recovery_candidate(db, username, form.code.trim()).await
+        {
+            // Consumption is deferred into the issue() transaction so a
+            // failed grant (stale epoch) rolls the spend back (codex
+            // review, #1005).
+            Ok(Some(id)) => ("mfa.recovery_used", Some(id), None),
+            Ok(None) => {
+                return render_challenge(
+                    &state,
+                    session.role,
+                    loc,
+                    theme,
+                    false,
+                    "wrong-code",
+                    next,
+                    StatusCode::UNAUTHORIZED,
+                );
+            }
+            Err(err) => {
+                tracing::error!(error = ?err, %username, "match MFA recovery code failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "MFA verification error")
+                    .into_response();
+            }
+        },
+        _ => {
+            return render_challenge(
+                &state,
+                session.role,
+                loc,
+                theme,
+                false,
+                "wrong-code",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
+        }
+    };
+
+    let Some(session_id) = cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) else {
+        return (StatusCode::UNAUTHORIZED, "admin session cookie missing").into_response();
+    };
+    let token = match crate::mfa::generate_device_token() {
+        Ok(token) => token,
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "generate MFA device token failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "MFA grant error").into_response();
+        }
+    };
+    let token_hash = match crate::mfa::hash_device_token(&token) {
+        Ok(hash) => hash,
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "hash MFA device token failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "MFA grant error").into_response();
+        }
+    };
+    let verified_at = chrono::Utc::now();
+    let expires_at = verified_at
+        + chrono::Duration::days(i64::from(ruscker_config::MAX_MFA_VALIDITY_DAYS));
+    let Some(factor_confirmed_at) = row.confirmed_at else {
+        return (StatusCode::CONFLICT, "MFA factor is not confirmed").into_response();
+    };
+    // Grant issuance UPSERTs the single row for this browser-session
+    // (keyed by session_binding), so rotation, stale-cookie-after-revocation
+    // and concurrent challenges all resolve to exactly one live grant — no
+    // previous-id juggling from the cookie needed (codex review, #1005).
+    let id = match db::mfa_grants::issue(
+        db,
+        username,
+        &token_hash,
+        &crate::mfa::session_binding(&session_id),
+        factor_confirmed_at,
+        verified_at,
+        expires_at,
+        row.security_epoch,
+        recovery_id.as_deref(),
+        totp_step,
+        audit_action,
+        username,
+    )
+    .await
+    {
+        Ok(Ok(id)) => id,
+        Ok(Err(db::mfa_grants::IssueRefusal::StaleEpoch)) => {
+            // A revocation (password change, forget-all) landed while this
+            // challenge was in flight: the epoch moved, so no grant was
+            // issued — and a consumed recovery code was rolled back with
+            // it (codex review, #1005). The proof itself was valid — ask
+            // the user to challenge again under the new epoch.
+            tracing::info!(%username, "MFA grant refused: security epoch moved mid-challenge");
+            return (
+                StatusCode::CONFLICT,
+                "device trust was revoked during this verification — try again",
+            )
+                .into_response();
+        }
+        Ok(Err(db::mfa_grants::IssueRefusal::Replayed)) => {
+            return render_challenge(
+                &state,
+                session.role,
+                loc,
+                theme,
+                false,
+                "replayed",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
+        }
+        Ok(Err(db::mfa_grants::IssueRefusal::RecoverySpent)) => {
+            // The matched recovery code raced another consumer between the
+            // lookup and the transactional spend — treat as a wrong code.
+            return render_challenge(
+                &state,
+                session.role,
+                loc,
+                theme,
+                false,
+                "wrong-code",
+                next,
+                StatusCode::UNAUTHORIZED,
+            );
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "issue MFA device grant failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "MFA grant error").into_response();
+        }
+    };
+    crate::mfa::CHALLENGE_LIMITER.record_success(username);
+    issue_device_cookie(&state, &cookies, &headers, &id, &token);
+    let destination = if next.is_empty() {
+        format!("{}/admin/account/mfa", state.base_path)
+    } else {
+        format!("{}{}", state.base_path, next)
+    };
+    Redirect::to(&destination).into_response()
+}
+
+async fn forget_device(
+    session: AdminSession,
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Response {
+    let Some(username) = session.actor.as_deref() else {
+        return (StatusCode::FORBIDDEN, "break-glass session has no MFA device").into_response();
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no database").into_response();
+    };
+    if let Some(cookie) = cookies.get(crate::mfa::DEVICE_COOKIE) {
+        if let Some((id, _)) = crate::mfa::device_cookie_parts(cookie.value()) {
+            if let Err(err) = db::mfa_grants::revoke_one(db, id, username, username).await {
+                tracing::error!(error = ?err, %username, "forget MFA device failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+            }
+        }
+    }
+    clear_device_cookie(&state, &cookies);
+    Redirect::to(&format!("{}/admin/account/mfa", state.base_path)).into_response()
+}
+
+async fn revoke_devices(
+    session: AdminSession,
+    State(state): State<AppState>,
+    cookies: Cookies,
+) -> Response {
+    let Some(username) = session.actor.as_deref() else {
+        return (StatusCode::FORBIDDEN, "break-glass session has no MFA devices").into_response();
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no database").into_response();
+    };
+    if let Err(err) =
+        db::mfa_grants::revoke_all(db, username, username, "all-devices").await
+    {
+        tracing::error!(error = ?err, %username, "revoke all MFA devices failed");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+    }
+    clear_device_cookie(&state, &cookies);
+    Redirect::to(&format!("{}/admin/account/mfa", state.base_path)).into_response()
 }

@@ -1971,9 +1971,15 @@ const RUSCKER_COOKIE_NAMES: &[&str] = &[
 /// Is `name` a cookie Ruscker owns (and must therefore never reach an
 /// upstream app)? Sticky cookies are per-spec since #731
 /// (`__ruscker_session_{spec}`), so they match by prefix — which also
-/// covers the legacy un-suffixed `__ruscker_session`.
+/// covers the legacy un-suffixed `__ruscker_session`. The `__ruscker_mfa_`
+/// prefix covers the trusted-device grant (#1005 — root-scoped so the
+/// slice-4 guard sees it on /app/*, which means browsers send it here
+/// too: it is an MFA BEARER and must never reach a container) and the
+/// enrollment-ceremony cookie.
 fn is_ruscker_cookie(name: &str) -> bool {
-    RUSCKER_COOKIE_NAMES.contains(&name) || name.starts_with(COOKIE_NAME)
+    RUSCKER_COOKIE_NAMES.contains(&name)
+        || name.starts_with(COOKIE_NAME)
+        || name.starts_with("__ruscker_mfa_")
 }
 
 /// Drop Ruscker's own cookies from a raw `Cookie` header value,

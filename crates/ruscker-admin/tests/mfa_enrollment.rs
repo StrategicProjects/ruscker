@@ -191,7 +191,7 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
         .generate_current()
         .unwrap();
 
-    let (confirm_status, recovery, _) = request(
+    let (confirm_status, recovery, _, confirm_cookies) = request_full(
         state.clone(),
         "POST",
         "/admin/account/mfa/confirm",
@@ -207,6 +207,25 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
         .unwrap()
         .unwrap();
     assert!(row.confirmed_at.is_some());
+    // Enrollment establishes the initial device proof (#1005 slice 4): the
+    // confirm response sets a device grant cookie, so returning to the app
+    // isn't bounced to a redundant challenge for the code just used.
+    assert!(
+        confirm_cookies
+            .iter()
+            .any(|c| c.starts_with("__ruscker_mfa_device=")),
+        "enrollment confirm must set the initial device grant cookie"
+    );
+    let ruscker_admin::db::ConfigDb::Sqlite(gpool) = &db else {
+        unreachable!()
+    };
+    let (grants,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM user_mfa_grants WHERE username = ?")
+            .bind("alice")
+            .fetch_one(gpool)
+            .await
+            .unwrap();
+    assert_eq!(grants, 1, "enrollment confirm must mint exactly one initial grant");
     let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
         unreachable!()
     };

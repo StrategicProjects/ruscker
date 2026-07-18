@@ -24,6 +24,9 @@ pub struct MfaRow {
     pub updated_at: DateTime<Utc>,
     /// Reserved for slice 3's accepted-step replay prevention.
     pub last_used_step: Option<i64>,
+    /// Trust-revocation epoch: grant issuance is conditional on the value
+    /// read before verification, so revocations racing a challenge win.
+    pub security_epoch: i64,
 }
 
 type StoredRow = (
@@ -35,6 +38,7 @@ type StoredRow = (
     DateTime<Utc>,
     DateTime<Utc>,
     Option<i64>,
+    i64,
 );
 
 /// Start or replace a pending enrollment. A confirmed factor is never
@@ -239,7 +243,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
         ConfigDb::Sqlite(pool) => {
             sqlx::query_as(
                 "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
-                    created_at, updated_at, last_used_step
+                    created_at, updated_at, last_used_step, security_epoch
                FROM user_mfa WHERE username = ?",
             )
             .bind(&username)
@@ -249,7 +253,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
         ConfigDb::Postgres(pool) => {
             sqlx::query_as(
                 "SELECT username, secret_enc, secret_nonce, ceremony, confirmed_at,
-                    created_at, updated_at, last_used_step
+                    created_at, updated_at, last_used_step, security_epoch
                FROM user_mfa WHERE username = $1",
             )
             .bind(&username)
@@ -268,6 +272,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
             created_at,
             updated_at,
             last_used_step,
+            security_epoch,
         )| {
             MfaRow {
                 username,
@@ -278,6 +283,7 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<MfaRow>> {
                 created_at,
                 updated_at,
                 last_used_step,
+                security_epoch,
             }
         },
     ))
@@ -650,9 +656,11 @@ mod tests {
             factor_confirmed_at,
             verified_at,
             verified_at + chrono::Duration::days(30),
+            0,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("grant issued under current epoch");
         let grant = crate::db::mfa_grants::fetch_valid(&db, &grant_id)
             .await
             .unwrap()

@@ -240,9 +240,11 @@ async fn create_eval_grant(
         factor,
         verified_at,
         expires_at,
+        0,
     )
     .await
     .unwrap()
+        .expect("grant issued under current epoch")
 }
 
 #[tokio::test]
@@ -345,6 +347,16 @@ async fn recovery_code_consumes_once_audits_and_creates_normal_grant() {
     assert_eq!(audits.0, 1);
 }
 
+/// The user's current security epoch — direct grant creation in tests must
+/// read it the same way the challenge route does (revocations bump it).
+async fn current_epoch(db: &ruscker_admin::db::ConfigDb, username: &str) -> i64 {
+    ruscker_admin::db::mfa::fetch(db, username)
+        .await
+        .unwrap()
+        .map(|row| row.security_epoch)
+        .unwrap_or(0)
+}
+
 #[tokio::test]
 async fn password_reset_factor_reset_and_forget_revoke_grants() {
     let (state, db) = state_with_db().await;
@@ -386,9 +398,11 @@ async fn password_reset_factor_reset_and_forget_revoke_grants() {
             factor,
             Utc::now(),
             Utc::now() + Duration::days(30),
+        0,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .expect("grant issued under current epoch");
     }
     assert_eq!(grant_count(&db, "revoke").await, 2);
     let (status, _, _, _) = request(
@@ -421,9 +435,11 @@ async fn password_reset_factor_reset_and_forget_revoke_grants() {
         factor,
         Utc::now(),
         Utc::now() + Duration::days(30),
+        current_epoch(&db, "revoke").await,
     )
     .await
-    .unwrap();
+    .unwrap()
+        .expect("grant issued under current epoch");
     ruscker_admin::db::users::set_password(
         &db,
         "revoke",
@@ -443,9 +459,11 @@ async fn password_reset_factor_reset_and_forget_revoke_grants() {
         factor,
         Utc::now(),
         Utc::now() + Duration::days(30),
+        current_epoch(&db, "revoke").await,
     )
     .await
-    .unwrap();
+    .unwrap()
+        .expect("grant issued under current epoch");
     ruscker_admin::db::mfa::reset(&db, "revoke", "root")
         .await
         .unwrap();
@@ -495,9 +513,11 @@ async fn password_reset_factor_reset_and_forget_revoke_grants() {
         replacement_factor,
         Utc::now(),
         Utc::now() + Duration::days(30),
+        0,
     )
     .await
-    .unwrap();
+    .unwrap()
+        .expect("grant issued under current epoch");
     ruscker_admin::db::users::delete(&db, "revoke", Some("root"))
         .await
         .unwrap();
@@ -616,4 +636,42 @@ async fn challenge_rate_limit_uses_atomic_sixth_attempt_rejection() {
     .await;
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert!(body.contains("data-mfa-error=\"rate-limited\""));
+}
+
+
+/// Codex review round 2 (#1005): a revocation that lands while a challenge
+/// is in flight must win — the in-flight grant INSERT reads a stale epoch
+/// and issues nothing.
+#[tokio::test]
+async fn revocation_racing_a_challenge_prevents_grant_issuance() {
+    let (state, db) = state_with_db().await;
+    create_user(&db, "race").await;
+    let (session_id, session_cookie) = session(&state, "race").await;
+    let _secret = enroll(&state, &db, "race", &session_cookie).await;
+    let row = ruscker_admin::db::mfa::fetch(&db, "race")
+        .await
+        .unwrap()
+        .unwrap();
+    let stale_epoch = row.security_epoch;
+
+    // The "in-flight challenge" read the epoch, THEN the revocation commits
+    // (password change bumps the epoch inside its transaction).
+    ruscker_admin::db::users::set_password(&db, "race", "ChangedPass8!", false, Some("race"))
+        .await
+        .unwrap();
+
+    let refused = ruscker_admin::db::mfa_grants::create(
+        &db,
+        "race",
+        &ruscker_admin::mfa::hash_device_token(&"e".repeat(64)).unwrap(),
+        &ruscker_admin::mfa::session_binding(&session_id),
+        row.confirmed_at.unwrap(),
+        Utc::now(),
+        Utc::now() + Duration::days(30),
+        stale_epoch,
+    )
+    .await
+    .unwrap();
+    assert!(refused.is_none(), "stale-epoch grant must be refused");
+    assert_eq!(grant_count(&db, "race").await, 0);
 }

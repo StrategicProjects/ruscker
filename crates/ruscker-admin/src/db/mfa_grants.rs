@@ -40,50 +40,63 @@ pub async fn create(
     factor_confirmed_at: DateTime<Utc>,
     verified_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
-) -> Result<String> {
+    expected_epoch: i64,
+) -> Result<Option<String>> {
+    // INSERT … SELECT conditioned on the security epoch read BEFORE the
+    // TOTP verification (codex review, #1005): a revocation (password
+    // set/change, forget-all) bumps the epoch in the same transaction
+    // that deletes the grants, so a challenge that was in flight across
+    // the revocation inserts 0 rows instead of resurrecting device
+    // trust. `None` = stale epoch; the route re-challenges.
     let username = crate::db::users::normalize_username(username);
     let id = uuid::Uuid::new_v4().to_string();
-    match db {
-        ConfigDb::Sqlite(pool) => {
-            sqlx::query(
-                "INSERT INTO user_mfa_grants
-                    (id, username, token_hash, session_binding, factor_confirmed_at,
-                     mfa_verified_at, expires_at, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&id)
-            .bind(&username)
-            .bind(token_hash)
-            .bind(session_binding)
-            .bind(factor_confirmed_at)
-            .bind(verified_at)
-            .bind(expires_at)
-            .bind(verified_at)
-            .execute(pool)
-            .await
-            .with_context(|| format!("create MFA device grant for {username}"))?;
-        }
-        ConfigDb::Postgres(pool) => {
-            sqlx::query(
-                "INSERT INTO user_mfa_grants
-                    (id, username, token_hash, session_binding, factor_confirmed_at,
-                     mfa_verified_at, expires_at, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            )
-            .bind(&id)
-            .bind(&username)
-            .bind(token_hash)
-            .bind(session_binding)
-            .bind(factor_confirmed_at)
-            .bind(verified_at)
-            .bind(expires_at)
-            .bind(verified_at)
-            .execute(pool)
-            .await
-            .with_context(|| format!("create MFA device grant for {username}"))?;
-        }
-    }
-    Ok(id)
+    let inserted = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query(
+            "INSERT INTO user_mfa_grants
+                (id, username, token_hash, session_binding, factor_confirmed_at,
+                 mfa_verified_at, expires_at, created_at)
+             SELECT ?, ?, ?, ?, ?, ?, ?, ?
+               FROM user_mfa
+              WHERE username = ? AND security_epoch = ?",
+        )
+        .bind(&id)
+        .bind(&username)
+        .bind(token_hash)
+        .bind(session_binding)
+        .bind(factor_confirmed_at)
+        .bind(verified_at)
+        .bind(expires_at)
+        .bind(verified_at)
+        .bind(&username)
+        .bind(expected_epoch)
+        .execute(pool)
+        .await
+        .with_context(|| format!("create MFA device grant for {username}"))?
+        .rows_affected(),
+        ConfigDb::Postgres(pool) => sqlx::query(
+            "INSERT INTO user_mfa_grants
+                (id, username, token_hash, session_binding, factor_confirmed_at,
+                 mfa_verified_at, expires_at, created_at)
+             SELECT $1, $2, $3, $4, $5, $6, $7, $8
+               FROM user_mfa
+              WHERE username = $9 AND security_epoch = $10",
+        )
+        .bind(&id)
+        .bind(&username)
+        .bind(token_hash)
+        .bind(session_binding)
+        .bind(factor_confirmed_at)
+        .bind(verified_at)
+        .bind(expires_at)
+        .bind(verified_at)
+        .bind(&username)
+        .bind(expected_epoch)
+        .execute(pool)
+        .await
+        .with_context(|| format!("create MFA device grant for {username}"))?
+        .rows_affected(),
+    };
+    Ok((inserted == 1).then_some(id))
 }
 
 /// Fetch one unexpired grant. Token, user, factor and session checks remain
@@ -160,6 +173,15 @@ pub async fn revoke_all(
                 .await
                 .context("revoke all MFA device grants")?
                 .rows_affected();
+            // Epoch bump in the SAME transaction: an in-flight challenge
+            // that read the old epoch can no longer issue a grant (#1005).
+            sqlx::query(
+                "UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = ?",
+            )
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .context("bump MFA security epoch")?;
             if changed > 0 {
                 sqlx::query(
                     "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -184,6 +206,15 @@ pub async fn revoke_all(
                 .await
                 .context("revoke all MFA device grants")?
                 .rows_affected();
+            // Epoch bump in the SAME transaction: an in-flight challenge
+            // that read the old epoch can no longer issue a grant (#1005).
+            sqlx::query(
+                "UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = $1",
+            )
+            .bind(&username)
+            .execute(&mut *tx)
+            .await
+            .context("bump MFA security epoch")?;
             if changed > 0 {
                 sqlx::query(
                     "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -284,6 +315,14 @@ pub(crate) async fn delete_all_sqlite(
         .execute(&mut **tx)
         .await
         .context("silently revoke MFA grants")?;
+    // Epoch bump in the SAME transaction (#1005): a challenge in flight
+    // across this revocation read the old epoch and can no longer issue
+    // a grant (its conditional INSERT sees 0 matching rows).
+    sqlx::query("UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = ?")
+        .bind(username)
+        .execute(&mut **tx)
+        .await
+        .context("bump MFA security epoch")?;
     Ok(())
 }
 
@@ -296,5 +335,13 @@ pub(crate) async fn delete_all_postgres(
         .execute(&mut **tx)
         .await
         .context("silently revoke MFA grants")?;
+    // Epoch bump in the SAME transaction (#1005): a challenge in flight
+    // across this revocation read the old epoch and can no longer issue
+    // a grant (its conditional INSERT sees 0 matching rows).
+    sqlx::query("UPDATE user_mfa SET security_epoch = security_epoch + 1 WHERE username = $1")
+        .bind(username)
+        .execute(&mut **tx)
+        .await
+        .context("bump MFA security epoch")?;
     Ok(())
 }

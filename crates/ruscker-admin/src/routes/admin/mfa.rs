@@ -929,10 +929,23 @@ async fn challenge_submit(
         factor_confirmed_at,
         verified_at,
         expires_at,
+        row.security_epoch,
     )
     .await
     {
-        Ok(id) => id,
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            // A revocation (password change, forget-all) landed while this
+            // challenge was in flight: the epoch moved, so no grant was
+            // issued (codex review, #1005). The proof itself was valid —
+            // ask the user to challenge again under the new epoch.
+            tracing::info!(%username, "MFA grant refused: security epoch moved mid-challenge");
+            return (
+                StatusCode::CONFLICT,
+                "device trust was revoked during this verification — try again",
+            )
+                .into_response();
+        }
         Err(err) => {
             tracing::error!(error = ?err, %username, "create MFA device grant failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "MFA grant error").into_response();

@@ -32,6 +32,7 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/users/{username}/groups", post(set_groups))
         .route("/admin/users/{username}/profile", post(set_profile))
         .route("/admin/users/{username}/password", post(reset_password))
+        .route("/admin/users/{username}/mfa/reset", post(reset_mfa))
         .route("/admin/users/{username}/delete", post(delete))
 }
 
@@ -104,7 +105,9 @@ struct UserEditPage<'a> {
     role: Role,
     user: db::users::UserRow,
     me: String,
-    /// "" | "saved" | "last-admin" | "bad-input" | "weak-password"
+    /// Empty means pending/not configured; otherwise the confirmation date.
+    mfa_enrolled_at: String,
+    /// "" | "saved" | "mfa-reset" | "last-admin" | "bad-input" | "weak-password"
     flash: &'static str,
 }
 
@@ -326,10 +329,21 @@ async fn edit(
     };
     let flash = match q.flash.as_deref() {
         Some("saved") => "saved",
+        Some("mfa-reset") => "mfa-reset",
         Some("last-admin") => "last-admin",
         Some("bad-input") => "bad-input",
         Some("weak-password") => "weak-password",
         _ => "",
+    };
+    let mfa_enrolled_at = match db::mfa::fetch(pool, &username).await {
+        Ok(row) => row
+            .and_then(|row| row.confirmed_at)
+            .map(|at| at.format("%Y-%m-%d %H:%M UTC").to_string())
+            .unwrap_or_default(),
+        Err(e) => {
+            tracing::error!(error = ?e, %username, "fetch MFA status for user edit failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
     };
     super::render(&UserEditPage {
         locale: loc,
@@ -341,6 +355,7 @@ async fn edit(
         role: admin.role,
         user,
         me: admin.actor().to_string(),
+        mfa_enrolled_at,
         flash,
     })
 }
@@ -546,6 +561,35 @@ async fn reset_password(
         Err(e) => {
             tracing::warn!(error = ?e, %username, "reset password failed");
             redirect_flash("bad-input")
+        }
+    }
+}
+
+async fn reset_mfa(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Path(username): Path<String>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let username = db::users::normalize_username(&username);
+    if !db::users::is_valid_username(&username) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match db::users::fetch(pool, &username).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, %username, "fetch user before MFA reset failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    }
+    match db::mfa::reset(pool, &username, admin.actor()).await {
+        Ok(()) => redirect_edit_flash(&username, "mfa-reset"),
+        Err(e) => {
+            tracing::warn!(error = ?e, %username, "reset user MFA failed");
+            redirect_edit_flash(&username, "bad-input")
         }
     }
 }

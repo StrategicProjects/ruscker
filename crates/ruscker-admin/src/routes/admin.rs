@@ -31,6 +31,7 @@ pub mod groups;
 pub mod images;
 pub mod landing;
 pub mod logs;
+pub mod mfa;
 pub mod schedules_ui;
 pub mod spec_form;
 pub mod specs;
@@ -53,6 +54,7 @@ pub fn routes() -> Router<AppState> {
             "/admin/account/password",
             get(password_form).post(password_submit),
         )
+        .merge(mfa::routes())
         .merge(dashboard::routes())
         .merge(disk::routes())
         .merge(specs::routes())

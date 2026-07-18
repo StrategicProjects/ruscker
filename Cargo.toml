@@ -97,6 +97,10 @@ hex = "0.4"
 # Password hashing for admin user accounts (argon2id). `std` pulls in
 # the OsRng salt generator via password-hash.
 argon2 = { version = "0.5", features = ["std"] }
+# TOTP enrollment (#1005 slice 2). Keep QR rendering separate so
+# `totp-rs` does not pull its image stack into the server binary.
+totp-rs = { version = "5.7.2", features = ["gen_secret", "otpauth"] }
+qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 
 # Testing
 pretty_assertions = "1.4"

@@ -164,6 +164,7 @@ pub mod export;
 pub mod images;
 pub mod landing;
 pub mod landing_blocks;
+pub mod mfa;
 pub mod ruscker_images;
 pub mod schedules;
 pub mod settings;
@@ -250,6 +251,8 @@ mod pg_tests {
             "landing_customization",
             "spec_versions",
             "specs",
+            "user_mfa",
+            "user_mfa_recovery",
             "users",
         ] {
             assert!(present.contains(expected), "missing table: {expected}");

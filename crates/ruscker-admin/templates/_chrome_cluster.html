@@ -79,6 +79,9 @@
         <a class="chrome-popover-item" href="{{ base }}/admin/account/password">
           <i class="ti ti-key" aria-hidden="true"></i> {{ self.t("chrome-change-password") }}
         </a>
+        <a class="chrome-popover-item" href="{{ base }}/admin/account/mfa">
+          <i class="ti ti-lock" aria-hidden="true"></i> {{ self.t("chrome-mfa") }}
+        </a>
         <div class="chrome-popover-sep"></div>
         <form method="post" action="{{ base }}/admin/logout" class="contents">
           <button type="submit" class="chrome-popover-item">

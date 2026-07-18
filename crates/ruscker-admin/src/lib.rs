@@ -34,6 +34,7 @@ pub mod leader;
 pub mod logbuf;
 pub mod markdown;
 pub mod metrics_cache;
+pub mod mfa;
 pub mod ratelimit;
 pub mod routes;
 pub mod admin_sessions_pg;
@@ -899,7 +900,7 @@ async fn must_change_password_guard(
     use axum::response::IntoResponse;
     let path = req.uri().path();
     let gated = path.starts_with("/admin/")
-        && !path.starts_with("/admin/account")
+        && path != "/admin/account/password"
         && !path.starts_with("/admin/login")
         && !path.starts_with("/admin/logout")
         && !path.starts_with("/admin/setup");

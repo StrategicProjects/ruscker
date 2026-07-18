@@ -296,7 +296,10 @@ async fn totp_grant_satisfies_age_window_and_session_binding_and_rejects_replay(
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(verified_audits.0, 1);
+    // Two mfa.verify: enrollment's initial device grant + the explicit
+    // challenge this test drives (#1005 slice 4 — enrollment now establishes
+    // the first proof so the user isn't bounced to a redundant challenge).
+    assert_eq!(verified_audits.0, 2);
 }
 
 #[tokio::test]
@@ -694,11 +697,13 @@ async fn grant_issued_under_old_epoch_is_rejected_at_read_time() {
     let _secret = enroll(&state, &db, "mvcc", &session_cookie).await;
     let row = ruscker_admin::db::mfa::fetch(&db, "mvcc").await.unwrap().unwrap();
     let token = "f".repeat(64);
+    // Distinct binding from the enrollment grant (a second browser), so this
+    // manual grant coexists — the test is about epoch, not binding.
     let id = ruscker_admin::db::mfa_grants::create(
         &db,
         "mvcc",
         &ruscker_admin::mfa::hash_device_token(&token).unwrap(),
-        &ruscker_admin::mfa::session_binding(&session_id),
+        &ruscker_admin::mfa::session_binding(&format!("{session_id}:mvcc")),
         row.confirmed_at.unwrap(),
         Utc::now(),
         Utc::now() + Duration::days(30),
@@ -769,7 +774,8 @@ async fn stale_epoch_rolls_back_recovery_consumption() {
         .await
         .unwrap()
         .is_some());
-    assert_eq!(grant_count(&db, "rollback").await, 0);
+    // The stale issuance added no grant; enrollment's initial grant remains.
+    assert_eq!(grant_count(&db, "rollback").await, 1);
 }
 
 /// Codex review r4 (#1005): a successful re-challenge must retire the

@@ -473,6 +473,7 @@ async fn confirm(
     session: AdminSession,
     State(state): State<AppState>,
     cookies: Cookies,
+    headers: HeaderMap,
     loc: Locale,
     theme: Theme,
     Form(form): Form<ConfirmForm>,
@@ -641,6 +642,58 @@ async fn confirm(
     }
     crate::mfa::CONFIRM_LIMITER.record_success(username);
     clear_ceremony_cookie(&state, &cookies);
+
+    // The confirmation code just entered IS a valid MFA proof, so mint the
+    // browser's initial device grant now — otherwise the recovery page's
+    // "Continue to app" link is immediately bounced to a challenge for the
+    // same code, which the replay guard rejects until the next TOTP
+    // interval (codex review, #1005). The enrollment already consumed the
+    // step, so this issuance passes no step/recovery to consume; it records
+    // the device proof (audited mfa.verify — the device is verified, beside
+    // the mfa.enroll already written). Non-fatal: the recovery codes must
+    // still render even if issuance fails; worst case is one extra
+    // challenge.
+    if let Some(session_id) = cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) {
+        if let Ok(Some(confirmed)) = db::mfa::fetch(db, username).await {
+            if let Some(factor_confirmed_at) = confirmed.confirmed_at {
+                if let (Ok(token), verified_at) =
+                    (crate::mfa::generate_device_token(), chrono::Utc::now())
+                {
+                    if let Ok(token_hash) = crate::mfa::hash_device_token(&token) {
+                        let expires_at = verified_at
+                            + chrono::Duration::days(i64::from(
+                                ruscker_config::MAX_MFA_VALIDITY_DAYS,
+                            ));
+                        match db::mfa_grants::issue(
+                            db,
+                            username,
+                            &token_hash,
+                            &crate::mfa::session_binding(&session_id),
+                            factor_confirmed_at,
+                            verified_at,
+                            expires_at,
+                            confirmed.security_epoch,
+                            None,
+                            None,
+                            "mfa.verify",
+                            username,
+                        )
+                        .await
+                        {
+                            Ok(Ok(id)) => {
+                                issue_device_cookie(&state, &cookies, &headers, &id, &token)
+                            }
+                            other => tracing::warn!(
+                                %username, result = ?other,
+                                "initial MFA grant after enrollment not issued; user will challenge once"
+                            ),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let page = AccountMfaRecoveryPage {
         locale: loc,
         theme,

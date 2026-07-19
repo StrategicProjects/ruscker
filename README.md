@@ -131,9 +131,11 @@ What's in the box:
   with an optional command override, run history/log tail, leader-only HA
   firing, no fire-on-create, one catch-up after downtime and a per-run
   timeout (1 hour by default); failures raise the `job-failed` alert webhook.
+  (Local Docker backend; not yet available with the multi-host backend.)
 - **Named-volume management** — the Disk panel lists Docker volumes with
   live reference counts and can create labelled volumes; removal is offered
   only for Ruscker-created volumes with zero references and no catalog use.
+  (Local Docker backend; the multi-host backend reports it as unavailable.)
 - **Operations** — `/healthz` + `/readyz` probes, graceful shutdown,
   structured (JSON) logging, per-API rate limiting + CORS, request
   body-size limits, an opt-in Prometheus `/metrics` endpoint, and
@@ -152,7 +154,7 @@ The repository contains 760+ unit + integration test cases. The default
 backend (`docker-it`), the full proxy + WebSocket path (`e2e`), and real
 Shiny/Streamlit WebSockets (`ws-e2e`).
 
-[admin guide]: https://strategicprojects.github.io/ruscker/admin.html#two-factor-authentication-for-selected-apps
+[admin guide]: https://strategicprojects.github.io/ruscker/admin.html#2fa--mfa-for-selected-apps
 [Schedules page]: https://strategicprojects.github.io/ruscker/admin.html#schedules
 [YAML reference]: docs/YAML_SCHEMA.md
 [security guide]: docs/SECURITY.md

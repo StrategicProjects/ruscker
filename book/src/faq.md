@@ -52,9 +52,32 @@ visibility**: every spec can declare `access-groups` / `access-users`
 and only matching users see the card and reach `/app` / `/api`
 (specs with no access keys remain open to anyone) —
 see [Per-user access](./configuration.md#per-user-access).
+An app can also set `require-mfa: true` for a TOTP step-up before its
+container starts; each user enrols one factor and each app chooses how
+recent the proof must be.
 External identity providers (OIDC / SAML / LDAP) for end-user
 sign-in are [Phase 8](./roadmap.md); user accounts are managed in
 the admin **Users** page until then.
+
+### How does my app receive the signed-in user?
+
+Identity forwarding is opt-in per spec. Set
+`add-default-http-headers: true` for `X-SP-UserId` and
+`X-SP-UserGroups`. Independently, select `identity-claims: [email, setor]`
+for `X-Ruscker-User-Email` / `X-Ruscker-User-Setor`. Ruscker sends values
+only for signed-in users, on HTTP and WebSocket, and strips client-supplied
+reserved identity headers first. It defaults off; if the app appears to
+have “lost” the user after migrating from ShinyProxy, enable it explicitly.
+
+### Can proxied apps set their own cookies?
+
+Yes. App-owned cookies pass through. Because apps share the portal origin,
+Ruscker drops response cookies that use its reserved session, preference,
+sticky or MFA names (including `ruscker_admin_session`, `ruscker_theme`,
+`ruscker_locale`, `__ruscker_session*` and `__ruscker_mfa_*`). It also
+neutralises `Clear-Site-Data` cookie-clearing directives. Rename a
+conflicting app cookie; this boundary prevents an app from overwriting the
+portal's login or MFA state.
 
 ### Where is configuration and state stored?
 
@@ -83,13 +106,12 @@ sticky upstream for the login paths remains the fallback — see
 
 ### Is it production-ready?
 
-Yes. Phases 0–7 are complete, the proxy is production-ready and
-horizontally scalable, and the codebase was systematically audited for
-bugs, security and UX in June 2026, with every finding fixed.
-Releases are multi-arch and cosign-signed; see the
-[release notes](./news.md) and the [Roadmap](./roadmap.md).
-Phase 8 (external auth: OIDC / SAML / LDAP) is the main remaining
-optional work.
+The current release includes health probes, graceful shutdown, structured
+logging, signed multi-arch artifacts and active-active operation with
+Postgres. Review the [release notes](./news.md) and
+[Roadmap](./roadmap.md), then stage your own workload and failure tests.
+External identity providers (OIDC / SAML / LDAP) are not yet available;
+use the built-in accounts when that limitation fits your deployment.
 
 ### What platforms does it run on?
 

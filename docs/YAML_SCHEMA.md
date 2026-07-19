@@ -44,7 +44,7 @@ server:
 
 ### `server.useForwardHeaders` — forwarded-header trust
 
-Since v0.2.5 this single switch gates **every** read of
+This single switch gates **every** read of
 client-suppliable `X-Forwarded-*` headers: the cookie `Secure` flag
 (`X-Forwarded-Proto`), the per-client API rate-limit key, and the
 `X-Forwarded-For` chain forwarded to your apps (trusted → the real
@@ -97,7 +97,7 @@ ignored by Ruscker.
 | `container-log-path` | path | none | **Ignored** (warned when set) — use `docker logs` / the admin Logs tab |
 | `port` | u16 | `8080` | HTTP listener port |
 | `bind-address` | string | `"0.0.0.0"` | Listener interface |
-| `authentication` | enum | `none` | `none` (only `none` is implemented today) / `openid` / `ldap` / `saml` / `simple` |
+| `authentication` | enum | `none` | `none` (the only implemented value) / `openid` / `ldap` / `saml` / `simple` |
 | `landing-customization` | block | `{}` | Branding, SEO/social meta, analytics, custom HTML blocks, sign-in visibility — see [§ `proxy.landing-customization`](#proxylanding-customization). Ruscker extension |
 | `specs` | array | `[]` | List of apps/links/APIs |
 | `container-wait-time` | ms | `60000` | Max wait for a spawned container to become ready (TCP + HTTP probe) before the spawn fails; `0` keeps the default (#970) |
@@ -151,15 +151,13 @@ and `tls` mismatched with the scheme.
 
 ### Authentication
 
-**Ruscker currently supports only `none`.** The other variants are
-accepted by the parser (so existing YAML doesn't fail) but Ruscker will
-warn at boot that auth is unimplemented and continue as if `none`. An
-external identity provider (OIDC / SAML / LDAP) is the Phase 8 roadmap
-item; today, apps that handle their own auth are the common case, and
-`none` is correct — Ruscker just routes traffic.
-
-For applications that handle their own auth internally (a common
-case), `none` is the correct choice — Ruscker just routes traffic.
+**`proxy.authentication` currently supports only `none`.** The other
+variants are accepted by the parser so an imported configuration still
+loads, but Ruscker treats them as `none`; `ruscker validate --strict-compat`
+reports the unsupported scheme. This field is about an external identity provider; Ruscker's database-backed user
+accounts, roles, per-spec access lists, and step-up MFA work independently
+of it. OIDC / SAML / LDAP remain roadmap items. An app may also keep its
+own internal authentication behind the proxy.
 
 ### `proxy.landing-customization`
 
@@ -186,7 +184,7 @@ proxy:
 
     # SEO / social-share meta tags injected into the landing `<head>`
     seo-title: "Portal — Org Name"     # overrides `proxy.title` for <title>
-    seo-description: "Internal apps."  # <meta name="description"> + og:description
+    seo-description: "Team applications."  # <meta name="description"> + og:description
     og-image: /assets/img/og.png       # path or absolute URL for og:image
 
     # Analytics — admin-trusted, injected verbatim into landing <head>
@@ -304,6 +302,7 @@ A spec describes one app, API, or external link. Every spec has an
 ```yaml
 - id: my_app
   container-image: org/repo:tag       # required for containerized
+  platform: linux/amd64               # optional Docker target platform
   type: shiny                         # optional, default 'shiny' if image set
   container-port: 8501                # port the app listens on inside the
                                       #   container; default 3838 (Shiny).
@@ -323,11 +322,15 @@ A spec describes one app, API, or external link. Every spec has an
   docker-registry-credential: dockerhub-acme   # OR reference a stored
                                       #   credential by name (Ruscker
                                       #   extension; see below)
+  container-cpu-limit: 1.5            # hard cap in CPU cores
+  container-cpu-request: 0.5          # accepted; local Docker ignores CPU requests
+  container-memory-limit: 1g          # hard cap; bytes or k/m/g suffix
+  container-memory-request: 512m      # Docker memory reservation
   container-volumes:                  # bind mounts (ShinyProxy key; `volumes` also accepted)
     - /srv/myapp/data:/data           #   persistent data
     - /srv/myapp/www:/www:ro          #   static assets, read-only
   container-env:                      # env vars injected into the container
-    DB_HOST: db.internal              #   (ShinyProxy-compatible)
+    DB_HOST: db.example.org           #   (ShinyProxy-compatible)
     DB_PASSWORD: ${DB_PASSWORD}       #   ${VAR} resolved at spawn, not at parse —
                                       #   the literal is stored; secret never hits the DB
   container-cmd:                      # override the image's CMD (argv list)
@@ -337,7 +340,7 @@ A spec describes one app, API, or external link. Every spec has an
   container-network: ruscker_net      # attach to this Docker network (created if missing)
   labels:                             # extra Docker labels stamped on the container
     team: data                        #   (ShinyProxy-compatible)
-    cost-center: GAPE
+    cost-center: analytics
   access-groups: [staff, ops]         # who may see/reach this app
   access-users: [alice]               #   (ShinyProxy-compatible)
   require-mfa: true                   # require a user-owned MFA proof (Ruscker-native)
@@ -364,6 +367,17 @@ created — so an app secret passed this way never lands in the database.
 is an argv list that overrides the image's baked `CMD` (Docker
 `Config.Cmd`); omit it to keep the image default. Both are
 ShinyProxy-compatible and editable per spec.
+
+`platform` selects the Docker target platform used for image pull and
+container creation, such as `linux/amd64` or `linux/arm64`; when omitted,
+the daemon chooses the host-compatible manifest. The four resource fields
+are ShinyProxy-compatible: `container-cpu-limit` is a positive fractional
+CPU hard cap (`0.5` = half a core), `container-memory-limit` is a hard byte
+cap, and `container-memory-request` maps to Docker's soft memory
+reservation. `container-cpu-request` is parsed and retained for compatible
+backends but has no runtime effect on the local Docker backend, which has no
+CPU-request primitive. Memory accepts plain bytes or binary `k`/`m`/`g`
+suffixes. Invalid or non-positive values are warned and not applied.
 
 `container-network` (Ruscker extension) attaches the spec's containers to
 a named Docker network, mapped to the container's `HostConfig.NetworkMode`.
@@ -393,8 +407,11 @@ membership is set per user in the admin panel. Enforcement is real (not
 just hiding the card). See the [Roadmap](ROADMAP.md) Phase 8.
 
 `require-mfa` and `mfa-validity-days` are Ruscker-native per-spec controls
-for step-up MFA (#1005). MFA is off by default. When enabled, the app trusts
-a successful user-owned TOTP proof for 7 days unless
+for step-up MFA (#1005). MFA is off by default. A user enrolls one TOTP
+factor on **Account → 2FA**, using the QR code with a compatible
+authenticator app, and receives one-time recovery codes that are displayed
+once. Every protected app uses that same user-owned factor. When enabled,
+the app trusts a successful proof for 7 days unless
 `mfa-validity-days` overrides the window; `0` means proof is valid only in
 the current login session (no remembered device), and values above 30 clamp
 to 30. A user without an enrolled TOTP factor will be guided through
@@ -540,8 +557,8 @@ navigates to the link.
   container-image: org/my-api:latest
   api:
     port: 8080                         # container port
-    docs-path: /__docs__               # OpenAPI/Swagger UI
-    health-path: /__healthz__          # readiness check
+    docs-path: /__docs__               # parsed/stored; not consumed yet
+    health-path: /__healthz__          # parsed/stored; readiness still probes /
     rate-limit: 100/min                # per-IP rate limit at proxy
     cors: true                         # permissive CORS headers
   min-replicas: 1
@@ -549,6 +566,13 @@ navigates to the link.
   concurrent-requests-per-replica: 100
   routing-strategy: round-robin        # APIs don't need sticky
 ```
+
+`api.port`, `api.rate-limit`, and `api.cors` have runtime effects.
+`api.docs-path` and `api.health-path` are currently parsed, stored, and
+editable but not consumed by the proxy/backend: Ruscker does not publish a
+docs link from `docs-path`, and container readiness still performs TCP then
+HTTP at `/` rather than probing `health-path`. Do not rely on either field
+for routing or health behavior yet.
 
 #### `api.rate-limit` — per-client throttling
 
@@ -689,12 +713,12 @@ Rules:
 - Comments (lines starting with `#`, or trailing `# …`) are not
   interpolated
 - A **nested** reference in a default (`${A:-${B}}`) is refused with a
-  hard error (v0.2.5) — it used to silently corrupt the value
+  hard error; nested defaults are not supported
 - `docker-registry-password` and everything under `container-env` are
   **preserved verbatim** and resolved only at use (spawn/pull), so
   secrets never land in the database on `import`. This holds wherever
   `container-env` appears in the spec — including as the first key of
-  a list item (fixed in v0.2.5)
+  a list item
 
 This applies to the whole YAML file, not just credentials. Use it for
 any value that varies between environments.
@@ -736,7 +760,7 @@ and respects the `RUST_LOG` env var as well.
 
 ## Validation warnings
 
-`ruscker validate <config>` — and, since v0.2.5, `ruscker serve` at
+`ruscker validate <config>` — and `ruscker serve` at
 startup — reports these non-fatal findings. None of them stops the
 server; each one means some configured intent is **not** taking
 effect, so treat warnings in production logs as action items.
@@ -745,12 +769,15 @@ effect, so treat warnings in production logs as action items.
 |---|---|
 | duplicate spec id | Two specs share an `id`; only the last parsed wins |
 | no display-name / no description | Cosmetic: the landing card falls back to the `id` / renders empty |
-| embedded credential | A sensitive field (`docker-registry-password`, …) carries a literal value instead of a pure `${VAR}` reference — including a partial one like `${VAR}-suffix` (v0.2.5) |
+| embedded credential | A sensitive field (`docker-registry-password`, …) carries a literal value instead of a pure `${VAR}` reference — including a partial one like `${VAR}-suffix` |
 | unknown template-properties type | `template-properties.type` isn't one of the known card types |
 | invalid replica range | `max-replicas < min-replicas` — the scaler can't satisfy both |
-| replica ceiling zero (v0.2.5) | Explicit `max-replicas: 0` on a containerized spec — every spawn is refused; the app can never start |
-| missing container-image (v0.2.5) | A containerized `type:` with no `container-image` — fails only when first visited |
-| external with container-image (v0.2.5) | `type: external` + `container-image` — the image is silently ignored |
+| replica ceiling zero | Explicit `max-replicas: 0` on a containerized spec — every spawn is refused; the app can never start |
+| missing container-image | A containerized `type:` with no `container-image` — fails only when first visited |
+| external with container-image | `type: external` + `container-image` — the image is silently ignored |
+| MFA validity out of range | `mfa-validity-days` is above 30; the effective value clamps to 30 |
+| MFA validity without requirement | `mfa-validity-days` is set while `require-mfa` is not true, so the window is inert |
+| MFA on external link | `require-mfa` is set on a link Ruscker does not proxy; it cannot guard the linked site |
 | invalid scale threshold | `scale-up`/`scale-down` thresholds inverted or out of `0..1` |
 | container fields without image | `seats-per-container` etc. on a spec with no image |
 | invalid rate-limit / max-body-size / cpu / memory / volume | The value doesn't parse, so the intended cap or mount is **not enforced** |
@@ -759,16 +786,16 @@ effect, so treat warnings in production logs as action items.
 | invalid container-network | `container-network` isn't a valid Docker network name (`[a-zA-Z0-9][a-zA-Z0-9_.-]*`) — the create fails at spawn |
 | zero seats | `seats-per-container: 0` confuses the auto-scaler |
 | invalid docker host | A `proxy.hosts` entry that will fail to connect at startup |
-| ignored compat field (v0.2.5) | A modeled ShinyProxy field with no runtime effect is set (`server.secure-cookies`, `server.servlet.session.timeout`, `proxy.heartbeat-rate`, `proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`, `logging.file`) |
+| ignored compat field | A modeled ShinyProxy field with no runtime effect is set (`server.secure-cookies`, `server.servlet.session.timeout`, `proxy.heartbeat-rate`, `proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`, `logging.file`) |
 
 `ruscker validate --strict-compat` additionally lists every
 *unsupported* ShinyProxy feature a migrated config uses and exits
 non-zero — the recommended pre-flight when migrating.
 
-## Not supported (MVP)
+## Not supported
 
-These ShinyProxy fields are accepted by the parser but currently
-ignored:
+These ShinyProxy fields are accepted by the permissive parser but currently
+ignored and reported by `ruscker validate --strict-compat`:
 
 - `proxy.specs[*].kubernetes-*` — Kubernetes backend (out of scope)
 - `proxy.specs[*].minimum-seats-available` — pre-warm pool (planned)
@@ -781,18 +808,18 @@ ignored:
 `container-network` and `labels` are now supported — see "Containerized
 specs" above.)
 
-Setting any of these will produce a startup warning but not an error
-(`serve` runs the same validation `ruscker validate` does and logs
-each finding at startup). The same applies to fields that *parse* but
-have no runtime effect yet: `server.secure-cookies`,
+Setting the strict-compat fields above does not prevent ordinary parsing;
+run `ruscker validate --strict-compat <config>` to surface them and fail the
+migration pre-flight. Separately, modeled fields that parse but have no
+runtime effect produce an ordinary validation/startup warning:
+`server.secure-cookies`,
 `server.servlet.session.timeout`, `proxy.heartbeat-rate`,
 `proxy.hide-navbar`, `proxy.landing-page`, `proxy.container-log-path`
 and `logging.file` each produce a warning when set, so a migrated
-config never silently loses configured behaviour.
-Run `ruscker validate --strict-compat <config>` to list every
-unsupported feature a config uses (and exit non-zero if any are
-found) — the recommended pre-flight check when migrating from
-ShinyProxy.
+config does not silently lose those configured behaviors. The API
+`docs-path` and `health-path` compatibility placeholders described above are
+the exception: they are stored but currently have no runtime effect or
+dedicated validation warning.
 
 For a field-by-field ShinyProxy → Ruscker reference — every documented
 ShinyProxy 3.x key with its status here (supported /

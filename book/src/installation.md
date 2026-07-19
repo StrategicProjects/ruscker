@@ -21,10 +21,12 @@ This:
 - installs `/usr/bin/ruscker`,
 - creates a `ruscker` system user,
 - installs a hardened `ruscker.service` unit and enables + starts it,
-- drops a minimal config at `/etc/ruscker/application.yml` and a
+- drops a minimal config at `/etc/ruscker/ruscker.yml` and a
   secrets file at `/etc/ruscker/ruscker.env`,
 - **generates a unique admin token on first install and prints it
   once** (there is no default password),
+- generates stable master and cookie keys without overwriting existing
+  values, so encrypted credentials, MFA and sticky sessions survive restarts,
 - runs with the **admin catalog enabled** (`--db
   /var/lib/ruscker/ruscker.db`), so the admin panel works out of the box
   and a set of showcase apps seeds on first boot.
@@ -37,7 +39,7 @@ sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env   # your admin token
 
 Log in at `/admin` with the printed token to manage **apps, the landing
 page and users** — that's where day-to-day configuration lives (stored
-in the catalog DB, not the YAML). `application.yml` holds **deployment**
+in the catalog DB, not the YAML). `ruscker.yml` holds **deployment**
 settings; put secrets in `/etc/ruscker/ruscker.env`. After editing either
 file, `sudo systemctl restart ruscker`.
 
@@ -53,8 +55,8 @@ Pick the scope you want:
 | Goal | Command | What's left |
 |---|---|---|
 | **Remove the software**, keep config + data | `sudo apt remove ruscker` | `/etc/ruscker` (config, admin token, keys) and `/var/lib/ruscker` (catalog DB) — a reinstall resumes where you left off. |
-| **Remove everything** (no trace) | `sudo apt purge ruscker` | Nothing. Drops the catalog DB **and** `/etc/ruscker` — including `application.yml` and the admin token / master key in `ruscker.env`. |
-| **Reset to a brand-new install** | `sudo apt purge ruscker && sudo apt install ./ruscker_<version>-1_amd64.deb` | A pristine box: the default `application.yml` (no custom title/specs) and a freshly generated admin token, exactly like a first install. |
+| **Remove everything** (no trace) | `sudo apt purge ruscker` | Nothing. Drops the catalog DB **and** `/etc/ruscker` — including `ruscker.yml` and the admin token / master key in `ruscker.env`. |
+| **Reset to a brand-new install** | `sudo apt purge ruscker && sudo apt install ./ruscker_<version>-1_amd64.deb` | A pristine box: the default `ruscker.yml` (no custom title/specs) and freshly generated keys and admin token, exactly like a first install. |
 | **Wipe the data only**, keep config | stop, remove the DB, start (below) | Config + token unchanged; the catalog is empty, so migrations re-run and the showcase cards re-seed on next boot. |
 
 To wipe just the catalog (a "fresh portal" without uninstalling):
@@ -68,7 +70,7 @@ sudo systemctl start ruscker
 > The catalog DB lives in `/var/lib/ruscker`; your config and secrets
 > live in `/etc/ruscker`. `purge` clears both; removing the DB clears
 > only the catalog. The portal **title** comes from `proxy.title` in
-> `application.yml`, so it survives a data-only wipe — only a `purge` (or
+> `ruscker.yml`, so it survives a data-only wipe — only a `purge` (or
 > editing the file) changes it.
 
 ## Static musl tarball
@@ -110,9 +112,9 @@ tap, so `brew upgrade` tracks the latest version.
 
 ```sh
 docker run --rm -p 8080:8080 \
-  -v "$PWD/application.yml:/etc/ruscker/application.yml:ro" \
+  -v "$PWD/ruscker.yml:/etc/ruscker/ruscker.yml:ro" \
   ghcr.io/strategicprojects/ruscker:latest \
-  serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080
+  serve --config /etc/ruscker/ruscker.yml --bind 0.0.0.0:8080
 ```
 
 To let Ruscker spawn app containers (the `--docker` backend), also
@@ -120,10 +122,10 @@ mount the Docker socket and add `--docker`:
 
 ```sh
 docker run --rm -p 8080:8080 \
-  -v "$PWD/application.yml:/etc/ruscker/application.yml:ro" \
+  -v "$PWD/ruscker.yml:/etc/ruscker/ruscker.yml:ro" \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/strategicprojects/ruscker:latest \
-  serve --config /etc/ruscker/application.yml --bind 0.0.0.0:8080 --docker
+  serve --config /etc/ruscker/ruscker.yml --bind 0.0.0.0:8080 --docker
 ```
 
 > Mounting the Docker socket grants control of the host's Docker
@@ -171,21 +173,24 @@ The exact commands are also printed in each release's notes.
 ## The `serve` command
 
 ```text
-ruscker serve --config <path> [--bind 0.0.0.0:8080] [--docker]
-              [--db <file>] [--images-dir <dir>] [--log-format json]
+ruscker serve [--config <path>] [--bind 0.0.0.0:8080] [--docker|--no-docker]
+              [--db <file>] [--config-db-url <postgres-url>]
+              [--images-dir <dir>] [--log-format json]
               [--base-path <prefix>]
 ```
 
 | Flag | What it does |
 |---|---|
-| `--config` | Path to the `application.yml`. |
+| `--config` | Path to the service config. When omitted, Ruscker prefers `ruscker.yml` in the working directory and falls back to `application.yml` for compatibility. |
 | `--bind` | Listen address (defaults to the YAML's `proxy.port`). |
-| `--docker` | Enable the container backend (spawn app containers). |
-| `--db` | SQLite file backing the admin panel. Without it, `/admin/*` is read-only-ish and the editor returns 503. |
+| `--docker` / `--no-docker` | By default Ruscker auto-connects when the local daemon socket is reachable. `--docker` makes connection failure fatal; `--no-docker` forces landing-only mode. |
+| `--db` | SQLite file backing the admin panel. Without it or `--config-db-url`, `/admin/*` returns 503. |
+| `--config-db-url` | PostgreSQL URL backing the admin panel and shared catalog in HA deployments. |
 | `--images-dir` | Directory served at `/assets/img/`. Auto-discovered from the config / ShinyProxy `template-path` when omitted. |
 | `--log-format` | `text` (default) or `json`. |
 | `--base-path` | Mount the whole portal under a URL prefix (e.g. `--base-path /apps`). Overrides `server.context-path` in the YAML. Health probes (`/healthz`, `/readyz`) stay at the root. |
 
 Secrets come from the environment: `RUSCKER_ADMIN_TOKEN`,
 `RUSCKER_MASTER_KEY`, `RUSCKER_COOKIE_KEY`,
-`DOCKER_REGISTRY_PASSWORD`.
+`DOCKER_REGISTRY_PASSWORD`. `RUSCKER_MASTER_KEY` is required for encrypted
+credentials and 2FA enrolment; keep it stable and back it up.

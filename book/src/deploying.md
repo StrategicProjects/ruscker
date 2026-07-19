@@ -18,10 +18,15 @@ option is documented inline in the shipped file); put your **secrets** in
 
 ```ini
 RUSCKER_ADMIN_TOKEN=...        # openssl rand -hex 32
-RUSCKER_MASTER_KEY=...         # for the credentials store
+RUSCKER_MASTER_KEY=...         # encrypted credentials and MFA secrets
 RUSCKER_COOKIE_KEY=...         # keep sticky sessions stable across restarts
 DOCKER_REGISTRY_PASSWORD=...   # referenced as ${DOCKER_REGISTRY_PASSWORD} in the YAML
 ```
+
+The package generates stable master and cookie keys when they are missing.
+Keep `RUSCKER_MASTER_KEY` backed up: 2FA enrolment returns `503` without it,
+and changing it makes existing encrypted credentials and TOTP factors
+undecryptable.
 
 ## 2. Enable the container backend
 
@@ -166,8 +171,8 @@ server {
 ```
 
 Set `server.useForwardHeaders: true` in the YAML so Ruscker trusts
-`X-Forwarded-*`. **Since v0.2.5 this is required** for cookies to carry
-the `Secure` flag behind a TLS-terminating proxy — without the flag,
+`X-Forwarded-*`. This is required for cookies to carry the `Secure` flag
+behind a TLS-terminating proxy — without the flag,
 forwarded headers from any client would be spoofable, so Ruscker
 ignores them entirely (cookies are then minted as if on plain HTTP, and
 per-client API rate limiting keys on the TCP peer, i.e. your proxy).
@@ -175,19 +180,19 @@ Both halves are needed: the `proxy_set_header X-Forwarded-Proto`
 above **and** the YAML flag. ShinyProxy-migrated configs usually carry
 the flag already.
 
-> Two Ruscker endpoints stream over **Server-Sent Events** (SSE):
-> the live dashboard (`/admin/dashboard/events`) and the Ruscker log
-> tail (`/admin/logs/stream`). nginx's default response buffering
-> delays or blocks these streams — disable it for both paths:
+> The Containers dashboard short-polls
+> `GET /admin/dashboard/snapshot`; it does not use SSE and needs no
+> buffering exception. The server log tail and per-replica live log tails
+> do use SSE, so disable nginx buffering for their paths:
 >
 > ```nginx
-> location = /admin/dashboard/events {
+> location = /admin/logs/stream {
 >     proxy_pass http://127.0.0.1:8090;
 >     proxy_buffering off;
 >     proxy_read_timeout 1h;
 >     # + the same proxy_set_header lines as above
 > }
-> location = /admin/logs/stream {
+> location ^~ /admin/dashboard/logs/ {
 >     proxy_pass http://127.0.0.1:8090;
 >     proxy_buffering off;
 >     proxy_read_timeout 1h;
@@ -231,7 +236,7 @@ location /apps/   { proxy_pass http://127.0.0.1:8080; /* + proxy_set_header from
 Ruscker then nests every route under `/apps` (`/apps`, `/apps/admin/…`,
 `/apps/app/{spec}/…`), rewrites the URLs/redirects it emits to carry the
 prefix, and injects a small runtime shim so JS-built requests (the live
-dashboard's SSE, `fetch`, etc.) resolve under `/apps` too. `/healthz` and
+dashboard poller, `fetch`, WebSockets, etc.) resolve under `/apps` too. `/healthz` and
 `/readyz` stay at the **root** for load-balancer probes — don't put them
 behind the `/apps` locations. `--base-path` is empty by default, so
 root-mounted deploys are unaffected.
@@ -256,7 +261,7 @@ sessions wind down up to `proxy.shutdown-grace-ms`, then exits.
 For high availability you can run **several Ruscker instances behind a
 load balancer**, all sharing one Postgres. There's a runnable harness
 (two instances + nginx + Postgres) in [`examples/ha/`][ha] — start
-there. The three things every instance must share:
+there. These things must be shared by every instance:
 
 - **`--config-db-url postgres://…`** — the admin catalog (specs,
   landing, users, credentials, audit) lives in Postgres instead of a
@@ -271,6 +276,9 @@ there. The three things every instance must share:
   instance pointed at the same Docker backend (so they reconcile the
   same replicas), a session survives the load balancer moving it
   between instances.
+- **the same `RUSCKER_MASTER_KEY`** on every instance — all nodes must be
+  able to decrypt stored registry credentials and user TOTP factors. A
+  missing key makes MFA enrolment fail closed.
 
 **Scaler leader election is automatic:** instances elect one leader via
 a Postgres advisory lock; only the leader spawns/reaps replicas, the
@@ -412,9 +420,10 @@ State lives in two places:
   sqlite3 /var/lib/ruscker/ruscker.db ".backup '/backup/ruscker.db'"
   ```
 
-  The encrypted credentials are useless without `RUSCKER_MASTER_KEY`, so
-  back up the key too — separately. `ruscker export --db <file>` also
-  writes a YAML snapshot (everything except the encrypted secrets).
+  The encrypted credentials and MFA factors are unusable without
+  `RUSCKER_MASTER_KEY`, so back up the key too — separately. `ruscker
+  export --db <file>` also writes a YAML snapshot; it does not export
+  credential or MFA secrets.
 
 ## Upgrading
 

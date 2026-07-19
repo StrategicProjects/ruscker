@@ -10,7 +10,9 @@ Shiny host.
 Each app becomes a card on the landing page and a route under
 `/app/{spec}` (interactive) or `/api/{spec}` (stateless). Ruscker handles
 spawning, sticky sessions, WebSocket upgrades, URL rewriting, load
-balancing, and reaping idle containers.
+balancing, and reaping idle containers. Sensitive apps can require a
+recent MFA proof before any container starts; signed-in identity can be
+forwarded to trusted apps through opt-in headers.
 
 ## Showcase demos
 
@@ -118,6 +120,15 @@ Multiplex GPUs and isolate users in front of generative tools.
 - Apache Airflow, Dagster, Prefect, Mage, Kestra, NocoDB, Baserow,
   Directus, self-hosted Supabase Studio.
 
+## Scheduled ETL, reports and maintenance
+
+The admin **Schedules** page can run a containerized spec to completion on
+a five-field UTC cron: nightly ETL, report generation, cache refreshes or
+small maintenance tasks. A job reuses the spec's image, environment,
+volumes, resource limits and registry credentials, with an optional command
+override. Runs have a configurable timeout (1 hour by default), history and
+log tails; failures can trigger the `job-failed` alert webhook.
+
 ## Database admin consoles
 
 Surface a DB console as just another card on the portal.
@@ -140,8 +151,9 @@ Surface a DB console as just another card on the portal.
 - **Service-mesh-grade microservices** (automatic mTLS, dense distributed
   tracing, complex canaries) — that's Istio/Linkerd on Kubernetes.
   Ruscker is a portal proxy, not a service mesh.
-- **Long CPU-bound batch jobs** — use a scheduler (Slurm, Nomad, Airflow
-  workers). Ruscker is for interactive sessions and short requests.
+- **Large distributed or unbounded batch pipelines** — use Slurm, Nomad,
+  Airflow workers or another dedicated scheduler. Ruscker's cron runner is
+  for bounded run-to-completion jobs alongside the portal workloads.
 
 ## Who it's for
 

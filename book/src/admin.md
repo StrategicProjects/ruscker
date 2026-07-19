@@ -1,8 +1,9 @@
 # The admin panel
 
 The admin panel is Ruscker's main advantage over editing YAML by hand.
-It lives at `/admin`, is gated by a token, and needs a SQLite database
-(`serve --db <file>`).
+It lives at `/admin`, uses account login after token-based bootstrap,
+and needs a catalog database: SQLite with `serve --db <file>`, or shared
+Postgres with `--config-db-url` in HA.
 
 **Everything is configurable from the web UI** — every spec field
 (including API, scaling, resource and lifecycle settings), the media
@@ -26,9 +27,9 @@ as a **break-glass** login (`/admin/login?token=1`) so you can never be
 locked out. Until a token is set, `/admin/*` returns `503` and only the
 public landing + proxy are served.
 
-The footer has the same **language** (pt-BR / en-US / es-ES / fr-FR)
-and **theme** (light / dark / auto) pickers as the public portal. The
-top-right corner shows your current **access level**.
+The top-right account cluster has the same **language** (pt-BR / en-US /
+es-ES / fr-FR) and **theme** (light / dark / auto) pickers as the public
+portal, plus your current **access level** and account actions.
 
 ## Users and access levels (roles)
 
@@ -38,6 +39,9 @@ accounts under **Users** (`/admin/users`): create one, or open a row's
 one form with a single save, plus the password reset. Each row shows a
 coloured avatar with the user's initials and their groups as coloured
 badges (a group keeps the same colour on the Groups and Apps pages).
+The table is paginated on the server at 50 users per page. Its
+server-side, accent-tolerant search covers username, groups, department,
+email and phone on both SQLite and Postgres.
 
 Passwords follow a **policy**: at least 8 characters, with at least one
 uppercase letter, one lowercase letter, one digit and one special
@@ -55,7 +59,7 @@ read a password as you type it.
 | Role | Can do |
 |---|---|
 | **Viewer** | a **portal** account, not a panel operator: signs in to unlock group-restricted cards on the landing; reaches no admin section |
-| **Editor** | view + manage Apps and Media; view the Dashboard and stop/restart replicas |
+| **Editor** | view + manage Apps and Media; view Containers and stop/restart replicas |
 | **Admin** | everything, including managing users, credentials, the landing editor, custom blocks and the audit log |
 
 The panel shows only the sections your role can reach. Enforcement is
@@ -65,7 +69,7 @@ acting username. A **last-admin guard** stops you deleting or demoting
 the only remaining admin (so the portal can't be locked out); the
 `RUSCKER_ADMIN_TOKEN` break-glass login is the other safety net.
 
-### Two-factor authentication for selected apps
+### 2FA / MFA for selected apps
 
 In an app's **Access & scale** settings, enable **Require 2FA**
 (`require-mfa`) to require a user-owned authenticator-app code before the
@@ -73,13 +77,19 @@ proxy will select or start that app's container. The same enrolled TOTP
 factor is reused across protected apps; the switch is a per-app step-up
 policy, not a separate enrollment for every app.
 
-On first access, a signed-in user without a factor is guided through setup
-and receives recovery codes. Later access redirects to a challenge when the
-browser has no current trusted-device proof. **MFA validity days** controls
-that cadence (7 days by default, at most 30); `0` means every new login
-session must prove MFA, even if the browser still has a trusted-device
-cookie. API routes do not redirect: they return `401` without a login and
-`403` when MFA is still required.
+Users enrol once under **Account → 2FA**, either directly or when a
+protected app redirects them there. They re-enter their password, scan the
+QR code with a standard TOTP app such as Google Authenticator, Microsoft
+Authenticator, Authy or 1Password, confirm a six-digit code, and save the
+one-time recovery codes shown once. One successful proof satisfies every
+protected app, subject to each app's freshness policy.
+
+**MFA validity days** (`mfa-validity-days`) controls that policy: 7 days by
+default, capped at 30; `0` limits the proof to the current login session.
+The proxy checks it before any container is selected or started. An
+unenrolled or unproven `/app` visit redirects to enrolment or challenge
+without spawning; protected `/api` requests return `401` without a login
+and `403` when proof is still required.
 
 Users can open **Two-factor authentication** in their account to **forget
 this device** or **forget all trusted devices** without ending their login
@@ -89,14 +99,45 @@ and device grants, so the next protected-app visit starts guided enrollment
 again. The `RUSCKER_ADMIN_TOKEN` remains an audited break-glass bypass for
 emergencies and should not be used for routine app access.
 
+The remembered-device cookie is opaque and `HttpOnly`; only its salted hash
+is stored. Password change/reset, 2FA reset, user deletion and **Forget all
+trusted devices** revoke remembered proofs. TOTP secrets are encrypted with
+`RUSCKER_MASTER_KEY`; enrolment fails closed with `503` when the key is
+missing. Secrets and recovery-code plaintext never enter logs, audit rows or
+YAML exports. The flow works with both SQLite and Postgres; an Admin sees
+only whether 2FA is configured and can perform the audited reset.
+
+### Identity headers to apps
+
+For an app that needs the portal identity, enable
+`add-default-http-headers: true`. Ruscker then sends the
+ShinyProxy-compatible `X-SP-UserId` and `X-SP-UserGroups` headers. Unlike
+ShinyProxy, Ruscker defaults this off so upgrading or importing a spec does
+not disclose identity unexpectedly.
+
+Independently, use `identity-claims: [email, setor]` to opt into profile
+fields as `X-Ruscker-User-Email` and `X-Ruscker-User-Setor`. A claim with
+no stored value is omitted. These headers are forwarded only for signed-in
+users and work on both HTTP requests and WebSocket handshakes.
+
+Treat them as trusted identity only when the app is reachable exclusively
+through Ruscker. The proxy strips all client-supplied `X-SP-*` and
+`X-Ruscker-User-*` headers before inserting its authoritative values, which
+prevents direct request spoofing at this boundary.
+
 ## Screens
 
 The sections below follow the panel's tab order: daily drivers first
-(Dashboard, Apps, Media, Credentials, Appearance), people (Users above,
-Groups), then diagnostics and maintenance (Logs, Disk, Audit, System).
+(Containers, Apps, Media, Credentials, Appearance, Schedules), people
+(Users above, Groups), then diagnostics and maintenance (Logs, Disk,
+Activity, System). The former Dashboard/Painel nav label is now
+**Containers**, and Audit/Auditoria is **Activity/Atividades**. Core module
+headings use the standardized “X Management” / “Gestão de X” pattern;
+technical notes sit in helper text instead of subtitles.
 
-### Dashboard
-A live view of running replicas, refreshed over Server-Sent Events. The
+### Containers
+A live view of running replicas, refreshed by polling
+`GET /admin/dashboard/snapshot`. The
 headline KPI cards (containers, apps with replicas, sessions, memory)
 count up on load. Below them, replicas are **grouped by app** in
 expandable cards: each card's header summarises the app — replica count,
@@ -108,8 +149,6 @@ started without `--docker`. Stop and restart take a few seconds (drain,
 signal, and a respawn for restart), so while one runs the replica row
 dims, its buttons disable to prevent a double-fire, and the clicked
 action shows a spinner.
-
-![Monitoring dashboard: aggregate cards (containers, apps with replicas, active sessions, memory) above a per-replica table with live CPU sparklines and memory, and per-row stop/restart/logs actions.](images/admin-dashboard.png)
 
 ### Apps
 The list of specs — apps, APIs and external links — with create, edit
@@ -128,8 +167,6 @@ it is (no reload, no scroll jump, and the row keeps its position in the
 list — archiving doesn't count as an "update"). Delete asks for
 confirmation, stops the app's containers and is audited; apps defined
 in the `serve --config` YAML stay read-only here.
-
-![Apps table: id, name, kind and state columns, plus updated/version, and an Actions column where each row has the featured star, edit and duplicate buttons, the archive toggle and a delete button.](images/admin-apps.png)
 
 The add/edit form walks down the page in the order you think about an
 app: **Identity** (id, name, subject), **Kind** (app container /
@@ -156,8 +193,6 @@ centre of the screen: it confirms the app was created and asks where to
 go next — **back to the form** to keep editing it, or straight to the
 **apps list**. Editing an existing app just saves in place, with no
 prompt. The dialog is localized in all four interface languages.
-
-![The post-create confirmation: a centred dialog reading "App created — the app was created successfully", with "Back to the form" and "Go to the app list" buttons over the dimmed editor.](images/admin-app-created.png)
 
 Two editors can have the same app open without trampling each other:
 the form carries the version it was loaded against, and a stale save is
@@ -192,8 +227,6 @@ without touching YAML:
 Every advanced field is optional; leaving it blank keeps Ruscker's
 default, so the section stays out of the way until you need it.
 
-![Add/edit app form: the Kind selector and Identity/Visual bands on the left, with a live card preview on the right that updates as you type.](images/admin-spec-form.png)
-
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
@@ -217,8 +250,6 @@ flow; inline uploads auto-select the stored (possibly renamed) file, and
 every picker tile shows a **filename caption**, so look-alike images are
 easy to tell apart.
 
-![Media library: a gallery of images with built-in framework logos seeded alongside uploads, each tile showing its filename, size and type.](images/admin-media.png)
-
 ### Credentials
 A named, AES-256-GCM-encrypted store for registry credentials (needs
 `RUSCKER_MASTER_KEY`). Passwords never appear in the YAML or in the
@@ -238,8 +269,6 @@ without changing the saved default, and the action bar carries a
 **"Restore defaults"** button (with confirmation) that resets the
 styling while keeping titles, logos, texts, SEO, custom CSS and HTML
 blocks:
-
-![Appearance editor: control cards for header texts, logos, header style, catalog cards, theme and layout on the left, with a live portal preview pane (with its own light/dark switch) on the right.](images/admin-appearance.png)
 
 - **Header** — the portal title, subtitle and footer texts.
 - **Logos** — the **main header logo** in one place: built-in mark,
@@ -346,16 +375,12 @@ that app's editor.
 
 ### Logs
 
-![Logs viewer: a terminal-style live stream with colour-coded levels and a toolbar with pause, level chips, an app filter and download.](images/admin-logs.png)
-
 The server log stream, live over Server-Sent Events. Lines are colour-
 coded by level, with level chips (info / warn / error), an app filter
 dropdown, a line counter, and pause/resume + clear controls. A download
 link grabs the current buffer.
 
 ### Disk
-
-![Disk panel: a storage hero with a stacked usage bar, above panels listing Ruscker-managed containers and images with remove and prune actions.](images/admin-disk.png)
 
 Storage at a glance (Admin-only). A usage hero shows host disk used /
 total with a percentage and a stacked bar split into Ruscker images,
@@ -364,11 +389,17 @@ containers and images — each removable, with an "in use" cross-reference
 so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
 
-### Audit log
+The **Volumes** card lists named Docker volumes with live reference counts
+across all host containers. Volumes created here receive the
+`ruscker.created` label. Removal is offered only when Ruscker created the
+volume, no container references it, and no effective catalog spec names it;
+the server rechecks all three conditions before asking Docker to remove it.
+
+### Activity
 Every admin mutation (spec/image/credential/landing/block changes,
-imports) is recorded with actor, action, target and timestamp — and
-since v0.2.5 the dashboard's destructive **replica stop/restart**
-actions are too.
+imports) is recorded with actor, action, target and timestamp. Destructive
+**replica stop/restart**, schedule changes, MFA enrolment/reset/proof, and
+break-glass MFA bypasses are recorded too.
 
 ### System
 
@@ -387,6 +418,7 @@ operator should know about happens:
   control (crash, OOM, external stop) and was pruned;
 - **`saturated`** — an app is full at `max-replicas` and visitors may
   be turned away;
+- **`job-failed`** — a scheduled job exited non-zero or could not run;
 - **`test`** — the *Send test alert* button, for checking the wiring.
 
 The payload:
@@ -413,11 +445,12 @@ token).
 
 ## Config vs. database
 
-`serve --config` drives the public landing and the proxy. The admin
-panel reads and writes the SQLite DB. Use `ruscker import` to populate
-the DB from a YAML, and `ruscker export` to round-trip it back — both
-preserve specs, landing customization, SEO/analytics and custom
-blocks.
+`serve --config` supplies service settings and any YAML-managed specs. The
+admin panel reads and writes the catalog database: SQLite with `--db`, or
+Postgres with `--config-db-url`. `ruscker import` can populate either from
+YAML. For SQLite, `ruscker export --db <file>` reconstructs the portable
+configuration, including specs, landing customization, SEO/analytics and
+custom blocks; credential and MFA secrets are not exported.
 
 ### Importing card images into the Media library
 

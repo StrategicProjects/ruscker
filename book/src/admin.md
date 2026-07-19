@@ -152,6 +152,8 @@ signal, and a respawn for restart), so while one runs the replica row
 dims, its buttons disable to prevent a double-fire, and the clicked
 action shows a spinner.
 
+![The Containers dashboard: KPI cards (containers, apps with replicas, active sessions, tracked sessions, memory) above an "Active replicas" list grouped by app, each row showing the replica count, state, sessions, CPU and memory for a live app.](images/admin-dashboard.png)
+
 ### Apps
 The list of specs — apps, APIs and external links — with create, edit
 and delete. Each row shows the app's **framework logo** next to its name,
@@ -169,6 +171,8 @@ it is (no reload, no scroll jump, and the row keeps its position in the
 list — archiving doesn't count as an "update"). Delete asks for
 confirmation, stops the app's containers and is audited; apps defined
 in the `serve --config` YAML stay read-only here.
+
+![The Application Management table: each spec row with id, name, framework logo, kind pill, access, state and version, plus an Actions column with the featured star, edit, duplicate, update-image, archive and delete controls, above type/access filter chips and a search box.](images/admin-apps.png)
 
 The add/edit form walks down the page in the order you think about an
 app: **Identity** (id, name, subject), **Kind** (app container /
@@ -195,6 +199,8 @@ centre of the screen: it confirms the app was created and asks where to
 go next — **back to the form** to keep editing it, or straight to the
 **apps list**. Editing an existing app just saves in place, with no
 prompt. The dialog is localized in all four interface languages.
+
+![The post-create confirmation: a centred "App created" dialog reading "The app was created successfully. What would you like to do next?" with "Back to the form" and "Go to the app list" buttons over the dimmed editor.](images/admin-app-created.png)
 
 Two editors can have the same app open without trampling each other:
 the form carries the version it was loaded against, and a stale save is
@@ -229,6 +235,8 @@ without touching YAML:
 Every advanced field is optional; leaving it blank keeps Ruscker's
 default, so the section stays out of the way until you need it.
 
+![The add/edit app form: the Identity, Kind, Description and Appearance bands on the left with per-field help popovers, and a live card preview on the right that updates as you type.](images/admin-spec-form.png)
+
 ### Media
 Upload images (PNG/JPEG → WebP), served at `/assets/img/<file>`. These
 are the card logos and covers.
@@ -252,6 +260,8 @@ flow; inline uploads auto-select the stored (possibly renamed) file, and
 every picker tile shows a **filename caption**, so look-alike images are
 easy to tell apart.
 
+![The Media library: a gallery of images with built-in framework logos seeded alongside uploads, each tile showing its filename and size.](images/admin-media.png)
+
 ### Credentials
 A named, AES-256-GCM-encrypted store for registry credentials (needs
 `RUSCKER_MASTER_KEY`). Passwords never appear in the YAML or in the
@@ -271,6 +281,8 @@ without changing the saved default, and the action bar carries a
 **"Restore defaults"** button (with confirmation) that resets the
 styling while keeping titles, logos, texts, SEO, custom CSS and HTML
 blocks:
+
+![The Appearance editor: control cards for header texts, logos, header style, catalog cards, theme and layout on the left, with a live portal preview pane (with its own light/dark switch) on the right.](images/admin-appearance.png)
 
 - **Header** — the portal title, subtitle and footer texts.
 - **Logos** — the **main header logo** in one place: built-in mark,

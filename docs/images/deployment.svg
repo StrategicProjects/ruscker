@@ -53,7 +53,7 @@
   <line x1="605" y1="174" x2="570" y2="208" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
 
   <rect x="405" y="212" width="260" height="44" rx="9" fill="#E8F3EE" stroke="#1D9E75" stroke-width="1.6"/>
-  <text x="535" y="231" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Postgres — shared session state</text>
+  <text x="535" y="231" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">Postgres — shared config + sessions</text>
   <text x="535" y="248" text-anchor="middle" font-size="10" fill="#5B6B66">either instance can serve any session</text>
   <line x1="535" y1="256" x2="535" y2="282" stroke="#1D9E75" stroke-width="2.2" marker-end="url(#dn)"/>
 

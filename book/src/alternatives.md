@@ -5,7 +5,8 @@ container-per-API workloads** — interactive apps that want a fresh
 container per visitor, and stateless HTTP services pooled per replica. If
 your apps run in a container and speak HTTP or WebSocket, Ruscker wraps
 them in a portal, a reverse proxy, sticky sessions, auto-scaling and an
-admin panel — configured by a single YAML file.
+admin panel. Service settings can live in `ruscker.yml`; the editable app
+catalog and operational state live in SQLite, or Postgres for HA.
 
 ## What Ruscker is good at
 
@@ -19,8 +20,24 @@ admin panel — configured by a single YAML file.
 - **A real admin panel** — apps CRUD, a media library, an encrypted
   credentials store, a live monitoring dashboard, an audit log, and user
   roles — instead of editing a file and restarting.
-- **Light to run** — a single static binary with a low-tens-of-MB idle
-  footprint and instant startup.
+- **Sensitive internal apps** — per-app step-up TOTP MFA is enforced before
+  a container starts, while opt-in identity headers let the app consume the
+  signed-in username, groups and selected profile claims.
+- **Scheduled operations** (local Docker backend) — run the same app
+  image/environment/volumes to completion on a cron for ETL, reports and
+  maintenance, with history,
+  timeouts and failure alerts.
+- **Light to run** — **~14 MB idle**, a single static binary, no JVM and
+  instant startup.
+
+## Compared with ShinyProxy
+
+Ruscker keeps the familiar spec schema and `/app/{spec}` shape, including
+opt-in `add-default-http-headers: true` compatibility through
+`X-SP-UserId` and `X-SP-UserGroups`. It adds per-app step-up MFA, selected
+`X-Ruscker-User-*` profile claims, stateless API pools, scheduled jobs and
+an editable database-backed admin catalog. Identity forwarding defaults
+off, so enable it explicitly for apps that need and trust those headers.
 
 ## Self-hosting a single framework
 
@@ -80,9 +97,9 @@ the systemd service) and reference them by name in the YAML.
 
 ## When Ruscker is *not* the right tool
 
-- You need a **publishing / authoring workflow** — pushing content from an
-  IDE, scheduled reports, content versioning. Ruscker is a
-  proxy/orchestrator; you bring your own container images.
+- You need a **publishing / authoring workflow** — pushing source from an
+  IDE, building content or versioning releases. Ruscker can schedule an
+  existing image, but it does not replace your build and publishing system.
 - You're **all-in on Kubernetes** and want a CRD-native operator today —
   Ruscker schedules onto Docker hosts (over ssh/tcp), not Kubernetes.
 - You need **enterprise SSO gating app access per user** (OIDC/SAML/LDAP

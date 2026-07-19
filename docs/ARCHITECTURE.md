@@ -1,16 +1,18 @@
 # Architecture
 
-Ruscker is a Rust-based proxy and orchestrator for containerized
-interactive web apps and stateless HTTP APIs. This document describes
-how the pieces fit together.
+Ruscker is an Apache-2.0-licensed, lightweight Rust alternative to
+ShinyProxy and Shiny Server: a portal and orchestrator for
+container-per-session and container-per-API workloads. This document
+describes how the pieces fit together.
 
 ## High-level diagram
 
 ![How Ruscker works: browsers and API clients hit a single Ruscker binary, which serves the landing page + admin and reverse-proxies to app containers it spawns on demand via the Docker daemon.](images/architecture.svg)
 
 All of this is a single Rust process — one static binary, ~14 MB idle,
-no JVM. Visitors and API clients reach it on one port; it serves the
-landing page and admin UI, reverse-proxies `/app/{spec}` and
+no JVM. The portal uses Askama templates with HTMX and Alpine.js and has
+zero Node build step. Visitors and API clients reach it on one port; it
+serves the landing page and admin UI, reverse-proxies `/app/{spec}` and
 `/api/{spec}` to the right replica (keeping Shiny sessions sticky and
 upgrading WebSockets), and drives the Docker daemon to spawn and reap
 containers. SQLite is the source of truth for configuration; the live
@@ -28,8 +30,8 @@ and the `ruscker-cli` binary stitches them together.
 Keeping the backend behind the `ContainerBackend` trait in
 `ruscker-core` is what made the multi-host backend
 (`ruscker-docker::MultiHostDockerBackend`, Phase 6) a new impl rather
-than a rewrite — and leaves the same door open for Kubernetes. Since
-v0.2.5 the multi-host impl covers the **whole** trait surface
+than a rewrite — and leaves the same door open for Kubernetes. The
+multi-host impl covers the **whole** trait surface
 (spawn/stop/list, metrics/logs, disk management, image
 presence/pull), each operation fanning out across hosts with
 degraded-mode tolerance for an unreachable daemon. See
@@ -41,28 +43,30 @@ degraded-mode tolerance for an unreachable daemon. See
 
 ```
 1. Visitor hits  https://portal/app/sales-dashboard/
-2. Proxy reads cookie  __ruscker_session_sales-dashboard   (one per app)
-3. Cookie missing → resolve_replica:
-     a. Look up spec 'sales-dashboard' (DB first, YAML fallback)
-     b. pick_or_spawn: pick a Ready replica with a free seat
+2. Look up spec 'sales-dashboard' (DB first, YAML fallback)
+3. Resolve access identity; enforce ACL and mfa::evaluate before any
+   backend access or cold start
+4. Read cookie  __ruscker_session_sales-dashboard   (one per app)
+5. Cookie missing → resolve_replica:
+     a. pick_or_spawn: pick a Ready replica with a free seat
         (least-conn) and reserve the seat atomically
-     c. No replica yet → cold-start splash to the visitor while a
+     b. No replica yet → cold-start splash to the visitor while a
         coalesced spawn runs in the background; the splash polls a
         readiness probe and reloads into the app
-     d. At max-replicas with no free seat → the splash says "full"
+     c. At max-replicas with no free seat → the splash says "full"
         and keeps polling for a freed seat
-     e. SessionStore.touch_or_register(session, spec, R2)
-     f. Sign + set cookie  __ruscker_session_sales-dashboard
+     d. SessionStore.touch_or_register(session, spec, R2)
+     e. Sign + set cookie  __ruscker_session_sales-dashboard
         (Path={base}/app/sales-dashboard — never sent to other apps)
-4. Forward GET /  to  http://127.0.0.1:<R2_port>/   (path strip)
-5. Stream response back
-6. Browser opens WebSocket  ws://portal/app/sales-dashboard/websocket
-7. Proxy connects the upstream WS FIRST (query string preserved,
+6. Forward GET /  to  http://127.0.0.1:<R2_port>/   (path strip)
+7. Stream response back
+8. Browser opens WebSocket  ws://portal/app/sales-dashboard/websocket
+9. Proxy connects the upstream WS FIRST (query string preserved,
    subprotocol negotiated); only then answers the client's 101 — a
    dead replica gets a clean 502, not a post-upgrade drop
-8. Bidirectional frame pump
-9. On heartbeat: SessionStore.touch()
-10. Idle timeout reached → Session purged → if last seat, container drained
+10. Bidirectional frame pump
+11. On heartbeat: SessionStore.touch()
+12. Idle timeout reached → Session purged → if last seat, container drained
 ```
 
 ### An API request lifecycle
@@ -87,6 +91,64 @@ drops once the whole (possibly long) download has been sent to the
 client — a large file transfer keeps counting against the replica for
 its full duration, and the scaler sees real concurrency rather than a
 spike that vanishes the instant headers are written.
+
+### Access, MFA, and identity resolution
+
+The proxy resolves a signed-in user's groups and selected profile claims
+once per request when an ACL or identity disclosure needs them. The
+`IdentityCache` in `AppState` holds groups, e-mail, and department/unit for
+30 seconds so an app page's asset burst does not issue one database query
+per request. User/group/profile mutations invalidate the cache with a
+generation counter, preventing an in-flight stale read from repopulating
+revoked identity data.
+
+The request guard then applies these boundaries in order:
+
+1. `Spec::access_allows` enforces per-user/per-group access server-side.
+2. For `require-mfa`, `mfa::evaluate` checks the user factor and browser
+   grant before the backend, cold-start splash, replica picker, or spawn can
+   run. Interactive visits redirect to enrollment/challenge; APIs fail with
+   `401` or `403`; break-glass Admin sessions bypass with an audit record.
+3. The proxy strips the entire client-supplied `X-SP-*` and
+   `X-Ruscker-User-*` namespaces, then adds only the opted-in authoritative
+   values for a signed-in user. The same header list is passed to HTTP and
+   WebSocket upstream connections; absent claims are omitted.
+
+MFA persistence is part of the configuration catalog in both SQLite and
+Postgres:
+
+| Table | Purpose |
+|---|---|
+| `user_mfa` | One user-owned TOTP factor; AES-GCM ciphertext/nonce, confirmation state, replay step, and revocation epoch |
+| `user_mfa_recovery` | Salted hashes for the one-time recovery codes |
+| `user_mfa_grants` | Salted hashes of opaque trusted-device tokens, bound to the user, factor epoch, proof time, expiry, and login-session hash |
+
+### Scheduled jobs
+
+`jobs::spawn` starts one scheduler loop per process when both a catalog DB
+and container backend exist (the local Docker backend runs jobs; the
+multi-host backend does not, so a due schedule there records an error). Every 30 seconds it loads enabled `schedules`;
+only the `LeaderElector` winner may fire in HA. `db::schedules::mark_fired`
+atomically advances `last_run_at` before execution, so a split-brain second
+runner loses the claim and a crash does not double-fire the occurrence.
+
+A new schedule anchors at `created_at` (no fire-on-create). If downtime spans
+several cron occurrences, the next tick collapses them to one firing. The job
+uses the spec's image, platform, resolved environment, volumes, limits,
+network, labels, and registry credentials, with an optional command override,
+and runs to completion outside the interactive replica registry. A
+per-schedule timeout defaults to one hour in the backend. Results, duration,
+exit code, and log tail land in `schedule_runs`; failures enqueue the
+`job-failed` alert webhook.
+
+### Aggregated access counter
+
+`access_counter::AccessCounter` keeps the proxy hot path free of database
+writes. It synchronously increments an in-memory `(spec_id, UTC day)` delta
+for each API request, new sticky app session, or external-card click. One
+supervised task flushes touched buckets every two seconds into `spec_access`
+with additive UPSERTs. Failed flushes merge deltas back for bounded
+exponential-backoff retries, and graceful shutdown attempts a final flush.
 
 ### Proxying an app under `/app/{spec}/` — the strip-and-rewrite model
 
@@ -138,7 +200,7 @@ The generalized shim **retired the old Voilà-specific rewrite**: Voilà's
 RequireJS bootstrap assigns its static URLs to `script.src` at runtime,
 which the patched `src` setter now prefixes without a bespoke pass.
 
-**The rewriter needs uncompressed HTML** (v0.2.5): nothing between
+**The rewriter needs uncompressed HTML**: nothing between
 the container and the rewriter decompresses bodies, so when the
 transform is enabled the upstream request carries
 `Accept-Encoding: identity` (ShinyProxy does the same) — an app that
@@ -185,7 +247,10 @@ rewrite — only the redirect `Location` header (`prefix_base_path`).
 - `ruscker-proxy` — sticky-cookie + WebSocket helpers (a library; it
   owns no socket)
 - `ruscker-admin` — builds the single axum router (landing + admin +
-  proxy routes)
+  proxy routes). Proxy selection, access/MFA/identity guards, and response
+  filtering live in `routes::proxy`; persistent MFA operations live in
+  `db::mfa` / `db::mfa_grants`; background subsystems live in `jobs`,
+  `scaler`, and `access_counter`
 - `ruscker-cli` — owns the one TCP listener and the tokio runtime,
   serving `ruscker-admin`'s router
 
@@ -194,8 +259,9 @@ rewrite — only the redirect `Location` header (`prefix_base_path`).
 ### Three sources of state, ranked by authority
 
 1. **SQLite (admin DB)** — source of truth for spec configurations,
-   images, credentials, landing-page sections, audit log. Always
-   write here first.
+   images, credentials, users/groups, MFA factors and grants, schedules and
+   run history, per-day access totals, landing-page sections, and audit log.
+   Always write here first. Postgres implements the same catalog for HA.
 2. **Live in-memory** — `ReplicaRegistry` (in proxy), `SessionStore`
    (in proxy, in-memory by default). Reflects the *running* state of
    containers and sessions.
@@ -203,14 +269,17 @@ rewrite — only the redirect `Location` header (`prefix_base_path`).
    "is this thing alive". The proxy queries Docker on startup to
    rebuild the registry.
 
-The YAML file is **NOT** a source of truth in production — it's an
-import/export format. Ruscker can be configured to auto-export to YAML
-for git versioning, but the running config lives in SQLite.
+The YAML file is **NOT** the mutable source of truth in production — it is
+the service bootstrap plus import/export format. `ruscker.yml` is the
+canonical service-config filename; `application.yml` remains the compatible
+ShinyProxy import/fallback name. Once imported, live catalog edits reside in
+SQLite or the HA Postgres catalog.
 
 ### State transitions
 
-- **First boot, no DB**: Bootstrap from `application.yml` if present;
-  otherwise create empty DB.
+- **First boot, no DB**: Bootstrap from the selected service config
+  (`ruscker.yml` by default, with `application.yml` as fallback) if present;
+  otherwise create an empty DB.
 - **Subsequent boots**: Load from DB. The YAML is optional.
 
 ## Concurrency model
@@ -228,7 +297,12 @@ for git versioning, but the running config lives in SQLite.
   respawn on saturation, so a single-seat long session can't flap a
   replica up and down. Set `min-replicas: 1`+ to keep an app warm.
 - The session-purger runs as a periodic task (every 5s).
-- `DashMap` for in-memory state (lock-free reads, sharded writes).
+- The leader-only job scheduler checks cron schedules every 30s and detaches
+  each run-to-completion job so long ETL work cannot block later ticks.
+- The access-counter drain batches in-memory deltas every 2s instead of
+  writing on every proxy request.
+- `DashMap` backs the replica/in-flight state and the short-TTL identity/spec
+  caches (lock-free reads, sharded writes).
 
 ## Security boundary
 
@@ -236,9 +310,9 @@ for git versioning, but the running config lives in SQLite.
 
 - **Untrusted**: visitors. They can hit `/app/*` and `/api/*` only.
   Admin paths require an authenticated session.
-- **Privileged**: admin users. `/admin/*` is gated by per-user
-  password login with three roles — **Viewer** (read-only dashboard),
-  **Editor** (apps + media), **Admin** (everything, incl. user
+- **Privileged**: signed-in users. Authentication uses per-user passwords
+  and three roles — **Viewer** (portal access only; no admin section),
+  **Editor** (dashboard, apps, and media), **Admin** (everything, incl. user
   management) — enforced server-side. A break-glass `RUSCKER_ADMIN_TOKEN`
   bootstraps the first account. See `docs/SECURITY.md` §2.
 - **Operator**: filesystem access (the person running Ruscker). Can
@@ -249,6 +323,9 @@ for git versioning, but the running config lives in SQLite.
 - Docker registry passwords: stored encrypted in
   `credentials.password_enc` via AES-GCM with a master key from
   `RUSCKER_MASTER_KEY` env var.
+- User TOTP secrets: stored as AES-GCM ciphertext and nonce in `user_mfa`
+  under the same master key; recovery and trusted-device tokens are stored
+  only as salted hashes.
 - Session cookie signing: HMAC-SHA256 with key from
   `RUSCKER_COOKIE_KEY` env var (randomized per process when unset —
   set it explicitly to keep sessions across restarts and across HA
@@ -270,10 +347,10 @@ installs run — simple, fast, easy to operate.
 
 Two or more Ruscker instances behind an L4 load balancer share a Postgres
 config catalog and session store, so either can serve any session.
-Exactly one instance holds the scaler leadership at a time via a Postgres
-advisory lock; standbys serve traffic and reconcile counts but skip the
-spawn/reap loop. The sticky cookie is an HMAC over a shared key, so any
-instance can validate any other's cookie. See the deployment guide's
+Exactly one instance holds leadership at a time via a Postgres advisory
+lock; standbys serve traffic and reconcile counts but skip the scaler and
+scheduled-job firing loops. The sticky cookie is an HMAC over a shared key,
+so any instance can validate any other's cookie. See the deployment guide's
 "Running active-active" section for the runnable example.
 
 ### Multi-host Docker (since Phase 6)

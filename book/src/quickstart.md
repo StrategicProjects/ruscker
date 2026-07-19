@@ -15,12 +15,18 @@ proxy:
   title: My Ruscker
 ```
 
-Then start it with an admin token and `--db` (the admin database):
+Then start it with an admin token, a master key and `--db` (the admin
+database):
 
 ```sh
-RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32) \
+export RUSCKER_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export RUSCKER_MASTER_KEY="$(openssl rand -hex 32)"
 ruscker serve --bind 127.0.0.1:8080 --db ruscker.db
 ```
+
+The master key encrypts saved registry credentials and TOTP secrets. Keep
+it stable if you reuse this database; without it, 2FA enrolment fails with
+`503`.
 
 - Ruscker **auto-connects to Docker** when the daemon socket is
   reachable, so app containers spawn out of the box. Pass `--no-docker`
@@ -33,14 +39,13 @@ ruscker serve --bind 127.0.0.1:8080 --db ruscker.db
   framework logos into the Media library. The seed is idempotent; cards
   you delete stay deleted on subsequent boots.
 
-![The seeded landing page on first boot: a Featured carousel of highlighted apps above a filterable grid of showcase cards (Shiny, Streamlit, Dash, Jupyter, RStudio, …).](images/landing.png)
-
 Prefer the container image? Mount the Docker socket and a volume for the
 DB (the image is cosign-signed; `:latest` tracks the current release):
 
 ```sh
 docker run --rm -p 8080:8080 \
-  -e RUSCKER_ADMIN_TOKEN=$(openssl rand -hex 32) \
+  -e RUSCKER_ADMIN_TOKEN \
+  -e RUSCKER_MASTER_KEY \
   -v "$PWD/ruscker.yml:/etc/ruscker/ruscker.yml:ro" \
   -v "$PWD/ruscker.db:/data/ruscker.db" \
   -v /var/run/docker.sock:/var/run/docker.sock \
@@ -59,7 +64,7 @@ docker run --rm -p 8080:8080 \
 | <http://127.0.0.1:8080/healthz> | liveness (always `200`) |
 
 Click any live-demo card to see on-demand container spawn in action,
-then watch the [admin dashboard](./admin.md) to see the replica start,
+then watch the admin [Containers page](./admin.md) to see the replica start,
 serve, and stop. The first request to an app spawns its container; it's
 reaped automatically once idle.
 
@@ -118,7 +123,8 @@ limits…).
   [Per-user access](./configuration.md#per-user-access) to restrict
   apps by user / group.
 - [The admin panel](./admin.md) — manage specs, images, users, and the
-  live dashboard without editing YAML.
+  live container dashboard, identity headers, per-app 2FA and schedules
+  without editing YAML.
 - [Deploying in production](./deploying.md) — systemd + nginx, TLS,
   multi-host, and active-active HA (including
   [mounting the portal under a subpath][base-path] and the

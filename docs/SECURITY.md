@@ -7,9 +7,9 @@ Status: living document. Tracks the Phase 5 security audit
 
 > **Scope.** A single-operator install: Ruscker behind a
 > TLS-terminating reverse proxy, Docker on one or more hosts. The model
-> below reflects the hardening done in the 2026-06 security audit.
-> Multi-tenant / shared-team auth (OIDC, SAML) is out of scope until
-> Phase 8.
+> below reflects the current security audit.
+> External identity-provider integration (OIDC, SAML, LDAP) remains
+> Phase 8 work.
 
 ---
 
@@ -21,7 +21,7 @@ Status: living document. Tracks the Phase 5 security audit
 |-------|----------------|
 | `RUSCKER_ADMIN_TOKEN` | break-glass Admin login + first-account bootstrap — full access |
 | User passwords (DB) | per-user login; stored as argon2id hashes; policy on set/reset: ≥ 8 chars with upper + lower + digit + special |
-| `RUSCKER_MASTER_KEY` | decrypts the registry-credential store |
+| `RUSCKER_MASTER_KEY` | decrypts registry credentials and enrolled TOTP factors |
 | `RUSCKER_COOKIE_KEY` | forges sticky-session cookies |
 | Registry credentials (DB) | pull access to private images |
 | Running app sessions | per-visitor app state inside containers |
@@ -43,9 +43,8 @@ Status: living document. Tracks the Phase 5 security audit
 
 - Defending against a hostile operator (they own the host +
   Docker daemon + all keys).
-- Per-app ACLs and external identity providers (OIDC/SAML/LDAP).
-  Coarse RBAC (Viewer/Editor/Admin) exists (§2); fine-grained,
-  per-spec authorization is Phase 8.
+- External identity providers (OIDC/SAML/LDAP). Database-backed users,
+  coarse RBAC, per-spec user/group ACLs, and per-app step-up MFA exist.
 - Isolating **untrusted, third-party app code** from the admin on a
   shared origin. Apps are assumed first-party; multi-tenant hosting of
   hostile apps needs origin separation (§6.1, roadmap #878).
@@ -99,21 +98,43 @@ Status: living document. Tracks the Phase 5 security audit
   (`InMemoryAdminSessionStore`); for HA, point Ruscker at a shared
   Postgres via `--admin-session-store-url` (#185) so sessions survive
   a load-balancer hop.
-- **[implemented]** Per-app TOTP step-up MFA (#1005) — the factor belongs
-  to the user and is enrolled once; each spec may opt in with
-  `require-mfa` and choose how long a successful proof is trusted. Device
-  grants store only salted token hashes, are bound to the factor's security
-  epoch and confirmation time, and are revoked by password/factor resets or
-  the user's **forget devices** actions. A zero-day policy additionally binds
-  the proof to the current opaque login session. The proxy guard runs before
-  replica selection/spawn. `RUSCKER_ADMIN_TOKEN` break-glass sessions bypass
-  the user factor but emit a warning on every request and a cooldown-deduped
-  `mfa.break_glass_bypass` audit row. The reserved `__ruscker_mfa_*` cookies
-  are consumed by Ruscker and stripped before proxying, so trusted-device and
-  enrollment bearers never reach app containers (#258).
+- **[implemented]** Per-app TOTP step-up MFA (#1005) — a factor belongs to
+  the user, not an app. The user enrolls it once under **Account → 2FA** by
+  scanning a local QR code with Google Authenticator, Microsoft Authenticator,
+  Authy, 1Password, or another compatible app, then receives one-time
+  recovery codes that are shown once. Each spec independently opts
+  in with `require-mfa` and selects the acceptable proof age with
+  `mfa-validity-days` (seven days by default, session-only at `0`, capped at
+  30). One successful proof satisfies every protected app whose freshness
+  policy accepts it.
+- **[implemented]** Trusted-device grants use an opaque, `HttpOnly` cookie;
+  only a salted token hash and a one-way login-session binding are stored in
+  `user_mfa_grants`. Grants are bound to the factor confirmation time and
+  security epoch. Password change/reset, MFA reset, user deletion, **Forget
+  this device**, and **Forget all devices** revoke the applicable grants; a
+  zero-day policy also requires the current opaque login session.
+- **[implemented]** The MFA guard (`mfa::evaluate`) runs on `/app` and `/api`
+  before backend access, cold-start handling, replica selection, or spawn.
+  Unenrolled/unproven interactive-app visits redirect to enrollment or a
+  challenge without starting a container; protected APIs return `401` when
+  the caller is not signed in and `403` when the factor proof is unsatisfied.
+  WebSocket upgrades are guarded before the upstream handshake.
+- **[implemented]** TOTP secrets are AES-256-GCM encrypted at rest with
+  `RUSCKER_MASTER_KEY`; enrollment and TOTP verification fail closed with
+  `503` when the key is unavailable. Secrets and recovery codes never appear
+  in logs, audit diffs, or configuration exports. The factor, recovery-code,
+  and grant tables work with SQLite and Postgres/HA. Admins see only whether
+  2FA is configured and may perform an audited reset; they cannot retrieve a
+  factor secret or recovery code.
+- **[implemented]** `RUSCKER_ADMIN_TOKEN` break-glass sessions bypass the
+  user factor so recovery cannot deadlock. Every bypass emits a warning and
+  a cooldown-deduplicated `mfa.break_glass_bypass` audit row. Reserved
+  `__ruscker_mfa_*` cookies are consumed by Ruscker and stripped before HTTP
+  or WebSocket proxying, so device and enrollment bearers never reach an app.
 - **[implemented]** Role-based access control (#101/#107) — three
-  roles (**Viewer** = dashboard read-only; **Editor** = apps + media +
-  dashboard incl. stop/restart; **Admin** = everything, incl. user
+  roles (**Viewer** = signed-in portal user with no admin-panel section;
+  **Editor** = apps + media + dashboard incl. stop/restart; **Admin** =
+  everything, incl. user
   management). Enforcement is **server-side** via the `AdminSession` /
   `RequireEditor` / `RequireAdmin` extractors on each route group —
   the permission matrix lives in `Role::can_access_section` /
@@ -271,6 +292,14 @@ Status: living document. Tracks the Phase 5 security audit
   prefs from the upstream-bound `Cookie` header so an app container
   never sees them (the admin session id is a bearer). The WebSocket
   handshake path applies the same filter.
+- **[implemented]** Reserved-cookie response filtering (#1010) — apps share
+  the portal origin, so the proxy inspects every upstream `Set-Cookie` and
+  drops cookies whose names belong to Ruscker (admin session, preferences,
+  sticky sessions, and MFA), while preserving the app's own cookies. It also
+  neutralizes the `cookies` and `*` directives in app-supplied
+  `Clear-Site-Data`; safe non-cookie directives such as `cache` and `storage`
+  may remain. A same-origin app therefore cannot overwrite or bulk-clear the
+  user's portal, sticky, or trusted-device cookies through its response.
 - **[accepted limitation — needs origin separation]** Admin and apps
   share one origin by default. A script inside an **untrusted** app
   served at `/app/{spec}` is genuinely *same-origin* with `/admin`, so
@@ -282,11 +311,11 @@ Status: living document. Tracks the Phase 5 security audit
   apps, see [§6.1 Hosting untrusted apps](#61-hosting-untrusted-apps-same-origin)**
   — the host-safety backstops below (#871/#889/#894) bound the blast
   radius regardless.
-- **[implemented]** Per-app sticky cookies (#731, v0.2.5) — the
+- **[implemented]** Per-app sticky cookies (#731) — the
   sticky cookie is named `__ruscker_session_{spec}` and scoped with
   `Path={base}/app/{spec}`, so it is only ever sent to its own app:
   two apps in one browser can't fight over a session, and the cookie
-  never travels cross-app at all. A lingering pre-v0.2.5 global
+  never travels cross-app at all. A lingering legacy global
   cookie (`Path=/`) is actively expired. The embedded
   `session.spec_id == spec.id` check stays as defense-in-depth
   against a copied/forged cookie (`routes::proxy::resolve_replica`).
@@ -311,7 +340,7 @@ Status: living document. Tracks the Phase 5 security audit
   identify the app, replica, close origin/code/reason, frame count,
   and timeout policy (#933).
 - **[implemented]** `X-Forwarded-For` is normalized on the forward
-  (#744, v0.2.5) — in trusted mode (§7) the real peer IP is appended
+  (#744) — in trusted mode (§7) the real peer IP is appended
   to the inbound chain; untrusted, the spoofable client value is
   replaced with the peer. Upstream apps never see a forged chain.
   `X-Forwarded-Proto`/`-Port` are stripped and re-set authoritatively.
@@ -381,8 +410,8 @@ deliberate feature, not a config flip.
   (`default-src 'self'; … frame-ancestors 'none'; base-uri 'self';
   form-action 'self'`).
 - **[implemented]** `Secure` cookie flag under TLS — admin + sticky
-  cookies set `Secure` when `auth::request_is_https` is true. Since
-  v0.2.5 (#762) that reads `X-Forwarded-Proto` **only under the trust
+  cookies set `Secure` when `auth::request_is_https` is true. That reads
+  `X-Forwarded-Proto` **only under the trust
   opt-in below**, and takes the **rightmost** entry of a chained list
   (the one appended by the proxy closest to Ruscker — the leftmost
   slot is client-controlled whenever a proxy appends). Off on
@@ -421,7 +450,9 @@ actually flows, and why it is **deliberately not TLS**:
   forge those headers directly. Ruscker strips inbound claims and injects
   authoritative `X-SP-UserId` / `X-SP-UserGroups` and explicitly selected
   `X-Ruscker-User-Email` / `X-Ruscker-User-Setor` claims only on opted-in
-  specs, but it cannot protect a separate network path around the proxy.
+  specs and only for signed-in users. The same stripping and injection rules
+  apply to HTTP and WebSocket handshakes; a selected claim with no value is
+  omitted. Ruscker cannot protect a separate network path around the proxy.
   E-mail and department/unit values are PII; operators should enable each
   claim only for apps that need and are trusted to process it.
 
@@ -455,8 +486,11 @@ without `Secure`. ShinyProxy-migrated configs already carry the flag.
 - **[implemented]** Default `tracing` level (`info`) logs paths,
   spec ids, replica ids — operational metadata, no secrets, no
   PII.
-- **[accepted limitation]** No PII is collected today; revisit if
-  auth/user features land.
+- **[implemented]** User identity data is minimized at the app boundary:
+  identity forwarding is per-spec and off by default, optional profile claims
+  are individually selected, and blank claims are omitted. Usernames, groups,
+  e-mail addresses, and department/unit values are PII and should not be
+  enabled for an app without a need.
 - **[opt-in]** Prometheus `/metrics` (`proxy.metrics-enabled`, off by
   default). When enabled it's served **unauthenticated** — it exposes
   operational gauges (replica counts/states, per-spec sessions,
@@ -500,7 +534,7 @@ server {
 ```
 
 `X-Forwarded-Proto: https` is what flips the `Secure` cookie flag on
-(§7) — and since v0.2.5 it is only honoured when the YAML sets
+(§7) — and it is only honoured when the YAML sets
 `server.useForwardHeaders: true`. Behind a TLS-terminating proxy you
 need **both** (the header on the proxy, the flag in the YAML);
 without them Ruscker assumes plain HTTP and omits `Secure`.

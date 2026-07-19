@@ -59,7 +59,31 @@ The credential store accepts either an encrypted password or a pure
 > The inline fields are still valid and kept for back-compat — use
 > whichever fits your workflow.
 
-## 3. Sub-path mounting (`context-path`)
+## 3. Identity headers
+
+ShinyProxy's per-spec `add-default-http-headers: true` is supported. It
+forwards the signed-in account as `X-SP-UserId` and its comma-separated
+groups as `X-SP-UserGroups` over HTTP and WebSocket.
+
+Check specs whose applications read those headers: ShinyProxy defaults the
+setting on, while Ruscker deliberately defaults it off. If the field was
+omitted from the old config, add it explicitly where the application needs
+the identity:
+
+```yaml
+- id: internal-app
+  container-image: example/internal-app:latest
+  add-default-http-headers: true
+  identity-claims: [email, setor] # optional Ruscker profile headers
+```
+
+The optional claims become `X-Ruscker-User-Email` and
+`X-Ruscker-User-Setor`; missing values are omitted. Ruscker strips
+client-supplied `X-SP-*` and `X-Ruscker-User-*` headers before adding its
+own, but the app should still be reachable only through the proxy if it
+trusts them.
+
+## 4. Sub-path mounting (`context-path`)
 
 If you run Ruscker on a path prefix rather than a dedicated subdomain
 (e.g. `example.org/apps/` instead of `apps.example.org`), use
@@ -88,7 +112,7 @@ health probes (`/healthz`, `/readyz`) stay at the root so your load
 balancer does not need to know the prefix. Your reverse proxy just
 needs to forward requests under the same path through to Ruscker.
 
-## 4. Card logos
+## 5. Card logos
 
 ShinyProxy serves card logos from its `template-path`'s `assets/img/`
 folder. When you run `serve` without `--images-dir`, Ruscker
@@ -102,7 +126,7 @@ So a config left in place finds its logos with no extra flags.
 You can also upload images through the admin **Media** panel and
 reference them by filename in the spec's `logo` field.
 
-## 5. Side-by-side cutover (recommended)
+## 6. Side-by-side cutover (recommended)
 
 You don't have to flip everything at once. A safe pattern (proven in
 production) keeps ShinyProxy reachable while Ruscker takes the root:
@@ -118,8 +142,8 @@ bookmarks keep working after the cutover.
 
 ## After the cutover: read the startup warnings
 
-Since v0.2.5 `ruscker serve` runs the same validation as
-`ruscker validate` at boot and logs every finding. A migrated config
+`ruscker serve` runs the same validation as `ruscker validate` at boot and
+logs every finding. A migrated config
 typically produces a few `is set but has no effect` warnings —
 ShinyProxy fields Ruscker parses but doesn't honour
 (`server.secure-cookies`, `proxy.heartbeat-rate`, `hide-navbar`, …).
@@ -141,9 +165,10 @@ says what to do for each. Two to know about:
 Beyond parity, you also get: a real admin panel (no more hand-editing
 YAML), a live monitoring dashboard, per-spec `container-env` /
 `container-cmd` injection, per-API rate-limiting and CORS, per-user
-and per-group app visibility, health probes, graceful shutdown, and a
-tiny footprint — **~14 MB** idle, against the ~540 MB of the JVM-based
-proxy it replaced on the same machine. See
+and per-group app visibility, per-app step-up MFA, scheduled jobs and named
+volume management (local Docker backend), health probes, graceful shutdown,
+and **~14 MB idle**.
+The JVM-based proxy it replaced on the same machine used about 540 MB. See
 [The admin panel](./admin.md).
 
 ## Not supported (yet)

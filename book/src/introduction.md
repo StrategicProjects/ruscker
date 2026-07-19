@@ -13,13 +13,10 @@ containerized web workloads. Behind a single proxy, it manages both:
 - **Container-per-API** stateless HTTP services — Plumber2, FastAPI.
 
 Deployed as a single, ultra-lightweight **static binary** with **instant
-startup**, Ruscker comes fully equipped with an **admin panel**,
-**real-time monitoring**, and **load balancing**. It uses a familiar
-YAML schema, so migration is smooth and configuration is effortless.
-
-<p align="center">
-  <img src="images/landing.png" alt="The Ruscker landing page: a portal of app cards with a Featured carousel at the top, plus search and type/access filters — hovering a card reveals its full description — all served by a single binary." width="860">
-</p>
+startup** and no JVM, Ruscker comes fully equipped with an **admin panel**,
+live monitoring, load balancing and scheduled container jobs. It uses a
+familiar YAML schema, so migration is smooth and configuration is
+effortless.
 
 ## How it works
 
@@ -41,28 +38,26 @@ engineered to keep the runtime light while staying compatible:
 
 - **Zero-friction migration** — bring your apps over with a familiar
   YAML schema, no rewrite.
-- **Single compiled binary** — one artifact to ship and run, with a tiny
-  idle footprint and instant startup.
+- **Single compiled binary** — one artifact to ship and run, measured at
+  **~14 MB idle**, with instant startup.
 - **Batteries included** — a proper admin panel, a live monitoring
-  dashboard, and load balancing, out of the box.
+  dashboard, per-app step-up MFA, identity forwarding, scheduled jobs and
+  load balancing, out of the box.
 
 ## In production
 
 Ruscker runs in production today — the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
-has the current version, and the whole codebase went through a
-systematic bug / security / UX audit in June 2026, with every
-finding fixed. Built for extreme efficiency, its idle footprint sits
-in the low tens of megabytes:
+has the current release. Its measured idle footprint is:
 
 > **~14 MB idle** — measured on a real production deployment serving a
 > real multi-app config. (The JVM-based proxy it replaced on the same
 > machine sat at ~540 MB.)
 
-It handles complex, multi-spec configurations with **no unsupported
-features** during migration, and apps spawn on demand reliably. Releases
-are multi-arch and **cosign-signed**; the [Roadmap](./roadmap.md) tracks
-what's shipped and what's next.
+The compatibility checker reports imported, ignored and unsupported
+ShinyProxy fields before a migration. Releases are multi-arch and
+**cosign-signed**; the [Roadmap](./roadmap.md) tracks what's shipped and
+what's next.
 
 ## What's in the box
 
@@ -71,6 +66,9 @@ what's shipped and what's next.
   (a generalized runtime shim patches `fetch`, `XMLHttpRequest`,
   `WebSocket`, `script.src`, `link.href`, and more) so unmodified apps
   work behind a sub-path.
+- **Access at the proxy boundary** with users/groups, per-app step-up TOTP
+  MFA, and opt-in ShinyProxy-compatible identity headers plus selected
+  profile claims for authenticated apps.
 - **Container backend** (Docker) that spawns app containers on demand,
   applies per-container CPU/memory limits, and reaps idle ones. Per-spec
   `container-env` and `container-cmd` let you configure notebook servers
@@ -82,7 +80,10 @@ what's shipped and what's next.
   intros, SEO, social meta, analytics, custom HTML blocks, header/footer
   logos with alignment and links), audit log, **user accounts with
   Viewer / Editor / Admin roles**, and a live monitoring dashboard
-  (CPU/memory, live-follow logs, stop/restart).
+  (CPU/memory, live-follow logs, stop/restart). On the local Docker backend,
+  operators can also manage named Docker volumes and run a spec's image to
+  completion on a cron schedule, with history, log tails, timeouts and
+  failure alerts (both are unavailable with the multi-host backend).
 - **Sub-path mounting**: serve the whole portal under a prefix via
   `server.context-path` or `--base-path`. Health probes (`/healthz`,
   `/readyz`) stay at the root for load balancers.
@@ -92,7 +93,10 @@ what's shipped and what's next.
   endpoint.
 - **Distribution**: a cosign-signed multi-arch container image
   (`ghcr.io/strategicprojects/ruscker`), a Debian package with a
-  hardened `systemd` unit, static musl tarballs, and a Homebrew tap.
+  hardened `systemd` unit, static musl tarballs, and a Homebrew tap. The
+  project is Apache-2.0 licensed.
+- **Server-rendered UI**: Askama templates with HTMX and Alpine.js; there
+  is no Node build step.
 
 ## Where to next
 

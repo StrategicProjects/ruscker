@@ -4,7 +4,7 @@
 No admin token is configured. Set `RUSCKER_ADMIN_TOKEN` (the `.deb`
 generates one — `sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env`)
 and restart. The admin pages also need `serve --db <file>`; without it
-the editor/list screens return 503.
+or `--config-db-url <postgres-url>` the editor/list screens return 503.
 
 ## Card logos don't show up
 The images aren't being served at `/assets/img/`. Either pass
@@ -19,9 +19,51 @@ the spec form.
   (and give the service Docker access).
 - `502` — the container failed to start or pull. Check
   `docker logs` for the spawned `ruscker-<spec>-<id>` container, and
-  verify registry credentials. Private images need
-  `docker-registry-username` + `docker-registry-password` (the latter
-  via `${DOCKER_REGISTRY_PASSWORD}`).
+  verify registry credentials. Private images can use a named credential
+  from **Credentials**, or `docker-registry-username` plus an env-backed
+  `docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}`.
+
+## 2FA enrolment returns `503`
+
+`RUSCKER_MASTER_KEY` is missing (or an existing MFA secret cannot be
+decrypted with the configured key). Set one stable 32-byte key, restart
+Ruscker, and try **Account → 2FA** again:
+
+```sh
+openssl rand -hex 32
+```
+
+Put the result in the service environment, such as
+`/etc/ruscker/ruscker.env`; do not regenerate it on each start. The `.deb`
+generates it automatically when missing. MFA deliberately fails closed,
+and the same key is also needed for encrypted registry credentials.
+
+## My app no longer receives the logged-in user
+
+Identity forwarding is off by default. Enable it on that spec:
+
+```yaml
+add-default-http-headers: true
+identity-claims: [email, setor] # optional
+```
+
+The app then receives `X-SP-UserId` / `X-SP-UserGroups` and the selected
+`X-Ruscker-User-*` claims for signed-in users, over HTTP and WebSocket. A
+blank profile claim is omitted. Ruscker strips client-supplied reserved
+identity headers, so test through Ruscker rather than by calling the
+container directly.
+
+## My app cannot set a cookie with a Ruscker-looking name
+
+Apps share the portal origin, so response cookies using Ruscker's reserved
+names are dropped to protect login, preference, sticky-session and MFA
+state. The reserved set includes `ruscker_admin_session`, `ruscker_theme`,
+`ruscker_locale`, `__ruscker_session*` and `__ruscker_mfa_*`; app-owned
+cookie names are preserved. Rename the conflicting app cookie.
+
+Ruscker also removes the cookie-clearing `Clear-Site-Data` directives
+`"cookies"` and `"*"` from app responses, while preserving safe non-cookie
+directives. An app must not try to clear all cookies on the shared origin.
 
 ## An app keeps failing with an old or broken image
 
@@ -125,7 +167,7 @@ sudo apt-get install -y ./ruscker_<version>-1_amd64.deb
 
 ## Cookies don't carry `Secure` behind my TLS proxy
 
-Since v0.2.5 Ruscker only honours `X-Forwarded-Proto` when
+Ruscker only honours `X-Forwarded-Proto` when
 `server.useForwardHeaders: true` is set (otherwise any client could
 spoof it). Behind a TLS-terminating reverse proxy you need **both**:
 the proxy sending `proxy_set_header X-Forwarded-Proto https;` (or
@@ -135,11 +177,10 @@ the proxy sending `proxy_set_header X-Forwarded-Proto https;` (or
 
 ## A Streamlit / Dash / Voilà app is unreachable (connection refused upstream)
 
-Before v0.2.5, `type: streamlit|dash|voila` without an explicit
-`container-port` forwarded to Shiny's 3838 — these frameworks listen on
-8501 / 8050 / 8866, so the proxy hit a closed port. v0.2.5 defaults to
-the framework's port; on older versions (or for a non-standard port)
-set `container-port` explicitly.
+The current defaults are 8501 / 8050 / 8866 for
+`type: streamlit|dash|voila`. If the image listens elsewhere, set
+`container-port` explicitly and confirm the process binds to `0.0.0.0`
+inside the container rather than loopback.
 
 ## Users bounce between replicas / lose their session after a restart
 The sticky-session cookie is signed with `RUSCKER_COOKIE_KEY`. If you
@@ -149,10 +190,12 @@ across replicas. Set a stable `RUSCKER_COOKIE_KEY` (e.g.
 `openssl rand -hex 32`) in `ruscker.env` and keep it constant.
 
 ## The dashboard doesn't update live (or lags badly)
-The dashboard streams over Server-Sent Events. A reverse proxy that
-buffers the response will hold the stream back. Disable buffering for
-`/admin/dashboard/events` — see the nginx note in
-[Deploying](./deploying.md).
+The Containers dashboard polls `GET /admin/dashboard/snapshot`; it does not
+use SSE. In browser developer tools, check that this request returns `200`
+every few seconds. Authentication redirects, a wrong base-path mapping or a
+slow/unreachable Docker daemon will stop or delay updates. nginx buffering
+does not affect the dashboard poll; it matters only for the server and
+per-replica live log streams described in [Deploying](./deploying.md).
 
 ## The favicon doesn't appear in Safari (or shows a stale icon)
 Safari caches favicons aggressively and sometimes keeps serving a stale
@@ -167,9 +210,9 @@ or broken icon long after you upgrade Ruscker. To force a refresh:
 For iOS Safari, a full Safari data clear (**Settings → Safari → Clear
 History and Website Data**) removes the icon cache.
 
-This is a browser-side caching behaviour, not a Ruscker bug. The favicon
-markup was hardened in v0.1.18 (the `sizes="any"` attribute that confused
-Safari's icon selection was removed).
+This is a browser-side caching behaviour, not a Ruscker bug. Ruscker's
+favicon markup avoids the `sizes="any"` attribute that can confuse Safari's
+icon selection.
 
 ## `docker pull ghcr.io/strategicprojects/ruscker` is denied
 A freshly-published image package starts **private**. Either make the

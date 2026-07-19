@@ -184,7 +184,7 @@ ruscker serve [--config <path>] [--bind 0.0.0.0:8080] [--docker|--no-docker]
 | `--config` | Path to the service config. When omitted, Ruscker prefers `ruscker.yml` in the working directory and falls back to `application.yml` for compatibility. |
 | `--bind` | Listen address (defaults to the YAML's `proxy.port`). |
 | `--docker` / `--no-docker` | By default Ruscker auto-connects when the local daemon socket is reachable. `--docker` makes connection failure fatal; `--no-docker` forces landing-only mode. |
-| `--db` | SQLite file backing the admin panel. Without it or `--config-db-url`, `/admin/*` returns 503. |
+| `--db` | SQLite file backing the admin catalog. Without it (and without `--config-db-url`), break-glass token login and the read-only monitoring dashboard still work, but the catalog-backed screens (Apps, Users, Groups, Media, Credentials, …) return 503. |
 | `--config-db-url` | PostgreSQL URL backing the admin panel and shared catalog in HA deployments. |
 | `--images-dir` | Directory served at `/assets/img/`. Auto-discovered from the config / ShinyProxy `template-path` when omitted. |
 | `--log-format` | `text` (default) or `json`. |

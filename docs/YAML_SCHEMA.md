@@ -377,7 +377,12 @@ cap, and `container-memory-request` maps to Docker's soft memory
 reservation. `container-cpu-request` is parsed and retained for compatible
 backends but has no runtime effect on the local Docker backend, which has no
 CPU-request primitive. Memory accepts plain bytes or binary `k`/`m`/`g`
-suffixes. Invalid or non-positive values are warned and not applied.
+suffixes. An **unparseable** memory value (e.g. the `512mb` typo) is warned
+and ignored; a `0` is valid and means *no limit* (for `-limit`) or *no
+reservation* (for `-request`) — Docker treats zero as unlimited, so it is
+not warned. `container-cpu-limit` / `container-cpu-request` are stricter:
+only a positive, finite number of CPUs is accepted — `0`, negatives, and
+non-finite values are warned and not applied.
 
 `container-network` (Ruscker extension) attaches the spec's containers to
 a named Docker network, mapped to the container's `HostConfig.NetworkMode`.

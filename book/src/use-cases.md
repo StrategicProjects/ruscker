@@ -122,8 +122,9 @@ Multiplex GPUs and isolate users in front of generative tools.
 
 ## Scheduled ETL, reports and maintenance
 
-The admin **Schedules** page can run a containerized spec to completion on
-a five-field UTC cron: nightly ETL, report generation, cache refreshes or
+The admin **Schedules** page (local Docker backend) can run a containerized
+spec to completion on a five-field UTC cron: nightly ETL, report generation,
+cache refreshes or
 small maintenance tasks. A job reuses the spec's image, environment,
 volumes, resource limits and registry credentials, with an optional command
 override. Runs have a configurable timeout (1 hour by default), history and

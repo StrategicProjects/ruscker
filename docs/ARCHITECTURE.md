@@ -126,7 +126,8 @@ Postgres:
 ### Scheduled jobs
 
 `jobs::spawn` starts one scheduler loop per process when both a catalog DB
-and container backend exist. Every 30 seconds it loads enabled `schedules`;
+and container backend exist (the local Docker backend runs jobs; the
+multi-host backend does not, so a due schedule there records an error). Every 30 seconds it loads enabled `schedules`;
 only the `LeaderElector` winner may fire in HA. `db::schedules::mark_fired`
 atomically advances `last_run_at` before execution, so a split-brain second
 runner loses the claim and a crash does not double-fire the occurrence.

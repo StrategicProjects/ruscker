@@ -100,8 +100,8 @@ What's in the box:
   lifecycle settings), Media, encrypted Credentials, a live-preview
   Appearance editor, **Viewer / Editor / Admin** accounts with a password
   policy and generator, consolidated per-user editing, server-side
-  pagination (50 per page) with accent-tolerant search across usernames,
-  groups and profiles, and an **Activity** history.
+  pagination (50 per page) with case-insensitive search (accented letters
+  included) across usernames, groups and profiles, and an **Activity** history.
 - **Containers dashboard** — CPU/memory sparklines, live-follow logs and
   stop/restart controls, refreshed every five seconds by polling
   `GET /admin/dashboard/snapshot`.

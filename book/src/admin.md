@@ -40,8 +40,10 @@ one form with a single save, plus the password reset. Each row shows a
 coloured avatar with the user's initials and their groups as coloured
 badges (a group keeps the same colour on the Groups and Apps pages).
 The table is paginated on the server at 50 users per page. Its
-server-side, accent-tolerant search covers username, groups, department,
-email and phone on both SQLite and Postgres.
+server-side, case-insensitive search (accented letters included — `GESTÃO`
+matches `Gestão`, though it does not strip diacritics, so `Joao` won't find
+`João`) covers username, groups, department, email and phone on both SQLite
+and Postgres.
 
 Passwords follow a **policy**: at least 8 characters, with at least one
 uppercase letter, one lowercase letter, one digit and one special
@@ -325,7 +327,9 @@ back at the blocks section.
 ### Schedules
 
 Cron-scheduled, run-to-completion jobs (Admin-only) — nightly ETL,
-report generation, cache warm-ups. A schedule picks one of your
+report generation, cache warm-ups. **Local Docker backend only** — the
+multi-host backend does not run jobs, so a due schedule there is recorded
+as an error. A schedule picks one of your
 containerized apps and runs **that app's image** with the same
 environment, volumes, resource limits and registry credentials a normal
 replica gets, optionally overriding the command (one argv element per
@@ -390,7 +394,8 @@ so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
 
 The **Volumes** card lists named Docker volumes with live reference counts
-across all host containers. Volumes created here receive the
+across all host containers. **Local Docker backend only** — with the
+multi-host backend the Disk page reports volumes as unavailable. Volumes created here receive the
 `ruscker.created` label. Removal is offered only when Ruscker created the
 volume, no container references it, and no effective catalog spec names it;
 the server rechecks all three conditions before asking Docker to remove it.

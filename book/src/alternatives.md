@@ -23,8 +23,9 @@ catalog and operational state live in SQLite, or Postgres for HA.
 - **Sensitive internal apps** — per-app step-up TOTP MFA is enforced before
   a container starts, while opt-in identity headers let the app consume the
   signed-in username, groups and selected profile claims.
-- **Scheduled operations** — run the same app image/environment/volumes to
-  completion on a cron for ETL, reports and maintenance, with history,
+- **Scheduled operations** (local Docker backend) — run the same app
+  image/environment/volumes to completion on a cron for ETL, reports and
+  maintenance, with history,
   timeouts and failure alerts.
 - **Light to run** — **~14 MB idle**, a single static binary, no JVM and
   instant startup.

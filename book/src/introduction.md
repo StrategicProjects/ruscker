@@ -80,9 +80,10 @@ what's next.
   intros, SEO, social meta, analytics, custom HTML blocks, header/footer
   logos with alignment and links), audit log, **user accounts with
   Viewer / Editor / Admin roles**, and a live monitoring dashboard
-  (CPU/memory, live-follow logs, stop/restart). Operators can also manage
-  named Docker volumes and run a spec's image to completion on a cron
-  schedule, with history, log tails, timeouts and failure alerts.
+  (CPU/memory, live-follow logs, stop/restart). On the local Docker backend,
+  operators can also manage named Docker volumes and run a spec's image to
+  completion on a cron schedule, with history, log tails, timeouts and
+  failure alerts (both are unavailable with the multi-host backend).
 - **Sub-path mounting**: serve the whole portal under a prefix via
   `server.context-path` or `--base-path`. Health probes (`/healthz`,
   `/readyz`) stay at the root for load balancers.

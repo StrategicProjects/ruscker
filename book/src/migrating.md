@@ -165,8 +165,9 @@ says what to do for each. Two to know about:
 Beyond parity, you also get: a real admin panel (no more hand-editing
 YAML), a live monitoring dashboard, per-spec `container-env` /
 `container-cmd` injection, per-API rate-limiting and CORS, per-user
-and per-group app visibility, per-app step-up MFA, scheduled jobs, named
-volume management, health probes, graceful shutdown, and **~14 MB idle**.
+and per-group app visibility, per-app step-up MFA, scheduled jobs and named
+volume management (local Docker backend), health probes, graceful shutdown,
+and **~14 MB idle**.
 The JVM-based proxy it replaced on the same machine used about 540 MB. See
 [The admin panel](./admin.md).
 

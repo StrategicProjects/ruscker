@@ -12,6 +12,9 @@ description = "Admin panel and public landing for Ruscker (Askama + HTMX + Tailw
 # set RUSCKER_TEST_PG_URL to a reachable `postgres://` DSN. See
 # crates/ruscker-admin/src/sessions_pg.rs for a throwaway-daemon recipe.
 postgres-it = []
+# Reactive-recovery smoke against a real Docker daemon (#1018). Enable with
+# `cargo test -p ruscker-admin --features docker-it`; needs docker socket access.
+docker-it = []
 # Live WebSocket e2e against REAL Shiny + Streamlit containers (#929):
 # spawns the demo images through the proxy and exercises the rewrite +
 # WS pump arc. Needs Docker and pulls ~1 GB of images on first run:

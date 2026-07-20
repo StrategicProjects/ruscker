@@ -87,6 +87,7 @@ async fn app_state(db: ConfigDb) -> AppState {
         catalog_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: std::sync::Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),
+        activity: ruscker_admin::activity::ActivitySink::default(),
     }
 }
 

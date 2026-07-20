@@ -682,17 +682,31 @@ async fn forward(
             .sessions
             .touch_or_register(&state.replicas, session_id, &spec.id, &replica.id, seat_reserved)
             .await;
-        // stop-on-logout (#337): when a *known* user first registers a
-        // session on a spec that opts in, index it so their logout can
-        // end it immediately. Only on first registration and only for
-        // such specs — no cost on the common path.
-        if outcome == crate::sessions::TouchOutcome::Registered && spec.effective_stop_on_logout() {
-            if let Some(user) = &acting_user {
-                state
-                    .logout_index
-                    .entry(user.clone())
-                    .or_default()
-                    .insert(session_id);
+        // A newly-registered session is a genuine app access (#1021): one
+        // per visit, already past the access guard, and never fired for
+        // assets/XHR/WS (untracked) or APIs (not sticky). `acting_user` is
+        // `None` for an anonymous access. Non-blocking enqueue; the session
+        // id is the dedup key.
+        if outcome == crate::sessions::TouchOutcome::Registered {
+            state.activity.record(crate::activity::ActivityEvent::app_access(
+                acting_user.clone(),
+                spec.id.clone(),
+                session_id.to_string(),
+                None,
+                None,
+            ));
+            // stop-on-logout (#337): when a *known* user first registers a
+            // session on a spec that opts in, index it so their logout can
+            // end it immediately. Only on first registration and only for
+            // such specs — no cost on the common path.
+            if spec.effective_stop_on_logout() {
+                if let Some(user) = &acting_user {
+                    state
+                        .logout_index
+                        .entry(user.clone())
+                        .or_default()
+                        .insert(session_id);
+                }
             }
         }
     }
@@ -2939,6 +2953,7 @@ mod tests {
             catalog_cache: StdArc::new(tokio::sync::RwLock::new(None)),
             access_counter: StdArc::new(crate::access_counter::AccessCounter::default()),
             alerts: crate::alerts::AlertSink::default(),
+            activity: crate::activity::ActivitySink::default(),
         }
     }
 
@@ -4301,6 +4316,57 @@ proxy:
             );
             assert_eq!(state.sessions.len(), 1);
         }
+    }
+
+    /// #1021: a new interactive session (a text/html visit that resolves to
+    /// a Ready replica) records exactly one anonymous `app.access`. The
+    /// record fires before the upstream forward, so a dead upstream (502)
+    /// doesn't matter — and assets/APIs/repeat requests don't register a
+    /// session, so they emit nothing.
+    #[tokio::test]
+    async fn interactive_visit_records_one_app_access() {
+        use crate::activity::ActivityEventType;
+        use tower::ServiceExt;
+        let backend = StdArc::new(CountingBackend {
+            spawns: AtomicU32::new(0),
+            delay: StdDuration::ZERO,
+        });
+        let mut state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        state.config = std::sync::Arc::new(
+            ruscker_config::Config::from_yaml(
+                "proxy:\n  specs:\n    - id: app\n      container-image: test:latest\n",
+            )
+            .expect("config"),
+        );
+        // A Ready replica with a free seat means the visit skips the splash
+        // and registers a session (its upstream is dead — the forward 502s
+        // after the app.access record has already fired).
+        state.replicas.write().await.add(accepting_replica("app"));
+
+        let app = Router::new()
+            .merge(routes())
+            .layer(tower_cookies::CookieManagerLayer::new())
+            .with_state(state.clone());
+        let req = Request::builder()
+            .method("GET")
+            .uri("/app/app/")
+            .header(header::ACCEPT, "text/html")
+            .body(Body::empty())
+            .unwrap();
+        let _ = app.oneshot(req).await.unwrap(); // 502 upstream — irrelevant
+
+        let mut rx = state
+            .activity
+            .take_receiver()
+            .expect("activity receiver available");
+        let ev = rx.try_recv().expect("an app.access was recorded");
+        assert_eq!(ev.event_type, ActivityEventType::AppAccess);
+        assert_eq!(ev.spec_id.as_deref(), Some("app"));
+        assert_eq!(ev.username, None, "anonymous visit has no username");
+        assert!(
+            rx.try_recv().is_err(),
+            "exactly one app.access per new session"
+        );
     }
 
     /// #1018 real smoke: against a live daemon, an externally-removed

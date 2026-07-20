@@ -9,6 +9,37 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.46 — 2026-07-20
+
+- **Self-healing when a container changes outside Ruscker.** If an
+  operator removes or restarts a managed container directly with the
+  Docker CLI, Ruscker now reconciles its view immediately — no admin
+  action needed.
+  - **`docker rm -f` no longer leaves a dead app behind.** Before, a
+    force-removed container lingered as "Ready" in Ruscker's registry
+    until the next housekeeping pass, so requests kept hitting the
+    vanished upstream (`upstream error`) and the phantom still counted
+    against the app's replica ceiling. Ruscker now authoritatively
+    detects the removal, drops the stale sticky binding and its
+    sessions, and brings up a replacement — a page navigation lands on
+    the familiar "Starting…" screen instead of a 502.
+  - **`docker restart` no longer orphans the container.** A container
+    restarted from the CLI is re-adopted once it is serving again (after
+    the same readiness check used on a fresh spawn), with no duplicate
+    started during the restart window and nothing left running but
+    invisible to the dashboard.
+  - **Near-instant, even for idle apps.** Ruscker watches Docker's event
+    stream, so an external change is reconciled within about a second —
+    not only when a request happens to arrive. A request that does hit a
+    just-removed upstream recovers on the spot.
+  - **Safe on multi-host and during daemon hiccups.** Recovery acts only
+    on an *authoritative* "gone" signal: a transient Docker error, an app
+    returning its own `5xx`, or an unreachable host in a multi-host
+    deployment never causes Ruscker to drop a live replica. The periodic
+    reconcile remains the fallback for anything missed.
+
+---
+
 ## v0.2.45 — 2026-07-18
 
 - **Two-factor authentication for selected apps (step-up MFA).** A spec

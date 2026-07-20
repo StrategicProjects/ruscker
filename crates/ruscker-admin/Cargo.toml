@@ -45,6 +45,9 @@ hyper-rustls = "0.27"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 # Cron parsing for scheduled jobs (#986) — verified on crates.io (3.0.1).
 croner = "3"
+# Percent-encode filter values onto pager query strings (#1021). Already
+# in the tree transitively; named directly so the usage is declared.
+urlencoding = "2"
 futures-util = { workspace = true }
 async-stream = { workspace = true }
 lol_html = { workspace = true }

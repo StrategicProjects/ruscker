@@ -1046,3 +1046,33 @@ admin-users-mfa-reset-confirm = Redefinir o 2FA deste usuário? A chave e TODOS 
 admin-users-mfa-reset = Redefinir 2FA
 admin-users-mfa-not-configured = 2FA não configurado
 admin-users-mfa-reset-ok = O 2FA e os códigos de recuperação foram redefinidos.
+
+# User activity (#1021)
+admin-activity-title = Atividades dos Usuários
+admin-activity-subtitle = Logins e acessos a aplicações, do mais recente para o mais antigo.
+admin-activity-tab-users = Atividades dos usuários
+admin-activity-tab-admin = Atividades administrativas
+admin-activity-event = Evento
+admin-activity-event-all = Todos os eventos
+admin-activity-event-login = Login
+admin-activity-event-access = Acesso a app
+admin-activity-user = Usuário
+admin-activity-user-all = Todos os usuários
+admin-activity-app = Aplicação
+admin-activity-app-all = Todas as aplicações
+admin-activity-period = Período
+admin-activity-period-all = Qualquer período
+admin-activity-period-24h = Últimas 24 horas
+admin-activity-period-7d = Últimos 7 dias
+admin-activity-period-30d = Últimos 30 dias
+admin-activity-col-when = Quando
+admin-activity-col-user = Usuário
+admin-activity-col-event = Evento
+admin-activity-col-app = Aplicação
+admin-activity-col-ip = IP
+admin-activity-empty = Nenhuma atividade ainda — ou o filtro não bate em nada.
+admin-activity-anonymous = Anônimo
+admin-activity-pager-status = Página { $page } de { $pages } · { $total } { $total ->
+        [one] registro
+       *[other] registros
+    }

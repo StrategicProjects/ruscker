@@ -232,6 +232,32 @@ pub async fn count_filtered(db: &ConfigDb, filter: &ActivityFilter) -> Result<i6
     Ok(count)
 }
 
+/// Distinct non-null usernames ever recorded — populates the user filter
+/// dropdown. Ordered so the select is stable.
+pub async fn distinct_usernames(db: &ConfigDb) -> Result<Vec<String>> {
+    let sql =
+        "SELECT DISTINCT username FROM user_activity WHERE username IS NOT NULL ORDER BY username ASC";
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
+    .context("distinct activity usernames")?;
+    Ok(rows.into_iter().map(|(u,)| u).collect())
+}
+
+/// Distinct non-null spec ids ever recorded — populates the app filter
+/// dropdown.
+pub async fn distinct_specs(db: &ConfigDb) -> Result<Vec<String>> {
+    let sql =
+        "SELECT DISTINCT spec_id FROM user_activity WHERE spec_id IS NOT NULL ORDER BY spec_id ASC";
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
+    .context("distinct activity specs")?;
+    Ok(rows.into_iter().map(|(s,)| s).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +367,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn distinct_dropdowns_exclude_nulls_and_sort() {
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        insert_batch(
+            &db,
+            &[
+                access(Some("bob"), "ops", "a1"),
+                access(Some("alice"), "sales", "a2"),
+                access(None, "public", "a3"), // anonymous → no username
+                login("alice", "l1"),         // login → no spec
+            ],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            distinct_usernames(&db).await.unwrap(),
+            vec!["alice".to_string(), "bob".to_string()]
+        );
+        assert_eq!(
+            distinct_specs(&db).await.unwrap(),
+            vec!["ops".to_string(), "public".to_string(), "sales".to_string()]
+        );
+    }
+
+    #[tokio::test]
     async fn since_until_filter_bounds_the_time_window() {
         let db = ConfigDb::Sqlite(open_memory().await.unwrap());
         // Three events at distinct, explicit timestamps (bypass the emit-time
@@ -437,5 +487,12 @@ mod tests {
         };
         assert_eq!(count_filtered(&db, &by_user).await.unwrap(), 2);
         assert_eq!(all.iter().filter(|r| r.username.is_none()).count(), 1);
+
+        // Distinct dropdowns exclude NULLs and are ordered.
+        assert_eq!(distinct_usernames(&db).await.unwrap(), vec!["alice".to_string()]);
+        assert_eq!(
+            distinct_specs(&db).await.unwrap(),
+            vec!["public".to_string(), "sales".to_string()]
+        );
     }
 }

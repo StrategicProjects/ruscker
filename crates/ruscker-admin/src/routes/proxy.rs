@@ -758,6 +758,15 @@ async fn forward(
                     spec = %spec.id, replica = %replica.id, error = ?err,
                     "upstream ws connect failed"
                 );
+                // Reactive recovery (#1018 slice A): a WS handshake connects the
+                // upstream before the 101, so a failure here is the same signal
+                // as an HTTP transport error. If the container is confirmed gone,
+                // reap it and kick a replacement — the browser's automatic
+                // reconnect then cold-starts onto the fresh replica instead of
+                // being pinned to the dead one until the scaler tick.
+                if reap_if_confirmed_dead(&state, &replica).await {
+                    kick_replacement_spawn(&state, &spec);
+                }
                 return with_cors(
                     (StatusCode::BAD_GATEWAY, "upstream unavailable").into_response(),
                     cors_on,
@@ -849,6 +858,11 @@ async fn forward(
             }
         }
     }
+    // Captured before `req` is consumed by `do_forward`, for reactive
+    // recovery on a transport failure (#1018): a GET document navigation to a
+    // vanished upstream is bounced onto the familiar cold-start splash rather
+    // than a raw 502.
+    let req_is_get_visit = *req.method() == Method::GET && is_visit;
     let resp = match do_forward(
         &replica,
         upstream_path,
@@ -866,6 +880,22 @@ async fn forward(
                 spec = %spec.id, replica = %replica.id,
                 error = ?err, "forward failed"
             );
+            // Reactive recovery (#1018 slice A): if the upstream is confirmed
+            // GONE (e.g. `docker rm -f`), reap it now so routing + sticky stop
+            // pointing here immediately instead of after the ~10 s scaler tick.
+            // Only an authoritative Missing reaps (see `reap_if_confirmed_dead`);
+            // an app 5xx is an `Ok` response and never reaches this arm.
+            if reap_if_confirmed_dead(&state, &replica).await {
+                kick_replacement_spawn(&state, &spec);
+                // A top-level navigation recovers on the "Starting…" screen,
+                // which polls readiness and opens the app once the replacement
+                // is up. Subresources/XHR just get the 502 and the browser
+                // retries onto the fresh replica. Non-idempotent methods are
+                // never blindly replayed — the reap lets the next call recover.
+                if req_is_get_visit {
+                    return cold_start_splash(&spec, &state.base_path, false);
+                }
+            }
             return with_cors(
                 // Detail is logged above; keep the client-facing body generic.
                 (StatusCode::BAD_GATEWAY, "upstream error").into_response(),
@@ -2019,6 +2049,72 @@ fn apply_smart_routing_headers(
     if let Some(host) = fwd_host {
         headers.insert("x-forwarded-host", host);
     }
+}
+
+/// Reactive recovery (#1018 slice A): when a forward or WS handshake fails at
+/// the transport layer, ask the backend whether the selected replica's
+/// container is authoritatively **gone**. If so, reap it now — through the same
+/// [`crate::scaler::cleanup_replica_state`] the periodic reconcile uses — so
+/// routing and the sticky binding stop pointing at a dead upstream in this same
+/// request, instead of waiting out the ~10 s scaler tick.
+///
+/// Returns `true` iff the replica was confirmed `Missing` and reaped. The bar
+/// is deliberately high and conservative:
+/// - Only `Missing` reaps. A `Stopped` container may be mid-`docker restart`;
+///   that case is owned by the scaler's grace window (#1016), so the reactive
+///   path must not prune it and risk a duplicate replacement.
+/// - An app-level `5xx` never reaches here — that's an `Ok` upstream response,
+///   not a transport error.
+/// - A transient daemon error, or a multi-host `Unknown` (owning host
+///   unreachable), returns `false`: a live replica behind a hiccup is never
+///   pruned.
+async fn reap_if_confirmed_dead(state: &AppState, replica: &Replica) -> bool {
+    let Some(backend) = state.backend.as_ref() else {
+        return false;
+    };
+    let query = ruscker_core::ReplicaLivenessQuery::from(replica);
+    let report = match backend.replica_liveness(std::slice::from_ref(&query)).await {
+        Ok(report) => report,
+        Err(err) => {
+            // Inconclusive (daemon hiccup / whole-call error) — do NOT reap.
+            tracing::debug!(
+                spec = %replica.spec_id, replica = %replica.id, error = ?err,
+                "reactive liveness check inconclusive; leaving replica in place"
+            );
+            return false;
+        }
+    };
+    let confirmed_missing = report.observations.iter().any(|obs| {
+        obs.replica_id == replica.id
+            && matches!(obs.liveness, ruscker_core::ReplicaLiveness::Missing)
+    });
+    if !confirmed_missing {
+        return false;
+    }
+    // `is_some()` means this call is the one that removed it (another task may
+    // have raced the same reap); either way the replica is gone now.
+    if crate::scaler::cleanup_replica_state(state, &replica.id).await.is_some() {
+        tracing::warn!(
+            spec = %replica.spec_id, replica = %replica.id, upstream = %replica.upstream,
+            "reactively reaped replica whose container is gone (confirmed missing on upstream failure)"
+        );
+    }
+    true
+}
+
+/// Kick a coalesced replacement spawn for `spec` in the background when it can
+/// still scale, so capacity returns without waiting for the next scaler tick.
+/// Best-effort — a failure is logged, never surfaced to the visitor.
+fn kick_replacement_spawn(state: &AppState, spec: &Spec) {
+    let (st, sp) = (state.clone(), spec.clone());
+    tokio::spawn(async move {
+        if at_capacity(&st, &sp).await {
+            return;
+        }
+        if let Err(err) = crate::scaler::ensure_replica_available(&st, &sp).await {
+            tracing::warn!(spec = %sp.id, error = ?err, "reactive replacement spawn failed");
+        }
+    });
 }
 
 async fn do_forward(
@@ -4065,5 +4161,188 @@ proxy:
             removal.contains("Max-Age=0") && removal.contains("Path=/"),
             "removal must expire the Path=/ legacy cookie: {removal}"
         );
+    }
+
+    // ── #1018 slice A: reactive recovery reaps a confirmed-dead upstream ──
+    //
+    // A backend whose `replica_liveness` returns a scripted verdict for the
+    // one queried replica, so `reap_if_confirmed_dead` can be exercised for
+    // every classification without a real daemon.
+    struct ScriptedLivenessBackend {
+        liveness: ruscker_core::ReplicaLiveness,
+        err: bool,
+    }
+
+    #[async_trait]
+    impl ContainerBackend for ScriptedLivenessBackend {
+        async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<ruscker_core::Replica> {
+            Ok(ruscker_core::Replica {
+                id: ReplicaId(uuid::Uuid::new_v4()),
+                spec_id: spec_id.to_string(),
+                container_id: "spawned".into(),
+                upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+                state: ReplicaState::Ready,
+                started_at: chrono::Utc::now(),
+                sessions_active: 0,
+                sessions_max: 1,
+                host: None,
+            })
+        }
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn list(&self) -> CoreResult<Vec<ruscker_core::Replica>> {
+            Ok(vec![])
+        }
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            Ok(ReplicaMetrics {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+        async fn replica_liveness(
+            &self,
+            known: &[ruscker_core::ReplicaLivenessQuery],
+        ) -> CoreResult<ruscker_core::ReplicaLivenessReport> {
+            if self.err {
+                return Err(ruscker_core::CoreError::Backend("daemon hiccup".into()));
+            }
+            Ok(ruscker_core::ReplicaLivenessReport {
+                observations: known
+                    .iter()
+                    .map(|q| ruscker_core::ReplicaLivenessObservation {
+                        replica_id: q.replica_id.clone(),
+                        liveness: self.liveness,
+                    })
+                    .collect(),
+                running: vec![],
+            })
+        }
+    }
+
+    /// Seed an `AppState` (backed by a scripted-liveness backend) with one
+    /// Ready replica for spec `app` and a sticky session pinned to it.
+    async fn state_with_pinned_replica(
+        liveness: ruscker_core::ReplicaLiveness,
+        err: bool,
+    ) -> (AppState, ruscker_core::Replica) {
+        let backend = StdArc::new(ScriptedLivenessBackend { liveness, err });
+        let state = coalescer_state(backend as StdArc<dyn ContainerBackend>);
+        let replica = ruscker_core::Replica {
+            id: ReplicaId(uuid::Uuid::new_v4()),
+            spec_id: "app".into(),
+            container_id: "c-app".into(),
+            upstream: "127.0.0.1:1".parse::<SocketAddr>().unwrap(),
+            state: ReplicaState::Ready,
+            started_at: chrono::Utc::now(),
+            sessions_active: 0,
+            sessions_max: 1,
+            host: None,
+        };
+        state.replicas.write().await.add(replica.clone());
+        state
+            .sessions
+            .touch_or_register(&state.replicas, uuid::Uuid::new_v4(), "app", &replica.id, false)
+            .await;
+        (state, replica)
+    }
+
+    #[tokio::test]
+    async fn reactive_reap_removes_replica_and_sessions_on_confirmed_missing() {
+        let (state, replica) =
+            state_with_pinned_replica(ruscker_core::ReplicaLiveness::Missing, false).await;
+
+        assert!(
+            reap_if_confirmed_dead(&state, &replica).await,
+            "a Missing upstream must be reaped"
+        );
+        assert!(
+            state.replicas.read().await.replicas_of("app").is_empty(),
+            "the dead replica must leave the registry"
+        );
+        assert_eq!(state.sessions.len(), 0, "its sticky session must be dropped");
+    }
+
+    #[tokio::test]
+    async fn reactive_reap_spares_stopped_replica_for_the_grace_window() {
+        // A Stopped container may be mid-`docker restart`; the scaler's grace
+        // window (#1016) owns it — the reactive path must not prune it.
+        let (state, replica) =
+            state_with_pinned_replica(ruscker_core::ReplicaLiveness::Stopped, false).await;
+
+        assert!(
+            !reap_if_confirmed_dead(&state, &replica).await,
+            "Stopped must not be reactively reaped"
+        );
+        assert_eq!(state.replicas.read().await.replicas_of("app").len(), 1);
+        assert_eq!(state.sessions.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reactive_reap_spares_unknown_and_running_and_errors() {
+        // Multi-host Unknown (host unreachable), a still-Running replica, and a
+        // whole-call backend error are all inconclusive — never prune.
+        for (liveness, err) in [
+            (ruscker_core::ReplicaLiveness::Unknown, false),
+            (ruscker_core::ReplicaLiveness::Running, false),
+            (ruscker_core::ReplicaLiveness::Missing, true), // Missing verdict never seen: call errors
+        ] {
+            let (state, replica) = state_with_pinned_replica(liveness, err).await;
+            assert!(
+                !reap_if_confirmed_dead(&state, &replica).await,
+                "inconclusive/live verdict (liveness={liveness:?}, err={err}) must not reap"
+            );
+            assert_eq!(
+                state.replicas.read().await.replicas_of("app").len(),
+                1,
+                "replica must survive (liveness={liveness:?}, err={err})"
+            );
+            assert_eq!(state.sessions.len(), 1);
+        }
+    }
+
+    /// #1018 real smoke: against a live daemon, an externally-removed
+    /// container is authoritatively confirmed gone and reaped through the
+    /// production glue (`reap_if_confirmed_dead` → `replica_liveness` →
+    /// `cleanup_replica_state`). Mirrors the operator running `docker rm -f`.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn reactive_reap_against_real_docker_after_external_removal() {
+        use ruscker_core::ContainerBackend as _;
+        let image = std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = StdArc::new(
+            ruscker_docker::LocalDockerBackend::local().expect("docker daemon reachable"),
+        );
+        let spec = format!("reap-it-{}", uuid::Uuid::new_v4());
+        let replica = backend
+            .spawn_with_port(&spec, &image, 80)
+            .await
+            .expect("spawn real container");
+
+        let state = coalescer_state(backend.clone() as StdArc<dyn ContainerBackend>);
+        state.replicas.write().await.add(replica.clone());
+        state
+            .sessions
+            .touch_or_register(&state.replicas, uuid::Uuid::new_v4(), &spec, &replica.id, false)
+            .await;
+
+        // External removal (what the operator does) — a real docker remove of
+        // the real, ruscker-labelled container.
+        backend
+            .remove_container(&replica.container_id)
+            .await
+            .expect("external remove of the managed container");
+
+        assert!(
+            reap_if_confirmed_dead(&state, &replica).await,
+            "a really-removed container must be confirmed Missing and reaped"
+        );
+        assert!(
+            state.replicas.read().await.replicas_of(&spec).is_empty(),
+            "registry must be clear of the reaped replica"
+        );
+        assert_eq!(state.sessions.len(), 0, "its session must be dropped");
     }
 }

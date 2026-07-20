@@ -301,8 +301,13 @@ impl ReplicaDownReason {
 
 /// Release every process-local association with a replica. Both explicit
 /// stops and liveness pruning use this routine so registry/session/metrics /
-/// in-flight state cannot drift apart.
-async fn cleanup_replica_state(state: &AppState, replica_id: &ReplicaId) -> Option<Replica> {
+/// in-flight state cannot drift apart. `pub(crate)` so the proxy's reactive
+/// recovery (#1018) reaps a confirmed-dead upstream through the exact same
+/// path the periodic reconcile uses.
+pub(crate) async fn cleanup_replica_state(
+    state: &AppState,
+    replica_id: &ReplicaId,
+) -> Option<Replica> {
     let removed = state.replicas.write().await.remove(replica_id);
     state.sessions.drop_replica(replica_id).await;
     state.metrics.remove(replica_id);

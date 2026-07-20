@@ -6,12 +6,24 @@
 
 <div x-data="ruscker.audit()" x-cloak>
 
-  <div class="flex items-end justify-between mb-5">
+  <div class="flex items-end justify-between mb-4">
     <div>
       <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-audit-title") }}</h1>
       <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-audit-subtitle") }}</p>
     </div>
     <div class="text-xs text-[color:var(--text-faint)]">{{ entries.len() }}</div>
+  </div>
+
+  {# ── Sub-nav: users activity ⇄ administrative audit (#1021) ──── #}
+  <div class="flex gap-1 mb-4">
+    <a href="{{ base }}/admin/activity" class="admin-nav-link" style="width:auto">
+      <i class="ti ti-users" aria-hidden="true"></i>
+      <span>{{ self.t("admin-activity-tab-users") }}</span>
+    </a>
+    <a href="{{ base }}/admin/audit" class="admin-nav-link is-active" style="width:auto">
+      <i class="ti ti-history" aria-hidden="true"></i>
+      <span>{{ self.t("admin-activity-tab-admin") }}</span>
+    </a>
   </div>
 
   {# ── Filter bar ───────────────────────────────────────────── #}

@@ -1042,3 +1042,33 @@ admin-users-mfa-reset-confirm = Reset this user's 2FA? The key and ALL recovery 
 admin-users-mfa-reset = Reset 2FA
 admin-users-mfa-not-configured = 2FA not configured
 admin-users-mfa-reset-ok = 2FA and its recovery codes were reset.
+
+# User activity (#1021)
+admin-activity-title = User Activity
+admin-activity-subtitle = Logins and app accesses, newest first.
+admin-activity-tab-users = User activity
+admin-activity-tab-admin = Administrative activity
+admin-activity-event = Event
+admin-activity-event-all = All events
+admin-activity-event-login = Login
+admin-activity-event-access = App access
+admin-activity-user = User
+admin-activity-user-all = All users
+admin-activity-app = App
+admin-activity-app-all = All apps
+admin-activity-period = Period
+admin-activity-period-all = Any time
+admin-activity-period-24h = Last 24 hours
+admin-activity-period-7d = Last 7 days
+admin-activity-period-30d = Last 30 days
+admin-activity-col-when = When
+admin-activity-col-user = User
+admin-activity-col-event = Event
+admin-activity-col-app = App
+admin-activity-col-ip = IP
+admin-activity-empty = No activity yet — or the filter matches nothing.
+admin-activity-anonymous = Anonymous
+admin-activity-pager-status = Page { $page } of { $pages } · { $total } { $total ->
+        [one] record
+       *[other] records
+    }

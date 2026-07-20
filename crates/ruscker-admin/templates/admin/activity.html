@@ -1,0 +1,166 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-activity-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="flex items-end justify-between mb-4">
+  <div>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-activity-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-activity-subtitle") }}</p>
+  </div>
+</div>
+
+{# ── Sub-nav: users activity ⇄ administrative audit ──────────── #}
+<div class="flex gap-1 mb-4">
+  <a href="{{ base }}/admin/activity" class="admin-nav-link is-active" style="width:auto">
+    <i class="ti ti-users" aria-hidden="true"></i>
+    <span>{{ self.t("admin-activity-tab-users") }}</span>
+  </a>
+  <a href="{{ base }}/admin/audit" class="admin-nav-link" style="width:auto">
+    <i class="ti ti-history" aria-hidden="true"></i>
+    <span>{{ self.t("admin-activity-tab-admin") }}</span>
+  </a>
+</div>
+
+{# ── Filter bar ───────────────────────────────────────────── #}
+<form method="get" action="{{ base }}/admin/activity" class="audit-filter-bar">
+  <div class="select-wrap" :class="'{{ event }}' !== '' ? 'is-active' : ''">
+    <select name="event" class="theme-select" onchange="this.form.submit()"
+            aria-label="{{ self.t("admin-activity-event") }}">
+      <option value=""              {% if event.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-event-all") }}</option>
+      <option value="login.success" {% if event == "login.success" %}selected{% endif %}>{{ self.t("admin-activity-event-login") }}</option>
+      <option value="app.access"     {% if event == "app.access" %}selected{% endif %}>{{ self.t("admin-activity-event-access") }}</option>
+    </select>
+    <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+  </div>
+
+  {% if !users.is_empty() %}
+    <div class="select-wrap" :class="'{{ user }}' !== '' ? 'is-active' : ''">
+      <select name="user" class="theme-select" onchange="this.form.submit()"
+              aria-label="{{ self.t("admin-activity-user") }}">
+        <option value="" {% if user.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-user-all") }}</option>
+        {% for u in users %}
+          <option value="{{ u }}" {% if user == *u %}selected{% endif %}>{{ u }}</option>
+        {% endfor %}
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+  {% endif %}
+
+  {% if !apps.is_empty() %}
+    <div class="select-wrap" :class="'{{ app }}' !== '' ? 'is-active' : ''">
+      <select name="app" class="theme-select" onchange="this.form.submit()"
+              aria-label="{{ self.t("admin-activity-app") }}">
+        <option value="" {% if app.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-app-all") }}</option>
+        {% for a in apps %}
+          <option value="{{ a }}" {% if app == *a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+      <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+    </div>
+  {% endif %}
+
+  <div class="select-wrap" :class="'{{ period }}' !== '' ? 'is-active' : ''">
+    <select name="period" class="theme-select" onchange="this.form.submit()"
+            aria-label="{{ self.t("admin-activity-period") }}">
+      <option value=""    {% if period.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-period-all") }}</option>
+      <option value="24h" {% if period == "24h" %}selected{% endif %}>{{ self.t("admin-activity-period-24h") }}</option>
+      <option value="7d"  {% if period == "7d" %}selected{% endif %}>{{ self.t("admin-activity-period-7d") }}</option>
+      <option value="30d" {% if period == "30d" %}selected{% endif %}>{{ self.t("admin-activity-period-30d") }}</option>
+    </select>
+    <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
+  </div>
+
+  <button type="submit" class="sort-btn">
+    <i class="ti ti-filter" aria-hidden="true"></i>
+    <span>{{ self.t("admin-audit-apply") }}</span>
+  </button>
+
+  {% if self.filtered() %}
+    <a href="{{ base }}/admin/activity" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
+      {{ self.t("filter-clear") }}
+    </a>
+  {% endif %}
+</form>
+
+{# ── Rows ─────────────────────────────────────────────────── #}
+{% if rows.is_empty() %}
+  <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)] mt-4">
+    {{ self.t("admin-activity-empty") }}
+  </div>
+{% else %}
+  <table class="admin-table mt-4">
+    <thead>
+      <tr>
+        <th style="width:160px">{{ self.t("admin-activity-col-when") }}</th>
+        <th style="width:200px">{{ self.t("admin-activity-col-user") }}</th>
+        <th style="width:170px">{{ self.t("admin-activity-col-event") }}</th>
+        <th>{{ self.t("admin-activity-col-app") }}</th>
+        <th style="width:130px">{{ self.t("admin-activity-col-ip") }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="dash-mono text-[color:var(--text-faint)]" style="white-space:nowrap">{{ r.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</td>
+        <td>
+          <span class="user-cell">
+            <span class="rk-avatar" data-avatar="{% match r.username %}{% when Some with (u) %}{{ u }}{% when None %}anon{% endmatch %}" aria-hidden="true"></span>
+            {% match r.username %}{% when Some with (u) %}<span>{{ u }}</span>{% when None %}<span class="text-[color:var(--text-faint)]">{{ self.t("admin-activity-anonymous") }}</span>{% endmatch %}
+          </span>
+        </td>
+        <td>
+          <span class="{{ self.event_tone(r.event_type.as_str()) }}" style="display:inline-flex;align-items:center;gap:6px">
+            <i class="ti {{ self.event_icon(r.event_type.as_str()) }} audit-row-icon" aria-hidden="true"></i>
+            <span class="audit-row-action">{{ self.event_label(r.event_type.as_str()) }}</span>
+          </span>
+        </td>
+        <td class="dash-mono text-[color:var(--text-muted)]">{% match r.spec_id %}{% when Some with (s) %}{{ s }}{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
+        <td class="dash-mono text-[color:var(--text-faint)]">{% match r.client_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {# ── Pager — links preserve the active filters. #}
+  <div class="flex items-center gap-3 mt-3 text-xs text-[color:var(--text-muted)]" style="flex-wrap:wrap">
+    {% if page > 1 %}
+      <a class="admin-nav-link" style="width:auto"
+         href="{{ base }}/admin/activity?page={{ page - 1 }}{{ self.query_suffix() }}">
+        <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
+      </a>
+    {% endif %}
+    <span>{{ self.pager_status() }}</span>
+    {% if page < pages %}
+      <a class="admin-nav-link" style="width:auto"
+         href="{{ base }}/admin/activity?page={{ page + 1 }}{{ self.query_suffix() }}">
+        {{ self.t("admin-users-next") }} <i class="ti ti-chevron-right" aria-hidden="true"></i>
+      </a>
+    {% endif %}
+  </div>
+{% endif %}
+
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
+<script>
+// Colour the user avatars from a hash of the name — same model as the
+// Users and Audit pages (#658/#623).
+(function () {
+  function color(s) {
+    var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return 'hsl(' + h + ' 55% 45%)';
+  }
+  function initials(s) {
+    var p = s.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
+    return ((p[0] || '').charAt(0) + (p.length > 1 ? (p[1] || '').charAt(0) : '')).toUpperCase() || '?';
+  }
+  document.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
+    var name = el.getAttribute('data-avatar'), c = color(name);
+    el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
+    el.style.color = c;
+    if (!el.textContent) el.textContent = initials(name);
+  });
+})();
+</script>
+
+{% endblock %}

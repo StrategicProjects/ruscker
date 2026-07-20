@@ -1042,3 +1042,33 @@ admin-users-mfa-reset-confirm = Réinitialiser la 2FA de cet utilisateur ? La cl
 admin-users-mfa-reset = Réinitialiser la 2FA
 admin-users-mfa-not-configured = 2FA non configurée
 admin-users-mfa-reset-ok = La 2FA et ses codes de récupération ont été réinitialisés.
+
+# User activity (#1021)
+admin-activity-title = Activité des Utilisateurs
+admin-activity-subtitle = Connexions et accès aux applications, du plus récent au plus ancien.
+admin-activity-tab-users = Activité des utilisateurs
+admin-activity-tab-admin = Activité administrative
+admin-activity-event = Événement
+admin-activity-event-all = Tous les événements
+admin-activity-event-login = Connexion
+admin-activity-event-access = Accès à une app
+admin-activity-user = Utilisateur
+admin-activity-user-all = Tous les utilisateurs
+admin-activity-app = Application
+admin-activity-app-all = Toutes les applications
+admin-activity-period = Période
+admin-activity-period-all = Toute période
+admin-activity-period-24h = Dernières 24 heures
+admin-activity-period-7d = 7 derniers jours
+admin-activity-period-30d = 30 derniers jours
+admin-activity-col-when = Quand
+admin-activity-col-user = Utilisateur
+admin-activity-col-event = Événement
+admin-activity-col-app = Application
+admin-activity-col-ip = IP
+admin-activity-empty = Aucune activité pour l'instant — ou le filtre ne correspond à rien.
+admin-activity-anonymous = Anonyme
+admin-activity-pager-status = Page { $page } sur { $pages } · { $total } { $total ->
+        [one] enregistrement
+       *[other] enregistrements
+    }

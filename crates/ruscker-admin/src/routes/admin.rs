@@ -24,6 +24,7 @@ use crate::AppState;
 
 pub mod audit;
 pub mod blocks;
+pub mod user_activity;
 pub mod credentials;
 pub mod dashboard;
 pub mod disk;
@@ -64,6 +65,7 @@ pub fn routes() -> Router<AppState> {
         .merge(landing::routes())
         .merge(blocks::routes())
         .merge(audit::routes())
+        .merge(user_activity::routes())
         .merge(groups::routes())
         .merge(logs::routes())
         .merge(schedules_ui::routes())

@@ -3054,6 +3054,7 @@ dependencies = [
  "tracing",
  "unic-langid",
  "url",
+ "urlencoding",
  "uuid",
  "zeroize",
 ]

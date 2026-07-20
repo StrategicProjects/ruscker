@@ -35,6 +35,41 @@ use thiserror::Error;
 /// `dyn ContainerBackend` trait object the proxy/admin hold.
 pub type LogStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
+/// The lifecycle transition a [`ContainerEvent`] reports. Only the
+/// transitions the runtime reacts to are named; everything else is
+/// [`Other`](ContainerEventKind::Other) and simply nudges a reconcile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerEventKind {
+    /// The container started (e.g. the second half of a `docker restart`).
+    Start,
+    /// The container's main process exited.
+    Die,
+    /// The container was stopped.
+    Stop,
+    /// The container was removed (`docker rm`).
+    Destroy,
+    /// Any other container action — still worth a reconcile, but not
+    /// individually interesting.
+    Other,
+}
+
+/// A single Docker lifecycle event for a Ruscker-managed container. The
+/// consumer (the admin events watcher, #1018 slice B) treats it mainly as a
+/// "something changed, reconcile now" nudge and lets the authoritative
+/// [`ContainerBackend::replica_liveness`] pass decide the actual action, so a
+/// missed or duplicated event is always safe.
+#[derive(Debug, Clone)]
+pub struct ContainerEvent {
+    pub kind: ContainerEventKind,
+    pub container_id: String,
+    pub spec_id: Option<String>,
+    pub replica_id: Option<String>,
+}
+
+/// A boxed, owned stream of [`ContainerEvent`]s. Boxed for the same reason as
+/// [`LogStream`] — it travels through the `dyn ContainerBackend` trait object.
+pub type ContainerEventStream = Pin<Box<dyn Stream<Item = ContainerEvent> + Send>>;
+
 #[derive(Debug, Error)]
 pub enum CoreError {
     #[error("spec {0} not found in registry")]
@@ -363,6 +398,20 @@ pub trait ContainerBackend: Send + Sync {
     /// live-logs SSE endpoint. Default impl returns an empty
     /// stream so non-streaming backends don't break callers.
     async fn logs_follow(&self, _replica_id: &ReplicaId, _tail: usize) -> CoreResult<LogStream> {
+        Ok(Box::pin(futures_util::stream::empty()))
+    }
+
+    /// A live stream of Docker lifecycle events (start/die/stop/destroy) for
+    /// Ruscker-managed containers, so the runtime can reconcile within ~1 s of
+    /// an external `docker rm -f` / `docker restart` instead of waiting out the
+    /// periodic scaler tick (#1018 slice B).
+    ///
+    /// Default returns an empty stream: a backend without event support (mocks,
+    /// future backends) simply relies on the periodic reconcile — events are a
+    /// latency optimization, never the source of truth. The stream ends when
+    /// the daemon connection drops; the consumer reopens it, and the periodic
+    /// reconcile remains the fallback for anything missed during a gap.
+    async fn container_events(&self) -> CoreResult<ContainerEventStream> {
         Ok(Box::pin(futures_util::stream::empty()))
     }
 

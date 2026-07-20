@@ -80,6 +80,14 @@ impl MetricsCache {
         self.inner.is_empty()
     }
 
+    /// Forget one replica immediately. The periodic `replace` pass also
+    /// garbage-collects stale rows, but liveness cleanup calls this so a dead
+    /// or restarting container disappears from the dashboard in the same
+    /// reconcile tick.
+    pub fn remove(&self, id: &ReplicaId) {
+        self.inner.remove(id);
+    }
+
     /// Replace the cache contents with the given (id, metrics)
     /// pairs and drop any entries for ids that didn't appear.
     /// Called by the refresher each tick. Each replica's rolling

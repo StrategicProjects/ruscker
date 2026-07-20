@@ -32,6 +32,7 @@ use dashmap::DashMap;
 use futures_util::StreamExt;
 use ruscker_core::{
     ContainerBackend, CoreError, CoreResult, ImageInfo, ManagedContainer, Replica, ReplicaId,
+    ReplicaLiveness, ReplicaLivenessObservation, ReplicaLivenessQuery, ReplicaLivenessReport,
     ReplicaMetrics, ReplicaState,
 };
 use std::collections::HashMap;
@@ -566,6 +567,37 @@ impl LocalDockerBackend {
     }
 }
 
+fn classify_local_liveness(
+    known: &[ReplicaLivenessQuery],
+    managed: &[ManagedContainer],
+    running: Vec<Replica>,
+) -> ReplicaLivenessReport {
+    let observations = known
+        .iter()
+        .map(|query| {
+            let liveness = managed
+                .iter()
+                .find(|container| container.id == query.container_id)
+                .map(|container| {
+                    if container.running {
+                        ReplicaLiveness::Running
+                    } else {
+                        ReplicaLiveness::Stopped
+                    }
+                })
+                .unwrap_or(ReplicaLiveness::Missing);
+            ReplicaLivenessObservation {
+                replica_id: query.replica_id.clone(),
+                liveness,
+            }
+        })
+        .collect();
+    ReplicaLivenessReport {
+        observations,
+        running,
+    }
+}
+
 #[async_trait]
 impl ContainerBackend for LocalDockerBackend {
     async fn spawn(&self, spec_id: &str, image: &str) -> CoreResult<Replica> {
@@ -842,6 +874,30 @@ impl ContainerBackend for LocalDockerBackend {
             })
             .collect();
         Ok(managed)
+    }
+
+    async fn replica_liveness(
+        &self,
+        known: &[ReplicaLivenessQuery],
+    ) -> CoreResult<ReplicaLivenessReport> {
+        // Both calls are required for a complete runtime snapshot: the
+        // managed list includes stopped containers even without a usable
+        // port, while `list` reconstructs upstream addresses for running
+        // containers that may need re-adoption. Any daemon error makes the
+        // whole pass Unknown to the caller (it skips reconciliation).
+        let (managed, replicas) = tokio::try_join!(
+            self.list_managed_containers(),
+            <Self as ContainerBackend>::list(self)
+        )?;
+        let running = replicas
+            .into_iter()
+            .filter(|replica| replica.state == ReplicaState::Ready)
+            .collect();
+        Ok(classify_local_liveness(known, &managed, running))
+    }
+
+    async fn wait_until_ready(&self, replica: &Replica) -> CoreResult<()> {
+        wait_for_ready(self, &replica.container_id, replica.upstream).await
     }
 
     async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
@@ -1739,6 +1795,26 @@ fn apply_limits(host_config: &mut HostConfig, limits: &ruscker_core::ResourceLim
 mod tests {
     use super::*;
 
+    #[test]
+    fn successful_local_inventory_classifies_absent_container_as_missing() {
+        let id = ReplicaId::new();
+        let known = [ReplicaLivenessQuery {
+            replica_id: id.clone(),
+            container_id: "removed-container".into(),
+            host: None,
+        }];
+
+        let report = classify_local_liveness(&known, &[], Vec::new());
+
+        assert_eq!(
+            report.observations,
+            vec![ReplicaLivenessObservation {
+                replica_id: id,
+                liveness: ReplicaLiveness::Missing,
+            }]
+        );
+    }
+
     /// `proxy.container-wait-time` reaches the readiness wait (#970):
     /// a 300 ms budget against a port nobody listens on must fail in
     /// well under the 60 s default, and the error names the budget.
@@ -1994,6 +2070,126 @@ mod tests {
             !backend.prev_stats.contains_key(&replica.container_id),
             "stop() must forget the container's metrics baseline (#325)"
         );
+    }
+
+    /// #1015: an out-of-band `docker rm -f` is an authoritative Missing
+    /// observation, after which replacement capacity can be spawned without
+    /// the removed container counting toward the pool.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn external_remove_is_missing_and_allows_replacement() {
+        let image = std::env::var("RUSCKER_IT_IMAGE")
+            .unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let spec = format!("itest-rm-{}", uuid::Uuid::new_v4());
+        let removed = backend
+            .spawn_with_port(&spec, &image, 80)
+            .await
+            .expect("spawn original");
+        let query = ReplicaLivenessQuery::from(&removed);
+
+        backend
+            .docker
+            .remove_container(
+                &removed.container_id,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .expect("external docker rm -f");
+
+        let report = backend
+            .replica_liveness(std::slice::from_ref(&query))
+            .await
+            .expect("authoritative inventory after remove");
+        assert_eq!(
+            report.observations[0].liveness,
+            ReplicaLiveness::Missing
+        );
+
+        let replacement = backend
+            .spawn_with_port(&spec, &image, 80)
+            .await
+            .expect("spawn replacement after cleanup");
+        assert_ne!(replacement.id, removed.id);
+        let real = backend
+            .list()
+            .await
+            .expect("list replacement")
+            .into_iter()
+            .filter(|replica| replica.spec_id == spec)
+            .collect::<Vec<_>>();
+        assert_eq!(real.len(), 1, "removed phantom cannot block or duplicate replacement");
+        assert_eq!(real[0].id, replacement.id);
+
+        backend.stop(&replacement.id).await.expect("cleanup replacement");
+    }
+
+    /// #1016: Docker restart preserves the replica/container labels and id.
+    /// Runtime inventory must rediscover that same object, and the adoption
+    /// readiness check must pass before it can re-enter the Ready pool.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn external_restart_rediscovers_same_container_without_duplicate() {
+        let image = std::env::var("RUSCKER_IT_IMAGE")
+            .unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let spec = format!("itest-restart-{}", uuid::Uuid::new_v4());
+        let original = backend
+            .spawn_with_port(&spec, &image, 80)
+            .await
+            .expect("spawn original");
+        let query = ReplicaLivenessQuery::from(&original);
+
+        backend
+            .docker
+            .restart_container(&original.container_id, None)
+            .await
+            .expect("external docker restart");
+
+        // A `docker restart` transitions the container RESTARTING -> RUNNING;
+        // `list()` (which feeds `report.running`) only surfaces it once Docker
+        // reports it RUNNING with its port binding back. In production the
+        // 10 s periodic reconcile just retries the next tick, so poll the
+        // inventory here the same way rather than racing that window.
+        let discovered = {
+            let mut found = None;
+            for _ in 0..50 {
+                let report = backend
+                    .replica_liveness(std::slice::from_ref(&query))
+                    .await
+                    .expect("inventory after restart");
+                if report.observations[0].liveness == ReplicaLiveness::Running {
+                    if let Some(replica) =
+                        report.running.into_iter().find(|replica| replica.id == original.id)
+                    {
+                        found = Some(replica);
+                        break;
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+            found.expect("same labelled replica rediscovered as Running after restart")
+        };
+        backend
+            .wait_until_ready(&discovered)
+            .await
+            .expect("restarted app readiness");
+
+        let real = backend
+            .list()
+            .await
+            .expect("list after restart")
+            .into_iter()
+            .filter(|replica| replica.spec_id == spec)
+            .collect::<Vec<_>>();
+        assert_eq!(real.len(), 1, "restart must not create a duplicate container");
+        assert_eq!(real[0].id, original.id);
+        assert_eq!(real[0].container_id, original.container_id);
+
+        backend.stop(&original.id).await.expect("cleanup restarted container");
     }
 
     /// `container-env` / `container-cmd` smoke: spawn with both set and

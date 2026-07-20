@@ -17,7 +17,8 @@ use dashmap::DashMap;
 use ruscker_config::{Host, Placement};
 use ruscker_core::{
     ContainerBackend, CoreError, CoreResult, ImageInfo, LogStream, ManagedContainer,
-    RegistryCredentials, Replica, ReplicaId, ReplicaMetrics, SpawnRequest,
+    RegistryCredentials, Replica, ReplicaId, ReplicaLiveness, ReplicaLivenessObservation,
+    ReplicaLivenessQuery, ReplicaLivenessReport, ReplicaMetrics, ReplicaState, SpawnRequest,
 };
 use std::collections::HashSet;
 
@@ -159,20 +160,22 @@ pub struct MultiHostDockerBackend {
     placement: DashMap<ReplicaId, (String, String)>,
 }
 
-type HostListCall<'a> = (
+type HostCall<'a, T> = (
     String,
-    futures_util::future::BoxFuture<'a, CoreResult<Vec<Replica>>>,
+    futures_util::future::BoxFuture<'a, CoreResult<T>>,
 );
+type HostListCall<'a> = HostCall<'a, Vec<Replica>>;
 
 /// Results from the hosts that answered plus the ids of hosts whose state is
 /// unknown. A successful empty list is different from an error/timeout: the
 /// former authoritatively says the host has no replicas; the latter must keep
 /// its previous placements until a later reconcile succeeds.
 #[derive(Debug)]
-struct HostListBatch {
-    reported: Vec<(String, Vec<Replica>)>,
+struct HostBatch<T> {
+    reported: Vec<(String, T)>,
     failed_hosts: HashSet<String>,
 }
+type HostListBatch = HostBatch<Vec<Replica>>;
 
 /// Run all host list calls concurrently with an independent budget per host.
 /// Partial success is useful degraded state; zero successful hosts is an
@@ -181,6 +184,13 @@ async fn list_hosts_with_timeout(
     calls: Vec<HostListCall<'_>>,
     budget: std::time::Duration,
 ) -> CoreResult<HostListBatch> {
+    host_calls_with_timeout(calls, budget).await
+}
+
+async fn host_calls_with_timeout<T: Send>(
+    calls: Vec<HostCall<'_, T>>,
+    budget: std::time::Duration,
+) -> CoreResult<HostBatch<T>> {
     let total = calls.len();
     let results = futures_util::future::join_all(calls.into_iter().map(|(id, call)| async move {
         (id, tokio::time::timeout(budget, call).await)
@@ -208,7 +218,7 @@ async fn list_hosts_with_timeout(
             "replica list failed on every docker host ({total} configured)"
         )));
     }
-    Ok(HostListBatch {
+    Ok(HostBatch {
         reported,
         failed_hosts,
     })
@@ -220,6 +230,74 @@ fn retain_confirmed_or_unknown_placements(
     failed_hosts: &HashSet<String>,
 ) {
     placement.retain(|id, (host, _)| live.contains(id) || failed_hosts.contains(host));
+}
+
+#[derive(Debug)]
+struct HostRuntimeInventory {
+    managed: Vec<ManagedContainer>,
+    replicas: Vec<Replica>,
+}
+
+fn classify_multihost_liveness(
+    known: &[ReplicaLivenessQuery],
+    reported: &[(String, HostRuntimeInventory)],
+    failed_hosts: &HashSet<String>,
+    placement: &DashMap<ReplicaId, (String, String)>,
+) -> Vec<ReplicaLivenessObservation> {
+    known
+        .iter()
+        .map(|query| {
+            let owner = query.host.clone().or_else(|| {
+                placement
+                    .get(&query.replica_id)
+                    .map(|entry| entry.value().0.clone())
+            });
+            let liveness = if let Some(owner) = owner {
+                if failed_hosts.contains(&owner) {
+                    ReplicaLiveness::Unknown
+                } else if let Some((_, inventory)) =
+                    reported.iter().find(|(host, _)| host == &owner)
+                {
+                    inventory
+                        .managed
+                        .iter()
+                        .find(|container| container.id == query.container_id)
+                        .map(|container| {
+                            if container.running {
+                                ReplicaLiveness::Running
+                            } else {
+                                ReplicaLiveness::Stopped
+                            }
+                        })
+                        .unwrap_or(ReplicaLiveness::Missing)
+                } else {
+                    // The owning host is no longer among the connected
+                    // backends. Its state is unknowable, not missing.
+                    ReplicaLiveness::Unknown
+                }
+            } else if let Some(container) = reported
+                .iter()
+                .flat_map(|(_, inventory)| &inventory.managed)
+                .find(|container| container.id == query.container_id)
+            {
+                if container.running {
+                    ReplicaLiveness::Running
+                } else {
+                    ReplicaLiveness::Stopped
+                }
+            } else if failed_hosts.is_empty() {
+                ReplicaLiveness::Missing
+            } else {
+                // Without placement, an unresponsive host might own the
+                // container. Preserve it rather than risk a duplicate.
+                ReplicaLiveness::Unknown
+            };
+            ReplicaLivenessObservation {
+                replica_id: query.replica_id.clone(),
+                liveness,
+            }
+        })
+        .collect()
 }
 
 /// One host's current load — the input to the pure placement decision.
@@ -553,6 +631,77 @@ impl ContainerBackend for MultiHostDockerBackend {
             }
         }
         Ok(all)
+    }
+
+    async fn replica_liveness(
+        &self,
+        known: &[ReplicaLivenessQuery],
+    ) -> CoreResult<ReplicaLivenessReport> {
+        // Fetch the authoritative lifecycle rows and the reconstructable
+        // replicas in one bounded call per host. A host is either wholly
+        // reported or wholly failed for this pass; that is what lets absence
+        // mean Missing on an answering host but Unknown on a timed-out one.
+        let calls: Vec<HostCall<'_, HostRuntimeInventory>> = self
+            .hosts
+            .iter()
+            .map(|host| {
+                (
+                    host.id.clone(),
+                    Box::pin(async move {
+                        let (managed, replicas) = tokio::try_join!(
+                            host.backend.list_managed_containers(),
+                            <LocalDockerBackend as ContainerBackend>::list(&host.backend)
+                        )?;
+                        Ok(HostRuntimeInventory { managed, replicas })
+                    }) as futures_util::future::BoxFuture<'_, _>,
+                )
+            })
+            .collect();
+        let batch = host_calls_with_timeout(calls, HOST_FANOUT_TIMEOUT).await?;
+        let observations = classify_multihost_liveness(
+            known,
+            &batch.reported,
+            &batch.failed_hosts,
+            &self.placement,
+        );
+
+        let mut running = Vec::new();
+        let mut live = HashSet::new();
+        for (host_id, inventory) in batch.reported {
+            for mut replica in inventory.replicas {
+                self.placement.insert(
+                    replica.id.clone(),
+                    (host_id.clone(), replica.spec_id.clone()),
+                );
+                replica.host = Some(host_id.clone());
+                live.insert(replica.id.clone());
+                if replica.state == ReplicaState::Ready {
+                    running.push(replica);
+                }
+            }
+        }
+        retain_confirmed_or_unknown_placements(&self.placement, &live, &batch.failed_hosts);
+
+        Ok(ReplicaLivenessReport {
+            observations,
+            running,
+        })
+    }
+
+    async fn wait_until_ready(&self, replica: &Replica) -> CoreResult<()> {
+        let backend = replica
+            .host
+            .as_deref()
+            .and_then(|host| self.hosts.iter().find(|entry| entry.id == host))
+            .map(|entry| &entry.backend)
+            .or_else(|| self.placed(&replica.id))
+            .ok_or_else(|| {
+                CoreError::Backend(format!(
+                    "replica {} is not placed on a reachable Docker host",
+                    replica.id
+                ))
+            })?;
+        backend.wait_until_ready(replica).await
     }
 
     async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
@@ -1014,6 +1163,53 @@ mod tests {
         assert!(
             placement.contains_key(&unknown.id),
             "failed host placement remains unknown, not dead"
+        );
+    }
+
+    #[test]
+    fn liveness_distinguishes_answering_host_absence_from_failed_host() {
+        let missing = ReplicaId::new();
+        let unknown = ReplicaId::new();
+        let known = vec![
+            ReplicaLivenessQuery {
+                replica_id: missing.clone(),
+                container_id: "gone".into(),
+                host: Some("healthy".into()),
+            },
+            ReplicaLivenessQuery {
+                replica_id: unknown.clone(),
+                container_id: "possibly-live".into(),
+                host: Some("down".into()),
+            },
+        ];
+        let reported = vec![(
+            "healthy".to_string(),
+            HostRuntimeInventory {
+                managed: Vec::new(),
+                replicas: Vec::new(),
+            },
+        )];
+        let failed_hosts = HashSet::from(["down".to_string()]);
+
+        let observations = classify_multihost_liveness(
+            &known,
+            &reported,
+            &failed_hosts,
+            &DashMap::new(),
+        );
+
+        assert_eq!(
+            observations,
+            vec![
+                ReplicaLivenessObservation {
+                    replica_id: missing,
+                    liveness: ReplicaLiveness::Missing,
+                },
+                ReplicaLivenessObservation {
+                    replica_id: unknown,
+                    liveness: ReplicaLiveness::Unknown,
+                },
+            ]
         );
     }
 

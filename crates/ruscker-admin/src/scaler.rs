@@ -39,7 +39,10 @@
 use crate::AppState;
 use dashmap::DashMap;
 use ruscker_config::{Spec, SpecKind};
-use ruscker_core::{ReplicaId, ReplicaState};
+use ruscker_core::{
+    ContainerBackend, Replica, ReplicaId, ReplicaLiveness, ReplicaLivenessQuery,
+    ReplicaLivenessReport, ReplicaState,
+};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -88,6 +91,12 @@ pub const DEFAULT_SATURATION_GRACE_TICKS: u32 = 2;
 /// it, a still-idle replica counts and reaps normally, so genuine idleness
 /// is unaffected.
 pub const YOUNG_REPLICA_GRACE_SECS: i64 = 60;
+
+/// How long an externally-stopped container keeps its non-routable registry
+/// slot while Docker may be restarting it. Three normal 10-second scaler
+/// ticks are enough for Docker's stop/start plus most app boots; readiness
+/// still has its own configured budget once the container is running again.
+pub const EXTERNAL_RESTART_GRACE_SECS: i64 = 30;
 
 /// Spawn the scaler loop as a detached tokio task. The returned
 /// handle is dropped at shutdown — there's no graceful stop
@@ -268,6 +277,246 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
     })
 }
 
+#[derive(Clone, Copy)]
+enum ReplicaDownReason {
+    Missing,
+    RestartTimedOut,
+}
+
+impl ReplicaDownReason {
+    fn log_value(self) -> &'static str {
+        match self {
+            Self::Missing => "missing/removed",
+            Self::RestartTimedOut => "stopped (restart timed out)",
+        }
+    }
+
+    fn alert_text(self) -> &'static str {
+        match self {
+            Self::Missing => "container is missing/removed",
+            Self::RestartTimedOut => "container stayed stopped past the restart grace window",
+        }
+    }
+}
+
+/// Release every process-local association with a replica. Both explicit
+/// stops and liveness pruning use this routine so registry/session/metrics /
+/// in-flight state cannot drift apart.
+async fn cleanup_replica_state(state: &AppState, replica_id: &ReplicaId) -> Option<Replica> {
+    let removed = state.replicas.write().await.remove(replica_id);
+    state.sessions.drop_replica(replica_id).await;
+    state.metrics.remove(replica_id);
+    crate::routes::proxy::inflight_forget(replica_id);
+    removed
+}
+
+async fn prune_dead_replica(state: &AppState, replica: &Replica, reason: ReplicaDownReason) {
+    if cleanup_replica_state(state, &replica.id).await.is_none() {
+        return;
+    }
+    warn!(
+        spec = %replica.spec_id,
+        replica = %replica.id,
+        container = %replica.container_id,
+        reason = reason.log_value(),
+        "pruned externally unavailable replica"
+    );
+    state.alerts.notify(crate::alerts::AlertEvent {
+        kind: crate::alerts::AlertKind::ReplicaDown,
+        spec: replica.spec_id.clone(),
+        replica: Some(replica.id.to_string()),
+        message: format!(
+            "replica {} of `{}` is gone — {}",
+            replica.id,
+            replica.spec_id,
+            reason.alert_text()
+        ),
+    });
+}
+
+async fn mark_restart_detected(
+    state: &AppState,
+    replica: &Replica,
+    observed_at: chrono::DateTime<chrono::Utc>,
+) {
+    let marked = state
+        .replicas
+        .write()
+        .await
+        .mark_restarting(&replica.id, observed_at);
+    if !marked {
+        return;
+    }
+    // A stopped replica is immediately non-routable. Drop its old sticky
+    // sessions now rather than waiting for either the restart or grace
+    // timeout, so a returning visitor can establish a fresh binding.
+    state.sessions.drop_replica(&replica.id).await;
+    state.metrics.remove(&replica.id);
+    crate::routes::proxy::inflight_forget(&replica.id);
+    warn!(
+        spec = %replica.spec_id,
+        replica = %replica.id,
+        container = %replica.container_id,
+        "restart detected; replica held out of routing during grace window"
+    );
+}
+
+async fn readopt_running_replica(
+    state: &AppState,
+    backend: &dyn ContainerBackend,
+    spec: &Spec,
+    mut replica: Replica,
+) {
+    let spec_mutex: std::sync::Arc<tokio::sync::Mutex<()>> = state
+        .spawn_locks
+        .entry(spec.id.clone())
+        .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+        .clone();
+    let _guard = spec_mutex.lock().await;
+
+    let (already_ready, same_id_present, live) = {
+        let registry = state.replicas.read().await;
+        let replicas = registry.replicas_of(&spec.id);
+        (
+            replicas
+                .iter()
+                .any(|known| known.id == replica.id && known.state == ReplicaState::Ready),
+            replicas.iter().any(|known| known.id == replica.id),
+            replicas.len(),
+        )
+    };
+    if already_ready {
+        return;
+    }
+
+    let max = spec.effective_max_replicas() as usize;
+    if !same_id_present && live >= max {
+        // The discovered container is definitely real, while every registry
+        // slot may also be real (including Unknown hosts). Remove the extra
+        // managed orphan instead of exceeding max or spawning another copy.
+        warn!(
+            spec = %spec.id,
+            replica = %replica.id,
+            live,
+            max,
+            "running orphan exceeds max-replicas; removing it"
+        );
+        if let Err(error) = backend.stop(&replica.id).await {
+            warn!(spec = %spec.id, replica = %replica.id, error = %error, "failed to remove excess orphan");
+        }
+        return;
+    }
+
+    if let Err(error) = backend.wait_until_ready(&replica).await {
+        warn!(
+            spec = %spec.id,
+            replica = %replica.id,
+            container = %replica.container_id,
+            error = %error,
+            "restart timed out -> pruned"
+        );
+        // A running container that exhausted the same readiness budget used
+        // by spawn must not remain an invisible orphan while a replacement is
+        // created. Stop/remove it first, then release the registry slot.
+        if let Err(stop_error) = backend.stop(&replica.id).await {
+            warn!(spec = %spec.id, replica = %replica.id, error = %stop_error, "failed to remove timed-out restart container");
+        }
+        if same_id_present {
+            prune_dead_replica(state, &replica, ReplicaDownReason::RestartTimedOut).await;
+        }
+        return;
+    }
+
+    replica.state = ReplicaState::Ready;
+    replica.sessions_active = 0;
+    replica.sessions_max = spec.effective_seats();
+    state.replicas.write().await.upsert(replica.clone());
+    info!(
+        spec = %spec.id,
+        replica = %replica.id,
+        container = %replica.container_id,
+        "replica readopted after readiness"
+    );
+}
+
+async fn reconcile_backend_liveness(
+    state: &AppState,
+    backend: &dyn ContainerBackend,
+    specs: &[Spec],
+    registry_snap: &[Replica],
+    report: ReplicaLivenessReport,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    let observations: HashMap<ReplicaId, ReplicaLiveness> = report
+        .observations
+        .into_iter()
+        .map(|observation| (observation.replica_id, observation.liveness))
+        .collect();
+    let mut running: HashMap<ReplicaId, Replica> = report
+        .running
+        .into_iter()
+        .map(|replica| (replica.id.clone(), replica))
+        .collect();
+
+    for replica in registry_snap {
+        // If the managed-container and reconstructable-replica reads raced a
+        // Docker restart, prefer the newer positive Running observation.
+        let liveness = if running.contains_key(&replica.id) {
+            ReplicaLiveness::Running
+        } else {
+            observations
+                .get(&replica.id)
+                .copied()
+                .unwrap_or(ReplicaLiveness::Unknown)
+        };
+        match liveness {
+            ReplicaLiveness::Running if replica.state == ReplicaState::Stopped => {
+                if let (Some(spec), Some(discovered)) = (
+                    specs.iter().find(|spec| spec.id == replica.spec_id),
+                    running.remove(&replica.id),
+                ) {
+                    readopt_running_replica(state, backend, spec, discovered).await;
+                }
+            }
+            ReplicaLiveness::Running | ReplicaLiveness::Unknown => {}
+            ReplicaLiveness::Missing => {
+                prune_dead_replica(state, replica, ReplicaDownReason::Missing).await;
+            }
+            ReplicaLiveness::Stopped if replica.state != ReplicaState::Stopped => {
+                mark_restart_detected(state, replica, now).await;
+            }
+            ReplicaLiveness::Stopped => {
+                let stopped_for = now.signed_duration_since(replica.started_at);
+                if stopped_for >= chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS) {
+                    warn!(
+                        spec = %replica.spec_id,
+                        replica = %replica.id,
+                        container = %replica.container_id,
+                        "restart timed out -> pruned"
+                    );
+                    if let Err(error) = backend.stop(&replica.id).await {
+                        warn!(spec = %replica.spec_id, replica = %replica.id, error = %error, "failed to remove stopped container after restart timeout");
+                    }
+                    prune_dead_replica(state, replica, ReplicaDownReason::RestartTimedOut).await;
+                }
+            }
+        }
+    }
+
+    // Anything still in `running` was not in the in-memory snapshot: a
+    // restarted/orphaned Ruscker container. Re-adopt only known, runnable
+    // specs; max-replica enforcement happens under the spawn coalescer lock.
+    for discovered in running.into_values() {
+        let Some(spec) = specs.iter().find(|spec| spec.id == discovered.spec_id) else {
+            continue;
+        };
+        if matches!(spec.kind(), SpecKind::External) || spec.container_image.is_none() {
+            continue;
+        }
+        readopt_running_replica(state, backend, spec, discovered).await;
+    }
+}
+
 /// One pass over every spec. Logs but never panics — a failed
 /// spawn or stop is reported and the loop continues with the
 /// next spec.
@@ -320,57 +569,33 @@ async fn tick_with_interval(
     };
     update_idle_ticks(idle_ticks, &registry_snap, chrono::Utc::now());
 
-    // Liveness reconcile: a container that exits unexpectedly (crash, OOM,
-    // external stop) leaves its replica behind in the registry as `Ready`
-    // with whatever seats it still "held" — which blocks new spawns
-    // (`spawn_one`'s `live >= max` cap) and traps cold-start visitors on the
-    // splash forever. Prune any snapshot replica whose container the backend
-    // no longer reports as running; removing it also releases its leaked
-    // seats. Only replicas already in the snapshot are touched, so a replica
-    // spawned mid-tick is never collected. Best-effort: a backend error
-    // skips the pass rather than risk wiping the registry on a hiccup.
-    if let Ok(managed) = backend.list_managed_containers().await {
-        let dead = stopped_replica_ids(&registry_snap, &managed);
-        if !dead.is_empty() {
-            let mut reg = state.replicas.write().await;
-            for id in &dead {
-                reg.remove(id);
-            }
-            drop(reg);
-            // Purge the dead replicas' sessions too, mirroring `stop_one`
-            // (#735): entries pointing at a crashed replica otherwise
-            // linger until the idle sweep — and forever under
-            // `heartbeat-timeout: -1` — keeping `sessions.len()` inflated
-            // (graceful shutdown then waits out the whole grace window)
-            // and, in HA, leaking `proxy_sessions` rows in Postgres.
-            for id in &dead {
-                state.sessions.drop_replica(id).await;
-            }
-            warn!(reaped = dead.len(), "pruned replicas whose container is no longer running");
-            // Alert the operator (#930): a container that died outside
-            // Ruscker's control (crash, OOM, external stop) is exactly
-            // the "app down" event a webhook exists for. One alert per
-            // spec per cooldown window (the sink dedups).
-            for id in &dead {
-                if let Some(r) = registry_snap.iter().find(|r| &r.id == id) {
-                    state.alerts.notify(crate::alerts::AlertEvent {
-                        kind: crate::alerts::AlertKind::ReplicaDown,
-                        spec: r.spec_id.clone(),
-                        replica: Some(r.id.to_string()),
-                        message: format!(
-                            "replica {} of `{}` is gone — its container is no longer running",
-                            r.id, r.spec_id
-                        ),
-                    });
-                }
-            }
-        }
+    // Runtime reconciliation is deliberately bidirectional. The backend
+    // classifies known replicas with per-host authority (Missing vs Unknown)
+    // and also returns running labelled containers for re-adoption. A total
+    // backend error skips the pass, preserving today's fail-safe behaviour.
+    let liveness_queries: Vec<ReplicaLivenessQuery> =
+        registry_snap.iter().map(ReplicaLivenessQuery::from).collect();
+    if let Ok(report) = backend.replica_liveness(&liveness_queries).await {
+        reconcile_backend_liveness(
+            state,
+            backend.as_ref(),
+            &specs,
+            &registry_snap,
+            report,
+            chrono::Utc::now(),
+        )
+        .await;
     }
 
     // GC the in-flight request gauge (#336) for replicas that have left
     // the registry, so the process-global map can't grow unbounded.
-    let alive_replicas: std::collections::HashSet<ReplicaId> =
-        registry_snap.iter().map(|r| r.id.clone()).collect();
+    let alive_replicas: std::collections::HashSet<ReplicaId> = state
+        .replicas
+        .read()
+        .await
+        .all()
+        .map(|r| r.id.clone())
+        .collect();
     crate::routes::proxy::inflight_gc(&alive_replicas);
 
     // Spec ids present in this tick's config — used to GC
@@ -804,11 +1029,7 @@ async fn stop_one(
         .stop(replica_id)
         .await
         .map_err(|e| anyhow::anyhow!("backend stop: {e}"));
-    state.replicas.write().await.remove(replica_id);
-    // Purge the stopped replica's sessions so `len()` doesn't stay
-    // inflated until the idle sweep (and forever under
-    // `heartbeat-timeout: -1`) — see SessionStore::drop_replica (#324).
-    state.sessions.drop_replica(replica_id).await;
+    cleanup_replica_state(state, replica_id).await;
     stop_result
 }
 
@@ -1042,6 +1263,7 @@ fn format_image_date(rfc3339: &str) -> Option<String> {
 /// liveness-reconcile prune set. Pruning on a reported-stopped container
 /// (not on mere absence) keeps backends that don't enumerate containers
 /// from wiping the registry, and never races a freshly-created container.
+#[cfg(test)]
 fn stopped_replica_ids(
     snap: &[ruscker_core::Replica],
     managed: &[ruscker_core::ManagedContainer],
@@ -2671,6 +2893,274 @@ proxy:
         assert!(stopped_replica_ids(&snap, &[]).is_empty(), "absence is not stopped");
     }
 
+    struct ScriptedLivenessBackend {
+        reports: std::sync::Mutex<std::collections::VecDeque<ReplicaLivenessReport>>,
+        spawns: AtomicU32,
+        readiness_checks: AtomicU32,
+    }
+
+    impl ScriptedLivenessBackend {
+        fn new(reports: Vec<ReplicaLivenessReport>) -> Self {
+            Self {
+                reports: std::sync::Mutex::new(reports.into()),
+                spawns: AtomicU32::new(0),
+                readiness_checks: AtomicU32::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ContainerBackend for ScriptedLivenessBackend {
+        async fn spawn(&self, spec_id: &str, _image: &str) -> CoreResult<Replica> {
+            let n = self.spawns.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(Replica {
+                container_id: format!("replacement-{n}"),
+                ..fake_replica(spec_id)
+            })
+        }
+
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+
+        async fn list(&self) -> CoreResult<Vec<Replica>> {
+            Ok(Vec::new())
+        }
+
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            Ok(ReplicaMetrics {
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+
+        async fn replica_liveness(
+            &self,
+            known: &[ReplicaLivenessQuery],
+        ) -> CoreResult<ReplicaLivenessReport> {
+            Ok(self
+                .reports
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| ReplicaLivenessReport::unknown(known)))
+        }
+
+        async fn wait_until_ready(&self, _replica: &Replica) -> CoreResult<()> {
+            self.readiness_checks.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn one_liveness(
+        id: &ReplicaId,
+        liveness: ReplicaLiveness,
+        running: Vec<Replica>,
+    ) -> ReplicaLivenessReport {
+        ReplicaLivenessReport {
+            observations: vec![ruscker_core::ReplicaLivenessObservation {
+                replica_id: id.clone(),
+                liveness,
+            }],
+            running,
+        }
+    }
+
+    #[tokio::test]
+    async fn missing_prunes_replica_and_drops_its_sessions() {
+        let replica = Replica {
+            container_id: "externally-removed".into(),
+            ..fake_replica("app")
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![one_liveness(
+            &replica.id,
+            ReplicaLiveness::Missing,
+            Vec::new(),
+        )]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 0\n",
+            backend,
+        );
+        state.replicas.write().await.add(replica.clone());
+        state
+            .sessions
+            .touch_or_register(
+                &state.replicas,
+                uuid::Uuid::new_v4(),
+                "app",
+                &replica.id,
+                false,
+            )
+            .await;
+
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+
+        assert!(state.replicas.read().await.replicas_of("app").is_empty());
+        assert_eq!(state.sessions.len(), 0, "missing cleanup releases sticky sessions");
+    }
+
+    #[tokio::test]
+    async fn unknown_keeps_replica_sessions_and_blocks_duplicate_spawn() {
+        let replica = fake_replica("app");
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![one_liveness(
+            &replica.id,
+            ReplicaLiveness::Unknown,
+            Vec::new(),
+        )]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 1\n      max-replicas: 1\n",
+            backend.clone(),
+        );
+        state.replicas.write().await.add(replica.clone());
+        state
+            .sessions
+            .touch_or_register(
+                &state.replicas,
+                uuid::Uuid::new_v4(),
+                "app",
+                &replica.id,
+                false,
+            )
+            .await;
+
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+
+        assert_eq!(state.replicas.read().await.replicas_of("app").len(), 1);
+        assert_eq!(state.sessions.len(), 1);
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 0, "Unknown still counts at max");
+    }
+
+    #[tokio::test]
+    async fn running_stopped_running_readopts_same_container_once() {
+        let replica = Replica {
+            container_id: "same-docker-container".into(),
+            ..fake_replica("app")
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![
+            one_liveness(
+                &replica.id,
+                ReplicaLiveness::Running,
+                vec![replica.clone()],
+            ),
+            one_liveness(&replica.id, ReplicaLiveness::Stopped, Vec::new()),
+            one_liveness(
+                &replica.id,
+                ReplicaLiveness::Running,
+                vec![replica.clone()],
+            ),
+        ]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 0\n      max-replicas: 1\n",
+            backend.clone(),
+        );
+        state.replicas.write().await.add(replica.clone());
+        let mut idle = HashMap::new();
+        let mut saturated = HashMap::new();
+        let mut cooldown = HashMap::new();
+
+        tick(&state, &mut idle, &mut saturated, &mut cooldown, 3, 2, 0).await;
+        tick(&state, &mut idle, &mut saturated, &mut cooldown, 3, 2, 0).await;
+        assert_eq!(
+            state.replicas.read().await.replicas_of("app")[0].state,
+            ReplicaState::Stopped,
+            "restart detection removes the replica from routing"
+        );
+        tick(&state, &mut idle, &mut saturated, &mut cooldown, 3, 2, 0).await;
+
+        let registry = state.replicas.read().await;
+        let replicas = registry.replicas_of("app");
+        assert_eq!(replicas.len(), 1);
+        assert_eq!(replicas[0].id, replica.id);
+        assert_eq!(replicas[0].container_id, "same-docker-container");
+        assert_eq!(replicas[0].state, ReplicaState::Ready);
+        assert_eq!(backend.readiness_checks.load(Ordering::SeqCst), 1);
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 0, "restart must not duplicate");
+    }
+
+    #[tokio::test]
+    async fn stopped_past_restart_grace_is_pruned_and_replaced() {
+        let stopped = Replica {
+            container_id: "never-returned".into(),
+            state: ReplicaState::Stopped,
+            started_at: chrono::Utc::now()
+                - chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS + 1),
+            ..fake_replica("app")
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![one_liveness(
+            &stopped.id,
+            ReplicaLiveness::Stopped,
+            Vec::new(),
+        )]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 1\n      max-replicas: 1\n",
+            backend.clone(),
+        );
+        state.replicas.write().await.add(stopped.clone());
+
+        tick(&state, &mut HashMap::new(), &mut HashMap::new(), &mut HashMap::new(), 1, 1, 0).await;
+
+        let registry = state.replicas.read().await;
+        let replicas = registry.replicas_of("app");
+        assert_eq!(replicas.len(), 1, "min-replicas is restored in the same tick");
+        assert_ne!(replicas[0].id, stopped.id);
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 1);
+    }
+
+    /// #1016 acceptance: a normal restart (Stopped observed, then the same
+    /// container returns) must NOT spawn a duplicate while the replica sits in
+    /// the grace window. The restarting replica keeps its registry slot, so
+    /// `min-replicas: 1` stays satisfied and no replacement is created — then
+    /// the same container is readopted once it reports Running again.
+    #[tokio::test]
+    async fn restart_within_grace_does_not_duplicate_spawn() {
+        let replica = Replica {
+            container_id: "restarting-container".into(),
+            ..fake_replica("app")
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![
+            // Tick 1: the scaler observes the container stopped (restart in
+            // progress) — well within the grace window.
+            one_liveness(&replica.id, ReplicaLiveness::Stopped, Vec::new()),
+            // Tick 2: the same container is back and running.
+            one_liveness(&replica.id, ReplicaLiveness::Running, vec![replica.clone()]),
+        ]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 1\n      max-replicas: 1\n",
+            backend.clone(),
+        );
+        state.replicas.write().await.add(replica.clone());
+        let mut idle = HashMap::new();
+        let mut saturated = HashMap::new();
+        let mut cooldown = HashMap::new();
+
+        // Tick 1: restart detected — held out of routing, no replacement.
+        tick(&state, &mut idle, &mut saturated, &mut cooldown, 1, 1, 0).await;
+        {
+            let registry = state.replicas.read().await;
+            let replicas = registry.replicas_of("app");
+            assert_eq!(replicas.len(), 1, "the restarting replica keeps its slot");
+            assert_eq!(replicas[0].id, replica.id);
+            assert_eq!(replicas[0].state, ReplicaState::Stopped);
+        }
+        assert_eq!(
+            backend.spawns.load(Ordering::SeqCst),
+            0,
+            "min-replicas must not spawn a duplicate during a normal restart"
+        );
+
+        // Tick 2: the same container returns and is readopted, not replaced.
+        tick(&state, &mut idle, &mut saturated, &mut cooldown, 1, 1, 0).await;
+        let registry = state.replicas.read().await;
+        let replicas = registry.replicas_of("app");
+        assert_eq!(replicas.len(), 1);
+        assert_eq!(replicas[0].id, replica.id);
+        assert_eq!(replicas[0].container_id, "restarting-container");
+        assert_eq!(replicas[0].state, ReplicaState::Ready);
+        assert_eq!(backend.spawns.load(Ordering::SeqCst), 0, "readopt, never duplicate");
+    }
+
     // #735: the liveness prune must also purge the dead replica's
     // tracked sessions, mirroring `stop_one` — otherwise they linger
     // until the idle sweep (and forever under `heartbeat-timeout: -1`),
@@ -2719,6 +3209,21 @@ proxy:
                     running: false,
                 }])
             }
+            async fn replica_liveness(
+                &self,
+                known: &[ReplicaLivenessQuery],
+            ) -> CoreResult<ReplicaLivenessReport> {
+                Ok(ReplicaLivenessReport {
+                    observations: known
+                        .iter()
+                        .map(|query| ruscker_core::ReplicaLivenessObservation {
+                            replica_id: query.replica_id.clone(),
+                            liveness: ReplicaLiveness::Stopped,
+                        })
+                        .collect(),
+                    running: Vec::new(),
+                })
+            }
         }
 
         let state = state_with_yaml(
@@ -2727,6 +3232,9 @@ proxy:
         );
         let dead = Replica {
             container_id: "c-dead".into(),
+            state: ReplicaState::Stopped,
+            started_at: chrono::Utc::now()
+                - chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS + 1),
             ..fake_replica("app")
         };
         state.replicas.write().await.add(dead.clone());

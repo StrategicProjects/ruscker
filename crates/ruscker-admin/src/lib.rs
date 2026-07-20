@@ -22,6 +22,7 @@ use tower_cookies::CookieManagerLayer;
 use tracing::info;
 
 pub mod access_counter;
+pub mod activity;
 pub mod alerts;
 pub mod auth;
 pub mod catalog;

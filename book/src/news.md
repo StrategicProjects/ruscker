@@ -9,6 +9,31 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.47 — 2026-07-20
+
+- **User activity: see who logged in and who opened which app.** A new
+  admin-only page, **Atividades → Atividades dos usuários**, lists user
+  logins and interactive app accesses with identity — a companion to the
+  administrative audit log, reachable from the same section via a two-tab
+  switcher.
+  - **What's recorded:** a successful password login, and each new
+    interactive app session (one row per visit — never per asset, XHR, or
+    WebSocket, and API calls keep only their aggregate counter). An
+    access with no signed-in user shows as "Anonymous". The history has no
+    foreign keys to users or apps, so it survives a user or app being
+    deleted.
+  - **Filter and page:** narrow by event kind, user, app, and time window
+    (last 24 h / 7 / 30 days), with server-side pagination for a long
+    history.
+  - **Off the hot path:** events are captured with a non-blocking enqueue
+    and written in batches by a supervised background task, so activity
+    logging never slows down a proxied request. Works on SQLite and
+    Postgres/HA. Client IP is not recorded in this release (it's personal
+    data — a future opt-in with a retention policy). New migration
+    **0031**.
+
+---
+
 ## v0.2.46 — 2026-07-20
 
 - **Self-healing when a container changes outside Ruscker.** If an

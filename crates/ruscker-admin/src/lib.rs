@@ -527,6 +527,13 @@ impl AdminServer {
             // a false positive here.
             #[allow(clippy::let_underscore_future)]
             let _ = scaler::spawn(self.state.clone(), scaler::DEFAULT_INTERVAL);
+            // Docker events watcher (#1018 slice B): reconciles within ~1 s of
+            // an external `docker rm -f` / `docker restart` instead of waiting
+            // for the periodic scaler tick. The periodic reconcile above stays
+            // as the fallback; backends without event support park on an empty
+            // stream. Detached like the scaler — every reconcile is idempotent.
+            #[allow(clippy::let_underscore_future)]
+            let _ = scaler::spawn_event_watcher(self.state.clone());
             // Session sweeper: evicts idle sessions per the
             // global `heartbeat-timeout`. `-1` (the ShinyProxy
             // idiom for "never expire") becomes a no-op loop

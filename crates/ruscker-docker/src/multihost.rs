@@ -704,6 +704,31 @@ impl ContainerBackend for MultiHostDockerBackend {
         backend.wait_until_ready(replica).await
     }
 
+    async fn container_events(&self) -> CoreResult<ruscker_core::ContainerEventStream> {
+        // Merge every reachable host's event stream. A host whose stream fails
+        // to open is skipped (logged) — its containers still recover via the
+        // periodic reconcile — and a host stream that later ends just drops out
+        // of the merge; the admin watcher's reconnect re-establishes all hosts.
+        // Never fail the whole call for a single host: events are a latency
+        // optimization, and a total failure would only fall back to periodic
+        // reconcile anyway.
+        let mut streams: Vec<ruscker_core::ContainerEventStream> = Vec::new();
+        for h in &self.hosts {
+            match h.backend.container_events().await {
+                Ok(s) => streams.push(Box::pin(s)),
+                Err(e) => {
+                    tracing::warn!(host = %h.id, error = %e, "open docker events on host failed; skipping (periodic reconcile covers it)")
+                }
+            }
+        }
+        // `select_all` panics on an empty iterator — if no host opened a
+        // stream, fall back to an empty stream (periodic reconcile still runs).
+        if streams.is_empty() {
+            return Ok(Box::pin(futures_util::stream::empty()));
+        }
+        Ok(Box::pin(futures_util::stream::select_all(streams)))
+    }
+
     async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
         // This feeds the disk panel's "image in use" signal, which MUST
         // cover every host: an image backing a container on an unreachable

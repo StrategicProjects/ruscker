@@ -277,6 +277,104 @@ pub fn spawn(state: AppState, interval: Duration) -> JoinHandle<()> {
     })
 }
 
+/// Debounce window for the events watcher: a burst of related events (a
+/// `docker restart` emits die+start; a `docker rm -f` emits die+destroy)
+/// collapses into a single reconcile once the stream is quiet this long.
+const EVENT_DEBOUNCE: Duration = Duration::from_millis(400);
+/// Backoff before reopening the events stream after it ends or errors.
+const EVENT_RECONNECT_BACKOFF: Duration = Duration::from_secs(3);
+
+/// Run one bidirectional liveness reconcile pass — the #1017 core, factored out
+/// so both the periodic scaler tick and the Docker-events watcher (#1018 slice
+/// B) take the exact same path: classify known replicas with per-host authority
+/// (Missing vs Unknown), prune Missing/Stopped-past-grace, and re-adopt
+/// externally-restarted containers. Idempotent and lock-safe, so a periodic
+/// tick and an event-triggered pass may run concurrently without conflict — the
+/// registry writes are serialized and every action re-checks state under lock.
+pub(crate) async fn reconcile_liveness_once(state: &AppState) {
+    let Some(backend) = state.backend.clone() else {
+        return;
+    };
+    let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
+    let registry_snap: Vec<Replica> = {
+        let reg = state.replicas.read().await;
+        specs.iter().flat_map(|s| reg.replicas_of(&s.id).to_vec()).collect()
+    };
+    let queries: Vec<ReplicaLivenessQuery> =
+        registry_snap.iter().map(ReplicaLivenessQuery::from).collect();
+    if let Ok(report) = backend.replica_liveness(&queries).await {
+        reconcile_backend_liveness(
+            state,
+            backend.as_ref(),
+            &specs,
+            &registry_snap,
+            report,
+            chrono::Utc::now(),
+        )
+        .await;
+    }
+}
+
+/// Watch the backend's Docker event stream and run an immediate liveness
+/// reconcile within ~1 s of an external container change (`docker rm -f`,
+/// `docker restart`), instead of waiting up to a full scaler tick (#1018 slice
+/// B). The reconcile is authoritative and idempotent, so the event is only a
+/// "reconcile now" nudge — a missed or duplicated event is always safe, and the
+/// periodic tick remains the fallback.
+///
+/// Leader-gated (HA), like the tick. Reconnects with backoff when the stream
+/// drops. Backends without event support yield an empty stream, so this task
+/// simply parks on it and relies entirely on the periodic reconcile.
+pub fn spawn_event_watcher(state: AppState) -> JoinHandle<()> {
+    use futures_util::StreamExt;
+    tokio::spawn(async move {
+        if state.backend.is_none() {
+            return;
+        }
+        loop {
+            let Some(backend) = state.backend.clone() else {
+                return;
+            };
+            match backend.container_events().await {
+                Ok(mut stream) => {
+                    info!("docker events watcher connected");
+                    while let Some(first) = stream.next().await {
+                        debug!(
+                            kind = ?first.kind, container = %first.container_id,
+                            replica = ?first.replica_id, "docker event"
+                        );
+                        // Coalesce a burst: keep pulling until the stream is
+                        // quiet for EVENT_DEBOUNCE (or it ends).
+                        let mut ended = false;
+                        loop {
+                            match tokio::time::timeout(EVENT_DEBOUNCE, stream.next()).await {
+                                Ok(Some(ev)) => {
+                                    debug!(kind = ?ev.kind, container = %ev.container_id, "docker event (coalesced)");
+                                }
+                                Ok(None) => {
+                                    ended = true;
+                                    break;
+                                }
+                                Err(_) => break, // quiet window elapsed → reconcile
+                            }
+                        }
+                        // Only the leader reconciles — mirrors the tick's gate.
+                        if state.leader.is_leader().await {
+                            reconcile_liveness_once(&state).await;
+                        }
+                        if ended {
+                            break;
+                        }
+                    }
+                    warn!("docker events stream ended; reconnecting");
+                }
+                Err(e) => warn!(error = %e, "docker events connect failed; will retry"),
+            }
+            tokio::time::sleep(EVENT_RECONNECT_BACKOFF).await;
+        }
+    })
+}
+
 #[derive(Clone, Copy)]
 enum ReplicaDownReason {
     Missing,
@@ -3004,6 +3102,34 @@ proxy:
 
         assert!(state.replicas.read().await.replicas_of("app").is_empty());
         assert_eq!(state.sessions.len(), 0, "missing cleanup releases sticky sessions");
+    }
+
+    /// #1018 slice B: the events watcher runs `reconcile_liveness_once`, which
+    /// must take the same authoritative path as the tick — a Missing replica is
+    /// pruned. This is the entry the watcher nudges on a `docker rm -f` event.
+    #[tokio::test]
+    async fn reconcile_liveness_once_prunes_missing_replica() {
+        let replica = Replica {
+            container_id: "gone".into(),
+            ..fake_replica("app")
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![one_liveness(
+            &replica.id,
+            ReplicaLiveness::Missing,
+            Vec::new(),
+        )]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 0\n",
+            backend,
+        );
+        state.replicas.write().await.add(replica.clone());
+
+        reconcile_liveness_once(&state).await;
+
+        assert!(
+            state.replicas.read().await.replicas_of("app").is_empty(),
+            "event-triggered reconcile prunes a Missing replica just like the tick"
+        );
     }
 
     #[tokio::test]

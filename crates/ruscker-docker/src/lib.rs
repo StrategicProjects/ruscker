@@ -16,12 +16,14 @@
 
 use async_trait::async_trait;
 use bollard::models::{
-    ContainerCreateBody, ContainerSummaryStateEnum, HostConfig, NetworkCreateRequest, PortBinding,
+    ContainerCreateBody, ContainerSummaryStateEnum, EventMessageTypeEnum, HostConfig,
+    NetworkCreateRequest, PortBinding,
 };
 use bollard::query_parameters::{
-    CreateContainerOptions, CreateImageOptions, ListContainersOptions, ListImagesOptions,
-    ListVolumesOptions, LogsOptionsBuilder, RemoveContainerOptions, RemoveImageOptions,
-    RemoveVolumeOptions, StartContainerOptions, StatsOptionsBuilder, StopContainerOptions,
+    CreateContainerOptions, CreateImageOptions, EventsOptionsBuilder, ListContainersOptions,
+    ListImagesOptions, ListVolumesOptions, LogsOptionsBuilder, RemoveContainerOptions,
+    RemoveImageOptions, RemoveVolumeOptions, StartContainerOptions, StatsOptionsBuilder,
+    StopContainerOptions,
 };
 pub mod multihost;
 pub use multihost::MultiHostDockerBackend;
@@ -567,6 +569,44 @@ impl LocalDockerBackend {
     }
 }
 
+/// Map a Docker `action` string to the [`ContainerEventKind`] the runtime
+/// reacts to. Unknown/other actions fold to `Other` — the consumer reconciles
+/// on any event, so the exact kind is for logging, not control flow.
+fn event_kind_from_action(action: Option<&str>) -> ruscker_core::ContainerEventKind {
+    use ruscker_core::ContainerEventKind as K;
+    match action {
+        Some("start") => K::Start,
+        // OOM/die both mean the process is gone; treat as Die.
+        Some("die") | Some("oom") => K::Die,
+        Some("stop") | Some("kill") => K::Stop,
+        Some("destroy") => K::Destroy,
+        _ => K::Other,
+    }
+}
+
+/// Translate a bollard [`EventMessage`](bollard::models::EventMessage) into a
+/// backend-neutral [`ContainerEvent`]. Returns `None` for anything that isn't a
+/// container event carrying our replica label (the stream is already filtered
+/// server-side; this is the belt-and-braces re-check).
+fn container_event_from_message(
+    msg: bollard::models::EventMessage,
+) -> Option<ruscker_core::ContainerEvent> {
+    if msg.typ != Some(EventMessageTypeEnum::CONTAINER) {
+        return None;
+    }
+    let actor = msg.actor?;
+    let attrs = actor.attributes.unwrap_or_default();
+    // Must be one of ours — the label filter guarantees it, but re-check so a
+    // stray event can never nudge a reconcile against a foreign container id.
+    let replica_id = attrs.get(LABEL_REPLICA_ID).cloned()?;
+    Some(ruscker_core::ContainerEvent {
+        kind: event_kind_from_action(msg.action.as_deref()),
+        container_id: actor.id.unwrap_or_default(),
+        spec_id: attrs.get(LABEL_SPEC_ID).cloned(),
+        replica_id: Some(replica_id),
+    })
+}
+
 fn classify_local_liveness(
     known: &[ReplicaLivenessQuery],
     managed: &[ManagedContainer],
@@ -898,6 +938,36 @@ impl ContainerBackend for LocalDockerBackend {
 
     async fn wait_until_ready(&self, replica: &Replica) -> CoreResult<()> {
         wait_for_ready(self, &replica.container_id, replica.upstream).await
+    }
+
+    async fn container_events(&self) -> CoreResult<ruscker_core::ContainerEventStream> {
+        // Scope the stream server-side to OUR containers' lifecycle events:
+        // container-type, carrying the replica label, and only the actions
+        // that change liveness (`start`/`die`/`stop`/`kill`/`destroy`/`oom`) —
+        // so daemon-wide churn and noisy actions (exec/health) never reach us.
+        let mut filters: HashMap<String, Vec<String>> = HashMap::new();
+        filters.insert("type".to_string(), vec!["container".to_string()]);
+        filters.insert("label".to_string(), vec![LABEL_REPLICA_ID.to_string()]);
+        filters.insert(
+            "event".to_string(),
+            ["start", "die", "stop", "kill", "destroy", "oom"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        );
+        let opts = EventsOptionsBuilder::new().filters(&filters).build();
+        let raw = self.docker.events(Some(opts));
+        // End the stream on the first transport error (the daemon connection
+        // dropped) so the consumer reconnects; the periodic reconcile covers
+        // anything missed during the gap. `filter_map` then drops events we
+        // don't model (all remaining items are `Ok`).
+        let stream = raw
+            .take_while(|res| {
+                let keep = res.is_ok();
+                async move { keep }
+            })
+            .filter_map(|res| async move { container_event_from_message(res.ok()?) });
+        Ok(Box::pin(stream))
     }
 
     async fn all_container_image_refs(&self) -> CoreResult<Vec<String>> {
@@ -1796,6 +1866,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn event_kind_maps_docker_actions() {
+        use ruscker_core::ContainerEventKind as K;
+        assert_eq!(event_kind_from_action(Some("start")), K::Start);
+        assert_eq!(event_kind_from_action(Some("die")), K::Die);
+        assert_eq!(event_kind_from_action(Some("oom")), K::Die);
+        assert_eq!(event_kind_from_action(Some("stop")), K::Stop);
+        assert_eq!(event_kind_from_action(Some("kill")), K::Stop);
+        assert_eq!(event_kind_from_action(Some("destroy")), K::Destroy);
+        assert_eq!(event_kind_from_action(Some("health_status")), K::Other);
+        assert_eq!(event_kind_from_action(None), K::Other);
+    }
+
+    #[test]
+    fn container_event_maps_labelled_container_message() {
+        use bollard::models::{EventActor, EventMessage, EventMessageTypeEnum};
+        let mut attrs = HashMap::new();
+        attrs.insert(LABEL_REPLICA_ID.to_string(), "11111111-1111-1111-1111-111111111111".to_string());
+        attrs.insert(LABEL_SPEC_ID.to_string(), "app".to_string());
+        let msg = EventMessage {
+            typ: Some(EventMessageTypeEnum::CONTAINER),
+            action: Some("destroy".to_string()),
+            actor: Some(EventActor {
+                id: Some("deadbeef".to_string()),
+                attributes: Some(attrs),
+            }),
+            ..Default::default()
+        };
+        let ev = container_event_from_message(msg).expect("a labelled container event maps");
+        assert_eq!(ev.kind, ruscker_core::ContainerEventKind::Destroy);
+        assert_eq!(ev.container_id, "deadbeef");
+        assert_eq!(ev.spec_id.as_deref(), Some("app"));
+        assert_eq!(ev.replica_id.as_deref(), Some("11111111-1111-1111-1111-111111111111"));
+    }
+
+    #[test]
+    fn container_event_ignores_non_container_and_unlabelled() {
+        use bollard::models::{EventActor, EventMessage, EventMessageTypeEnum};
+        // Non-container type → None.
+        let image_evt = EventMessage {
+            typ: Some(EventMessageTypeEnum::IMAGE),
+            action: Some("pull".to_string()),
+            actor: Some(EventActor { id: Some("img".into()), attributes: Some(HashMap::new()) }),
+            ..Default::default()
+        };
+        assert!(container_event_from_message(image_evt).is_none());
+        // Container event without our replica label → None (belt-and-braces).
+        let foreign = EventMessage {
+            typ: Some(EventMessageTypeEnum::CONTAINER),
+            action: Some("die".to_string()),
+            actor: Some(EventActor { id: Some("other".into()), attributes: Some(HashMap::new()) }),
+            ..Default::default()
+        };
+        assert!(container_event_from_message(foreign).is_none());
+    }
+
+    #[test]
     fn successful_local_inventory_classifies_absent_container_as_missing() {
         let id = ReplicaId::new();
         let known = [ReplicaLivenessQuery {
@@ -2190,6 +2316,74 @@ mod tests {
         assert_eq!(real[0].container_id, original.container_id);
 
         backend.stop(&original.id).await.expect("cleanup restarted container");
+    }
+
+    /// Consume the event stream (skipping unrelated events) until one matches
+    /// `pred`, or a 15 s budget elapses.
+    #[cfg(feature = "docker-it")]
+    async fn wait_for_event(
+        stream: &mut ruscker_core::ContainerEventStream,
+        pred: impl Fn(&ruscker_core::ContainerEvent) -> bool,
+    ) -> bool {
+        use futures_util::StreamExt;
+        tokio::time::timeout(std::time::Duration::from_secs(15), async {
+            while let Some(ev) = stream.next().await {
+                if pred(&ev) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    /// #1018 slice B real smoke: the events stream reports a `Start` for a
+    /// freshly-spawned Ruscker container and a `die/stop/destroy` when it is
+    /// removed out of band — the signal the admin watcher turns into an
+    /// immediate reconcile.
+    ///
+    /// bollard's events stream connects lazily on first poll, so each docker
+    /// action is fired from a delayed task *while* the stream is already being
+    /// polled (`tokio::join!`) — otherwise the event races ahead of the
+    /// connection. This is exactly how the real watcher behaves (it polls
+    /// continuously); the choreography here just makes the test deterministic.
+    #[cfg(feature = "docker-it")]
+    #[tokio::test]
+    async fn container_events_report_start_and_external_removal() {
+        use ruscker_core::ContainerEventKind as K;
+        let image = std::env::var("RUSCKER_IT_IMAGE").unwrap_or_else(|_| "nginx:1.29-alpine".into());
+        let backend = LocalDockerBackend::local().expect("connect docker");
+        let mut events = backend.container_events().await.expect("open events stream");
+        let spec = format!("evt-it-{}", uuid::Uuid::new_v4());
+
+        // Start: match by spec label (the replica id isn't known until spawn
+        // returns). Spawn after a short delay so the stream is polling first.
+        let spec_for_match = spec.clone();
+        let (start_seen, spawn_res) = tokio::join!(
+            wait_for_event(&mut events, |ev| ev.spec_id.as_deref() == Some(&spec_for_match)
+                && ev.kind == K::Start),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                backend.spawn_with_port(&spec, &image, 80).await
+            }
+        );
+        let replica = spawn_res.expect("spawn original");
+        assert!(start_seen, "expected a Start event for the spawned container");
+
+        // Removal: match by the now-known replica id.
+        let rid = replica.id.to_string();
+        let container_id = replica.container_id.clone();
+        let (gone_seen, rm_res) = tokio::join!(
+            wait_for_event(&mut events, |ev| ev.replica_id.as_deref() == Some(&rid)
+                && matches!(ev.kind, K::Die | K::Stop | K::Destroy)),
+            async {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                backend.remove_container(&container_id).await
+            }
+        );
+        rm_res.expect("external remove");
+        assert!(gone_seen, "expected a die/stop/destroy event after external removal");
     }
 
     /// `container-env` / `container-cmd` smoke: spawn with both set and

@@ -389,6 +389,33 @@ pub trait ContainerBackend: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Reconcile a caller's in-memory replicas against one authoritative
+    /// backend inventory. Besides classifying every known replica, Docker
+    /// backends return the running, Ruscker-labelled replicas they found so
+    /// the runtime can re-adopt a container that came back after an external
+    /// restart.
+    ///
+    /// The default is deliberately fail-safe: a backend that has not opted
+    /// into authoritative inventory reports every replica as [`Unknown`] and
+    /// discovers nothing. An empty/default backend must never make the scaler
+    /// forget a live container.
+    async fn replica_liveness(
+        &self,
+        known: &[ReplicaLivenessQuery],
+    ) -> CoreResult<ReplicaLivenessReport> {
+        Ok(ReplicaLivenessReport::unknown(known))
+    }
+
+    /// Wait until a running replica's upstream is actually serving HTTP.
+    /// Re-adoption uses the same backend-specific readiness check as spawn;
+    /// the default fails closed so a backend cannot accidentally publish a
+    /// just-restarted container as Ready without checking it.
+    async fn wait_until_ready(&self, _replica: &Replica) -> CoreResult<()> {
+        Err(CoreError::Backend(
+            "readiness checks are not supported by this backend".into(),
+        ))
+    }
+
     /// Image refs (name/tag AND sha id) of **every** container on the
     /// host — not just Ruscker-managed ones (#871). The disk panel uses
     /// this so an image backing a non-Ruscker container (e.g. ShinyProxy)
@@ -554,6 +581,62 @@ pub struct ManagedContainer {
     pub running: bool,
 }
 
+/// What an authoritative backend inventory says about one known replica.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplicaLiveness {
+    Running,
+    Stopped,
+    Missing,
+    Unknown,
+}
+
+/// The identity and host affinity a backend needs to classify a replica.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplicaLivenessQuery {
+    pub replica_id: ReplicaId,
+    pub container_id: String,
+    pub host: Option<String>,
+}
+
+impl From<&Replica> for ReplicaLivenessQuery {
+    fn from(replica: &Replica) -> Self {
+        Self {
+            replica_id: replica.id.clone(),
+            container_id: replica.container_id.clone(),
+            host: replica.host.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplicaLivenessObservation {
+    pub replica_id: ReplicaId,
+    pub liveness: ReplicaLiveness,
+}
+
+/// One runtime inventory pass: classifications for the caller's known
+/// replicas plus running labelled containers available for re-adoption.
+#[derive(Debug, Clone)]
+pub struct ReplicaLivenessReport {
+    pub observations: Vec<ReplicaLivenessObservation>,
+    pub running: Vec<Replica>,
+}
+
+impl ReplicaLivenessReport {
+    pub fn unknown(known: &[ReplicaLivenessQuery]) -> Self {
+        Self {
+            observations: known
+                .iter()
+                .map(|query| ReplicaLivenessObservation {
+                    replica_id: query.replica_id.clone(),
+                    liveness: ReplicaLiveness::Unknown,
+                })
+                .collect(),
+            running: Vec::new(),
+        }
+    }
+}
+
 /// The result of a run-to-completion job (#986). A captured non-zero
 /// exit code is a *reported failure*, distinct from the backend being
 /// unable to run the job at all (which is a `CoreResult::Err`).
@@ -645,6 +728,31 @@ impl ReplicaRegistry {
             }
         }
         None
+    }
+
+    /// Replace a replica with the same id, or insert it when absent. Runtime
+    /// re-adoption uses this to make `Stopped -> Ready` atomic from readers'
+    /// point of view and to guarantee one registry row per Docker replica.
+    pub fn upsert(&mut self, replica: Replica) {
+        self.remove(&replica.id);
+        self.add(replica);
+    }
+
+    /// Take a replica out of routing while preserving its slot in the pool.
+    /// `observed_at` records when the external restart was first noticed so
+    /// the scaler can allow a short grace window without separate AppState.
+    pub fn mark_restarting(
+        &mut self,
+        replica_id: &ReplicaId,
+        observed_at: chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        let Some(replica) = self.find_mut(replica_id) else {
+            return false;
+        };
+        replica.state = ReplicaState::Stopped;
+        replica.started_at = observed_at;
+        replica.sessions_active = 0;
+        true
     }
 
     /// Replace the registry contents with `replicas`, grouped by

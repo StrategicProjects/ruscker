@@ -213,6 +213,12 @@ pub(crate) fn inflight_gc(alive: &std::collections::HashSet<ruscker_core::Replic
     INFLIGHT.retain(|rid, _| alive.contains(rid));
 }
 
+/// Forget one dead/non-routable replica immediately. A guard belonging to a
+/// request already in flight may later drop and find no row, which is safe.
+pub(crate) fn inflight_forget(replica_id: &ruscker_core::ReplicaId) {
+    INFLIGHT.remove(replica_id);
+}
+
 // Each handler extracts `Option<ConnectInfo<SocketAddr>>`: it's
 // `Some` in production (the listener is served with connect-info)
 // and `None` under `Router::oneshot` tests, where there's no socket

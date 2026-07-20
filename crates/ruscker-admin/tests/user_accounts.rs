@@ -48,6 +48,7 @@ async fn state_with_db() -> (AppState, sqlx::SqlitePool) {
         catalog_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: std::sync::Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),
+        activity: ruscker_admin::activity::ActivitySink::default(),
     };
     (state, pool)
 }
@@ -116,6 +117,59 @@ async fn password_login_succeeds_and_wrong_fails() {
 
     let (bad_status, _) = post(state, "/admin/login", "username=alice&password=WRONG", None).await;
     assert_eq!(bad_status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn successful_login_records_activity_but_failed_does_not() {
+    use ruscker_admin::activity::{ActivityEventType, AuthMethod};
+    let (state, pool) = state_with_db().await;
+    ruscker_admin::db::users::create(
+        &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
+        "alice",
+        "alicepass1",
+        Role::Editor,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+
+    // A correct password login enqueues exactly one `login.success`.
+    let (ok, _) = post(
+        state.clone(),
+        "/admin/login",
+        "username=alice&password=alicepass1",
+        None,
+    )
+    .await;
+    assert_eq!(ok, StatusCode::SEE_OTHER);
+
+    // The drain task isn't started in this harness, so the receiver still
+    // holds what the capture site enqueued (deterministic, no timing).
+    let mut rx = state
+        .activity
+        .take_receiver()
+        .expect("activity receiver available");
+    let ev = rx.try_recv().expect("a login.success was recorded");
+    assert_eq!(ev.event_type, ActivityEventType::LoginSuccess);
+    assert_eq!(ev.username.as_deref(), Some("alice"));
+    assert_eq!(ev.auth_method, Some(AuthMethod::Password));
+    assert!(ev.spec_id.is_none(), "a login is not tied to a spec");
+
+    // A wrong password records nothing.
+    let (bad, _) = post(
+        state.clone(),
+        "/admin/login",
+        "username=alice&password=WRONG",
+        None,
+    )
+    .await;
+    assert_eq!(bad, StatusCode::UNAUTHORIZED);
+    assert!(
+        rx.try_recv().is_err(),
+        "a failed login must not record activity"
+    );
 }
 
 #[tokio::test]

@@ -1631,6 +1631,7 @@ mod tests {
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(crate::access_counter::AccessCounter::default()),
             alerts: crate::alerts::AlertSink::default(),
+            activity: crate::activity::ActivitySink::default(),
         }
     }
 

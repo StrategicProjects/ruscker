@@ -46,6 +46,7 @@ async fn state_with_db(master_key: bool) -> (AppState, ruscker_admin::db::Config
         catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),
+        activity: ruscker_admin::activity::ActivitySink::default(),
     };
     (state, db)
 }

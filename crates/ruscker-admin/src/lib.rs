@@ -283,6 +283,10 @@ pub struct AppState {
     /// when a DB is wired) POSTs the events to the operator-configured
     /// webhook URL.
     pub alerts: alerts::AlertSink,
+    /// User-activity sink (#1021). Capture sites (login, new app session)
+    /// call `record` — a non-blocking enqueue; one drain task (started in
+    /// `AdminServer::run` when a DB is wired) batch-writes to `user_activity`.
+    pub activity: activity::ActivitySink,
 }
 
 impl AppState {
@@ -353,6 +357,7 @@ impl AdminServer {
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(access_counter::AccessCounter::default()),
             alerts: alerts::AlertSink::default(),
+            activity: activity::ActivitySink::default(),
         };
         Ok(Self {
             addr,
@@ -592,6 +597,16 @@ impl AdminServer {
         if let Some(db) = self.state.db.clone() {
             #[allow(clippy::let_underscore_future)]
             let _ = alerts::spawn(&self.state.alerts, db);
+        }
+
+        // User-activity drain (#1021): one task batch-writes login/app-access
+        // events to `user_activity`. Capture sites (login, new app session)
+        // enqueue non-blocking; without a DB there's nowhere to write, so the
+        // task isn't started and `record` just drops into a never-drained
+        // queue (bounded — no leak).
+        if let Some(db) = self.state.db.clone() {
+            #[allow(clippy::let_underscore_future)]
+            let _ = activity::spawn(&self.state.activity, db);
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

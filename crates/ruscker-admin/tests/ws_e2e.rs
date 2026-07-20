@@ -136,6 +136,7 @@ async fn serve() -> (AppState, SocketAddr) {
         catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
         access_counter: Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
         alerts: ruscker_admin::alerts::AlertSink::default(),
+        activity: ruscker_admin::activity::ActivitySink::default(),
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

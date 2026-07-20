@@ -327,6 +327,16 @@ async fn login_submit(
         .admin_sessions
         .create(user.role, Some(user.username.clone()))
         .await;
+    // Record the successful password login (#1021). Non-blocking enqueue;
+    // the session id is the dedup key so the same login isn't double-counted
+    // across HA instances. (Break-glass token logins are operator emergency
+    // access and intentionally not surfaced as user activity.)
+    state.activity.record(crate::activity::ActivityEvent::login_success(
+        user.username.clone(),
+        crate::activity::AuthMethod::Password,
+        session_id.clone(),
+        None,
+    ));
     issue_session_cookie(&state, &cookies, &headers, session_id);
 
     // First login with an admin-assigned password ⇒ ask whether to
@@ -832,6 +842,7 @@ mod tests {
             catalog_cache: Arc::new(tokio::sync::RwLock::new(None)),
             access_counter: Arc::new(crate::access_counter::AccessCounter::default()),
             alerts: crate::alerts::AlertSink::default(),
+            activity: crate::activity::ActivitySink::default(),
         }
     }
 

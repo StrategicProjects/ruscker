@@ -441,6 +441,8 @@ pub struct SpecForm {
     //    default; nothing here is required. ──────────────────────
     /// `heartbeat-timeout` override in ms; `-1` = never expire.
     pub heartbeat_timeout: String,
+    /// `container-wait-time` readiness override in ms; blank/0 = global.
+    pub container_wait_time: String,
     /// Fractional CPUs, e.g. `0.5` (`container-cpu-limit`).
     pub container_cpu_limit: String,
     /// Memory cap, e.g. `512m` / `1.5g` (`container-memory-limit`).
@@ -578,6 +580,10 @@ impl SpecForm {
             max_lifetime: spec.max_lifetime.map(|n| n.to_string()).unwrap_or_default(),
             heartbeat_timeout: spec
                 .heartbeat_timeout
+                .map(|n| n.to_string())
+                .unwrap_or_default(),
+            container_wait_time: spec
+                .container_wait_time
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             container_cpu_limit: spec
@@ -807,6 +813,7 @@ impl SpecForm {
             seats_per_container: parse_opt(&self.seats_per_container),
             max_lifetime: parse_opt(&self.max_lifetime),
             heartbeat_timeout: parse_opt(&self.heartbeat_timeout),
+            container_wait_time: parse_opt(&self.container_wait_time),
             container_cpu_limit: parse_opt(&self.container_cpu_limit),
             container_memory_limit: empty_to_none(&self.container_memory_limit),
             template_properties: TemplateProperties(tp_map),
@@ -902,6 +909,7 @@ impl SpecForm {
             &self.seats_per_container,
             &self.max_lifetime,
             &self.heartbeat_timeout,
+            &self.container_wait_time,
             &self.min_replicas,
             &self.max_replicas,
             &self.concurrent_requests_per_replica,
@@ -916,6 +924,15 @@ impl SpecForm {
         if int_fields
             .iter()
             .any(|v| !v.trim().is_empty() && v.trim().parse::<i64>().is_err())
+        {
+            errs.push("spec-form-error-number");
+        }
+        // `container-wait-time` is unsigned: 0 deliberately inherits the
+        // global value, but a crafted negative POST must not silently parse
+        // to None and inherit by accident.
+        if !self.container_wait_time.trim().is_empty()
+            && self.container_wait_time.trim().parse::<u64>().is_err()
+            && !errs.contains(&"spec-form-error-number")
         {
             errs.push("spec-form-error-number");
         }
@@ -2060,8 +2077,35 @@ proxy:
         f.min_replicas = "1".into();
         f.max_replicas = "3".into();
         f.heartbeat_timeout = "-1".into();
+        f.container_wait_time = "120000".into();
         let errs = f.validate(FormMode::New);
         assert!(errs.is_empty(), "expected no errors, got {errs:?}");
+    }
+
+    #[test]
+    fn container_wait_time_round_trips_and_rejects_negative_values() {
+        let mut form = valid_form();
+        form.container_wait_time = "120000".into();
+        let spec = form.into_spec(None, Role::Admin).expect("into_spec");
+        assert_eq!(spec.container_wait_time, Some(120_000));
+        assert_eq!(SpecForm::from_spec(&spec).container_wait_time, "120000");
+
+        let mut inherited = valid_form();
+        inherited.container_wait_time = "0".into();
+        assert!(inherited.validate(FormMode::New).is_empty());
+        assert_eq!(
+            inherited
+                .into_spec(None, Role::Admin)
+                .expect("zero is valid")
+                .container_wait_time,
+            Some(0)
+        );
+
+        let mut invalid = valid_form();
+        invalid.container_wait_time = "-1".into();
+        assert!(invalid
+            .validate(FormMode::New)
+            .contains(&"spec-form-error-number"));
     }
 
     // ── #211: newly-modelled advanced fields ────────────────────

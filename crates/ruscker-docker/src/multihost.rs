@@ -704,6 +704,28 @@ impl ContainerBackend for MultiHostDockerBackend {
         backend.wait_until_ready(replica).await
     }
 
+    async fn wait_until_ready_with_timeout(
+        &self,
+        replica: &Replica,
+        readiness_timeout_ms: Option<u64>,
+    ) -> CoreResult<()> {
+        let backend = replica
+            .host
+            .as_deref()
+            .and_then(|host| self.hosts.iter().find(|entry| entry.id == host))
+            .map(|entry| &entry.backend)
+            .or_else(|| self.placed(&replica.id))
+            .ok_or_else(|| {
+                CoreError::Backend(format!(
+                    "replica {} is not placed on a reachable Docker host",
+                    replica.id
+                ))
+            })?;
+        backend
+            .wait_until_ready_with_timeout(replica, readiness_timeout_ms)
+            .await
+    }
+
     async fn container_events(&self) -> CoreResult<ruscker_core::ContainerEventStream> {
         // Merge every reachable host's event stream. A host whose stream fails
         // to open is skipped (logged) — its containers still recover via the

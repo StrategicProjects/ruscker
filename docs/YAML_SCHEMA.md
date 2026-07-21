@@ -315,6 +315,7 @@ A spec describes one app, API, or external link. Every spec has an
   max-lifetime: 360                   # minutes — hard recycle (enforced, #334)
   container-lifetime: 360             # minutes — soft recycle when idle (enforced, #334)
   heartbeat-timeout: 3600000          # ms — per-spec override (enforced)
+  container-wait-time: 120000         # ms — startup readiness override; 0/unset = global
   stop-on-logout: false               # end a user's sessions on logout (enforced, #337)
   docker-registry-username: acme
   docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}   # use env vars!
@@ -656,6 +657,7 @@ applied) and flagged by `ruscker validate`.
 | `scale-down-grace` | s | unset | idle-grace before retiring a replica; unset ⇒ the global ~30 s grace (enforced, #333) |
 | `scale-down-cooldown-secs` | s | `60` | suppress saturation-driven scale-up after this app scales down, preventing immediate respawn flaps; `0` disables. Ruscker extension (#936) |
 | `drain-timeout` | s | `60` | grace for in-flight sessions on a `max-lifetime` recycle (enforced, #335) |
+| `container-wait-time` | ms | global `proxy.container-wait-time` | per-app TCP + HTTP startup-readiness budget; unset or `0` inherits the global value. Ruscker extension (#1026) |
 | `routing-strategy` | enum | varies | See below |
 | `concurrent-requests-per-replica` | u32 | `100` | API-only — per-replica in-flight cap the scaler scales on (enforced, #336) |
 

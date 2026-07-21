@@ -1796,6 +1796,9 @@ async fn pick_or_spawn(state: &AppState, spec: &Spec) -> anyhow::Result<(Replica
         .with_env(env)
         .with_placement(spec.effective_placement())
         .with_anti_affinity(spec.effective_anti_affinity());
+    if let Some(millis) = spec.container_wait_time {
+        req = req.with_readiness_timeout_ms(millis);
+    }
     if let Some(port) = inner_port {
         req = req.with_port(port);
     }

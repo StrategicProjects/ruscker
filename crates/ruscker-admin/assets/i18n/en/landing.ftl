@@ -555,6 +555,7 @@ spec-form-concurrent = Requests per replica
 spec-form-cpu-limit = CPU limit
 spec-form-memory-limit = Memory limit
 spec-form-heartbeat = Heartbeat timeout (ms)
+spec-form-container-wait = Container startup timeout (ms)
 spec-help-kind = What kind of thing this is. Drives routing, the card badge, and whether a container is started.
 spec-help-id = Stable identifier used in the URL (/app/<id>). Lowercase letters, digits, "-" and "_"; can't change after creation.
 spec-help-name = The title shown on the landing card.
@@ -579,6 +580,7 @@ spec-help-concurrent = Requests one API replica handles before the scaler adds a
 spec-help-cpu-limit = Max CPU as fractional cores (e.g. 0.5 = half a core). Blank = unlimited.
 spec-help-memory-limit = Max memory, e.g. 512m or 1.5g. Blank = unlimited.
 spec-help-heartbeat = Idle session timeout in milliseconds; -1 never expires. Blank = use the global default.
+spec-help-container-wait = Maximum time for this app to answer TCP and HTTP during startup. Blank or 0 = use the global container-wait-time.
 admin-blocks-slot-empty = No blocks in this slot yet.
 admin-blocks-drag-hint = Drag the handle to reorder blocks within a slot.
 spec-form-volumes-section = Volumes

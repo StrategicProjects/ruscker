@@ -1102,6 +1102,15 @@
                    value="{{ form.heartbeat_timeout }}" x-model="form.heartbeat_timeout"
                    placeholder="3600000" class="spec-form-input">
           </div>
+          <div class="spec-form-field">
+            <div class="spec-form-label-row">
+              <label for="f-container-wait" class="spec-form-label">{{ self.t("spec-form-container-wait") }}</label>
+              {% call help(self.t("spec-help-container-wait")) %}{% endcall %}
+            </div>
+            <input id="f-container-wait" type="number" name="container_wait_time" min="0"
+                   value="{{ form.container_wait_time }}" x-model="form.container_wait_time"
+                   placeholder="60000" class="spec-form-input">
+          </div>
         </div>
       </div>
       </template>

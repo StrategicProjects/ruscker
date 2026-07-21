@@ -22,6 +22,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/users", get(index).post(create))
@@ -53,6 +55,11 @@ struct UsersPage<'a> {
     page: i64,
     pages: i64,
     total: i64,
+    kpi_total: i64,
+    kpi_admins: i64,
+    kpi_editors: i64,
+    kpi_viewers: i64,
+    kpi_password_change: i64,
     /// The active search term, echoed back into the search box and
     /// carried on the pager links; `""` when unfiltered.
     q: String,
@@ -90,6 +97,20 @@ impl UsersPage<'_> {
     /// The three roles, for the create/edit selectors.
     fn all_roles(&self) -> [Role; 3] {
         [Role::Viewer, Role::Editor, Role::Admin]
+    }
+
+    fn kpis(&self) -> [KpiMetric; 5] {
+        [
+            KpiMetric::new("ti-users", "admin-users-kpi-total", self.kpi_total),
+            KpiMetric::new("ti-user-check", "admin-users-kpi-admins", self.kpi_admins),
+            KpiMetric::new("ti-edit", "admin-users-kpi-editors", self.kpi_editors),
+            KpiMetric::new("ti-eye", "admin-users-kpi-viewers", self.kpi_viewers),
+            KpiMetric::new(
+                "ti-key",
+                "admin-users-kpi-password-change",
+                self.kpi_password_change,
+            ),
+        ]
     }
 }
 
@@ -179,6 +200,13 @@ async fn index(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    let counts = match db::users::counts(pool).await {
+        Ok(counts) => counts,
+        Err(e) => {
+            tracing::error!(error = ?e, "count user KPIs failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
     // Ceiling division (i64::div_ceil is still unstable on our floor).
     let pages = ((total + USERS_PER_PAGE - 1) / USERS_PER_PAGE).max(1);
     let page = q.page.unwrap_or(1).clamp(1, pages);
@@ -216,6 +244,11 @@ async fn index(
         page,
         pages,
         total,
+        kpi_total: counts.total,
+        kpi_admins: counts.admins,
+        kpi_editors: counts.editors,
+        kpi_viewers: counts.viewers,
+        kpi_password_change: counts.must_change_password,
         q: search,
         me: admin.actor().to_string(),
         flash,

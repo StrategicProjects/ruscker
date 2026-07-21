@@ -201,6 +201,18 @@ pub async fn list(db: &ConfigDb, filter: &AuditFilter) -> Result<Vec<AuditEntry>
         .collect())
 }
 
+/// Total events in the audit log. The UI list is capped, so its length is
+/// not a reliable aggregate for the KPI band.
+pub async fn count_all(db: &ConfigDb) -> Result<i64> {
+    let sql = "SELECT COUNT(*) FROM audit_log";
+    let (count,): (i64,) = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_one(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_one(pool).await,
+    }
+    .context("count audit_log")?;
+    Ok(count)
+}
+
 /// Distinct values of `action` currently in the table — used to
 /// populate the filter dropdown so the UI doesn't enumerate
 /// actions that have never fired in this install.
@@ -258,6 +270,7 @@ mod tests {
         assert_eq!(v.len(), 3);
         assert_eq!(v[0].action, "spec.delete");
         assert_eq!(v[2].action, "spec.create");
+        assert_eq!(count_all(&db).await.unwrap(), 3);
     }
 
     #[tokio::test]

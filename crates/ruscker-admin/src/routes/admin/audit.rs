@@ -22,6 +22,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/admin/audit", get(index))
 }
@@ -53,6 +55,8 @@ struct AuditPage<'a> {
     /// Current session role (always Admin here) - drives nav gating.
     role: Role,
     entries: Vec<AuditEntry>,
+    kpi_events: i64,
+    kpi_users: i64,
     filter: AuditQuery,
     /// Distinct actors ever seen — populates the actor select.
     /// Empty in the typical single-operator install.
@@ -97,6 +101,13 @@ impl<'a> AuditPage<'a> {
             _ => "tone-other",
         }
     }
+
+    fn kpis(&self) -> [KpiMetric; 2] {
+        [
+            KpiMetric::new("ti-history", "admin-audit-kpi-events", self.kpi_events),
+            KpiMetric::new("ti-users", "admin-audit-kpi-users", self.kpi_users),
+        ]
+    }
 }
 
 async fn index(
@@ -129,6 +140,14 @@ async fn index(
     // two — single-operator installs leak no information by
     // omitting the select.
     let distinct_actors: Vec<String> = db::audit::distinct_actors(pool).await.unwrap_or_default();
+    let kpi_events = match db::audit::count_all(pool).await {
+        Ok(count) => count,
+        Err(err) => {
+            tracing::error!(error = ?err, "count audit events failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let kpi_users = distinct_actors.len() as i64;
 
     let page = AuditPage {
         locale: loc,
@@ -139,6 +158,8 @@ async fn index(
         nav_section: "audit",
         role: Role::Admin,
         entries,
+        kpi_events,
+        kpi_users,
         filter: q,
         distinct_actors,
     };

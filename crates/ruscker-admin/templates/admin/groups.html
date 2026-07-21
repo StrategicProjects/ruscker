@@ -12,6 +12,8 @@
   <div class="text-xs text-[color:var(--text-faint)]">{{ groups.len() }}</div>
 </div>
 
+{% include "admin/_kpi_band.html" %}
+
 {# Flash split (#746): an error is a PERSISTENT inline banner with
    role="alert" — the old single .admin-flash-ok class made the layout
    promote even errors into a 4s auto-dismissing toast, announced only

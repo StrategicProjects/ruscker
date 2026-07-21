@@ -30,6 +30,8 @@
   </div>
 </div>
 
+{% include "admin/_kpi_band.html" %}
+
 {% match flash %}
   {% when Some with (f) %}
     <div class="import-flash import-flash--{{ f.tone }}" role="status">{{ f.text }}</div>

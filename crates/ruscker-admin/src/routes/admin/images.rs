@@ -29,6 +29,8 @@ use crate::images;
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 const UPLOAD_BODY_LIMIT: usize = 12 * 1024 * 1024;
 
 pub fn routes() -> Router<AppState> {
@@ -66,6 +68,9 @@ struct ImagesPage<'a> {
     /// Current session role (Editor or Admin) — drives nav gating.
     role: Role,
     images: Vec<db::images::ImageMeta>,
+    kpi_files: i64,
+    kpi_in_use: i64,
+    kpi_total_bytes: i64,
     /// Concatenated reference strings (every spec's logo + cover, plus the
     /// landing header/footer logo URLs). An image is "in use" when its
     /// `/assets/img/<filename>` appears here — drives the delete warning
@@ -96,6 +101,18 @@ impl<'a> ImagesPage<'a> {
         } else {
             format!("{:.1} MB", b as f64 / 1024.0 / 1024.0)
         }
+    }
+
+    fn kpis(&self) -> [KpiMetric; 3] {
+        [
+            KpiMetric::new("ti-photo", "admin-images-kpi-files", self.kpi_files),
+            KpiMetric::new("ti-circle-check", "admin-images-kpi-in-use", self.kpi_in_use),
+            KpiMetric::new(
+                "ti-database",
+                "admin-images-kpi-total-size",
+                self.fmt_size(&self.kpi_total_bytes),
+            ),
+        ]
     }
 
     /// The gallery as a JSON array, seeding the Alpine component that
@@ -204,6 +221,12 @@ async fn render_index(
             refs.push('\n');
         }
     }
+    let kpi_files = images.len() as i64;
+    let kpi_in_use = images
+        .iter()
+        .filter(|image| refs.contains(&format!("/assets/img/{}", image.filename)))
+        .count() as i64;
+    let kpi_total_bytes = images.iter().map(|image| image.size_bytes).sum();
     let page = ImagesPage {
         locale: loc,
         theme,
@@ -213,6 +236,9 @@ async fn render_index(
         nav_section: "images",
         role,
         images,
+        kpi_files,
+        kpi_in_use,
+        kpi_total_bytes,
         refs,
         flash_uploaded,
         flash_renamed,

@@ -21,6 +21,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 /// Body cap for the YAML import upload. ShinyProxy configs are
 /// tiny (<100 KB typically); 2 MB is generous and stops a huge
 /// paste from buffering unbounded.
@@ -163,6 +165,10 @@ pub struct SpecRow {
     /// public app. Rendered as coloured badges (#623).
     #[sqlx(skip)]
     pub access_groups: Vec<String>,
+    /// Whether either `access-groups` or `access-users` restricts the app.
+    /// Filled from the effective catalog for the KPI band (#1032).
+    #[sqlx(skip)]
+    pub restricted: bool,
 }
 
 /// Post-import flash, carried back via query params on the
@@ -213,12 +219,27 @@ struct SpecsPage<'a> {
     /// Current session role (Editor or Admin) — drives nav gating.
     role: Role,
     specs: Vec<SpecRow>,
+    kpi_total: i64,
+    kpi_active: i64,
+    kpi_archived: i64,
+    kpi_public: i64,
+    kpi_restricted: i64,
     flash: Option<Flash>,
 }
 
 impl<'a> SpecsPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    fn kpis(&self) -> [KpiMetric; 5] {
+        [
+            KpiMetric::new("ti-apps", "admin-specs-kpi-total", self.kpi_total),
+            KpiMetric::new("ti-circle-check", "admin-specs-kpi-active", self.kpi_active),
+            KpiMetric::new("ti-archive", "admin-specs-kpi-archived", self.kpi_archived),
+            KpiMetric::new("ti-world", "admin-specs-kpi-public", self.kpi_public),
+            KpiMetric::new("ti-lock", "admin-specs-kpi-restricted", self.kpi_restricted),
+        ]
     }
 }
 
@@ -423,14 +444,16 @@ async fn index(
     // Card logo + access-groups per spec for the table (#623). The effective
     // catalog deserializes each spec once — fine here (admin page, not the
     // proxy/dashboard hot path the lean SELECT of #588 protects).
-    let meta: std::collections::HashMap<String, (Option<String>, Vec<String>)> =
+    let meta: std::collections::HashMap<String, (Option<String>, Vec<String>, bool)> =
         crate::catalog::effective_specs_cached(&state)
             .await
             .iter()
             .map(|s| {
                 let logo = s.template_properties.get_str("logo").map(str::to_string);
                 let groups = s.access_groups.clone().unwrap_or_default();
-                (s.id.clone(), (logo, groups))
+                let restricted = !groups.is_empty()
+                    || s.access_users.as_ref().is_some_and(|users| !users.is_empty());
+                (s.id.clone(), (logo, groups, restricted))
             })
             .collect();
 
@@ -438,9 +461,10 @@ async fn index(
     // the lean SELECT (#588), so there's no second config_json deserialize.
     for row in &mut specs {
         row.access_count = access.get(&row.id).copied().unwrap_or(0);
-        if let Some((logo, groups)) = meta.get(&row.id) {
+        if let Some((logo, groups, restricted)) = meta.get(&row.id) {
             row.logo = logo.clone();
             row.access_groups = groups.clone();
+            row.restricted = *restricted;
         }
         row.trend_svg = spark(&row.id);
     }
@@ -480,9 +504,20 @@ async fn index(
                 trend_svg: spark(&s.id),
                 logo: s.template_properties.get_str("logo").map(str::to_string),
                 access_groups: s.access_groups.clone().unwrap_or_default(),
+                restricted: s
+                    .access_groups
+                    .as_ref()
+                    .is_some_and(|groups| !groups.is_empty())
+                    || s.access_users.as_ref().is_some_and(|users| !users.is_empty()),
             });
         }
     }
+
+    let kpi_total = specs.len() as i64;
+    let kpi_active = specs.iter().filter(|spec| spec.state == "active").count() as i64;
+    let kpi_archived = kpi_total - kpi_active;
+    let kpi_restricted = specs.iter().filter(|spec| spec.restricted).count() as i64;
+    let kpi_public = kpi_total - kpi_restricted;
 
     let flash = build_flash(&state.locales, loc, &flash);
     let page = SpecsPage {
@@ -494,6 +529,11 @@ async fn index(
         nav_section: "specs",
         role: editor.role,
         specs,
+        kpi_total,
+        kpi_active,
+        kpi_archived,
+        kpi_public,
+        kpi_restricted,
         flash,
     };
     super::render(&page)

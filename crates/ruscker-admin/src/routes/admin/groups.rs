@@ -24,6 +24,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/groups", get(index))
@@ -74,6 +76,9 @@ struct GroupsPage<'a> {
     /// Current session role (always Admin here) — drives nav gating.
     role: Role,
     groups: Vec<GroupView>,
+    kpi_groups: i64,
+    kpi_members: i64,
+    kpi_apps: i64,
     /// Apps with no `access-groups` — visible to everyone (#623). Shown in
     /// a dedicated "Public apps" rail so the page accounts for every spec,
     /// not only the gated ones.
@@ -86,6 +91,14 @@ struct GroupsPage<'a> {
 impl GroupsPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    fn kpis(&self) -> [KpiMetric; 3] {
+        [
+            KpiMetric::new("ti-users-group", "admin-groups-kpi-total", self.kpi_groups),
+            KpiMetric::new("ti-user", "admin-groups-kpi-members", self.kpi_members),
+            KpiMetric::new("ti-app-window", "admin-groups-kpi-apps", self.kpi_apps),
+        ]
     }
 }
 
@@ -138,7 +151,7 @@ async fn index(
         }
     }
 
-    let groups = map
+    let groups: Vec<GroupView> = map
         .into_iter()
         .map(|(name, (members, apps))| GroupView {
             name,
@@ -156,6 +169,17 @@ async fn index(
                 .collect(),
         })
         .collect();
+    let kpi_groups = groups.len() as i64;
+    let kpi_members = groups
+        .iter()
+        .flat_map(|group| group.members.iter().map(String::as_str))
+        .collect::<BTreeSet<_>>()
+        .len() as i64;
+    let kpi_apps = groups
+        .iter()
+        .flat_map(|group| group.apps.iter().map(|app| app.id.as_str()))
+        .collect::<BTreeSet<_>>()
+        .len() as i64;
 
     // Truly public specs — open to everyone — need BOTH access-groups and
     // access-users empty (#623 audit: a users-only-gated spec is not public).
@@ -175,6 +199,9 @@ async fn index(
         nav_section: "groups",
         role: Role::Admin,
         groups,
+        kpi_groups,
+        kpi_members,
+        kpi_apps,
         public_apps,
         all_users,
         flash: q.flash,

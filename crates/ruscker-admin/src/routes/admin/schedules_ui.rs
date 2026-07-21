@@ -27,6 +27,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/schedules", get(index).post(create))
@@ -77,6 +79,9 @@ struct SchedulesPage<'a> {
     specs: Vec<(String, String)>,
     schedules: Vec<ScheduleRow>,
     runs: Vec<RunView>,
+    kpi_jobs: i64,
+    kpi_active: i64,
+    kpi_recent_failures: i64,
     flash: Option<&'static str>,
     flash_error: bool,
 }
@@ -84,6 +89,22 @@ struct SchedulesPage<'a> {
 impl SchedulesPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    fn kpis(&self) -> [KpiMetric; 3] {
+        [
+            KpiMetric::new("ti-clock", "admin-schedules-kpi-jobs", self.kpi_jobs),
+            KpiMetric::new(
+                "ti-circle-check",
+                "admin-schedules-kpi-active",
+                self.kpi_active,
+            ),
+            KpiMetric::new(
+                "ti-alert-triangle",
+                "admin-schedules-kpi-recent-failures",
+                self.kpi_recent_failures,
+            ),
+        ]
     }
 }
 
@@ -195,6 +216,10 @@ async fn index(
         None => (Vec::new(), Vec::new()),
     };
 
+    let kpi_jobs = schedules.len() as i64;
+    let kpi_active = schedules.iter().filter(|schedule| schedule.enabled).count() as i64;
+    let kpi_recent_failures = runs.iter().filter(|run| run.status != "ok").count() as i64;
+
     super::render(&SchedulesPage {
         locale: loc,
         theme,
@@ -206,6 +231,9 @@ async fn index(
         specs,
         schedules: schedules.into_iter().map(schedule_row).collect(),
         runs: runs.into_iter().map(run_view).collect(),
+        kpi_jobs,
+        kpi_active,
+        kpi_recent_failures,
         flash,
         flash_error,
     })

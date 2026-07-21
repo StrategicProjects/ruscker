@@ -1,0 +1,12 @@
+{# Shared admin KPI band (#1032). Each page exposes `self.kpis()` with
+   localized label keys, a shipped Tabler icon and an aggregate value. #}
+<div class="dash-metrics">
+  {% for kpi in self.kpis() %}
+  <div class="metric">
+    <div class="metric__label">
+      <i class="ti {{ kpi.icon }}" aria-hidden="true"></i>{{ self.t(kpi.label_key) }}
+    </div>
+    <div class="metric__value tnum">{{ kpi.value }}</div>
+  </div>
+  {% endfor %}
+</div>

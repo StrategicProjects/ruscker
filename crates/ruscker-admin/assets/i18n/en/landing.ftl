@@ -105,6 +105,11 @@ admin-pw-reveal = Show/hide password
 admin-nav-users = Users
 admin-users-title = User Management
 admin-users-subtitle = User creation and editing.
+admin-users-kpi-total = Total
+admin-users-kpi-admins = Admins
+admin-users-kpi-editors = Editors
+admin-users-kpi-viewers = Viewers
+admin-users-kpi-password-change = Password change pending
 admin-users-edit = Edit user
 admin-users-edit-title = Edit user
 admin-users-edit-subtitle = Update access and profile in one save.
@@ -221,6 +226,11 @@ admin-login-back-portal = ← public portal
 admin-specs-title = Application Management
 admin-specs-refresh = Refresh
 admin-specs-subtitle = Information and specifications for the application images
+admin-specs-kpi-total = Total
+admin-specs-kpi-active = Active
+admin-specs-kpi-archived = Archived
+admin-specs-kpi-public = Public
+admin-specs-kpi-restricted = Restricted
 admin-specs-empty = No apps yet. Use { $cmd } to import from a YAML.
 admin-specs-add = Add app
 admin-specs-col-id = ID
@@ -335,6 +345,9 @@ spec-form-error-stale = Someone else saved this app while you were editing. Revi
 
 # Admin image library
 admin-images-title = Media library
+admin-images-kpi-files = Files
+admin-images-kpi-in-use = In use
+admin-images-kpi-total-size = Total size
 admin-images-subtitle = Images used across the portal
 admin-images-formats-help = PNG, JPEG and WebP are converted to WebP. SVG passes through.
 admin-images-drop-here = Click to pick a file
@@ -361,6 +374,8 @@ admin-images-no-match = No images match your search.
 
 # Admin credentials
 admin-creds-title = Credential Management
+admin-creds-kpi-total = Total
+admin-creds-kpi-in-use = In use
 admin-creds-subtitle = Create credentials. They are encrypted at rest with AES-256-GCM and never appear in the YAML or in the panel after saving.
 admin-creds-form-title = Add / update credential
 admin-creds-name = Name
@@ -431,6 +446,8 @@ admin-landing-analytics-key-help = GA4 measurement id (G-XXXX), Plausible domain
 
 # Admin audit log
 admin-audit-title = Administrative Activity History
+admin-audit-kpi-events = Events
+admin-audit-kpi-users = Distinct users
 admin-audit-subtitle = Administrative activity, newest first. Capped at 100 events per query.
 admin-audit-family = Family
 admin-audit-family-all = All actions
@@ -875,6 +892,9 @@ admin-landing-show-highlights-help = Shows the carousel of featured apps above t
 # Groups page (#503, read-only)
 admin-nav-groups = Groups
 admin-groups-title = Group Management
+admin-groups-kpi-total = Groups
+admin-groups-kpi-members = Unique members
+admin-groups-kpi-apps = Apps covered
 admin-groups-subtitle = Create and edit the groups derived from apps and users.
 admin-groups-members = Members
 admin-groups-apps = Apps
@@ -964,6 +984,9 @@ admin-disk-flash-reclaimed = Space reclaimed (dangling images + build cache).
 # Schedules — cron jobs (#986 slice C)
 admin-nav-schedules = Schedules
 admin-schedules-title = Schedules
+admin-schedules-kpi-jobs = Jobs
+admin-schedules-kpi-active = Active
+admin-schedules-kpi-recent-failures = Recent failures
 admin-schedules-subtitle = Run an app's image to completion on a cron schedule (ETL, reports).
 admin-schedules-create = New schedule
 admin-schedules-spec = App
@@ -1047,6 +1070,9 @@ admin-users-mfa-reset-ok = 2FA and its recovery codes were reset.
 
 # User activity (#1021)
 admin-activity-title = User Activity
+admin-activity-kpi-logins = Logins
+admin-activity-kpi-app-accesses = App accesses
+admin-activity-kpi-users = Distinct users
 admin-activity-subtitle = Logins and app accesses, newest first.
 admin-activity-tab-users = User activity
 admin-activity-tab-admin = Administrative activity

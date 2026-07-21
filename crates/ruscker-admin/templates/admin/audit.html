@@ -14,6 +14,8 @@
     <div class="text-xs text-[color:var(--text-faint)]">{{ entries.len() }}</div>
   </div>
 
+  {% include "admin/_kpi_band.html" %}
+
   {# ── Sub-nav: users activity ⇄ administrative audit (#1021) ──── #}
   <div class="flex gap-1 mb-4">
     <a href="{{ base }}/admin/activity" class="admin-nav-link" style="width:auto">

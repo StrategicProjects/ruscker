@@ -105,6 +105,11 @@ admin-pw-reveal = Afficher/masquer le mot de passe
 admin-nav-users = Utilisateurs
 admin-users-title = Gestion des Utilisateurs
 admin-users-subtitle = Création et édition des utilisateurs.
+admin-users-kpi-total = Total
+admin-users-kpi-admins = Administrateurs
+admin-users-kpi-editors = Éditeurs
+admin-users-kpi-viewers = Lecteurs
+admin-users-kpi-password-change = Changement de mot de passe requis
 admin-users-edit = Modifier l’utilisateur
 admin-users-edit-title = Modifier l’utilisateur
 admin-users-edit-subtitle = Mettez à jour l’accès et le profil en un seul enregistrement.
@@ -221,6 +226,11 @@ admin-login-back-portal = ← portail public
 admin-specs-title = Gestion des Applications
 admin-specs-refresh = Actualiser
 admin-specs-subtitle = Informations et spécifications des images des applications
+admin-specs-kpi-total = Total
+admin-specs-kpi-active = Actives
+admin-specs-kpi-archived = Archivées
+admin-specs-kpi-public = Publiques
+admin-specs-kpi-restricted = Restreintes
 admin-specs-empty = Aucune application. Utilisez { $cmd } pour importer un YAML.
 admin-specs-add = Ajouter une application
 admin-specs-col-id = ID
@@ -335,6 +345,9 @@ spec-form-error-stale = Une autre personne a enregistré cette app pendant votre
 
 # Admin image library
 admin-images-title = Bibliothèque de médias
+admin-images-kpi-files = Fichiers
+admin-images-kpi-in-use = Utilisés
+admin-images-kpi-total-size = Taille totale
 admin-images-subtitle = Images utilisées par le portail
 admin-images-formats-help = PNG, JPEG et WebP sont convertis en WebP. Le SVG passe tel quel.
 admin-images-drop-here = Cliquez pour choisir un fichier
@@ -361,6 +374,8 @@ admin-images-no-match = Aucune image ne correspond à la recherche.
 
 # Admin credentials
 admin-creds-title = Gestion des Identifiants
+admin-creds-kpi-total = Total
+admin-creds-kpi-in-use = Utilisés
 admin-creds-subtitle = Création d'identifiants. Ils sont chiffrés au repos avec AES-256-GCM et n'apparaissent jamais dans le YAML ni dans le panneau après sauvegarde.
 admin-creds-form-title = Ajouter / mettre à jour
 admin-creds-name = Nom
@@ -431,6 +446,8 @@ admin-landing-analytics-key-help = ID de mesure GA4 (G-XXXX), domaine Plausible,
 
 # Admin audit log
 admin-audit-title = Historique des Activités Administratives
+admin-audit-kpi-events = Événements
+admin-audit-kpi-users = Utilisateurs distincts
 admin-audit-subtitle = Visualisation des activités administratives, de la plus récente à la plus ancienne. Limité à 100 événements par requête.
 admin-audit-family = Famille
 admin-audit-family-all = Toutes les actions
@@ -875,6 +892,9 @@ admin-landing-show-highlights-help = Affiche le carrousel des apps en avant au-d
 # Groups page (#503, read-only)
 admin-nav-groups = Groupes
 admin-groups-title = Gestion des Groupes
+admin-groups-kpi-total = Groupes
+admin-groups-kpi-members = Membres uniques
+admin-groups-kpi-apps = Applications couvertes
 admin-groups-subtitle = Création et édition des groupes dérivés des apps et des utilisateurs.
 admin-groups-members = Membres
 admin-groups-apps = Apps
@@ -964,6 +984,9 @@ admin-disk-flash-reclaimed = Espace récupéré (images dangling + cache de buil
 # Planifications — cron jobs (#986 tranche C)
 admin-nav-schedules = Planifications
 admin-schedules-title = Planifications
+admin-schedules-kpi-jobs = Tâches
+admin-schedules-kpi-active = Actives
+admin-schedules-kpi-recent-failures = Échecs récents
 admin-schedules-subtitle = Exécute l'image d'une app jusqu'au bout selon un horaire cron (ETL, rapports).
 admin-schedules-create = Nouvelle planification
 admin-schedules-spec = App
@@ -1047,6 +1070,9 @@ admin-users-mfa-reset-ok = La 2FA et ses codes de récupération ont été réin
 
 # User activity (#1021)
 admin-activity-title = Activité des Utilisateurs
+admin-activity-kpi-logins = Connexions
+admin-activity-kpi-app-accesses = Accès aux applications
+admin-activity-kpi-users = Utilisateurs distincts
 admin-activity-subtitle = Connexions et accès aux applications, du plus récent au plus ancien.
 admin-activity-tab-users = Activité des utilisateurs
 admin-activity-tab-admin = Activité administrative

@@ -39,6 +39,26 @@ pub mod specs;
 pub mod system;
 pub mod users;
 
+/// One item in the shared KPI band used at the top of admin pages (#1032).
+/// Pages calculate their own cheap aggregates and expose them through a
+/// `kpis()` method consumed by `admin/_kpi_band.html`.
+#[derive(Clone)]
+struct KpiMetric {
+    icon: &'static str,
+    label_key: &'static str,
+    value: String,
+}
+
+impl KpiMetric {
+    fn new(icon: &'static str, label_key: &'static str, value: impl ToString) -> Self {
+        Self {
+            icon,
+            label_key,
+            value: value.to_string(),
+        }
+    }
+}
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin", get(redirect_to_dashboard))

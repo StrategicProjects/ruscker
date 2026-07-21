@@ -38,6 +38,16 @@ pub struct UserRow {
     pub celular: Option<String>,
 }
 
+/// Global user-account counts shown in the admin KPI band (#1032).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserCounts {
+    pub total: i64,
+    pub admins: i64,
+    pub editors: i64,
+    pub viewers: i64,
+    pub must_change_password: i64,
+}
+
 /// Normalize a username for storage/lookup: trimmed + lowercased.
 /// Usernames are case-insensitive and unique.
 pub fn normalize_username(raw: &str) -> String {
@@ -111,6 +121,30 @@ pub async fn count_admins(db: &ConfigDb) -> Result<i64> {
     }
     .context("count admins")?;
     Ok(n)
+}
+
+/// Count all roles and pending first-password changes in one query.
+/// This stays global even while the users table is searched or paginated.
+pub async fn counts(db: &ConfigDb) -> Result<UserCounts> {
+    let sql = "SELECT COUNT(*),
+                      COUNT(CASE WHEN role = 'admin' THEN 1 END),
+                      COUNT(CASE WHEN role = 'editor' THEN 1 END),
+                      COUNT(CASE WHEN role = 'viewer' THEN 1 END),
+                      COUNT(CASE WHEN must_change_password = TRUE THEN 1 END)
+                 FROM users";
+    let (total, admins, editors, viewers, must_change_password): (i64, i64, i64, i64, i64) =
+        match db {
+            ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_one(pool).await,
+            ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_one(pool).await,
+        }
+        .context("count users by role")?;
+    Ok(UserCounts {
+        total,
+        admins,
+        editors,
+        viewers,
+        must_change_password,
+    })
 }
 
 /// Whether any admin account exists yet. Drives the bootstrap flow:
@@ -1352,7 +1386,20 @@ mod tests {
         create(&p, "ed", "pw", Role::Editor, false, &[], None)
             .await
             .unwrap();
+        create(&p, "viewer", "pw", Role::Viewer, true, &[], None)
+            .await
+            .unwrap();
         assert_eq!(count_admins(&p).await.unwrap(), 1);
+        assert_eq!(
+            counts(&p).await.unwrap(),
+            UserCounts {
+                total: 3,
+                admins: 1,
+                editors: 1,
+                viewers: 1,
+                must_change_password: 1,
+            }
+        );
         assert!(any_admin_exists(&p).await.unwrap());
         // Promote editor → admin.
         set_role(&p, "ed", Role::Admin, Some("root")).await.unwrap();

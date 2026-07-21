@@ -44,7 +44,7 @@ use ruscker_core::{
     ReplicaLivenessReport, ReplicaState,
 };
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
@@ -553,13 +553,16 @@ async fn reconcile_backend_liveness(
     report: ReplicaLivenessReport,
     now: chrono::DateTime<chrono::Utc>,
 ) {
-    let observations: HashMap<ReplicaId, ReplicaLiveness> = report
-        .observations
+    let ReplicaLivenessReport {
+        observations,
+        running,
+        managed,
+    } = report;
+    let observations: HashMap<ReplicaId, ReplicaLiveness> = observations
         .into_iter()
         .map(|observation| (observation.replica_id, observation.liveness))
         .collect();
-    let mut running: HashMap<ReplicaId, Replica> = report
-        .running
+    let mut running: HashMap<ReplicaId, Replica> = running
         .into_iter()
         .map(|replica| (replica.id.clone(), replica))
         .collect();
@@ -620,6 +623,49 @@ async fn reconcile_backend_liveness(
             continue;
         }
         readopt_running_replica(state, backend, spec, discovered).await;
+    }
+
+    // Stopped containers that are no longer in the registry cannot appear in
+    // `running`, so without this pass they survive forever. Keep both the
+    // snapshot and current registry protected (a concurrent reconcile may
+    // have changed it), and only reap containers whose Docker FinishedAt is
+    // beyond the same grace used for an external restart.
+    let mut registered_containers: HashSet<String> = registry_snap
+        .iter()
+        .map(|replica| replica.container_id.clone())
+        .collect();
+    registered_containers.extend(
+        state
+            .replicas
+            .read()
+            .await
+            .all()
+            .map(|replica| replica.container_id.clone()),
+    );
+    let restart_grace = chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS);
+    for container in managed {
+        if container.running || registered_containers.contains(&container.id) {
+            continue;
+        }
+        let Some(finished_at) = container.finished_at else {
+            continue;
+        };
+        if now.signed_duration_since(finished_at) < restart_grace {
+            continue;
+        }
+        match backend.remove_container(&container.id).await {
+            Ok(()) => info!(
+                container = %container.id,
+                spec = ?container.spec_id,
+                "removed stopped orphan after restart grace"
+            ),
+            Err(error) => warn!(
+                container = %container.id,
+                spec = ?container.spec_id,
+                error = %error,
+                "failed to remove stopped orphan after restart grace"
+            ),
+        }
     }
 }
 
@@ -2991,6 +3037,7 @@ proxy:
                 spec_id: Some("shiny".into()),
                 status: if running { "Up 1s".into() } else { "Exited (0)".into() },
                 running,
+                finished_at: None,
             }
         }
         let alive = rep("c-alive");
@@ -3007,6 +3054,7 @@ proxy:
         reports: std::sync::Mutex<std::collections::VecDeque<ReplicaLivenessReport>>,
         spawns: AtomicU32,
         readiness_checks: AtomicU32,
+        removed_containers: std::sync::Mutex<Vec<String>>,
     }
 
     impl ScriptedLivenessBackend {
@@ -3015,6 +3063,7 @@ proxy:
                 reports: std::sync::Mutex::new(reports.into()),
                 spawns: AtomicU32::new(0),
                 readiness_checks: AtomicU32::new(0),
+                removed_containers: std::sync::Mutex::new(Vec::new()),
             }
         }
     }
@@ -3062,6 +3111,11 @@ proxy:
             self.readiness_checks.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
+
+        async fn remove_container(&self, container_id: &str) -> CoreResult<()> {
+            self.removed_containers.lock().unwrap().push(container_id.into());
+            Ok(())
+        }
     }
 
     fn one_liveness(
@@ -3075,7 +3129,72 @@ proxy:
                 liveness,
             }],
             running,
+            managed: Vec::new(),
         }
+    }
+
+    /// #1031: an exited managed container can already be absent from the
+    /// registry (for example after its replacement was spawned). The liveness
+    /// inventory must reap that orphan after the restart grace, while keeping
+    /// both a recent orphan and a registered stopped replica intact.
+    #[tokio::test]
+    async fn stopped_orphan_is_removed_only_after_restart_grace() {
+        use ruscker_core::{ManagedContainer, ReplicaLivenessObservation};
+
+        let now = chrono::Utc::now();
+        let registered = Replica {
+            container_id: "registered-stopped".into(),
+            state: ReplicaState::Stopped,
+            started_at: now,
+            ..fake_replica("app")
+        };
+        let stopped = |id: &str, finished_at| ManagedContainer {
+            id: id.into(),
+            name: id.into(),
+            image: "img".into(),
+            spec_id: Some("app".into()),
+            status: "Exited (137)".into(),
+            running: false,
+            finished_at,
+        };
+        let report = ReplicaLivenessReport {
+            observations: vec![ReplicaLivenessObservation {
+                replica_id: registered.id.clone(),
+                liveness: ReplicaLiveness::Stopped,
+            }],
+            running: Vec::new(),
+            managed: vec![
+                stopped(
+                    "old-orphan",
+                    Some(now - chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS + 1)),
+                ),
+                stopped("recent-orphan", Some(now)),
+                stopped("unknown-age-orphan", None),
+                stopped(
+                    "registered-stopped",
+                    Some(now - chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS + 1)),
+                ),
+            ],
+        };
+        let backend = Arc::new(ScriptedLivenessBackend::new(vec![report]));
+        let state = state_with_yaml(
+            "proxy:\n  specs:\n    - id: app\n      container-image: t:1\n      min-replicas: 0\n",
+            backend.clone(),
+        );
+        state.replicas.write().await.add(registered.clone());
+
+        reconcile_liveness_once(&state).await;
+
+        assert_eq!(
+            backend.removed_containers.lock().unwrap().as_slice(),
+            ["old-orphan"],
+            "only an unregistered stopped container older than the grace is removable"
+        );
+        assert_eq!(
+            state.replicas.read().await.replicas_of("app")[0].id,
+            registered.id,
+            "the registered stopped replica remains protected during its restart grace"
+        );
     }
 
     #[tokio::test]
@@ -3345,6 +3464,10 @@ proxy:
                     spec_id: Some("app".into()),
                     status: "Exited (137) 2 seconds ago".into(),
                     running: false,
+                    finished_at: Some(
+                        chrono::Utc::now()
+                            - chrono::Duration::seconds(EXTERNAL_RESTART_GRACE_SECS + 1),
+                    ),
                 }])
             }
             async fn replica_liveness(
@@ -3360,6 +3483,7 @@ proxy:
                         })
                         .collect(),
                     running: Vec::new(),
+                    managed: Vec::new(),
                 })
             }
         }

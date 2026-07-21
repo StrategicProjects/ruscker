@@ -656,6 +656,9 @@ pub struct ManagedContainer {
     pub status: String,
     /// Whether the container is currently running.
     pub running: bool,
+    /// When Docker last observed the container exit. `None` for running
+    /// containers or when the backend cannot determine it safely.
+    pub finished_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// What an authoritative backend inventory says about one known replica.
@@ -697,6 +700,9 @@ pub struct ReplicaLivenessObservation {
 pub struct ReplicaLivenessReport {
     pub observations: Vec<ReplicaLivenessObservation>,
     pub running: Vec<Replica>,
+    /// All Ruscker-managed containers in the same authoritative inventory,
+    /// including stopped ones that may no longer exist in the registry.
+    pub managed: Vec<ManagedContainer>,
 }
 
 impl ReplicaLivenessReport {
@@ -710,6 +716,7 @@ impl ReplicaLivenessReport {
                 })
                 .collect(),
             running: Vec::new(),
+            managed: Vec::new(),
         }
     }
 }

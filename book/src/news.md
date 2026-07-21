@@ -9,6 +9,39 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.48 — 2026-07-21
+
+- **A consistent KPI band across the admin.** Every management screen now
+  opens with the same at-a-glance metric strip already used on the
+  dashboard, so counts are where you expect them. Applications (total /
+  active / archived / public / restricted), Users (total / admins /
+  editors / viewers / password-change pending), Groups, Credentials,
+  Media, the audit and activity logs, and Schedules each lead with their
+  own headline numbers.
+- **Self-healing keeps the host tidy: stopped orphan containers are now
+  reaped.** A managed container that exits outside Ruscker's control — an
+  external `kill`, an out-of-memory stop, or an old replica replaced by a
+  fresh one — used to linger as a stopped shell until someone pressed
+  *Remove stopped* on the Disk panel. The reconcile loop now sweeps
+  those orphans and removes them automatically once they are past the
+  restart grace window, using Docker's own `FinishedAt` timestamp. Only
+  Ruscker-managed containers are ever touched; a container still tracked
+  in the registry, still within the grace window, or of unknown age is
+  always left alone.
+- **Per-app container startup timeout.** The `container-wait-time`
+  readiness budget can now be set per application (advanced form, beside
+  the heartbeat timeout) instead of only globally under `proxy`. Slow-
+  starting apps get a larger startup budget without loosening the
+  feedback for everything else; blank or `0` inherits the global value.
+- **Admin polish.** On the Disk panel the **Volumes** card now sits above
+  the images/containers pair. The **Groups** cards flow freely (masonry)
+  with a capped, scrollable member/app list, so a group with many members
+  no longer balloons while its neighbours sit half-empty. The user
+  creation form no longer nudges the *Initial password* field out of
+  alignment with the rest of the row.
+
+---
+
 ## v0.2.47 — 2026-07-20
 
 - **User activity: see who logged in and who opened which app.** A new

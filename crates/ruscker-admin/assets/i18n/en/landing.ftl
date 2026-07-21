@@ -919,6 +919,8 @@ admin-groups-flash-bad-input = Invalid input (empty name or unknown user).
 admin-groups-empty = No groups yet. Groups appear when you set access-groups on an app or groups on a user.
 admin-groups-no-members = No members
 admin-groups-no-apps = No app restricted to this group
+admin-groups-show-all = Show all
+admin-groups-show-less = Show less
 
 highlights-prev = Previous
 highlights-next = Next

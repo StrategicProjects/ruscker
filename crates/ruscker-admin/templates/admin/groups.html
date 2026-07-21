@@ -81,12 +81,12 @@
           <button type="submit" class="group-action group-action-del" title="{{ self.t("admin-groups-delete") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
         </form>
       </div>
-      <div class="group-col">
+      <div class="group-col"{% if g.members.len() > 8 %} x-data="{ open: false }"{% endif %}>
         <div class="group-col-title">{{ self.t("admin-groups-members") }} · {{ g.members.len() }}</div>
         {% if g.members.is_empty() %}
           <span class="group-empty">{{ self.t("admin-groups-no-members") }}</span>
         {% else %}
-          <div class="group-pills">
+          <div class="group-pills"{% if g.members.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
             {% for m in g.members %}
             <span class="group-pill">
               <i class="ti ti-user" aria-hidden="true"></i> {{ m }}
@@ -99,6 +99,15 @@
             </span>
             {% endfor %}
           </div>
+          {# Long lists collapse to a ~3-row preview; the label lives in
+             data-* (never inside the Alpine expression) so a translated
+             string can't break the handler. #}
+          {% if g.members.len() > 8 %}
+          <button type="button" class="group-more" @click="open = !open"
+                  data-more="{{ self.t("admin-groups-show-all") }} ({{ g.members.len() }})"
+                  data-less="{{ self.t("admin-groups-show-less") }}"
+                  x-text="open ? $el.dataset.less : $el.dataset.more">{{ self.t("admin-groups-show-all") }} ({{ g.members.len() }})</button>
+          {% endif %}
         {% endif %}
         {% if !all_users.is_empty() %}
         <form method="post" action="{{ base }}/admin/groups/members/add" class="group-add-member">
@@ -111,14 +120,20 @@
         </form>
         {% endif %}
       </div>
-      <div class="group-col">
+      <div class="group-col"{% if g.apps.len() > 8 %} x-data="{ open: false }"{% endif %}>
         <div class="group-col-title">{{ self.t("admin-groups-apps") }} · {{ g.apps.len() }}</div>
         {% if g.apps.is_empty() %}
           <span class="group-empty">{{ self.t("admin-groups-no-apps") }}</span>
         {% else %}
-          <div class="group-pills">
+          <div class="group-pills"{% if g.apps.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
             {% for a in g.apps %}<a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="group-pill"><i class="ti ti-app-window" aria-hidden="true"></i> {{ a.name }}</a>{% endfor %}
           </div>
+          {% if g.apps.len() > 8 %}
+          <button type="button" class="group-more" @click="open = !open"
+                  data-more="{{ self.t("admin-groups-show-all") }} ({{ g.apps.len() }})"
+                  data-less="{{ self.t("admin-groups-show-less") }}"
+                  x-text="open ? $el.dataset.less : $el.dataset.more">{{ self.t("admin-groups-show-all") }} ({{ g.apps.len() }})</button>
+          {% endif %}
         {% endif %}
       </div>
     </section>

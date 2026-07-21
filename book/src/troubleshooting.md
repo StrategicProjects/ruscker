@@ -23,6 +23,25 @@ the spec form.
   from **Credentials**, or `docker-registry-username` plus an env-backed
   `docker-registry-password: ${DOCKER_REGISTRY_PASSWORD}`.
 
+## I removed or restarted a container with the Docker CLI
+
+Ruscker self-heals. If you `docker rm -f` a managed container, or
+`docker restart` it directly, Ruscker notices and reconciles on its own:
+
+- a **removed** container is pruned from the registry, its stale sticky
+  binding dropped, and a replacement is brought up (a browser visit lands on
+  the "Starting…" splash instead of a persistent `upstream error`);
+- a **restarted** container is re-adopted into the pool once it's serving
+  again, without a duplicate being spawned.
+
+A Docker events watcher makes this happen within about a second; the periodic
+reconcile (~10 s) is the fallback. You may still see a brief `502` in the
+window between the container going away and Ruscker reacting — retry and it
+recovers. If it *doesn't* recover, the container is genuinely unreachable
+(check `docker ps` and its logs). Recovery only acts on an authoritative
+"gone" signal, so an app returning its own `5xx` or a momentary Docker daemon
+hiccup never causes Ruscker to drop a healthy replica.
+
 ## 2FA enrolment returns `503`
 
 `RUSCKER_MASTER_KEY` is missing (or an existing MFA secret cannot be

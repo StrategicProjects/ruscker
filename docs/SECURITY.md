@@ -84,6 +84,13 @@ Status: living document. Tracks the Phase 5 security audit
 - **[implemented]** Operational replica actions are audited (#745) —
   dashboard stop/restart write `replica.stop`/`replica.restart` rows
   (with the acting user) to the same `audit_log` config mutations use.
+- **[implemented]** User activity is recorded (#1021) — a `user_activity`
+  table logs successful password logins and new interactive app sessions
+  (username or "anonymous", app id, timestamp) for the Admin-only Activity
+  page. It is **data minimizing by default**: the client IP is not stored,
+  API calls are not logged per-request (only the aggregate counter), and the
+  table has no foreign keys so deleting a user or app is not blocked by it.
+  Read access is Admin-only.
 - **[implemented]** HA admin-session cache is bounded (#738) — the
   Postgres-backed session store caches a negative entry per looked-up
   session id (anti-hammer); an amortized sweep now evicts expired

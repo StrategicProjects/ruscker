@@ -413,10 +413,32 @@ volume, no container references it, and no effective catalog spec names it;
 the server rechecks all three conditions before asking Docker to remove it.
 
 ### Activity
-Every admin mutation (spec/image/credential/landing/block changes,
-imports) is recorded with actor, action, target and timestamp. Destructive
-**replica stop/restart**, schedule changes, MFA enrolment/reset/proof, and
-break-glass MFA bypasses are recorded too.
+The Activity section holds two tables, switched by a pill toggle at the top
+of the page.
+
+**Atividades dos usuários (user activity)** lists who signed in and who
+opened which app:
+
+- a **login** is recorded when a user signs in with a password;
+- an **app access** is recorded once per new interactive app session — a
+  genuine visit, never counted for a page's assets, XHR calls or WebSocket
+  frames, and API calls keep only their aggregate access counter. An access
+  with no signed-in user shows as **Anonymous**.
+
+Filter by event kind, user, app, and time window (last 24 h / 7 / 30 days),
+with server-side pagination for a long history. The history carries no
+foreign keys to users or apps, so removing a user or an app doesn't erase
+the record of past activity. Events are captured off the proxy's hot path —
+a non-blocking enqueue plus a background writer that batches inserts — so
+activity logging never slows a request. The client IP is **not** stored in
+this release (it's personal data; a future opt-in would come with a
+retention policy).
+
+**Atividades administrativas (administrative audit)** records every admin
+mutation (spec/image/credential/landing/block changes, imports) with actor,
+action, target and timestamp. Destructive **replica stop/restart**, schedule
+changes, MFA enrolment/reset/proof, and break-glass MFA bypasses are recorded
+too; rows with a change diff expand to show it.
 
 ### System
 

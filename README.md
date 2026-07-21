@@ -96,12 +96,25 @@ What's in the box:
   rewriting so unmodified Shiny/Streamlit apps work behind a sub-path.
 - **Container backend** (Docker) that spawns app containers on demand,
   applies per-container CPU/memory limits, and reaps idle ones.
+- **Self-healing on external Docker changes** — if an operator removes or
+  restarts a managed container directly with the Docker CLI, Ruscker
+  reconciles authoritatively: a removed container (`docker rm -f`) is pruned,
+  its stale sticky binding dropped, and a replacement brought up; a
+  restarted container is re-adopted once it's serving again, with no
+  duplicate spawned. A Docker events watcher makes this near-instant instead
+  of waiting for the periodic reconcile, and a request that hits a
+  just-removed upstream recovers on the spot. Recovery acts only on an
+  authoritative "gone" signal, so an app's own `5xx`, a transient daemon
+  error, or an unreachable host in a multi-host deployment never drops a
+  live replica.
 - **Admin panel** — full apps CRUD (including API, scaling, resource and
   lifecycle settings), Media, encrypted Credentials, a live-preview
   Appearance editor, **Viewer / Editor / Admin** accounts with a password
   policy and generator, consolidated per-user editing, server-side
   pagination (50 per page) with case-insensitive search (accented letters
-  included) across usernames, groups and profiles, and an **Activity** history.
+  included) across usernames, groups and profiles, and an **Activity** section
+  with two tables — **user activity** (logins and interactive app accesses,
+  filterable and paginated) alongside the **administrative audit** trail.
 - **Containers dashboard** — CPU/memory sparklines, live-follow logs and
   stop/restart controls, refreshed every five seconds by polling
   `GET /admin/dashboard/snapshot`.

@@ -199,6 +199,12 @@ pub struct SpawnRequest {
     /// collision. Empty ⇒ only the internal labels.
     pub labels: Vec<(String, String)>,
 
+    /// Per-spawn readiness budget in milliseconds. `None` (and zero via
+    /// [`Self::with_readiness_timeout_ms`]) means the backend's configured
+    /// default, normally `proxy.container-wait-time`. Regular replica
+    /// spawns consume it; run-to-completion jobs ignore it.
+    pub readiness_timeout_ms: Option<u64>,
+
     /// Wall-clock cap, in seconds, for a run-to-completion job (#986
     /// slice C). Only [`ContainerBackend::run_job`] consumes it — a
     /// regular replica spawn ignores the field entirely. `None` ⇒ the
@@ -222,6 +228,7 @@ impl SpawnRequest {
             cmd: None,
             network: None,
             labels: Vec::new(),
+            readiness_timeout_ms: None,
             job_timeout_secs: None,
         }
     }
@@ -272,6 +279,14 @@ impl SpawnRequest {
 
     pub fn with_labels(mut self, labels: Vec<(String, String)>) -> Self {
         self.labels = labels;
+        self
+    }
+
+    /// Override the readiness budget for this spawn. Zero is normalized to
+    /// `None`, preserving the configuration contract that `0` inherits the
+    /// backend/global default rather than failing the spawn immediately.
+    pub fn with_readiness_timeout_ms(mut self, millis: u64) -> Self {
+        self.readiness_timeout_ms = (millis > 0).then_some(millis);
         self
     }
 
@@ -463,6 +478,19 @@ pub trait ContainerBackend: Send + Sync {
         Err(CoreError::Backend(
             "readiness checks are not supported by this backend".into(),
         ))
+    }
+
+    /// Wait for a running replica using an optional per-spec readiness
+    /// budget. The default delegates to [`Self::wait_until_ready`] so
+    /// existing/mock backends remain source-compatible and may ignore the
+    /// override. Backends that support per-spawn readiness should override
+    /// this method.
+    async fn wait_until_ready_with_timeout(
+        &self,
+        replica: &Replica,
+        _readiness_timeout_ms: Option<u64>,
+    ) -> CoreResult<()> {
+        self.wait_until_ready(replica).await
     }
 
     /// Image refs (name/tag AND sha id) of **every** container on the
@@ -954,6 +982,19 @@ mod registry_tests {
         assert!(SpawnRequest::new("a", "img").job_timeout_secs.is_none());
         let req = SpawnRequest::new("etl", "img").with_job_timeout(600);
         assert_eq!(req.job_timeout_secs, Some(600));
+    }
+
+    #[test]
+    fn spawn_request_carries_readiness_timeout_and_zero_inherits() {
+        assert!(SpawnRequest::new("a", "img")
+            .readiness_timeout_ms
+            .is_none());
+        assert!(SpawnRequest::new("a", "img")
+            .with_readiness_timeout_ms(0)
+            .readiness_timeout_ms
+            .is_none());
+        let req = SpawnRequest::new("slow", "img").with_readiness_timeout_ms(120_000);
+        assert_eq!(req.readiness_timeout_ms, Some(120_000));
     }
 
     #[test]

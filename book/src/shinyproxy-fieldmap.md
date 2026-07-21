@@ -140,6 +140,7 @@ is fully accounted for. Details in the
 `scale-down-threshold` / `scale-down-grace` / `scale-down-cooldown-secs`,
 `drain-timeout`, `routing-strategy`,
 `concurrent-requests-per-replica`, `container-lifetime`, `platform`,
+per-spec `container-wait-time` (the ShinyProxy counterpart is global-only),
 `inject-base-href`, `max-body-size` (global + per-spec),
 `docker-registry-credential`, `placement` / `anti-affinity`, the
 `api.*` block (`docs-path`, `health-path`, `rate-limit`, `cors`),

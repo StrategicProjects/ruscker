@@ -510,7 +510,10 @@ async fn readopt_running_replica(
         return;
     }
 
-    if let Err(error) = backend.wait_until_ready(&replica).await {
+    if let Err(error) = backend
+        .wait_until_ready_with_timeout(&replica, spec.container_wait_time)
+        .await
+    {
         warn!(
             spec = %spec.id,
             replica = %replica.id,
@@ -1299,6 +1302,9 @@ async fn spawn_one(
         .with_env(env)
         .with_placement(spec.effective_placement())
         .with_anti_affinity(spec.effective_anti_affinity());
+    if let Some(millis) = spec.container_wait_time {
+        req = req.with_readiness_timeout_ms(millis);
+    }
     if let Some(port) = inner_port {
         req = req.with_port(port);
     }

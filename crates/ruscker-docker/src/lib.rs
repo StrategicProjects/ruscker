@@ -162,6 +162,15 @@ impl LocalDockerBackend {
         self
     }
 
+    /// Resolve a request/spec override against the backend-wide default.
+    /// Zero deliberately inherits, matching `proxy.container-wait-time`.
+    fn effective_readiness_timeout(&self, override_ms: Option<u64>) -> Duration {
+        override_ms
+            .filter(|millis| *millis > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(self.readiness_timeout)
+    }
+
     /// Spawn a container for `spec_id` with the explicit inner
     /// port to bind. Use this when the spec carries an
     /// `api.port`; otherwise [`Self::spawn`] uses
@@ -330,7 +339,8 @@ impl LocalDockerBackend {
             // 5. Wait for the container's process to bind that port. Passes
             //    the backend + container id so a startup crash fails fast and
             //    the error carries the container's log tail (#550).
-            wait_for_ready(self, &container_id, upstream).await?;
+            let budget = self.effective_readiness_timeout(req.readiness_timeout_ms);
+            wait_for_ready(self, &container_id, upstream, budget).await?;
             Ok::<SocketAddr, CoreError>(upstream)
         }
         .await;
@@ -937,7 +947,22 @@ impl ContainerBackend for LocalDockerBackend {
     }
 
     async fn wait_until_ready(&self, replica: &Replica) -> CoreResult<()> {
-        wait_for_ready(self, &replica.container_id, replica.upstream).await
+        wait_for_ready(
+            self,
+            &replica.container_id,
+            replica.upstream,
+            self.readiness_timeout,
+        )
+        .await
+    }
+
+    async fn wait_until_ready_with_timeout(
+        &self,
+        replica: &Replica,
+        readiness_timeout_ms: Option<u64>,
+    ) -> CoreResult<()> {
+        let budget = self.effective_readiness_timeout(readiness_timeout_ms);
+        wait_for_ready(self, &replica.container_id, replica.upstream, budget).await
     }
 
     async fn container_events(&self) -> CoreResult<ruscker_core::ContainerEventStream> {
@@ -1608,8 +1633,8 @@ async fn wait_for_ready(
     backend: &LocalDockerBackend,
     container_id: &str,
     addr: SocketAddr,
+    budget: Duration,
 ) -> CoreResult<()> {
-    let budget = backend.readiness_timeout;
     let deadline = std::time::Instant::now() + budget;
 
     // Phase 1: TCP connect.
@@ -1954,7 +1979,12 @@ mod tests {
         let backend = backend.with_readiness_timeout(Duration::from_millis(300));
         let addr: SocketAddr = "127.0.0.1:1".parse().unwrap();
         let started = std::time::Instant::now();
-        let err = wait_for_ready(&backend, "no-such-container", addr)
+        let err = wait_for_ready(
+            &backend,
+            "no-such-container",
+            addr,
+            backend.readiness_timeout,
+        )
             .await
             .expect_err("nothing listens on port 1");
         assert!(
@@ -1975,6 +2005,26 @@ mod tests {
         };
         let backend = backend.with_readiness_timeout(Duration::ZERO);
         assert_eq!(backend.readiness_timeout, READINESS_TIMEOUT);
+    }
+
+    #[test]
+    fn per_spawn_readiness_timeout_overrides_and_zero_inherits() {
+        let Ok(backend) = LocalDockerBackend::local() else {
+            return;
+        };
+        let backend = backend.with_readiness_timeout(Duration::from_secs(17));
+        assert_eq!(
+            backend.effective_readiness_timeout(Some(120_000)),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            backend.effective_readiness_timeout(Some(0)),
+            Duration::from_secs(17)
+        );
+        assert_eq!(
+            backend.effective_readiness_timeout(None),
+            Duration::from_secs(17)
+        );
     }
 
     #[test]

@@ -813,6 +813,12 @@ pub struct Spec {
     #[serde(rename = "heartbeat-timeout")]
     pub heartbeat_timeout: Option<i64>,
 
+    /// Per-spec readiness timeout override in milliseconds. `None` or
+    /// zero inherits `proxy.container-wait-time`. Ruscker extension —
+    /// ShinyProxy only exposes this setting at `proxy.*` level.
+    #[serde(rename = "container-wait-time")]
+    pub container_wait_time: Option<u64>,
+
     /// Whether the container should be stopped when its last user logs
     /// out. Only meaningful when authentication is enabled.
     #[serde(rename = "stop-on-logout")]
@@ -2099,6 +2105,7 @@ proxy:
             max_lifetime: None,
             container_lifetime: None,
             heartbeat_timeout: None,
+            container_wait_time: None,
             stop_on_logout: None,
             docker_registry_username: None,
             docker_registry_password: None,
@@ -2154,6 +2161,7 @@ proxy:
             max_lifetime: None,
             container_lifetime: None,
             heartbeat_timeout: None,
+            container_wait_time: None,
             stop_on_logout: None,
             docker_registry_username: None,
             docker_registry_password: None,
@@ -2209,6 +2217,7 @@ proxy:
             max_lifetime: None,
             container_lifetime: None,
             heartbeat_timeout: None,
+            container_wait_time: None,
             stop_on_logout: None,
             docker_registry_username: None,
             docker_registry_password: None,
@@ -2256,6 +2265,19 @@ proxy:
 
     fn parse_spec(yaml: &str) -> Spec {
         serde_yaml_ng::from_str(yaml).expect("parse spec")
+    }
+
+    #[test]
+    fn parses_per_spec_container_wait_time() {
+        let spec = parse_spec(
+            "id: slow\ncontainer-image: example/slow\ncontainer-wait-time: 120000\n",
+        );
+        assert_eq!(spec.container_wait_time, Some(120_000));
+
+        let inherited = parse_spec(
+            "id: inherited\ncontainer-image: example/app\ncontainer-wait-time: 0\n",
+        );
+        assert_eq!(inherited.container_wait_time, Some(0));
     }
 
     #[test]

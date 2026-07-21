@@ -559,6 +559,7 @@ spec-form-concurrent = Requisições por réplica
 spec-form-cpu-limit = Limite de CPU
 spec-form-memory-limit = Limite de memória
 spec-form-heartbeat = Timeout de heartbeat (ms)
+spec-form-container-wait = Timeout de subida do container (ms)
 spec-help-kind = Que tipo de coisa é. Define o roteamento, o selo do card e se um container é iniciado.
 spec-help-id = Identificador estável usado na URL (/app/<id>). Minúsculas, dígitos, "-" e "_"; não pode mudar após criado.
 spec-help-name = O título exibido no card da landing.
@@ -583,6 +584,7 @@ spec-help-concurrent = Requisições que uma réplica de API atende antes do sca
 spec-help-cpu-limit = CPU máxima em núcleos fracionários (ex.: 0,5 = meio núcleo). Vazio = ilimitado.
 spec-help-memory-limit = Memória máxima, ex.: 512m ou 1.5g. Vazio = ilimitado.
 spec-help-heartbeat = Timeout de sessão ociosa em milissegundos; -1 nunca expira. Vazio = usa o padrão global.
+spec-help-container-wait = Tempo máximo para este app responder TCP e HTTP durante a subida. Vazio ou 0 = usa o container-wait-time global.
 admin-blocks-slot-empty = Nenhum bloco neste slot ainda.
 admin-blocks-drag-hint = Arraste pela alça para reordenar os blocos dentro do slot.
 spec-form-volumes-section = Volumes

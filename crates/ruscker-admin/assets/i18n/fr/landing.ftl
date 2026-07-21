@@ -555,6 +555,7 @@ spec-form-concurrent = Requêtes par réplica
 spec-form-cpu-limit = Limite CPU
 spec-form-memory-limit = Limite mémoire
 spec-form-heartbeat = Délai de heartbeat (ms)
+spec-form-container-wait = Délai de démarrage du conteneur (ms)
 spec-help-kind = Le type d'élément. Détermine le routage, le badge de la carte et si un conteneur est démarré.
 spec-help-id = Identifiant stable utilisé dans l'URL (/app/<id>). Minuscules, chiffres, « - » et « _ » ; non modifiable après création.
 spec-help-name = Le titre affiché sur la carte.
@@ -579,6 +580,7 @@ spec-help-concurrent = Requêtes qu'une réplica d'API gère avant que le scaler
 spec-help-cpu-limit = CPU max en cœurs fractionnaires (ex. 0,5 = un demi-cœur). Vide = illimité.
 spec-help-memory-limit = Mémoire max, ex. 512m ou 1.5g. Vide = illimité.
 spec-help-heartbeat = Délai de session inactive en millisecondes ; -1 = jamais. Vide = valeur globale.
+spec-help-container-wait = Temps maximal pour que cette app réponde en TCP et HTTP au démarrage. Vide ou 0 = utilise le container-wait-time global.
 admin-blocks-slot-empty = Aucun bloc dans cet emplacement.
 admin-blocks-drag-hint = Glissez par la poignée pour réordonner les blocs dans un emplacement.
 spec-form-volumes-section = Volumes

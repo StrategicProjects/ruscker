@@ -72,6 +72,99 @@
   </div>
   {% endif %}
 
+  {# ── Named volumes (#987) — full-width panel above the pair. Only a
+     zero-reference, catalog-unreferenced volume WITH the
+     `ruscker.created` label gets a remove button; everything else shows
+     a lock (a neighbour's volume is data we never touch — #894 spirit).
+     The shell JS wraps every .admin-table in a scroll wrapper on
+     mobile, so the table stays display:table. #}
+  <div class="disk-panel">
+    <div class="disk-panel__head">
+      <div>
+        <div class="disk-panel__title">
+          <i class="ti ti-database" style="color:#a78bfa" aria-hidden="true"></i>
+          {{ self.t("admin-disk-volumes-title") }}
+        </div>
+        <div class="disk-panel__sub">{{ self.t("admin-disk-volumes-hint") }}</div>
+      </div>
+      {% if !volumes_unavailable %}
+      <form method="post" action="{{ base }}/admin/disk/volumes/create"
+            style="display:flex;gap:8px;align-items:center">
+        {# Same shape the server enforces (is_valid_volume_name) — the
+           pattern only gives earlier feedback, it is not the gate. #}
+        <input type="text" name="name" required maxlength="100"
+               pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99}"
+               class="admin-table-search" style="max-width:200px"
+               placeholder="{{ self.t("admin-disk-volumes-name-placeholder") }}">
+        <button type="submit" class="admin-login-btn" style="width:auto;padding:7px 12px;font-size:12px">
+          <i class="ti ti-plus" aria-hidden="true"></i>
+          {{ self.t("admin-disk-volumes-create") }}
+        </button>
+      </form>
+      {% endif %}
+    </div>
+    {% if volumes_unavailable %}
+    <div class="disk-panel__sub" role="alert" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
+      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+      {{ self.t("admin-disk-volumes-unavailable") }}
+    </div>
+    {% else %}
+    <table class="admin-table" data-enhance>
+      <thead>
+        <tr>
+          <th>{{ self.t("admin-disk-volumes-col-name") }}</th>
+          <th style="width:96px">{{ self.t("admin-disk-volumes-col-driver") }}</th>
+          <th style="width:110px">{{ self.t("admin-disk-volumes-col-created") }}</th>
+          <th style="width:110px">{{ self.t("admin-disk-volumes-col-refs") }}</th>
+          <th style="width:120px">{{ self.t("admin-disk-volumes-col-origin") }}</th>
+          <th style="width:48px" data-nosort></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in volumes %}
+        <tr{% if v.removable() %} class="is-unused"{% endif %}>
+          <td><code class="dash-mono" style="font-size:11.5px">{{ v.name }}</code></td>
+          <td style="font-size:11.5px">{{ v.driver }}</td>
+          <td class="tnum" style="font-size:11.5px">{{ v.created }}</td>
+          <td>
+            {% if v.refs > 0 %}
+              <span class="use-badge use-badge--on">{{ v.refs }} {{ self.t("admin-disk-badge-inuse") }}</span>
+            {% else %}
+              <span class="text-[color:var(--text-faint)]" style="font-size:11.5px">0</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if v.ruscker_created %}
+              <span class="use-badge use-badge--on">{{ self.t("admin-disk-volumes-badge-ruscker") }}</span>
+            {% else %}
+              <span class="use-badge use-badge--off" title="{{ self.t("admin-disk-volumes-locked") }}">{{ self.t("admin-disk-volumes-badge-external") }}</span>
+            {% endif %}
+          </td>
+          <td style="text-align:right;white-space:nowrap">
+            {% if v.removable() %}
+              <form method="post" action="{{ base }}/admin/disk/volumes/remove" style="display:inline"
+                    data-confirm="{{ self.t("admin-disk-volumes-confirm-remove") }}">
+                <input type="hidden" name="name" value="{{ v.name }}">
+                <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
+                  <i class="ti ti-trash"></i>
+                </button>
+              </form>
+            {% else %}
+              <span class="text-[color:var(--text-faint)]" title="{{ self.t("admin-disk-volumes-locked") }}">
+                <i class="ti ti-lock"></i>
+              </span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+        {% if volumes.is_empty() %}
+        <tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-disk-volumes-empty") }}</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
   {# ── Two side-by-side panels: container images + containers ───── #}
   <div class="disk-cols">
 
@@ -237,100 +330,6 @@
     </div>
 
   </div>
-
-  {# ── Named volumes (#987) — full-width panel below the pair. Only a
-     zero-reference, catalog-unreferenced volume WITH the
-     `ruscker.created` label gets a remove button; everything else shows
-     a lock (a neighbour's volume is data we never touch — #894 spirit).
-     The shell JS wraps every .admin-table in a scroll wrapper on
-     mobile, so the table stays display:table. #}
-  <div class="disk-panel" style="margin-top:16px">
-    <div class="disk-panel__head">
-      <div>
-        <div class="disk-panel__title">
-          <i class="ti ti-database" style="color:#a78bfa" aria-hidden="true"></i>
-          {{ self.t("admin-disk-volumes-title") }}
-        </div>
-        <div class="disk-panel__sub">{{ self.t("admin-disk-volumes-hint") }}</div>
-      </div>
-      {% if !volumes_unavailable %}
-      <form method="post" action="{{ base }}/admin/disk/volumes/create"
-            style="display:flex;gap:8px;align-items:center">
-        {# Same shape the server enforces (is_valid_volume_name) — the
-           pattern only gives earlier feedback, it is not the gate. #}
-        <input type="text" name="name" required maxlength="100"
-               pattern="[a-zA-Z0-9][a-zA-Z0-9_.\-]{0,99}"
-               class="admin-table-search" style="max-width:200px"
-               placeholder="{{ self.t("admin-disk-volumes-name-placeholder") }}">
-        <button type="submit" class="admin-login-btn" style="width:auto;padding:7px 12px;font-size:12px">
-          <i class="ti ti-plus" aria-hidden="true"></i>
-          {{ self.t("admin-disk-volumes-create") }}
-        </button>
-      </form>
-      {% endif %}
-    </div>
-    {% if volumes_unavailable %}
-    <div class="disk-panel__sub" role="alert" style="color:var(--warn,#b45309);display:flex;gap:6px;align-items:center;padding:2px 0 6px">
-      <i class="ti ti-alert-triangle" aria-hidden="true"></i>
-      {{ self.t("admin-disk-volumes-unavailable") }}
-    </div>
-    {% else %}
-    <table class="admin-table" data-enhance>
-      <thead>
-        <tr>
-          <th>{{ self.t("admin-disk-volumes-col-name") }}</th>
-          <th style="width:96px">{{ self.t("admin-disk-volumes-col-driver") }}</th>
-          <th style="width:110px">{{ self.t("admin-disk-volumes-col-created") }}</th>
-          <th style="width:110px">{{ self.t("admin-disk-volumes-col-refs") }}</th>
-          <th style="width:120px">{{ self.t("admin-disk-volumes-col-origin") }}</th>
-          <th style="width:48px" data-nosort></th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for v in volumes %}
-        <tr{% if v.removable() %} class="is-unused"{% endif %}>
-          <td><code class="dash-mono" style="font-size:11.5px">{{ v.name }}</code></td>
-          <td style="font-size:11.5px">{{ v.driver }}</td>
-          <td class="tnum" style="font-size:11.5px">{{ v.created }}</td>
-          <td>
-            {% if v.refs > 0 %}
-              <span class="use-badge use-badge--on">{{ v.refs }} {{ self.t("admin-disk-badge-inuse") }}</span>
-            {% else %}
-              <span class="text-[color:var(--text-faint)]" style="font-size:11.5px">0</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if v.ruscker_created %}
-              <span class="use-badge use-badge--on">{{ self.t("admin-disk-volumes-badge-ruscker") }}</span>
-            {% else %}
-              <span class="use-badge use-badge--off" title="{{ self.t("admin-disk-volumes-locked") }}">{{ self.t("admin-disk-volumes-badge-external") }}</span>
-            {% endif %}
-          </td>
-          <td style="text-align:right;white-space:nowrap">
-            {% if v.removable() %}
-              <form method="post" action="{{ base }}/admin/disk/volumes/remove" style="display:inline"
-                    data-confirm="{{ self.t("admin-disk-volumes-confirm-remove") }}">
-                <input type="hidden" name="name" value="{{ v.name }}">
-                <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-disk-remove") }}">
-                  <i class="ti ti-trash"></i>
-                </button>
-              </form>
-            {% else %}
-              <span class="text-[color:var(--text-faint)]" title="{{ self.t("admin-disk-volumes-locked") }}">
-                <i class="ti ti-lock"></i>
-              </span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-        {% if volumes.is_empty() %}
-        <tr><td colspan="6" style="text-align:center;color:var(--text-faint);padding:24px;font-size:12px">{{ self.t("admin-disk-volumes-empty") }}</td></tr>
-        {% endif %}
-      </tbody>
-    </table>
-    {% endif %}
-  </div>
-
   <p class="text-xs text-[color:var(--text-faint)] mt-3">{{ self.t("admin-disk-images-note") }}</p>
 
 {% endif %}

@@ -86,7 +86,7 @@
         {% if g.members.is_empty() %}
           <span class="group-empty">{{ self.t("admin-groups-no-members") }}</span>
         {% else %}
-          <div class="group-pills"{% if g.members.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
+          <div class="group-pills{% if g.members.len() > 8 %} is-collapsed{% endif %}"{% if g.members.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
             {% for m in g.members %}
             <span class="group-pill">
               <i class="ti ti-user" aria-hidden="true"></i> {{ m }}
@@ -125,7 +125,7 @@
         {% if g.apps.is_empty() %}
           <span class="group-empty">{{ self.t("admin-groups-no-apps") }}</span>
         {% else %}
-          <div class="group-pills"{% if g.apps.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
+          <div class="group-pills{% if g.apps.len() > 8 %} is-collapsed{% endif %}"{% if g.apps.len() > 8 %} :class="{ 'is-collapsed': !open }"{% endif %}>
             {% for a in g.apps %}<a href="{{ base }}/admin/specs/{{ a.id }}/edit" class="group-pill"><i class="ti ti-app-window" aria-hidden="true"></i> {{ a.name }}</a>{% endfor %}
           </div>
           {% if g.apps.len() > 8 %}
@@ -189,6 +189,10 @@
   .group-pill-x:hover { color: var(--color-lock); }
   .group-add-member { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 </style>
+
+{# Alpine drives the per-card "show all / show less" collapse. Deferred, so
+   the server renders `is-collapsed` up-front (no flash of the full list). #}
+<script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 
 <script>
   // Colour each group card's accent bar from a hash of the group name —

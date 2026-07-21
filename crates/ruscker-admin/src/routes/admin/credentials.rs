@@ -14,12 +14,15 @@ use axum::{
     Router,
 };
 use serde::Deserialize;
+use std::collections::BTreeSet;
 
 use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
+
+use super::KpiMetric;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -40,6 +43,8 @@ struct CredentialsPage<'a> {
     /// Current session role (always Admin here) - drives nav gating.
     role: Role,
     credentials: Vec<db::credentials::CredentialMeta>,
+    kpi_total: i64,
+    kpi_in_use: i64,
     /// Banner shown when the master key isn't configured. When
     /// true, the form is disabled and a hint is rendered.
     key_missing: bool,
@@ -50,6 +55,13 @@ struct CredentialsPage<'a> {
 impl<'a> CredentialsPage<'a> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    fn kpis(&self) -> [KpiMetric; 2] {
+        [
+            KpiMetric::new("ti-key", "admin-creds-kpi-total", self.kpi_total),
+            KpiMetric::new("ti-app-window", "admin-creds-kpi-in-use", self.kpi_in_use),
+        ]
     }
 }
 
@@ -79,6 +91,16 @@ async fn render_index(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    let referenced: BTreeSet<String> = crate::catalog::effective_specs_cached(state)
+        .await
+        .iter()
+        .filter_map(|spec| spec.docker_registry_credential.clone())
+        .collect();
+    let kpi_total = credentials.len() as i64;
+    let kpi_in_use = credentials
+        .iter()
+        .filter(|credential| referenced.contains(&credential.name))
+        .count() as i64;
     let page = CredentialsPage {
         locale: loc,
         theme,
@@ -88,6 +110,8 @@ async fn render_index(
         nav_section: "credentials",
         role: Role::Admin,
         credentials,
+        kpi_total,
+        kpi_in_use,
         key_missing: !state.master_key.is_configured(),
         flash_saved,
         flash_error,

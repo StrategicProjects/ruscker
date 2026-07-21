@@ -12,6 +12,8 @@
   <div class="text-xs text-[color:var(--text-faint)]">{{ images.len() }}</div>
 </div>
 
+{% include "admin/_kpi_band.html" %}
+
 {% match flash_error %}{% when Some with (msg) %}
   <div class="admin-login-error mb-4" role="alert">
     <i class="ti ti-alert-circle" aria-hidden="true"></i>

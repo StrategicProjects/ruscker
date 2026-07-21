@@ -10,6 +10,8 @@
   </div>
 </div>
 
+{% include "admin/_kpi_band.html" %}
+
 {# Flash split (#746) — persistent role="alert" errors, toastable
    role="status" successes; no colour-only state. #}
 {% if let Some(f) = flash %}

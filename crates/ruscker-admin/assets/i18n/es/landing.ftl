@@ -345,6 +345,9 @@ spec-form-error-stale = Otra persona guardó esta app mientras editabas. Revisa 
 
 # Admin image library
 admin-images-title = Biblioteca multimedia
+admin-images-kpi-files = Archivos
+admin-images-kpi-in-use = En uso
+admin-images-kpi-total-size = Tamaño total
 admin-images-subtitle = Imágenes utilizadas por el portal
 admin-images-formats-help = PNG, JPEG y WebP se convierten a WebP. SVG pasa directo.
 admin-images-drop-here = Haga clic para elegir un archivo
@@ -371,6 +374,8 @@ admin-images-no-match = Ninguna imagen coincide con la búsqueda.
 
 # Admin credentials
 admin-creds-title = Gestión de Credenciales
+admin-creds-kpi-total = Total
+admin-creds-kpi-in-use = En uso
 admin-creds-subtitle = Creación de credenciales. Se cifran en reposo con AES-256-GCM y nunca aparecen en el YAML ni en el panel después de guardarlas.
 admin-creds-form-title = Añadir / actualizar credencial
 admin-creds-name = Nombre
@@ -441,6 +446,8 @@ admin-landing-analytics-key-help = ID de medición de GA4 (G-XXXX), dominio de P
 
 # Admin audit log
 admin-audit-title = Historial de Actividades Administrativas
+admin-audit-kpi-events = Eventos
+admin-audit-kpi-users = Usuarios distintos
 admin-audit-subtitle = Visualización de actividades administrativas, de la más reciente a la más antigua. Tope de 100 eventos por consulta.
 admin-audit-family = Familia
 admin-audit-family-all = Todas las acciones
@@ -885,6 +892,9 @@ admin-landing-show-highlights-help = Muestra el carrusel de apps destacadas enci
 # Groups page (#503, read-only)
 admin-nav-groups = Grupos
 admin-groups-title = Gestión de Grupos
+admin-groups-kpi-total = Grupos
+admin-groups-kpi-members = Miembros únicos
+admin-groups-kpi-apps = Apps cubiertas
 admin-groups-subtitle = Creación y edición de los grupos derivados de los apps y usuarios.
 admin-groups-members = Miembros
 admin-groups-apps = Apps
@@ -974,6 +984,9 @@ admin-disk-flash-reclaimed = Espacio recuperado (imágenes dangling + caché de 
 # Programaciones — cron jobs (#986 parte C)
 admin-nav-schedules = Programaciones
 admin-schedules-title = Programaciones
+admin-schedules-kpi-jobs = Jobs
+admin-schedules-kpi-active = Activos
+admin-schedules-kpi-recent-failures = Fallos recientes
 admin-schedules-subtitle = Ejecuta la imagen de una app hasta terminar según un horario cron (ETL, informes).
 admin-schedules-create = Nueva programación
 admin-schedules-spec = App
@@ -1057,6 +1070,9 @@ admin-users-mfa-reset-ok = Se restablecieron el 2FA y sus códigos de recuperaci
 
 # User activity (#1021)
 admin-activity-title = Actividad de Usuarios
+admin-activity-kpi-logins = Inicios de sesión
+admin-activity-kpi-app-accesses = Accesos a apps
+admin-activity-kpi-users = Usuarios distintos
 admin-activity-subtitle = Inicios de sesión y accesos a aplicaciones, del más reciente al más antiguo.
 admin-activity-tab-users = Actividad de usuarios
 admin-activity-tab-admin = Actividad administrativa

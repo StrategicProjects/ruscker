@@ -23,6 +23,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new().route("/admin/activity", get(index))
 }
@@ -103,6 +105,9 @@ struct ActivityPage<'a> {
     page: i64,
     pages: i64,
     total: i64,
+    kpi_logins: i64,
+    kpi_app_accesses: i64,
+    kpi_users: i64,
 }
 
 impl ActivityPage<'_> {
@@ -171,6 +176,18 @@ impl ActivityPage<'_> {
             || !self.app.is_empty()
             || !self.period.is_empty()
     }
+
+    fn kpis(&self) -> [KpiMetric; 3] {
+        [
+            KpiMetric::new("ti-login", "admin-activity-kpi-logins", self.kpi_logins),
+            KpiMetric::new(
+                "ti-app-window",
+                "admin-activity-kpi-app-accesses",
+                self.kpi_app_accesses,
+            ),
+            KpiMetric::new("ti-users", "admin-activity-kpi-users", self.kpi_users),
+        ]
+    }
 }
 
 async fn index(
@@ -227,6 +244,24 @@ async fn index(
 
     let users = db::user_activity::distinct_usernames(db).await.unwrap_or_default();
     let apps = db::user_activity::distinct_specs(db).await.unwrap_or_default();
+    let mut kpi_filter = filter.clone();
+    kpi_filter.event_type = Some("login.success".into());
+    let kpi_logins = match db::user_activity::count_filtered(db, &kpi_filter).await {
+        Ok(count) => count,
+        Err(e) => {
+            tracing::error!(error = ?e, "count login activity failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    kpi_filter.event_type = Some("app.access".into());
+    let kpi_app_accesses = match db::user_activity::count_filtered(db, &kpi_filter).await {
+        Ok(count) => count,
+        Err(e) => {
+            tracing::error!(error = ?e, "count app access activity failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let kpi_users = users.len() as i64;
 
     let page = ActivityPage {
         locale: loc,
@@ -246,6 +281,9 @@ async fn index(
         page,
         pages,
         total,
+        kpi_logins,
+        kpi_app_accesses,
+        kpi_users,
     };
     super::render(&page)
 }

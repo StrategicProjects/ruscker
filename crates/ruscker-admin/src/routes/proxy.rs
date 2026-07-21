@@ -4236,6 +4236,7 @@ proxy:
                     })
                     .collect(),
                 running: vec![],
+                managed: vec![],
             })
         }
     }

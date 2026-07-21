@@ -645,6 +645,7 @@ fn classify_local_liveness(
     ReplicaLivenessReport {
         observations,
         running,
+        managed: managed.to_vec(),
     }
 }
 
@@ -904,25 +905,40 @@ impl ContainerBackend for LocalDockerBackend {
             .list_containers(Some(opts))
             .await
             .map_err(|e| backend_err("list managed containers", e))?;
-        let managed = list
-            .into_iter()
-            .map(|c| {
-                let labels = c.labels.unwrap_or_default();
-                let name = c
-                    .names
-                    .and_then(|n| n.into_iter().next())
-                    .map(|s| s.trim_start_matches('/').to_string())
-                    .unwrap_or_default();
-                ManagedContainer {
-                    id: c.id.unwrap_or_default(),
-                    name,
-                    image: c.image.unwrap_or_default(),
-                    spec_id: labels.get(LABEL_SPEC_ID).cloned(),
-                    status: c.status.unwrap_or_default(),
-                    running: matches!(c.state, Some(ContainerSummaryStateEnum::RUNNING)),
-                }
-            })
-            .collect();
+        let mut managed = Vec::with_capacity(list.len());
+        for c in list {
+            let id = c.id.unwrap_or_default();
+            let running = matches!(c.state, Some(ContainerSummaryStateEnum::RUNNING));
+            let finished_at = if running || id.is_empty() {
+                None
+            } else {
+                self.docker
+                    .inspect_container(&id, None)
+                    .await
+                    .ok()
+                    .and_then(|info| info.state)
+                    .filter(|state| state.running == Some(false))
+                    .and_then(|state| state.finished_at)
+                    .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                    .map(|value| value.with_timezone(&Utc))
+                    .filter(|value| value.timestamp() > 0)
+            };
+            let labels = c.labels.unwrap_or_default();
+            let name = c
+                .names
+                .and_then(|n| n.into_iter().next())
+                .map(|s| s.trim_start_matches('/').to_string())
+                .unwrap_or_default();
+            managed.push(ManagedContainer {
+                id,
+                name,
+                image: c.image.unwrap_or_default(),
+                spec_id: labels.get(LABEL_SPEC_ID).cloned(),
+                status: c.status.unwrap_or_default(),
+                running,
+                finished_at,
+            });
+        }
         Ok(managed)
     }
 

@@ -666,8 +666,10 @@ impl ContainerBackend for MultiHostDockerBackend {
         );
 
         let mut running = Vec::new();
+        let mut managed = Vec::new();
         let mut live = HashSet::new();
         for (host_id, inventory) in batch.reported {
+            managed.extend(inventory.managed);
             for mut replica in inventory.replicas {
                 self.placement.insert(
                     replica.id.clone(),
@@ -685,6 +687,7 @@ impl ContainerBackend for MultiHostDockerBackend {
         Ok(ReplicaLivenessReport {
             observations,
             running,
+            managed,
         })
     }
 

@@ -10,7 +10,7 @@
     <p class="text-sm text-[color:var(--text-muted)] mt-1">{{ self.t("admin-proclog-subtitle") }}</p>
   </div>
   {% if available %}
-  {# Live-stream badge (#623): the SSE follow keeps this terminal current. #}
+  {# Live badge: short incremental polls keep this terminal current. #}
   <span class="live-badge"><span class="live-dot"></span>{{ self.t("admin-dashboard-live") }}</span>
   {% endif %}
 </div>
@@ -50,7 +50,7 @@
     </div>
 
     {# Buffer wired but empty — say so explicitly so an operator can tell
-       "nothing logged yet" from a broken tab (#452). New lines still stream
+       "nothing logged yet" from a broken tab (#452). New lines still arrive
        in below as they happen. #}
     {% if lines.is_empty() %}
     <p id="log-empty" class="text-sm text-[color:var(--text-faint)] py-8 text-center">{{ self.t("admin-proclog-empty") }}</p>
@@ -60,7 +60,8 @@
        the terminal below. Hidden — never shown directly. #}
     <pre id="proclog-seed" hidden>{% for line in lines %}{{ line }}
 {% endfor %}</pre>
-    <div id="proclog" class="log-body" role="log" aria-live="polite"></div>
+    <div id="proclog" class="log-body" role="log" aria-live="polite"
+         data-cursor="{{ cursor }}" data-poll-url="{{ base }}/admin/logs/poll"></div>
   </div>
   {% if self.truncated() %}
   <p class="text-[11px] text-[color:var(--text-faint)] mt-2">{{ self.t("admin-proclog-tail-note") }} ({{ lines.len() }}/{{ total }})</p>
@@ -77,6 +78,12 @@
     var emptyHint = document.getElementById('log-empty');
     var chips = Array.prototype.slice.call(document.querySelectorAll('.log-chip'));
     var paused = false;
+    var cursor = box.dataset.cursor || '0';
+    var pollUrl = box.dataset.pollUrl;
+    var timer = null;
+    var inFlight = false;
+    var active = true;
+    var retryMs = 1000;
     var hiddenLevels = {};   // level -> true when its chip is toggled off
     var knownApps = {};      // app name -> true, to dedupe the app <select>
 
@@ -163,18 +170,65 @@
       var icon = pauseBtn.querySelector('i'), label = pauseBtn.querySelector('span');
       if (icon) icon.className = 'ti ' + (paused ? 'ti-player-play' : 'ti-player-pause');
       if (label) label.textContent = paused ? pauseBtn.dataset.resume : pauseBtn.dataset.pause;
+      if (paused) {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = null;
+      } else {
+        schedulePoll(0);
+      }
     });
 
-    if (window.EventSource) {
-      var es = new EventSource((window.RUSCKER_BASE || '') + '/admin/logs/stream');
-      es.onmessage = function (e) {
-        if (paused) return;
-        var stick = nearBottom();
-        e.data.split('\n').forEach(append);
-        if (stick) box.scrollTop = box.scrollHeight;
-      };
-      es.onerror = function () { /* EventSource auto-reconnects */ };
+    function schedulePoll(delay) {
+      if (!active || paused || document.hidden || timer !== null) return;
+      timer = window.setTimeout(poll, delay);
     }
+
+    function poll() {
+      timer = null;
+      if (!active || paused || document.hidden || inFlight) return;
+      inFlight = true;
+      fetch(pollUrl + '?cursor=' + encodeURIComponent(cursor), {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json' }
+      }).then(function (response) {
+        if (!response.ok) throw new Error('log poll failed: ' + response.status);
+        return response.json();
+      }).then(function (data) {
+        // If the page was paused or hidden while this finite request was in
+        // flight, retain the old cursor so the next poll catches up.
+        if (!active || paused || document.hidden) return;
+        var stick = nearBottom();
+        (data.lines || []).forEach(append);
+        cursor = String(data.cursor || cursor);
+        if (stick) box.scrollTop = box.scrollHeight;
+        retryMs = 1000;
+      }).catch(function () {
+        retryMs = Math.min(retryMs * 2, 15000);
+      }).finally(function () {
+        inFlight = false;
+        schedulePoll(retryMs);
+      });
+    }
+
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        if (timer !== null) window.clearTimeout(timer);
+        timer = null;
+      } else {
+        schedulePoll(0);
+      }
+    });
+    window.addEventListener('pagehide', function () {
+      active = false;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = null;
+    });
+    window.addEventListener('pageshow', function () {
+      active = true;
+      schedulePoll(0);
+    });
+    schedulePoll(1000);
   })();
   </script>
 {% endif %}

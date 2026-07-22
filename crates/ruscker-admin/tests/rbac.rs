@@ -111,6 +111,8 @@ async fn viewer_cannot_reach_apps_or_admin_sections() {
         "/admin/blocks",
         "/admin/audit",
         "/admin/logs",
+        "/admin/logs/poll?cursor=0",
+        "/admin/logs/stream",
     ] {
         let st = state();
         let c = cookie_for(&st, Role::Viewer).await;
@@ -171,6 +173,8 @@ async fn editor_cannot_reach_admin_only_sections() {
         "/admin/blocks",
         "/admin/audit",
         "/admin/logs",
+        "/admin/logs/poll?cursor=0",
+        "/admin/logs/stream",
     ] {
         let st = state();
         let c = cookie_for(&st, Role::Editor).await;
@@ -208,11 +212,17 @@ async fn admin_passes_guard_everywhere() {
 
 #[tokio::test]
 async fn unauthenticated_is_redirected_to_login() {
-    let status = send(state(), "GET", "/admin/specs", None).await;
-    assert!(
-        status.is_redirection(),
-        "no session ⇒ redirect to login, got {status}"
-    );
+    for uri in [
+        "/admin/specs",
+        "/admin/logs/poll?cursor=0",
+        "/admin/logs/stream",
+    ] {
+        let status = send(state(), "GET", uri, None).await;
+        assert!(
+            status.is_redirection(),
+            "no session ⇒ redirect to login on {uri}, got {status}"
+        );
+    }
 }
 
 // ── Inline image upload (#213) — same RequireEditor guard ───────────

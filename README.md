@@ -81,9 +81,12 @@ tool" cases) is in
 **Production-ready and running in production.** Releases are multi-arch
 (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
-has the current version.
+has the current version. **Current release: [v0.2.49]** — the process
+Logs page uses finite cursor polling, so it cannot strand an HTTP/1.1
+connection and stall later admin navigation behind a reverse proxy.
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
+[v0.2.49]: https://github.com/StrategicProjects/ruscker/releases/tag/v0.2.49
 
 > **~14 MB idle** — measured on a real production deployment serving a
 > real 31-spec config, with apps spawning on demand. (The JVM-based
@@ -115,6 +118,8 @@ What's in the box:
   included) across usernames, groups and profiles, and an **Activity** section
   with two tables — **user activity** (logins and interactive app accesses,
   filterable and paginated) alongside the **administrative audit** trail.
+  The process-log terminal follows new lines with finite cursor requests,
+  pauses while hidden and never occupies a persistent browser connection.
 - **Containers dashboard** — CPU/memory sparklines, live-follow logs and
   stop/restart controls, refreshed every five seconds by polling
   `GET /admin/dashboard/snapshot`.
@@ -220,9 +225,19 @@ docker run --rm -p 8080:8080 \
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./ruscker_<version>_amd64.deb
+sudo apt install ./ruscker_<version>-1_amd64.deb
 # Creates a `ruscker` user, installs a systemd unit, and prints a
 # freshly-generated admin token on first install.
+```
+
+Upgrades preserve `/etc/ruscker` and `/var/lib/ruscker`. Install the new
+package, restart, then verify the binary and readiness endpoint:
+
+```bash
+sudo apt-get install -y --no-install-recommends ./ruscker_<version>-1_amd64.deb
+sudo systemctl restart ruscker
+ruscker --version
+curl -fsS http://127.0.0.1:8080/readyz
 ```
 
 ### From source

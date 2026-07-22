@@ -48,6 +48,37 @@ backend: `sudo ruscker-enable-docker`. See [Deploying in
 production](./deploying.md) for nginx + TLS, and
 [Configuration](./configuration.md) for what lives where.
 
+### Upgrade in place
+
+An upgrade replaces the binary and packaged unit while preserving the
+operator-managed files in `/etc/ruscker` and the catalog, images and state
+under `/var/lib/ruscker`. Back those directories up as usual, then install
+the package for the host architecture:
+
+```sh
+sudo apt-get install -y --no-install-recommends \
+  ./ruscker_<version>-1_amd64.deb
+sudo systemctl restart ruscker
+ruscker --version
+curl -fsS http://127.0.0.1:<bind-port>/readyz
+```
+
+For a remote host where `sudo` requires a terminal, copy the package and its
+matching `.sha256` file to `/tmp`, then run:
+
+```sh
+ssh -tt <host> 'cd /tmp && \
+  sha256sum -c ruscker_<version>-1_amd64.deb.sha256 && \
+  sudo apt-get install -y --no-install-recommends \
+    ./ruscker_<version>-1_amd64.deb && \
+  sudo systemctl restart ruscker && \
+  ruscker --version && sudo systemctl is-active ruscker'
+```
+
+Replace `amd64` with `arm64` where appropriate. A successful upgrade prints
+the requested Ruscker version and `active`; `/readyz` must also return HTTP
+200 before the node goes back into load-balancer rotation.
+
 ### Uninstall & reset
 
 Pick the scope you want:

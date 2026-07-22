@@ -391,10 +391,18 @@ that app's editor.
 
 ### Logs
 
-The server log stream, live over Server-Sent Events. Lines are colour-
-coded by level, with level chips (info / warn / error), an app filter
-dropdown, a line counter, and pause/resume + clear controls. A download
-link grabs the current buffer.
+The server log terminal updates in near real time through finite,
+cursor-based polls. Lines are colour-coded by level, with level chips
+(info / warn / error), an app filter dropdown, a line counter, and
+pause/resume + clear controls. Polling stops while the page is paused or
+hidden and resumes from the last cursor, catching up with lines still in the
+bounded buffer. A download link grabs the current buffer.
+
+This page deliberately does **not** use `EventSource`: every poll completes
+and releases its HTTP connection, so an HTTP/1.1 reverse-proxy hop cannot
+retain the log response and head-of-line block later admin navigation. The
+per-replica container log viewer is separate; its **Live** button opens an
+SSE follow stream only when requested by an operator.
 
 ### Disk
 

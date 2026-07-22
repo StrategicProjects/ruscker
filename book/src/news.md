@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.49 — 2026-07-21
+
+- **The process Logs page no longer strands an infinite HTTP/1.1
+  response.** Its automatic `EventSource` feed has been replaced with
+  finite, cursor-based polling, preventing a reverse proxy or load
+  balancer from retaining the stream and head-of-line blocking later
+  admin navigation. The initial tail and cursor are captured atomically,
+  polling pauses while the tab is hidden, and the retired SSE endpoint
+  returns `204` so clients loaded before a rolling upgrade stop
+  reconnecting. Explicit container-log live follow and finite image-pull
+  event streams are unchanged.
+
+---
+
 ## v0.2.48 — 2026-07-21
 
 - **A consistent KPI band across the admin.** Every management screen now

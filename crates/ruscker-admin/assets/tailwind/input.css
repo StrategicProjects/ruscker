@@ -2375,16 +2375,15 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 
 /* Groups page (#503, read-only) — one card per derived group. */
 .groups-grid {
-  columns: 280px; column-gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  align-items: start;
 }
 /* Coloured left accent bar per group card (design handoff #623) — hue from
  * the group-name hash (set inline by the page script), matching the group
  * badges on the Users page so the same group reads the same colour. */
-.group-card {
-  position: relative; overflow: hidden;
-  display: inline-block; width: 100%; vertical-align: top;
-  break-inside: avoid;
-}
+.group-card { position: relative; overflow: hidden; }
 .group-card__bar { position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--color-teal-600); }
 .group-card > .editor-card__head, .group-card > .group-col { padding-left: 6px; }
 
@@ -2405,9 +2404,21 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 }
 .group-pills {
   display: flex; flex-wrap: wrap; gap: 6px;
-  max-height: 11rem; overflow-y: auto; scrollbar-gutter: stable;
-  padding-right: 4px;
 }
+/* Collapsed preview for a long member/app list (#1030 follow-up): instead of
+ * a cramped inner scrollbar, show ~3 rows with a soft fade and a "show all"
+ * toggle. Only applied by the template when the list exceeds the preview. */
+.group-pills.is-collapsed {
+  max-height: 5.9rem; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+          mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.group-more {
+  margin-top: 8px; font-size: 12px; font-weight: 500;
+  color: var(--color-teal-600); background: none; border: 0;
+  cursor: pointer; padding: 2px 0;
+}
+.group-more:hover { text-decoration: underline; }
 .group-pill {
   display: inline-flex; align-items: center; gap: 5px;
   max-width: 100%; overflow-wrap: anywhere;

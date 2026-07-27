@@ -919,6 +919,8 @@ admin-groups-flash-bad-input = Datos inválidos (nombre vacío o usuario inexist
 admin-groups-empty = Aún no hay grupos. Aparecen cuando defines access-groups en un app o grupos en un usuario.
 admin-groups-no-members = Sin miembros
 admin-groups-no-apps = Ningún app restringido a este grupo
+admin-groups-show-all = Ver todos
+admin-groups-show-less = Ver menos
 
 highlights-prev = Anteriores
 highlights-next = Siguientes

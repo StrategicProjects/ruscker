@@ -33,20 +33,22 @@ The chosen direction is a blend of **(3) depth** and the deploy half of
 
 ## Chosen direction
 
-### A. Documented single-node deploy recipe — *high ROI, low–medium effort*
+### A. Documented single-node deploy recipe — **completed**
 
-Recent work surfaced real deploy friction that every adopter would hit:
+The production deploy pass surfaced reverse-proxy friction that is now
+covered by the [deployment handbook](../book/src/deploying.md):
 
-- SSE behind nginx was buffered until a reverse-proxy hint
-  (`X-Accel-Buffering: no`) was added — the live dashboard appeared
-  frozen on a subpath mount.
+- The dashboard switched from SSE to finite snapshot polling in v0.2.37,
+  and the process Logs page switched to finite cursor polling in v0.2.49.
+  Neither needs an nginx buffering exception. Only the per-replica log
+  viewer's operator-activated **Live** mode keeps an SSE connection.
 - The reverse proxy serving its own root `/favicon.ico` shadows the
   app's icon on some browsers.
 - The `location` for the app needs the right `proxy_buffering` /
-  `Upgrade` / timeout settings for WebSockets *and* SSE.
+  `Upgrade` / timeout settings for WebSockets and explicit log follow.
 
-**Deliverable:** a battle-tested, copy-pasteable recipe for the common
-single-node case:
+**Delivered:** a battle-tested, copy-pasteable recipe for the common
+single-node case, including:
 
 - a reference `nginx` server block (root mount and subpath mount), with
   the WebSocket + SSE + favicon footguns pre-solved and commented;

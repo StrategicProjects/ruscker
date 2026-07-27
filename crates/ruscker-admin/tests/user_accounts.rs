@@ -680,6 +680,63 @@ async fn logs_tab_distinguishes_empty_buffer_from_unwired() {
         !body.contains("Buffer de log não disponível"),
         "should not show the unwired-buffer message when a buffer exists"
     );
+    assert!(body.contains("/admin/logs/poll"), "poll endpoint missing");
+    assert!(
+        !body.contains("new EventSource"),
+        "the process-log page must not open a persistent connection"
+    );
+}
+
+/// #1039: process-log following uses finite cursor polling. This avoids an
+/// infinite HTTP/1.1 response being retained by a reverse proxy and blocking
+/// subsequent admin navigation on the same backend connection.
+#[tokio::test]
+async fn process_log_poll_is_incremental_and_legacy_sse_is_retired() {
+    let (mut state, _pool) = state_with_db().await;
+    let buffer = ruscker_admin::logbuf::LogBuffer::new(16);
+    buffer.push_line("first");
+    let cursor = buffer.cursor();
+    buffer.push_line("second");
+    state.log_buffer = Some(buffer);
+
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let app = router(state);
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/admin/logs/poll?cursor={cursor}"))
+                .header("cookie", &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers().get("cache-control").unwrap(),
+        "no-store"
+    );
+    let bytes = axum::body::to_bytes(response.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(body["lines"], serde_json::json!(["second"]));
+    assert_eq!(body["cursor"], (cursor + 1).to_string());
+    assert_eq!(body["available"], true);
+
+    let retired = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/logs/stream")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(retired.status(), StatusCode::NO_CONTENT);
 }
 
 #[tokio::test]

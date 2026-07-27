@@ -112,8 +112,10 @@ snippet in [Deploying](./deploying.md).
 ## The admin shows the wrong / old features after an upgrade
 Templates are compiled into the binary, so changes need a **rebuild +
 reinstall**, not just editing files on the server:
-`sudo dpkg -i --force-confold ruscker_<version>-1_amd64.deb && sudo
-systemctl restart ruscker`.
+`sudo apt-get install -y --no-install-recommends
+./ruscker_<version>-1_amd64.deb && sudo systemctl restart ruscker`.
+Confirm both `ruscker --version` and the local `/readyz` endpoint before
+putting the node back into rotation.
 
 ## `413 Payload Too Large` on a Media upload
 There are two independent size limits in the upload path; the **nginx
@@ -213,8 +215,23 @@ The Containers dashboard polls `GET /admin/dashboard/snapshot`; it does not
 use SSE. In browser developer tools, check that this request returns `200`
 every few seconds. Authentication redirects, a wrong base-path mapping or a
 slow/unreachable Docker daemon will stop or delay updates. nginx buffering
-does not affect the dashboard poll; it matters only for the server and
-per-replica live log streams described in [Deploying](./deploying.md).
+does not affect the dashboard poll; it matters only for the explicitly
+enabled per-replica live log stream described in [Deploying](./deploying.md).
+
+## Admin navigation hangs after visiting Logs
+
+Upgrade to **v0.2.49 or newer**. Older releases automatically opened
+`/admin/logs/stream` as an infinite SSE response. On a deployment with an
+HTTP/1.1 load-balancer or reverse-proxy hop, an intermediary could retain
+that response after browser navigation and then reuse the same backend
+connection for another request behind it, causing head-of-line blocking.
+
+Current releases use finite cursor polling. In browser developer tools,
+`GET /admin/logs/poll?cursor=…` should return JSON promptly and repeat while
+the page is visible. `/admin/logs/stream` should return `204` and must not be
+configured in nginx as a persistent stream. The per-replica log viewer still
+uses SSE only after an operator clicks **Live**; that endpoint is unrelated
+to ordinary admin navigation.
 
 ## The favicon doesn't appear in Safari (or shows a stale icon)
 Safari caches favicons aggressively and sometimes keeps serving a stale

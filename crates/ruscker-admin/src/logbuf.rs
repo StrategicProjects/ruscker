@@ -1,8 +1,8 @@
 //! In-memory ring buffer of recent Ruscker log lines (#100).
 //!
 //! A `tracing` layer (wired in `ruscker-cli`) pushes each formatted log
-//! line here; the admin "Logs" tab reads a snapshot and follows new
-//! lines over SSE. It's a bounded *recent tail* — lost on restart;
+//! line here; the admin "Logs" tab reads a snapshot and polls for new
+//! lines. It's a bounded *recent tail* — lost on restart;
 //! journald / `docker logs` / `container-log-path` remain the durable
 //! source. No `tracing` dependency lives here on purpose: the writer
 //! that feeds it is owned by the CLI.
@@ -10,7 +10,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-/// Monotonic, gap-tolerant line sequence — lets the SSE follower ask
+/// Monotonic, gap-tolerant line sequence — lets a polling client ask
 /// "anything after seq N?" even though old lines are evicted.
 struct Inner {
     lines: VecDeque<(u64, String)>,
@@ -70,16 +70,25 @@ impl LogBuffer {
     /// The last `n` lines (oldest-first within the tail) plus the total
     /// number of buffered lines. Caps the initial `/admin/logs` render so
     /// a long-lived buffer doesn't ship the whole ring on every load
-    /// (#200); the SSE stream then appends what's new.
+    /// (#200); the polling endpoint then appends what's new.
     pub fn tail(&self, n: usize) -> (Vec<String>, usize) {
+        let (lines, total, _) = self.tail_with_cursor(n);
+        (lines, total)
+    }
+
+    /// The last `n` lines, total buffered lines, and the cursor immediately
+    /// after that same snapshot. Taking all three under one lock prevents a
+    /// line written during the initial page render from falling between the
+    /// rendered tail and the first poll (#1039).
+    pub fn tail_with_cursor(&self, n: usize) -> (Vec<String>, usize, u64) {
         let g = self.lock();
         let total = g.lines.len();
         let start = total.saturating_sub(n);
         let lines = g.lines.iter().skip(start).map(|(_, l)| l.clone()).collect();
-        (lines, total)
+        (lines, total, g.next_seq)
     }
 
-    /// The next sequence number that will be assigned — an SSE follower
+    /// The next sequence number that will be assigned — a polling client
     /// records this at connect and asks [`Self::since`] for anything past
     /// it.
     pub fn cursor(&self) -> u64 {
@@ -135,6 +144,22 @@ mod tests {
     }
 
     #[test]
+    fn tail_cursor_hands_off_to_incremental_poll_without_a_gap() {
+        let b = LogBuffer::new(100);
+        b.push_line("a");
+        b.push_line("b");
+
+        let (tail, total, cursor) = b.tail_with_cursor(1);
+        assert_eq!(tail, vec!["b"]);
+        assert_eq!(total, 2);
+
+        b.push_line("c");
+        let (new, next) = b.since(cursor);
+        assert_eq!(new, vec!["c"]);
+        assert_eq!(next, cursor + 1);
+    }
+
+    #[test]
     fn since_returns_only_new_lines() {
         let b = LogBuffer::new(100);
         b.push_line("a");
@@ -167,6 +192,7 @@ mod tests {
         b.push_line("after panic");
         assert_eq!(b.snapshot(), vec!["before panic", "after panic"]);
         assert_eq!(b.tail(1), (vec!["after panic".to_string()], 2));
+        assert_eq!(b.tail_with_cursor(1).0, vec!["after panic"]);
         let cursor = b.cursor();
         b.push_line("new line");
         assert_eq!(b.since(cursor).0, vec!["new line"]);

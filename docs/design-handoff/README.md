@@ -356,13 +356,14 @@ interface App {
 
 ### 12. Admin — Logs
 
-**Propósito:** Stream ao vivo de logs do servidor.
+**Propósito:** Acompanhamento quase em tempo real dos logs do servidor por
+polling incremental finito (sem conexão SSE automática persistente).
 
 **Layout:** painel de terminal com controles no topo
 
-- Stream simulado de linhas de log (auto-scroll)
+- Linhas incrementais com cursor e auto-scroll
 - Filtros: nível (INFO/WARN/ERROR/DEBUG), app, texto livre
-- Botão Pausar/Retomar
+- Botão Pausar/Retomar; polling suspenso quando a página fica oculta
 - Cores por nível: ERROR=vermelho, WARN=âmbar, INFO=texto normal, DEBUG=faint
 
 ---

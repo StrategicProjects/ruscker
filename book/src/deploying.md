@@ -181,17 +181,13 @@ above **and** the YAML flag. ShinyProxy-migrated configs usually carry
 the flag already.
 
 > The Containers dashboard short-polls
-> `GET /admin/dashboard/snapshot`; it does not use SSE and needs no
-> buffering exception. The server log tail and per-replica live log tails
-> do use SSE, so disable nginx buffering for their paths:
+> `GET /admin/dashboard/snapshot`, and the process **Logs** page short-polls
+> `GET /admin/logs/poll?cursor=…`. Both responses are finite and need no
+> buffering exception. Only the per-replica log viewer opens an
+> `EventSource`, and only after the operator clicks **Live**. Disable nginx
+> buffering for that explicit follow path:
 >
 > ```nginx
-> location = /admin/logs/stream {
->     proxy_pass http://127.0.0.1:8090;
->     proxy_buffering off;
->     proxy_read_timeout 1h;
->     # + the same proxy_set_header lines as above
-> }
 > location ^~ /admin/dashboard/logs/ {
 >     proxy_pass http://127.0.0.1:8090;
 >     proxy_buffering off;
@@ -199,6 +195,10 @@ the flag already.
 >     # + the same proxy_set_header lines as above
 > }
 > ```
+>
+> Since v0.2.49, `/admin/logs/stream` is a retired compatibility endpoint
+> that returns `204 No Content`, which tells pages loaded before a rolling
+> upgrade to stop reconnecting. Do not proxy it as a long-lived stream.
 
 ## 4. Side-by-side with ShinyProxy
 

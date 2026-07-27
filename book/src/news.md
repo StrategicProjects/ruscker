@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.50 — 2026-07-26
+
+- **Group cards stay compact — even with hundreds of members.** On the
+  Groups page, a long member or app list now collapses to a ~3-row
+  preview with a soft fade and a localized **"Show all (N)" / "Show
+  less"** toggle, instead of one group ballooning while its neighbours
+  sit half-empty. The collapse is *measured*, not assumed: a list that
+  happens to fit the preview (short names, wide card) renders in full
+  with no fade and no toggle. Cards flow in a clean responsive grid,
+  each only as tall as its own content.
+
+---
+
 ## v0.2.49 — 2026-07-21
 
 - **The process Logs page no longer strands an infinite HTTP/1.1

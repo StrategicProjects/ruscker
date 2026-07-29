@@ -85,6 +85,15 @@ impl EditorScope {
         self.groups.iter().any(|owned| owned == group)
     }
 
+    /// Whether this caller owns the named group boundary.
+    ///
+    /// Group names stay case-sensitive, matching [`Spec::access_allows`].
+    /// Admin and break-glass sessions are unscoped; an Editor must carry the
+    /// exact group in the authoritative memberships fetched for this request.
+    pub fn may_touch_group(&self, group: &str) -> bool {
+        self.unscoped || self.has_group(group)
+    }
+
     /// Whether this caller may mutate or operate one spec.
     ///
     /// Open specs are shared admin-panel resources, so every Editor may work
@@ -272,6 +281,7 @@ mod tests {
             assert!(scope.groups.is_empty());
             assert!(scope.may_touch_spec(&restricted));
             assert!(scope.may_touch_user(&admin_target));
+            assert!(scope.may_touch_group("foreign"));
             assert!(scope.may_assign_groups(&["foreign".into()]));
             assert!(scope.may_assign_role(Role::Admin));
         }
@@ -283,6 +293,9 @@ mod tests {
     fn editor_touches_only_open_or_group_shared_specs() {
         let editor = scope(&["blue"]);
 
+        assert!(editor.may_touch_group("blue"));
+        assert!(!editor.may_touch_group("Blue"));
+        assert!(!editor.may_touch_group("green"));
         assert!(editor.may_touch_spec(&spec(&[], &[])), "open spec");
         assert!(
             editor.may_touch_spec(&spec(&["blue", "green"], &[])),

@@ -7,7 +7,10 @@
 <div class="flex items-end justify-between mb-5 pb-3 border-b border-[color:var(--border)]">
   <div>
     <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-groups-title") }}</h1>
-    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-groups-subtitle") }}</p>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">
+      {% if role == Role::Admin %}{{ self.t("admin-groups-subtitle") }}
+      {% else %}{{ self.t("admin-groups-editor-subtitle") }}{% endif %}
+    </p>
   </div>
   <div class="text-xs text-[color:var(--text-faint)]">{{ groups.len() }}</div>
 </div>
@@ -28,7 +31,8 @@
   {% else %}
   <div class="admin-flash-ok mb-4" role="status">
     <i class="ti ti-check" aria-hidden="true"></i>
-    {% if f == "renamed" %}{{ self.t("admin-groups-flash-renamed") }}
+    {% if f == "created" %}{{ self.t("admin-groups-flash-created") }}
+    {% else if f == "renamed" %}{{ self.t("admin-groups-flash-renamed") }}
     {% else if f == "deleted" %}{{ self.t("admin-groups-flash-deleted") }}
     {% else if f == "member-added" %}{{ self.t("admin-groups-flash-member-added") }}
     {% else %}{{ self.t("admin-groups-flash-member-removed") }}{% endif %}
@@ -38,8 +42,8 @@
 
 {# Create a group: a group exists once a user belongs to it, so "create" =
    add its first member under a new name. #}
-{% if !all_users.is_empty() %}
-<form method="post" action="{{ base }}/admin/groups/members/add" class="group-create">
+{% if role == Role::Admin && !all_users.is_empty() %}
+<form method="post" action="{{ base }}/admin/groups/create" class="group-create">
   <span class="group-create-label">{{ self.t("admin-groups-new-group-title") }}</span>
   <input type="text" name="group" required placeholder="{{ self.t("admin-groups-new-name") }}"
          pattern="[^,]+" class="admin-table-search" style="max-width:200px">
@@ -66,6 +70,7 @@
       <div class="editor-card__head">
         <span class="editor-card__icon"><i class="ti ti-users-group" aria-hidden="true"></i></span>
         <div class="flex-1"><div class="editor-card__title">{{ g.name }}</div></div>
+        {% if role == Role::Admin %}
         {# Rename: prompt for a new name (read the old one from the DOM, not
            interpolated into JS, so a name with a quote can't break it). #}
         <form method="post" action="{{ base }}/admin/groups/rename" style="display:inline"
@@ -80,6 +85,7 @@
           <input type="hidden" name="name" value="{{ g.name }}">
           <button type="submit" class="group-action group-action-del" title="{{ self.t("admin-groups-delete") }}"><i class="ti ti-trash" aria-hidden="true"></i></button>
         </form>
+        {% endif %}
       </div>
       {# Collapse is measured, not assumed: >8 pills that still FIT the
          preview height (short names / wide card) must not fade visible

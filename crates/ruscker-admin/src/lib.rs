@@ -637,6 +637,11 @@ impl AdminServer {
             db = db_kind,
             specs = self.state.config.proxy.specs.len(),
             images_dir = ?self.images_dir,
+            // The scheduler's clock (#1042). Worth a line in the banner:
+            // an operator who set `timezone` in the wrong file or section
+            // gets a silent UTC fallback otherwise, and would only find
+            // out when a nightly job fires hours off.
+            timezone = self.state.config.server.effective_timezone().name(),
             "ruscker started — listening"
         );
         // `into_make_service_with_connect_info` exposes the TCP peer

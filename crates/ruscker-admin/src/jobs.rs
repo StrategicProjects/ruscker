@@ -28,18 +28,43 @@ pub const TICK: Duration = Duration::from_secs(30);
 /// The next occurrence of `cron` strictly after `after`, or `None`
 /// for an unparseable expression (surfaced by the caller once — a bad
 /// expression must not wedge the tick).
-fn next_occurrence(cron: &str, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
+///
+/// The cron fields are matched against the **wall clock in `tz`**
+/// (`server.timezone`, UTC when unset — #1042): an operator writing
+/// `0 8 * * *` means eight in the morning where they live. Croner does
+/// the matching on `start_time.naive_local()`, so handing it a
+/// `DateTime<Tz>` is all it takes; the result comes back in the same
+/// zone and is converted to UTC for storage and comparison, which are
+/// zone-free throughout.
+///
+/// DST is croner's to resolve, and it does so sanely — verified, not
+/// assumed, in `dst_transitions_neither_skip_nor_duplicate_a_run`: a
+/// spring-forward gap fires at the transition instant (the run is not
+/// lost) and a fall-back repeat fires only on the first of the two
+/// (no duplicate run).
+///
+/// Public so the Schedules page computes "next run" through the very
+/// same function the scheduler fires on — a UI that disagreed with the
+/// runner about when a job fires would be worse than no UI.
+pub fn next_occurrence(
+    cron: &str,
+    after: DateTime<Utc>,
+    tz: chrono_tz::Tz,
+) -> Option<DateTime<Utc>> {
     let parsed: croner::Cron = cron.parse().ok()?;
-    parsed.find_next_occurrence(&after, false).ok()
+    parsed
+        .find_next_occurrence(&after.with_timezone(&tz), false)
+        .ok()
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 /// Whether `schedule` is due at `now`: its cron has an occurrence in
 /// `(anchor, now]`, where the anchor is the last fire marker (or the
 /// schedule's creation, so a brand-new "every day at 03:00" waits for
 /// 03:00 instead of firing on creation).
-fn is_due(schedule: &Schedule, now: DateTime<Utc>) -> bool {
+fn is_due(schedule: &Schedule, now: DateTime<Utc>, tz: chrono_tz::Tz) -> bool {
     let anchor = schedule.last_run_at.unwrap_or(schedule.created_at);
-    match next_occurrence(&schedule.cron, anchor) {
+    match next_occurrence(&schedule.cron, anchor, tz) {
         Some(next) => next <= now,
         None => false,
     }
@@ -116,8 +141,11 @@ async fn tick(state: &AppState) {
         }
     };
     let now = Utc::now();
+    // One zone for the whole pass, so two schedules in the same tick
+    // can't disagree about what "08:00" means.
+    let tz = state.config.server.effective_timezone();
     for schedule in schedules.into_iter().filter(|s| s.enabled) {
-        if next_occurrence(&schedule.cron, now).is_none() {
+        if next_occurrence(&schedule.cron, now, tz).is_none() {
             tracing::warn!(
                 schedule = schedule.id,
                 spec = %schedule.spec_id,
@@ -126,7 +154,7 @@ async fn tick(state: &AppState) {
             );
             continue;
         }
-        if !is_due(&schedule, now) {
+        if !is_due(&schedule, now, tz) {
             continue;
         }
         // Claim BEFORE running — a crash mid-job must not double-fire,
@@ -275,23 +303,126 @@ mod tests {
     fn due_when_an_occurrence_passed_since_the_anchor() {
         let now: DateTime<Utc> = "2026-07-13T03:05:00Z".parse().unwrap();
         // Daily at 03:00, last fired yesterday 03:00 → due.
-        assert!(is_due(&sched("0 3 * * *", Some("2026-07-12T03:00:30Z"), "2026-07-01T00:00:00Z"), now));
+        assert!(is_due(&sched("0 3 * * *", Some("2026-07-12T03:00:30Z"), "2026-07-01T00:00:00Z"), now, chrono_tz::UTC));
         // Already fired today at 03:00 → not due again.
-        assert!(!is_due(&sched("0 3 * * *", Some("2026-07-13T03:00:30Z"), "2026-07-01T00:00:00Z"), now));
+        assert!(!is_due(&sched("0 3 * * *", Some("2026-07-13T03:00:30Z"), "2026-07-01T00:00:00Z"), now, chrono_tz::UTC));
         // Brand new schedule created at 02:00 today → 03:00 passed → due.
-        assert!(is_due(&sched("0 3 * * *", None, "2026-07-13T02:00:00Z"), now));
+        assert!(is_due(&sched("0 3 * * *", None, "2026-07-13T02:00:00Z"), now, chrono_tz::UTC));
         // Brand new created at 04:00 → next is tomorrow → NOT due (no
         // fire-on-create).
         let later: DateTime<Utc> = "2026-07-13T04:10:00Z".parse().unwrap();
-        assert!(!is_due(&sched("0 3 * * *", None, "2026-07-13T04:00:00Z"), later));
+        assert!(!is_due(&sched("0 3 * * *", None, "2026-07-13T04:00:00Z"), later, chrono_tz::UTC));
         // Downtime over several occurrences collapses to one firing.
-        assert!(is_due(&sched("0 3 * * *", Some("2026-07-09T03:00:00Z"), "2026-07-01T00:00:00Z"), now));
+        assert!(is_due(&sched("0 3 * * *", Some("2026-07-09T03:00:00Z"), "2026-07-01T00:00:00Z"), now, chrono_tz::UTC));
+    }
+
+    /// The whole point of #1042: `0 8 * * *` under `America/Recife`
+    /// means 08:00 THERE, i.e. 11:00 UTC. Firing at 08:00 UTC (05:00
+    /// local) is the bug this fixes.
+    #[test]
+    fn cron_is_evaluated_in_the_configured_zone() {
+        let recife = chrono_tz::America::Recife;
+        let anchor: DateTime<Utc> = "2026-07-12T12:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("0 8 * * *", anchor, recife).unwrap().to_rfc3339(),
+            "2026-07-13T11:00:00+00:00"
+        );
+        // Same expression, no zone configured → unchanged behaviour.
+        assert_eq!(
+            next_occurrence("0 8 * * *", anchor, chrono_tz::UTC).unwrap().to_rfc3339(),
+            "2026-07-13T08:00:00+00:00"
+        );
+
+        // And the due check follows: at 08:05 UTC the Recife job has NOT
+        // fired yet (it is 05:05 there); at 11:05 UTC it has.
+        let sched = sched("0 8 * * *", Some("2026-07-12T11:00:30Z"), "2026-07-01T00:00:00Z");
+        let morning_utc: DateTime<Utc> = "2026-07-13T08:05:00Z".parse().unwrap();
+        let morning_local: DateTime<Utc> = "2026-07-13T11:05:00Z".parse().unwrap();
+        assert!(!is_due(&sched, morning_utc, recife));
+        assert!(is_due(&sched, morning_local, recife));
+        // Under UTC the same schedule is due at 08:05 — the old behaviour,
+        // which an upgrade must preserve for anyone who sets nothing.
+        assert!(is_due(&sched, morning_utc, chrono_tz::UTC));
+    }
+
+    /// A zone whose offset changes across the year must be read from the
+    /// zone database, not frozen: São Paulo is −03 in July and was −02
+    /// under DST in January. (Brazil dropped DST in 2019, so the January
+    /// case is historical — which is exactly why a hardcoded offset
+    /// would be wrong and a zone name is right.)
+    #[test]
+    fn zone_offset_follows_the_date() {
+        let sp = chrono_tz::America::Sao_Paulo;
+        let winter: DateTime<Utc> = "2026-07-01T00:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("0 8 * * *", winter, sp).unwrap().to_rfc3339(),
+            "2026-07-01T11:00:00+00:00"
+        );
+        let dst_era: DateTime<Utc> = "2018-01-01T00:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("0 8 * * *", dst_era, sp).unwrap().to_rfc3339(),
+            "2018-01-01T10:00:00+00:00"
+        );
+    }
+
+
+    /// What croner ACTUALLY does across a DST transition, pinned here
+    /// because both plausible guesses are wrong and the answer decides
+    /// whether a nightly ETL silently skips or double-runs. Lisbon,
+    /// which still observes EU DST (Brazil dropped it in 2019).
+    #[test]
+    fn dst_transitions_neither_skip_nor_duplicate_a_run() {
+        let lisbon = chrono_tz::Europe::Lisbon;
+
+        // Spring forward, 2026-03-29: 01:00 WET → 02:00 WEST, so a
+        // 01:30 local never happens that day. The run is NOT skipped —
+        // croner lands on the transition instant itself (01:00 UTC),
+        // i.e. the job fires as the clock jumps.
+        let before: DateTime<Utc> = "2026-03-28T12:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", before, lisbon).unwrap().to_rfc3339(),
+            "2026-03-29T01:00:00+00:00"
+        );
+
+        // Fall back, 2026-10-25: 02:00 WEST → 01:00 WET, so 01:30 local
+        // happens twice. Croner takes the FIRST (00:30 UTC) and then
+        // moves to the next day — the repeat does not fire a second run.
+        let fb: DateTime<Utc> = "2026-10-24T12:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", fb, lisbon).unwrap().to_rfc3339(),
+            "2026-10-25T00:30:00+00:00"
+        );
+        let after_first: DateTime<Utc> = "2026-10-25T00:45:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", after_first, lisbon).unwrap().to_rfc3339(),
+            "2026-10-26T01:30:00+00:00",
+            "the second 01:30 must not fire a duplicate run"
+        );
+    }
+
+    /// Adopting a zone on an install that already has schedules can fire
+    /// one EXTRA run on the switch-over day: the fire marker is a UTC
+    /// instant, and re-reading the same expression on a westward clock
+    /// puts today's occurrence later than the marker. Pinned so the
+    /// behaviour is a documented consequence rather than a surprise —
+    /// it's why the docs tell operators to review their schedules after
+    /// setting `server.timezone`.
+    #[test]
+    fn adopting_a_zone_can_refire_on_the_switchover_day() {
+        // Fired today at 08:00 UTC under the old (UTC) behaviour…
+        let s = sched("0 8 * * *", Some("2026-07-29T08:00:00Z"), "2026-07-01T00:00:00Z");
+        let noon: DateTime<Utc> = "2026-07-29T12:00:00Z".parse().unwrap();
+        // …under UTC it is done for the day…
+        assert!(!is_due(&s, noon, chrono_tz::UTC));
+        // …but under Recife today's 08:00 local (11:00 UTC) is still
+        // ahead of the marker, so it runs once more.
+        assert!(is_due(&s, noon, chrono_tz::America::Recife));
     }
 
     #[test]
     fn unparseable_cron_is_never_due() {
         let now = Utc::now();
-        assert!(!is_due(&sched("not a cron", None, "2026-07-01T00:00:00Z"), now));
-        assert!(next_occurrence("61 99 * * *", now).is_none());
+        assert!(!is_due(&sched("not a cron", None, "2026-07-01T00:00:00Z"), now, chrono_tz::UTC));
+        assert!(next_occurrence("61 99 * * *", now, chrono_tz::UTC).is_none());
     }
 }

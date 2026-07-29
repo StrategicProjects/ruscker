@@ -49,7 +49,10 @@
         <span class="admin-login-label">{{ self.t("admin-schedules-cron") }}</span>
         <input type="text" name="cron" required placeholder="0 3 * * *"
                autocapitalize="none" spellcheck="false" class="dash-mono">
-        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-schedules-cron-help") }}</span>
+        {# The zone itself is data, not a translatable string — appended
+           so the operator sees which clock their expression will be read
+           in without having to open ruscker.yml (#1042). #}
+        <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-schedules-cron-help") }} ({{ tz_label }})</span>
       </label>
 
       <label class="admin-login-field" style="margin:0">

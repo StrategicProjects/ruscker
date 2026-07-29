@@ -63,6 +63,10 @@ regex = "1.12"
 url = "2.5.8"
 uuid = { version = "1.23", features = ["v4", "serde"] }
 chrono = { version = "0.4.44", features = ["serde"] }
+# IANA zone database, for evaluating cron schedules in the operator's
+# local time instead of UTC (#1042). Pure data + arithmetic — no I/O, so
+# it's admissible in the pure-domain `ruscker-config` crate.
+chrono-tz = "0.10"
 dashmap = "6.2"
 ordered-float = { version = "5.3", features = ["serde"] }
 

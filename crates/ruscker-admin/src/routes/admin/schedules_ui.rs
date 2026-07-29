@@ -44,10 +44,10 @@ struct ScheduleRow {
     /// First line of the argv override, or an em dash for "the spec's
     /// own command".
     cmd_summary: String,
-    /// `YYYY-MM-DD HH:MM UTC`, or an em dash when the schedule is
-    /// disabled or its cron no longer parses.
+    /// `YYYY-MM-DD HH:MM <zone>` in the scheduler's timezone, or an em
+    /// dash when the schedule is disabled or its cron no longer parses.
     next_run: String,
-    /// `YYYY-MM-DD HH:MM UTC`, or an em dash before the first fire.
+    /// `YYYY-MM-DD HH:MM <zone>`, or an em dash before the first fire.
     last_run: String,
     enabled: bool,
 }
@@ -82,6 +82,11 @@ struct SchedulesPage<'a> {
     kpi_jobs: i64,
     kpi_active: i64,
     kpi_recent_failures: i64,
+    /// The scheduler's zone, spelled out for the cron field's help text
+    /// (`America/Recife`, or `UTC` when unconfigured) — an operator
+    /// writing an expression shouldn't have to open `ruscker.yml` to
+    /// learn which clock it will be read in (#1042).
+    tz_label: String,
     flash: Option<&'static str>,
     flash_error: bool,
 }
@@ -110,23 +115,35 @@ impl SchedulesPage<'_> {
 
 /// `2026-07-13T03:00:12Z` → `2026-07-13 03:00 UTC` — minute precision
 /// is all a cron UI needs.
-fn fmt_utc(dt: &DateTime<Utc>) -> String {
-    dt.format("%Y-%m-%d %H:%M UTC").to_string()
+///
+/// Rendered in the SCHEDULER's zone (`server.timezone`, UTC when unset
+/// — #1042), not the viewer's: these times are when the server will
+/// fire a job, and the operator writing the cron expression needs to
+/// read them in the same clock they wrote it in. That's the opposite
+/// call from the admin tables (#1041), which are records of past
+/// events and follow each viewer's browser. `%Z` labels the zone, so
+/// an unconfigured install still reads exactly `… UTC` as before.
+fn fmt_dt(dt: &DateTime<Utc>, tz: chrono_tz::Tz) -> String {
+    dt.with_timezone(&tz).format("%Y-%m-%d %H:%M %Z").to_string()
 }
 
 /// The schedule's next occurrence, from the same anchor the scheduler
 /// uses ([`crate::jobs`]): the last fire marker, or creation for a
 /// schedule that never fired (no fire-on-create). `None` when the
 /// stored cron no longer parses.
-fn next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
+///
+/// Delegates to [`crate::jobs::next_occurrence`] instead of re-deriving
+/// it, so the page can't drift from the runner — it used to hold its
+/// own copy of the croner call, which would now have silently kept
+/// computing in UTC while the scheduler moved to the configured zone.
+fn next_run(schedule: &Schedule, tz: chrono_tz::Tz) -> Option<DateTime<Utc>> {
     let anchor = schedule.last_run_at.unwrap_or(schedule.created_at);
-    let parsed: croner::Cron = schedule.cron.parse().ok()?;
-    parsed.find_next_occurrence(&anchor, false).ok()
+    crate::jobs::next_occurrence(&schedule.cron, anchor, tz)
 }
 
-fn schedule_row(s: Schedule) -> ScheduleRow {
+fn schedule_row(s: Schedule, tz: chrono_tz::Tz) -> ScheduleRow {
     let next = if s.enabled {
-        next_run(&s).map(|dt| fmt_utc(&dt))
+        next_run(&s, tz).map(|dt| fmt_dt(&dt, tz))
     } else {
         None // a disabled schedule has no next fire
     };
@@ -136,7 +153,10 @@ fn schedule_row(s: Schedule) -> ScheduleRow {
             .and_then(|argv| argv.first().cloned())
             .unwrap_or_else(|| "—".to_string()),
         next_run: next.unwrap_or_else(|| "—".to_string()),
-        last_run: s.last_run_at.map(|dt| fmt_utc(&dt)).unwrap_or_else(|| "—".to_string()),
+        last_run: s
+            .last_run_at
+            .map(|dt| fmt_dt(&dt, tz))
+            .unwrap_or_else(|| "—".to_string()),
         id: s.id,
         spec_id: s.spec_id,
         cron: s.cron,
@@ -153,10 +173,10 @@ fn fmt_duration(ms: Option<i64>) -> String {
     }
 }
 
-fn run_view(r: RunRow) -> RunView {
+fn run_view(r: RunRow, tz: chrono_tz::Tz) -> RunView {
     RunView {
         spec_id: r.spec_id,
-        started: fmt_utc(&r.started_at),
+        started: fmt_dt(&r.started_at, tz),
         status: r.status,
         exit_code: r.exit_code.map(|c| c.to_string()).unwrap_or_else(|| "—".to_string()),
         duration: fmt_duration(r.duration_ms),
@@ -220,6 +240,10 @@ async fn index(
     let kpi_active = schedules.iter().filter(|schedule| schedule.enabled).count() as i64;
     let kpi_recent_failures = runs.iter().filter(|run| run.status != "ok").count() as i64;
 
+    // The scheduler's zone — every time on this page is a server firing
+    // time, so they all render in it (#1042).
+    let tz = state.config.server.effective_timezone();
+
     super::render(&SchedulesPage {
         locale: loc,
         theme,
@@ -229,11 +253,12 @@ async fn index(
         nav_section: "schedules",
         role: admin.role,
         specs,
-        schedules: schedules.into_iter().map(schedule_row).collect(),
-        runs: runs.into_iter().map(run_view).collect(),
+        schedules: schedules.into_iter().map(|s| schedule_row(s, tz)).collect(),
+        runs: runs.into_iter().map(|r| run_view(r, tz)).collect(),
         kpi_jobs,
         kpi_active,
         kpi_recent_failures,
+        tz_label: tz.name().to_string(),
         flash,
         flash_error,
     })
@@ -421,19 +446,56 @@ mod tests {
     #[test]
     fn schedule_row_formats_next_and_last_run() {
         // Fired 2026-07-12 03:00 → next daily 03:00 is the 13th.
-        let row = schedule_row(sched("0 3 * * *", true, Some("2026-07-12T03:00:10Z")));
+        let row = schedule_row(
+            sched("0 3 * * *", true, Some("2026-07-12T03:00:10Z")),
+            chrono_tz::UTC,
+        );
         assert_eq!(row.next_run, "2026-07-13 03:00 UTC");
         assert_eq!(row.last_run, "2026-07-12 03:00 UTC");
         assert_eq!(row.cmd_summary, "Rscript");
 
         // Disabled → no next fire; never fired → em-dash last run.
-        let row = schedule_row(sched("0 3 * * *", false, None));
+        let row = schedule_row(sched("0 3 * * *", false, None), chrono_tz::UTC);
         assert_eq!(row.next_run, "—");
         assert_eq!(row.last_run, "—");
 
         // A stored cron that no longer parses can't show a next run.
-        let row = schedule_row(sched("not a cron", true, None));
+        let row = schedule_row(sched("not a cron", true, None), chrono_tz::UTC);
         assert_eq!(row.next_run, "—");
+    }
+
+    /// With a zone configured, the page reports the firing time on the
+    /// operator's clock — and the STORED instant is unchanged, so this
+    /// is purely how it reads (#1042). `0 3 * * *` in Recife fires at
+    /// 06:00 UTC; the row must say 03:00, not 06:00, or the operator
+    /// can't tell whether their cron means what they wrote.
+    #[test]
+    fn schedule_row_renders_in_the_configured_zone() {
+        let row = schedule_row(
+            sched("0 3 * * *", true, Some("2026-07-12T06:00:10Z")),
+            chrono_tz::America::Recife,
+        );
+        assert_eq!(row.next_run, "2026-07-13 03:00 -03");
+        assert_eq!(row.last_run, "2026-07-12 03:00 -03");
+    }
+
+    /// The page's "next run" must be the very instant the scheduler
+    /// will fire on. Both go through `jobs::next_occurrence`, and this
+    /// pins them together: the same schedule, the same zone, one answer.
+    #[test]
+    fn page_next_run_matches_the_scheduler() {
+        let s = sched("0 8 * * *", true, Some("2026-07-12T11:00:00Z"));
+        let tz = chrono_tz::America::Recife;
+        let anchor = s.last_run_at.unwrap();
+        assert_eq!(
+            next_run(&s, tz),
+            crate::jobs::next_occurrence("0 8 * * *", anchor, tz)
+        );
+        // …and that instant is 08:00 local = 11:00 UTC, not 08:00 UTC.
+        assert_eq!(
+            next_run(&s, tz).unwrap().to_rfc3339(),
+            "2026-07-13T11:00:00+00:00"
+        );
     }
 
     #[test]

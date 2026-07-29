@@ -46,7 +46,10 @@ server:
   # With this set, `0 8 * * *` on the Schedules page means 08:00 HERE;
   # without it, 08:00 UTC (the default, and what every install did
   # before this key existed — so setting it WILL shift existing
-  # schedules by your UTC offset; check them afterwards).
+  # schedules by your UTC offset; check them afterwards, and note that
+  # the switch-over day can fire one extra run of a job that already
+  # ran. Disable/re-enable the schedule around the restart if a re-run
+  # would hurt).
   # Use a zone name, never an abbreviation: `BRT` is not a zone and
   # leaves the scheduler on UTC with a startup warning.
   # Admin tables and the Logs tab are unaffected — they follow each

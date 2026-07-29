@@ -37,10 +37,11 @@ pub const TICK: Duration = Duration::from_secs(30);
 /// zone and is converted to UTC for storage and comparison, which are
 /// zone-free throughout.
 ///
-/// DST is croner's problem, and it has one: for a spring-forward gap
-/// the next matching local time simply doesn't exist that day, and for
-/// a fall-back repeat it returns the first of the two. Both are the
-/// conventional cron behaviours.
+/// DST is croner's to resolve, and it does so sanely — verified, not
+/// assumed, in `dst_transitions_neither_skip_nor_duplicate_a_run`: a
+/// spring-forward gap fires at the transition instant (the run is not
+/// lost) and a fall-back repeat fires only on the first of the two
+/// (no duplicate run).
 ///
 /// Public so the Schedules page computes "next run" through the very
 /// same function the scheduler fires on — a UI that disagreed with the
@@ -362,6 +363,60 @@ mod tests {
             next_occurrence("0 8 * * *", dst_era, sp).unwrap().to_rfc3339(),
             "2018-01-01T10:00:00+00:00"
         );
+    }
+
+
+    /// What croner ACTUALLY does across a DST transition, pinned here
+    /// because both plausible guesses are wrong and the answer decides
+    /// whether a nightly ETL silently skips or double-runs. Lisbon,
+    /// which still observes EU DST (Brazil dropped it in 2019).
+    #[test]
+    fn dst_transitions_neither_skip_nor_duplicate_a_run() {
+        let lisbon = chrono_tz::Europe::Lisbon;
+
+        // Spring forward, 2026-03-29: 01:00 WET → 02:00 WEST, so a
+        // 01:30 local never happens that day. The run is NOT skipped —
+        // croner lands on the transition instant itself (01:00 UTC),
+        // i.e. the job fires as the clock jumps.
+        let before: DateTime<Utc> = "2026-03-28T12:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", before, lisbon).unwrap().to_rfc3339(),
+            "2026-03-29T01:00:00+00:00"
+        );
+
+        // Fall back, 2026-10-25: 02:00 WEST → 01:00 WET, so 01:30 local
+        // happens twice. Croner takes the FIRST (00:30 UTC) and then
+        // moves to the next day — the repeat does not fire a second run.
+        let fb: DateTime<Utc> = "2026-10-24T12:00:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", fb, lisbon).unwrap().to_rfc3339(),
+            "2026-10-25T00:30:00+00:00"
+        );
+        let after_first: DateTime<Utc> = "2026-10-25T00:45:00Z".parse().unwrap();
+        assert_eq!(
+            next_occurrence("30 1 * * *", after_first, lisbon).unwrap().to_rfc3339(),
+            "2026-10-26T01:30:00+00:00",
+            "the second 01:30 must not fire a duplicate run"
+        );
+    }
+
+    /// Adopting a zone on an install that already has schedules can fire
+    /// one EXTRA run on the switch-over day: the fire marker is a UTC
+    /// instant, and re-reading the same expression on a westward clock
+    /// puts today's occurrence later than the marker. Pinned so the
+    /// behaviour is a documented consequence rather than a surprise —
+    /// it's why the docs tell operators to review their schedules after
+    /// setting `server.timezone`.
+    #[test]
+    fn adopting_a_zone_can_refire_on_the_switchover_day() {
+        // Fired today at 08:00 UTC under the old (UTC) behaviour…
+        let s = sched("0 8 * * *", Some("2026-07-29T08:00:00Z"), "2026-07-01T00:00:00Z");
+        let noon: DateTime<Utc> = "2026-07-29T12:00:00Z".parse().unwrap();
+        // …under UTC it is done for the day…
+        assert!(!is_due(&s, noon, chrono_tz::UTC));
+        // …but under Recife today's 08:00 local (11:00 UTC) is still
+        // ahead of the marker, so it runs once more.
+        assert!(is_due(&s, noon, chrono_tz::America::Recife));
     }
 
     #[test]

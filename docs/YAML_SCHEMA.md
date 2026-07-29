@@ -69,6 +69,18 @@ existed: upgrading never moves the firing time of a schedule already
 running in production. Set it deliberately, and check your schedules
 afterwards — a nightly job *will* shift by your UTC offset.
 
+One consequence worth planning for: **adopting a zone can fire one
+extra run on the switch-over day.** The fire marker is a UTC instant,
+so re-reading the same expression on a westward clock can put today's
+occurrence *after* the marker — a job that already ran at 08:00 UTC
+runs again at 08:00 local. It settles from the next day on. If a
+re-run would be harmful (a non-idempotent ETL), disable the schedule,
+restart with the zone set, then re-enable it.
+
+Across DST transitions the runner neither skips nor duplicates: a
+spring-forward gap fires at the transition instant, and a fall-back
+repeat fires only on the first of the two.
+
 Use a zone name, not an abbreviation: `BRT` is not a zone and produces
 a startup warning while the scheduler quietly stays on UTC. Zone names
 also carry the historical DST rules, so a schedule keeps meaning

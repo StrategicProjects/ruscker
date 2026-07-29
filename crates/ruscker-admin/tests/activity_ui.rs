@@ -179,3 +179,45 @@ async fn paginates_server_side() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(row_count(&body2), 10, "second page has the remainder");
 }
+
+/// The timestamp column must ship the instant in a machine-readable
+/// `<time datetime="…Z">` next to the human text, so the layout can
+/// re-render it in the viewer's timezone. Without it the cell shows UTC
+/// and reads three hours ahead for a UTC−3 operator (#1041).
+#[tokio::test]
+async fn timestamp_cell_carries_utc_instant_for_local_rendering() {
+    let db = open_db().await;
+    user_activity::insert_batch(
+        &db,
+        &[ActivityEvent::login_success(
+            "alice",
+            AuthMethod::Password,
+            "l1",
+            None,
+        )],
+    )
+    .await
+    .unwrap();
+    let state = app_state(db).await;
+    let cookie = admin_cookie(&state).await;
+
+    let (status, body) = get(state, "/admin/activity", Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(r#"data-rk-time="datetime-s""#),
+        "activity row is missing the local-time marker"
+    );
+
+    // The attribute is a real UTC instant — not the pt-BR display text.
+    let attr = body
+        .split(r#"<time datetime=""#)
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("a <time datetime=…> in the row");
+    let parsed = chrono::DateTime::parse_from_rfc3339(attr)
+        .unwrap_or_else(|e| panic!("datetime attr {attr:?} is not RFC-3339: {e}"));
+    let skew = (chrono::Utc::now() - parsed.with_timezone(&chrono::Utc))
+        .num_seconds()
+        .abs();
+    assert!(skew < 120, "row timestamp {attr} is {skew}s off from now");
+}

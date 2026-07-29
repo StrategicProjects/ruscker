@@ -226,7 +226,7 @@
           {% if let Some(celular) = u.celular %}<div class="text-xs text-[color:var(--text-muted)]">{{ celular }}</div>{% endif %}
           {% if u.setor.is_none() && u.email.is_none() && u.celular.is_none() %}<span class="text-[color:var(--text-faint)]">—</span>{% endif %}
         </td>
-        <td class="dash-mono text-[color:var(--text-muted)]">{{ u.created_at.format("%Y-%m-%d") }}</td>
+        <td class="dash-mono text-[color:var(--text-muted)]"><time datetime="{{ u.created_at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="date-iso">{{ u.created_at.format("%Y-%m-%d") }}</time></td>
         <td style="text-align:right;white-space:nowrap">
           <a href="{{ base }}/admin/users/{{ u.username }}/edit" class="dash-action"
              title="{{ self.t("admin-users-edit") }}" aria-label="{{ self.t("admin-users-edit") }}">

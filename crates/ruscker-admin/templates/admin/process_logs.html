@@ -88,6 +88,7 @@
     var knownApps = {};      // app name -> true, to dedupe the app <select>
 
     function cell(cls, text) { var s = document.createElement('span'); s.className = cls; s.textContent = text; return s; }
+    function p2(n) { return (n < 10 ? '0' : '') + n; }
 
     // A row matches when its level chip is on AND the app filter allows it.
     function matches(el) {
@@ -123,9 +124,21 @@
         div.dataset.level = level;
         div.dataset.app = app;
         div.dataset.text = clean.toLowerCase();
-        // HH:MM:SS.mmm (keep millis like the design; drop the date + tz).
-        var ts = m[1].replace(/^.*T/, '').replace(/(\.\d{3})\d*Z?$/, '$1').replace(/Z$/, '');
-        div.appendChild(cell('log-ts', ts));
+        // HH:MM:SS.mmm (keep millis like the design; drop the date + tz),
+        // in the VIEWER's timezone (#1041): the tracing stream emits UTC,
+        // which reads three hours ahead for a UTC−3 operator — the same
+        // defect the audit table had. The raw UTC token stays on the
+        // cell's title for anyone correlating with the downloaded log.
+        var d = new Date(m[1]);
+        var ts = isNaN(d.getTime())
+          // First field isn't a timestamp we can parse — show it as-is
+          // rather than blanking the column.
+          ? m[1].replace(/^.*T/, '').replace(/(\.\d{3})\d*Z?$/, '$1').replace(/Z$/, '')
+          : p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) +
+            '.' + ('00' + d.getMilliseconds()).slice(-3);
+        var tsCell = cell('log-ts', ts);
+        tsCell.title = m[1];
+        div.appendChild(tsCell);
         div.appendChild(cell('log-lvl log-lvl-' + level.toLowerCase(), level));
         div.appendChild(cell('log-app', app));
         div.appendChild(cell('log-msg', rest));

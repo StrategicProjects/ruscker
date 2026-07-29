@@ -448,6 +448,12 @@ action, target and timestamp. Destructive **replica stop/restart**, schedule
 changes, MFA enrolment/reset/proof, and break-glass MFA bypasses are recorded
 too; rows with a change diff expand to show it.
 
+Timestamps are stored in UTC and rendered in **your browser's timezone**, so
+two operators in different zones each read the local wall clock of the same
+event. Hovering a timestamp shows the full date with the zone name. (The
+scheduler's own times — next occurrence and last run on the Schedules page —
+are still labelled UTC.)
+
 ### System
 
 A read-only diagnostic of the running server (version, bind address,

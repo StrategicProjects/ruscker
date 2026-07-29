@@ -40,6 +40,7 @@ pub mod ratelimit;
 pub mod routes;
 pub mod admin_sessions_pg;
 pub mod scaler;
+pub mod scope;
 pub mod sessions;
 pub mod sessions_pg;
 pub mod theme;

@@ -213,10 +213,27 @@ fn row_from(
     // Treat a stored empty string the same as NULL (the form may submit
     // blanks); keep only non-empty trimmed values.
     let clean = |s: Option<String>| s.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    // An unparseable stored role falls back to the LEAST privilege, which is
+    // the right default — but it used to do so silently, and a row that
+    // suddenly reads as Viewer is exactly the "why did my admin lose access?"
+    // mystery nobody can debug from the UI. `role` is plain TEXT with no
+    // CHECK, so a hand-edited row or an external provisioner (#934) can put
+    // anything there. Say so once per read; an operator needs the row's name.
+    let role = match Role::parse(&role) {
+        Some(parsed) => parsed,
+        None => {
+            tracing::warn!(
+                username = %username,
+                stored_role = %role,
+                "stored role does not parse; treating the account as Viewer"
+            );
+            Role::Viewer
+        }
+    };
     UserRow {
         id,
         username,
-        role: Role::parse(&role).unwrap_or(Role::Viewer),
+        role,
         // `must_change_password` reads as `bool` on both backends: sqlx
         // decodes SQLite's INTEGER 0/1 and Postgres' native BOOLEAN.
         must_change_password: must_change,

@@ -1,9 +1,10 @@
-//! Admin > Groups (#503 read-only + #540 CRUD).
+//! Admin > Groups (#503 read-only + #540 CRUD + #990 scoped membership).
 //!
 //! Groups in Ruscker are **derived**, not a first-class entity: a group is
 //! any name that appears in a user's memberships or a spec's `access-groups`.
 //! This page surfaces them — for each group, its member users and the apps it
-//! gates — and lets an Admin **rename**, **delete**, and add/remove members.
+//! gates. Admins may create, rename, delete, and change membership. Editors
+//! may only add/remove non-Admin members of groups they themselves belong to.
 //! Because there's no `groups` table, every edit rewrites the name across the
 //! users and specs that reference it; a group exists exactly as long as
 //! something points at it (adding the first member creates it; removing the
@@ -12,6 +13,7 @@
 use askama::Template;
 use axum::{
     extract::{Query, State},
+    http::StatusCode,
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Form, Router,
@@ -20,7 +22,9 @@ use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::auth::{RequireAdmin, Role};
+use crate::db::users::UserRow;
 use crate::i18n::{Locale, Locales};
+use crate::scope::EditorScope;
 use crate::theme::Theme;
 use crate::AppState;
 
@@ -29,6 +33,7 @@ use super::KpiMetric;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/groups", get(index))
+        .route("/admin/groups/create", post(create))
         .route("/admin/groups/rename", post(rename))
         .route("/admin/groups/delete", post(delete))
         .route("/admin/groups/members/add", post(add_member))
@@ -73,7 +78,7 @@ struct GroupsPage<'a> {
     /// Mount prefix for base-path-correct URLs (#294).
     base: std::sync::Arc<str>,
     nav_section: &'static str,
-    /// Current session role (always Admin here) — drives nav gating.
+    /// Current session role — drives nav and structural-action gating.
     role: Role,
     groups: Vec<GroupView>,
     kpi_groups: i64,
@@ -83,7 +88,8 @@ struct GroupsPage<'a> {
     /// a dedicated "Public apps" rail so the page accounts for every spec,
     /// not only the gated ones.
     public_apps: Vec<AppRef>,
-    /// All usernames, for the "add member" picker.
+    /// Eligible usernames for the "add member" picker. Editors never receive
+    /// Admin targets; unscoped Admins receive every account.
     all_users: Vec<String>,
     flash: Option<String>,
 }
@@ -113,58 +119,87 @@ fn redirect_flash(flash: &str) -> Response {
 }
 
 async fn index(
-    _: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
     Query(q): Query<GroupsQuery>,
 ) -> Response {
-    // group name → (member usernames, apps id→name). BTree everywhere so the
+    type GroupData = (BTreeSet<String>, BTreeSet<String>);
+
+    // group name → (member usernames, app ids). BTree everywhere so the
     // page is deterministically ordered (groups, members, apps) with no dups.
-    let mut map: BTreeMap<String, (BTreeSet<String>, BTreeMap<String, String>)> = BTreeMap::new();
+    let mut map: BTreeMap<String, GroupData> = BTreeMap::new();
     let mut all_users: Vec<String> = Vec::new();
 
-    // Users contribute members.
+    // An Editor's own authoritative row is enough to establish each owned
+    // group even if no app references it. A failed scope lookup yields an
+    // empty list, so this remains fail-closed.
+    if !scope.unscoped {
+        for group in &scope.groups {
+            map.entry(group.clone()).or_default();
+        }
+    }
+
+    // Users contribute members and the add-member picker. Editors may add any
+    // non-Admin account to an owned group, but Admin accounts are neither
+    // exposed nor offered as mutation targets.
     if let Some(db) = state.db.as_ref() {
-        if let Ok(users) = crate::db::users::list_all(db).await {
-            for u in users {
-                all_users.push(u.username.clone());
-                for g in u.groups {
-                    map.entry(g).or_default().0.insert(u.username.clone());
+        match crate::db::users::list_all(db).await {
+            Ok(users) => {
+                for u in users {
+                    if scope.unscoped || u.role != Role::Admin {
+                        all_users.push(u.username.clone());
+                    }
+                    if !scope.may_touch_user(&u) {
+                        continue;
+                    }
+                    for group in &u.groups {
+                        if scope.may_touch_group(group) {
+                            map.entry(group.clone())
+                                .or_default()
+                                .0
+                                .insert(u.username.clone());
+                        }
+                    }
                 }
+            }
+            Err(error) => {
+                tracing::warn!(error = ?error, "group member lookup failed; using empty list");
             }
         }
     }
     all_users.sort();
 
-    // Specs contribute apps (by `access-groups`).
+    // Specs contribute apps (by `access-groups`). Resolve and authorize from
+    // the effective authoritative catalog before inserting ids into the view;
+    // a missing row can never be interpreted as an unrestricted app.
     let specs = crate::catalog::effective_specs_cached(&state).await;
-    for s in specs.iter() {
-        if let Some(groups) = s.access_groups.as_ref() {
-            let name = s.display_name.clone().unwrap_or_else(|| s.id.clone());
-            for g in groups {
-                map.entry(g.clone())
-                    .or_default()
-                    .1
-                    .insert(s.id.clone(), name.clone());
+    for spec in specs.iter().filter(|spec| scope.may_touch_spec(spec)) {
+        if let Some(groups) = spec.access_groups.as_ref() {
+            for group in groups {
+                if scope.may_touch_group(group) {
+                    map.entry(group.clone())
+                        .or_default()
+                        .1
+                        .insert(spec.id.clone());
+                }
             }
         }
     }
 
     let groups: Vec<GroupView> = map
         .into_iter()
-        .map(|(name, (members, apps))| GroupView {
+        .map(|(name, (members, app_ids))| GroupView {
             name,
             members: members.into_iter().collect(),
-            apps: apps
+            apps: app_ids
                 .into_iter()
-                .map(|(id, name)| {
-                    // Resolve back to the spec for logo + type (#809);
-                    // admin page, the linear scan is fine.
-                    match specs.iter().find(|s| s.id == id) {
-                        Some(s) => AppRef::from_spec(s),
-                        None => AppRef { id, name, logo: None, kind: "app" },
-                    }
+                .filter_map(|id| {
+                    specs
+                        .iter()
+                        .find(|spec| spec.id == id)
+                        .map(AppRef::from_spec)
                 })
                 .collect(),
         })
@@ -185,7 +220,7 @@ async fn index(
     // access-users empty (#623 audit: a users-only-gated spec is not public).
     let mut public_apps: Vec<AppRef> = specs
         .iter()
-        .filter(|s| s.is_open())
+        .filter(|spec| scope.may_touch_spec(spec) && spec.is_open())
         .map(AppRef::from_spec)
         .collect();
     public_apps.sort_by(|a, b| a.name.cmp(&b.name));
@@ -197,7 +232,7 @@ async fn index(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "groups",
-        role: Role::Admin,
+        role: scope.role,
         groups,
         kpi_groups,
         kpi_members,
@@ -217,6 +252,70 @@ fn clean_group(raw: &str) -> Option<String> {
         return None;
     }
     Some(g.to_string())
+}
+
+fn not_found() -> Response {
+    StatusCode::NOT_FOUND.into_response()
+}
+
+/// Persist one membership list and invalidate the proxy identity cache only
+/// after the authoritative write succeeds.
+async fn save_memberships(
+    state: &AppState,
+    user: &UserRow,
+    groups: &[String],
+    actor: &str,
+    success: &str,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::users::set_groups(db, &user.username, groups, Some(actor)).await {
+        Ok(()) => {
+            state.invalidate_identity_cache();
+            redirect_flash(success)
+        }
+        Err(error) => {
+            tracing::warn!(
+                user = %user.username,
+                error = ?error,
+                "group membership write failed"
+            );
+            redirect_flash("bad-input")
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct MemberForm {
+    group: String,
+    username: String,
+}
+
+/// Creating a derived group means adding its first member. This remains a
+/// distinct Admin-only handler so the membership endpoint opened to Editors
+/// cannot grow a new authority boundary through its UI or route contract.
+async fn create(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Form(form): Form<MemberForm>,
+) -> Response {
+    let Some(group) = clean_group(&form.group) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::users::fetch(db, &form.username).await {
+        Ok(Some(user)) => {
+            let mut groups = user.groups.clone();
+            if !groups.iter().any(|existing| existing == &group) {
+                groups.push(group);
+            }
+            save_memberships(&state, &user, &groups, admin.actor(), "created").await
+        }
+        _ => redirect_flash("bad-input"),
+    }
 }
 
 /// Rewrite group `old` everywhere it's referenced. `new = Some(n)` renames it
@@ -300,49 +399,86 @@ async fn delete(admin: RequireAdmin, State(state): State<AppState>, Form(f): For
     redirect_flash("deleted")
 }
 
-#[derive(Deserialize)]
-struct MemberForm {
-    group: String,
-    username: String,
-}
-
 async fn add_member(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
-    Form(f): Form<MemberForm>,
+    Form(form): Form<MemberForm>,
 ) -> Response {
-    let Some(group) = clean_group(&f.group) else {
+    let Some(group) = clean_group(&form.group) else {
         return redirect_flash("bad-input");
     };
+    if !scope.may_touch_group(&group) {
+        return not_found();
+    }
     let Some(db) = state.db.as_ref() else {
         return redirect_flash("bad-input");
     };
-    match crate::db::users::fetch(db, &f.username).await {
-        Ok(Some(u)) => {
-            let mut groups = u.groups;
-            if !groups.iter().any(|g| g == &group) {
-                groups.push(group);
+    match crate::db::users::fetch(db, &form.username).await {
+        Ok(Some(user)) => {
+            let mut requested: Vec<String> = user
+                .groups
+                .iter()
+                .filter(|existing| scope.may_touch_group(existing))
+                .cloned()
+                .collect();
+            if !requested.iter().any(|existing| existing == &group) {
+                requested.push(group);
             }
-            let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
-            state.invalidate_identity_cache();
-            redirect_flash("member-added")
+            let groups = scope.merge_preserving_out_of_scope(&user.groups, &requested);
+
+            // `may_touch_user` normally evaluates the current membership. For
+            // an add, evaluate the authoritative row plus the proposed owned
+            // group: this permits inducting a non-Admin into the team while
+            // retaining the same central predicate that excludes Admin.
+            let mut proposed = user.clone();
+            proposed.groups = groups.clone();
+            if !scope.may_touch_user(&proposed) {
+                return not_found();
+            }
+            save_memberships(&state, &user, &groups, scope.actor(), "member-added").await
         }
-        _ => redirect_flash("bad-input"),
+        _ => not_found(),
     }
 }
 
 async fn remove_member(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
-    Form(f): Form<MemberForm>,
+    Form(form): Form<MemberForm>,
 ) -> Response {
+    let Some(group) = clean_group(&form.group) else {
+        return redirect_flash("bad-input");
+    };
+    if !scope.may_touch_group(&group) {
+        return not_found();
+    }
     let Some(db) = state.db.as_ref() else {
         return redirect_flash("bad-input");
     };
-    if let Ok(Some(u)) = crate::db::users::fetch(db, &f.username).await {
-        let groups: Vec<String> = u.groups.into_iter().filter(|g| g != &f.group).collect();
-        let _ = crate::db::users::set_groups(db, &u.username, &groups, Some(admin.actor())).await;
-        state.invalidate_identity_cache();
+    match crate::db::users::fetch(db, &form.username).await {
+        Ok(Some(user)) if scope.may_touch_user(&user) => {
+            // `set_groups` replaces the entire CSV. Feed only the remaining
+            // in-scope memberships through the shared merge primitive so an
+            // Editor removes this group surgically and preserves every
+            // foreign-team membership.
+            let requested: Vec<String> = user
+                .groups
+                .iter()
+                .filter(|existing| {
+                    existing.as_str() != group.as_str() && scope.may_touch_group(existing)
+                })
+                .cloned()
+                .collect();
+            let groups = scope.merge_preserving_out_of_scope(&user.groups, &requested);
+            save_memberships(
+                &state,
+                &user,
+                &groups,
+                scope.actor(),
+                "member-removed",
+            )
+            .await
+        }
+        _ => not_found(),
     }
-    redirect_flash("member-removed")
 }

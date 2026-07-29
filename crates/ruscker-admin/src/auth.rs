@@ -60,17 +60,17 @@ pub enum Role {
 impl Role {
     /// Whether this role may reach the given admin nav section.
     /// `section` matches the `nav_section` strings used by the
-    /// templates (`dashboard`, `specs`, `images`, `credentials`,
-    /// `landing`, `blocks`, `audit`).
+    /// templates (`dashboard`, `specs`, `images`, `users`, `groups`,
+    /// `credentials`, `landing`, `blocks`, `audit`).
     pub fn can_access_section(&self, section: &str) -> bool {
         match section {
-            // Dashboard + apps + media + scoped users: Editor and up. A
+            // Dashboard + apps + media + scoped users/groups: Editor and up. A
             // Viewer is NOT an admin-panel operator (#857) — it's the portal's
             // authenticated-end-user role (group-based card visibility,
             // #155), so it reaches NO admin section.
-            "dashboard" | "specs" | "images" | "users" => *self >= Role::Editor,
-            // Everything else — credentials, landing, groups, logs, disk,
-            // audit, system, schedules — is admin-only.
+            "dashboard" | "specs" | "images" | "users" | "groups" => *self >= Role::Editor,
+            // Everything else — credentials, landing, logs, disk, audit,
+            // system, schedules — is admin-only.
             _ => *self == Role::Admin,
         }
     }
@@ -114,13 +114,19 @@ impl Role {
         }
     }
 
-    /// Parse the lowercase form back to a [`Role`]. Unknown ⇒ `None`.
+    /// Parse a wire/DB role case-insensitively. Unknown ⇒ `None`.
+    ///
+    /// Writes stay canonical lowercase through [`Self::as_str`], but the
+    /// column has no CHECK and external identity provisioners may vary casing.
     pub fn parse(s: &str) -> Option<Role> {
-        match s {
-            "viewer" => Some(Role::Viewer),
-            "editor" => Some(Role::Editor),
-            "admin" => Some(Role::Admin),
-            _ => None,
+        if s.eq_ignore_ascii_case("viewer") {
+            Some(Role::Viewer)
+        } else if s.eq_ignore_ascii_case("editor") {
+            Some(Role::Editor)
+        } else if s.eq_ignore_ascii_case("admin") {
+            Some(Role::Admin)
+        } else {
+            None
         }
     }
 }
@@ -741,9 +747,9 @@ mod tests {
         assert!(Role::Admin > Role::Editor);
         assert!(Role::Editor > Role::Viewer);
 
-        // Dashboard + apps + media + scoped users: Editor and up — a Viewer
-        // reaches no admin section (#857).
-        for sec in ["dashboard", "specs", "images", "users"] {
+        // Dashboard + apps + media + scoped users/groups: Editor and up — a
+        // Viewer reaches no admin section (#857).
+        for sec in ["dashboard", "specs", "images", "users", "groups"] {
             assert!(!Role::Viewer.can_access_section(sec));
             assert!(Role::Editor.can_access_section(sec));
             assert!(Role::Admin.can_access_section(sec));

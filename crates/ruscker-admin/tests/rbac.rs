@@ -1358,3 +1358,341 @@ async fn admin_remains_unscoped_for_all_user_operations() {
         "Admin bulk import remains functional"
     );
 }
+
+// ── Editor group scope over group membership (#990 slice 3) ─────────
+
+#[tokio::test]
+async fn scoped_editor_lists_only_owned_groups_apps_and_matching_kpis() {
+    let (state, _db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+    let response = send_request(
+        state,
+        "GET",
+        "/admin/groups",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+
+    assert!(body.contains(r#"data-group="time-a""#));
+    assert!(
+        !body.contains(r#"data-group="time-b""#),
+        "a foreign group must not get a card"
+    );
+    assert!(body.contains(r#"href="/admin/specs/time-a/edit""#));
+    assert!(
+        !body.contains(r#"href="/admin/specs/time-b/edit""#),
+        "a foreign app must not leak through a group card"
+    );
+    assert!(
+        !body.contains(">admin-a</option>"),
+        "an Admin is not offered as an Editor membership target"
+    );
+    assert!(
+        body.contains(r#"href="/admin/groups""#),
+        "the Groups nav tab is visible to Editors"
+    );
+    assert_eq!(
+        metric_values(&body),
+        vec!["1", "3", "1"],
+        "group, member and app KPIs derive from the scoped cards"
+    );
+    assert!(
+        !body.contains(r#"action="/admin/groups/create""#),
+        "Editors do not get the create-group affordance"
+    );
+    assert!(!body.contains(r#"action="/admin/groups/rename""#));
+    assert!(!body.contains(r#"action="/admin/groups/delete""#));
+}
+
+#[tokio::test]
+async fn scoped_editor_gets_404_for_foreign_group_membership_routes() {
+    let (state, _db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for (uri, body) in [
+        (
+            "/admin/groups/members/add",
+            "group=time-b&username=viewer-b",
+        ),
+        (
+            "/admin/groups/members/remove",
+            "group=time-b&username=viewer-b",
+        ),
+    ] {
+        let response = send_request(
+            state.clone(),
+            "POST",
+            uri,
+            Some(&cookie),
+            Body::from(body),
+            Some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "foreign group must be indistinguishable from a missing group: {uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn scoped_editor_adds_and_removes_only_owned_membership() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let added = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/members/add",
+        Some(&cookie),
+        Body::from("group=time-a&username=viewer-b"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(added.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ruscker_admin::db::users::fetch(&db, "viewer-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups,
+        vec!["time-a", "time-b"]
+    );
+
+    let removed_shared = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/members/remove",
+        Some(&cookie),
+        Body::from("group=time-a&username=shared-user"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(removed_shared.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ruscker_admin::db::users::fetch(&db, "shared-user")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups,
+        vec!["time-b"],
+        "removing time-a must preserve the foreign time-b membership"
+    );
+
+    let removed_added = send_request(
+        state,
+        "POST",
+        "/admin/groups/members/remove",
+        Some(&cookie),
+        Body::from("group=time-a&username=viewer-b"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(removed_added.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ruscker_admin::db::users::fetch(&db, "viewer-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups,
+        vec!["time-b"]
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_add_or_remove_an_admin_member() {
+    let (state, db) = scoped_user_state().await;
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
+        panic!("RBAC scope fixture must use SQLite");
+    };
+    // The role column has no CHECK and the future external-identity writer may
+    // use different casing. The membership guard must still recognize Admin.
+    sqlx::query("UPDATE users SET role = 'Admin' WHERE username = 'admin-a'")
+        .execute(pool)
+        .await
+        .unwrap();
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for uri in [
+        "/admin/groups/members/add",
+        "/admin/groups/members/remove",
+    ] {
+        let response = send_request(
+            state.clone(),
+            "POST",
+            uri,
+            Some(&cookie),
+            Body::from("group=time-a&username=admin-a"),
+            Some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "Admin target must stay outside Editor scope: {uri}"
+        );
+    }
+    assert_eq!(
+        ruscker_admin::db::users::fetch(&db, "admin-a")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups,
+        vec!["time-a"]
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_create_rename_or_delete_groups() {
+    let (state, _db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for (uri, body) in [
+        (
+            "/admin/groups/create",
+            "group=new-team&username=viewer-a",
+        ),
+        (
+            "/admin/groups/rename",
+            "old=time-a&new=renamed-time-a",
+        ),
+        ("/admin/groups/delete", "name=time-a"),
+    ] {
+        let response = send_request(
+            state.clone(),
+            "POST",
+            uri,
+            Some(&cookie),
+            Body::from(body),
+            Some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::FORBIDDEN,
+            "structural group operation remains Admin-only: {uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn admin_remains_unscoped_for_all_group_operations() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Admin, Some("admin-op")).await;
+
+    let list = send_request(
+        state.clone(),
+        "GET",
+        "/admin/groups",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(list.status(), StatusCode::OK);
+    let list = response_body(list).await;
+    assert!(list.contains(r#"data-group="time-a""#));
+    assert!(list.contains(r#"data-group="time-b""#));
+    assert!(list.contains(r#"action="/admin/groups/create""#));
+    assert!(list.contains(r#"action="/admin/groups/rename""#));
+    assert!(list.contains(r#"action="/admin/groups/delete""#));
+
+    let created = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/create",
+        Some(&cookie),
+        Body::from("group=new-team&username=viewer-b"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "viewer-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups
+            .contains(&"new-team".to_string())
+    );
+
+    let renamed = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/rename",
+        Some(&cookie),
+        Body::from("old=new-team&new=renamed-team"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(renamed.status(), StatusCode::SEE_OTHER);
+    let viewer_b = ruscker_admin::db::users::fetch(&db, "viewer-b")
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(!viewer_b.groups.contains(&"new-team".to_string()));
+    assert!(viewer_b.groups.contains(&"renamed-team".to_string()));
+
+    let deleted = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/delete",
+        Some(&cookie),
+        Body::from("name=renamed-team"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(deleted.status(), StatusCode::SEE_OTHER);
+    assert!(
+        !ruscker_admin::db::users::fetch(&db, "viewer-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups
+            .contains(&"renamed-team".to_string())
+    );
+
+    let add_admin = send_request(
+        state.clone(),
+        "POST",
+        "/admin/groups/members/add",
+        Some(&cookie),
+        Body::from("group=time-b&username=admin-a"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(add_admin.status(), StatusCode::SEE_OTHER);
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "admin-a")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups
+            .contains(&"time-b".to_string()),
+        "unscoped Admin may still manage Admin memberships"
+    );
+
+    let remove_admin = send_request(
+        state,
+        "POST",
+        "/admin/groups/members/remove",
+        Some(&cookie),
+        Body::from("group=time-b&username=admin-a"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(remove_admin.status(), StatusCode::SEE_OTHER);
+    assert!(
+        !ruscker_admin::db::users::fetch(&db, "admin-a")
+            .await
+            .unwrap()
+            .unwrap()
+            .groups
+            .contains(&"time-b".to_string())
+    );
+}

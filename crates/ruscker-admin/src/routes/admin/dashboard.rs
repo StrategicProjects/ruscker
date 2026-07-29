@@ -73,16 +73,48 @@ const SSE_INTERVAL: Duration = Duration::from_secs(5);
 /// handler.
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
-/// Per-locale memoized dashboard snapshot (#291). Building a snapshot
-/// reads the registry, fetches the effective spec catalog (a DB query),
-/// and assembles the rows; with N open dashboard tabs each running its
-/// own [`SSE_INTERVAL`] loop that was N× the work every tick. The whole
-/// snapshot is the same for everyone in a given locale (only the state
-/// labels are localized), so cache it for one interval and let every
-/// tab/connection in that locale reuse it. Keyed by locale (≤4 entries);
-/// a clone of the cached snapshot is cheap next to a fresh DB build.
-static SNAPSHOT_CACHE: LazyLock<DashMap<Locale, (Instant, Arc<DashboardSnapshot>)>> =
+/// Memoized dashboard snapshot (#291). Building one reads the registry,
+/// fetches the effective spec catalog (a DB query) and assembles the rows;
+/// with N open dashboard tabs each running its own [`SSE_INTERVAL`] loop
+/// that was N× the work every tick.
+///
+/// Keyed by locale **and scope** (#990). The snapshot used to be identical
+/// for everyone in a locale, but a scoped Editor sees only their groups'
+/// rows, so a locale-only key would hand one team's containers to another.
+/// Sharing survives where it matters: every Admin/break-glass view shares
+/// one entry, and two Editors with the same group set share theirs — which
+/// keeps the #291 guarantee for the multi-tab case that made the admin
+/// hang on an HTTP/1.1 front end (#1039/#1040) instead of dropping caching
+/// for Editors altogether.
+static SNAPSHOT_CACHE: LazyLock<DashMap<SnapshotCacheKey, CachedSnapshot>> =
     LazyLock::new(DashMap::new);
+
+/// `(locale, scope)` — see [`SNAPSHOT_CACHE`].
+type SnapshotCacheKey = (Locale, ScopeKey);
+
+/// When it was built, and the snapshot itself behind an `Arc` so serving a
+/// cache hit clones a pointer rather than the whole row set.
+type CachedSnapshot = (Instant, Arc<DashboardSnapshot>);
+
+/// Cache identity of a viewer's authorization scope: `None` for the
+/// unscoped Admin/token view, or the caller's groups sorted and joined so
+/// two Editors with the same memberships hit the same entry. Sorting
+/// matters — `["a","b"]` and `["b","a"]` are the same scope and must not
+/// split the cache.
+type ScopeKey = Option<String>;
+
+fn scope_key(scope: &EditorScope) -> ScopeKey {
+    if scope.unscoped {
+        return None;
+    }
+    let mut groups: Vec<&str> = scope.groups.iter().map(String::as_str).collect();
+    groups.sort_unstable();
+    groups.dedup();
+    // `\u{1f}` (unit separator) can't appear in a group name, so the join is
+    // unambiguous where a plain comma would let `["a,b"]` collide with
+    // `["a","b"]`.
+    Some(groups.join("\u{1f}"))
+}
 
 /// One row of the replicas table — flattened for the template
 /// and also serialized as JSON over the SSE stream so the
@@ -410,20 +442,17 @@ async fn build_snapshot(
     locale: Locale,
     scope: &EditorScope,
 ) -> DashboardSnapshot {
-    // The old cache key was locale-only. Reusing it for scoped Editors
-    // would serve one team's rows to another, so only the truly unscoped
-    // Admin/break-glass view uses that shared cache.
-    if scope.unscoped {
-        if let Some(entry) = SNAPSHOT_CACHE.get(&locale) {
-            if entry.0.elapsed() < SSE_INTERVAL {
-                return (*entry.1).clone();
-            }
+    // Keyed by (locale, scope): a scoped Editor must never read an entry
+    // built for another group set, but two viewers with the SAME scope
+    // still share one build — that's the #291 guarantee for many tabs.
+    let key = (locale, scope_key(scope));
+    if let Some(entry) = SNAPSHOT_CACHE.get(&key) {
+        if entry.0.elapsed() < SSE_INTERVAL {
+            return (*entry.1).clone();
         }
     }
     let snap = build_snapshot_uncached(state, locale, scope).await;
-    if scope.unscoped {
-        SNAPSHOT_CACHE.insert(locale, (Instant::now(), Arc::new(snap.clone())));
-    }
+    SNAPSHOT_CACHE.insert(key, (Instant::now(), Arc::new(snap.clone())));
     snap
 }
 
@@ -1258,6 +1287,42 @@ mod tests {
         // shiny group's head, and its summed sessions are 2/10.
         assert_eq!(html.matches("class=\"app-group ").count(), 2, "one card per app");
         assert!(html.contains(">2<span class=\"faint\">/10<"), "summed sessions on the head");
+    }
+
+    /// The snapshot cache is keyed by scope as well as locale (#990): two
+    /// Editors with the same groups must share an entry (that's the #291
+    /// many-tabs guarantee), while a different group set — or the unscoped
+    /// Admin view — must never read someone else's rows.
+    #[test]
+    fn snapshot_cache_key_separates_scopes_but_shares_equal_ones() {
+        let scoped = |groups: &[&str]| EditorScope {
+            role: Role::Editor,
+            actor: Some("editor".into()),
+            groups: groups.iter().map(|g| (*g).to_string()).collect(),
+            unscoped: false,
+        };
+        let admin = EditorScope {
+            role: Role::Admin,
+            actor: Some("admin".into()),
+            groups: Vec::new(),
+            unscoped: true,
+        };
+
+        assert_eq!(scope_key(&admin), None, "the unscoped view is one entry");
+        assert_ne!(scope_key(&scoped(&["a"])), scope_key(&admin));
+        assert_ne!(scope_key(&scoped(&["a"])), scope_key(&scoped(&["b"])));
+        // Order and duplicates are not different scopes.
+        assert_eq!(
+            scope_key(&scoped(&["a", "b"])),
+            scope_key(&scoped(&["b", "a"]))
+        );
+        assert_eq!(scope_key(&scoped(&["a", "a"])), scope_key(&scoped(&["a"])));
+        // A group name containing the separator we join on can't forge
+        // another scope's key.
+        assert_ne!(
+            scope_key(&scoped(&["a", "b"])),
+            scope_key(&scoped(&["a,b"]))
+        );
     }
 
     #[test]

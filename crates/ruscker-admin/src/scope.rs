@@ -39,7 +39,7 @@ pub struct EditorScope {
 }
 
 impl EditorScope {
-    async fn from_editor(editor: RequireEditor, db: Option<&ConfigDb>) -> Self {
+    pub(crate) async fn from_editor(editor: RequireEditor, db: Option<&ConfigDb>) -> Self {
         if editor.role == Role::Admin {
             return Self {
                 role: editor.role,
@@ -71,6 +71,14 @@ impl EditorScope {
             groups,
             unscoped: false,
         }
+    }
+
+    /// Audit actor carried by the authenticated session.
+    ///
+    /// The break-glass token has no account username, so it keeps the same
+    /// stable `token` label used by [`RequireEditor::actor`].
+    pub fn actor(&self) -> &str {
+        self.actor.as_deref().unwrap_or("token")
     }
 
     fn has_group(&self, group: &str) -> bool {

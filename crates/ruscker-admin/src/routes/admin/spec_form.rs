@@ -28,9 +28,10 @@ use serde::{Deserialize, Serialize};
 use serde_yaml_ng::Value as YamlValue;
 use std::collections::HashMap;
 
-use crate::auth::{RequireEditor, Role};
+use crate::auth::Role;
 use crate::db;
 use crate::i18n::{Locale, Locales};
+use crate::scope::EditorScope;
 use crate::theme::Theme;
 use crate::view_model::DisplayType;
 use crate::AppState;
@@ -78,7 +79,7 @@ struct ImageCheckResult {
 /// (#498). Pull-free and Editor-gated; a quick yes/no, no registry round
 /// trip (that's slice B's explicit Pull button).
 async fn image_check(
-    _: RequireEditor,
+    _scope: EditorScope,
     State(state): State<AppState>,
     Query(q): Query<ImageCheckQuery>,
 ) -> Json<ImageCheckResult> {
@@ -166,7 +167,7 @@ const PULL_JOB_TTL_SECS: u64 = 300;
 /// editor then opens an EventSource on `…/image-pull/events?job=<token>`.
 /// Editor-gated; the POST inherits the chrome CSRF (Fetch-Metadata) guard.
 async fn image_pull_start(
-    _: RequireEditor,
+    _scope: EditorScope,
     State(state): State<AppState>,
     Form(q): Form<ImagePullQuery>,
 ) -> Response {
@@ -277,7 +278,7 @@ async fn start_pull(
 /// `{ "job": "<token>" }` for the row to follow over SSE. Editor-gated;
 /// inherits the chrome CSRF guard.
 async fn image_repull(
-    _: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -292,6 +293,11 @@ async fn image_repull(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // A direct re-pull URL is an operation on the app, not on the shared
+    // media library. Hide a foreign app exactly like the edit/delete routes.
+    if !scope.may_touch_spec(&spec) {
+        return (StatusCode::NOT_FOUND, "no such app").into_response();
+    }
     let Some(image) = spec
         .container_image
         .as_deref()
@@ -330,7 +336,7 @@ struct PullEventsQuery {
 /// already-running pull's progress over SSE (default events = lines, then
 /// one terminal `done` event), then drops the job. An unknown or
 /// already-followed token ⇒ 404. Editor-gated (RBAC preserved).
-async fn image_pull_events(_: RequireEditor, Query(q): Query<PullEventsQuery>) -> Response {
+async fn image_pull_events(_scope: EditorScope, Query(q): Query<PullEventsQuery>) -> Response {
     use axum::http::header::{HeaderName, CACHE_CONTROL};
     use axum::response::sse::{Event, KeepAlive, Sse};
 
@@ -393,7 +399,7 @@ async fn resolve_pull_creds(
 /// Mirror of the form fields. Strings are unconditional so empty
 /// inputs round-trip as `""` rather than disappearing; conversion
 /// to [`Spec`] handles "empty means None".
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SpecForm {
     pub id: String,
@@ -1290,10 +1296,11 @@ impl<'a> SpecFormPage<'a> {
 /// wired or the query fails — the picker degrades to the text field.
 /// Distinct, sorted `template-properties.subject` values across the
 /// effective catalog (#746) — real data instead of a fixed list.
-async fn subject_suggestions(state: &AppState) -> Vec<String> {
+async fn subject_suggestions(state: &AppState, scope: &EditorScope) -> Vec<String> {
     let specs = crate::catalog::effective_specs(state.db.as_ref(), &state.config).await;
     let mut subjects: Vec<String> = specs
         .iter()
+        .filter(|spec| scope.may_touch_spec(spec))
         .filter_map(|sp| sp.template_properties.get_str("subject"))
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
@@ -1332,7 +1339,7 @@ async fn credential_names(state: &AppState) -> Vec<String> {
 /// every effective spec's `access-groups` and every user's memberships,
 /// sorted and de-duplicated. Empty when no DB is wired — the picker then
 /// just offers the "add group" input.
-async fn group_names(state: &AppState) -> Vec<String> {
+async fn group_names(state: &AppState, scope: &EditorScope) -> Vec<String> {
     let mut set = std::collections::BTreeSet::new();
     for s in crate::catalog::effective_specs(state.db.as_ref(), &state.config).await {
         if let Some(groups) = s.access_groups.as_ref() {
@@ -1346,11 +1353,15 @@ async fn group_names(state: &AppState) -> Vec<String> {
             }
         }
     }
-    set.into_iter().collect()
+    let known: Vec<String> = set.into_iter().collect();
+    // The picker must not advertise another team's vocabulary. Reuse the
+    // scope merge primitive with an empty base to retain only assignable
+    // groups for Editors; Admins receive the full set unchanged.
+    scope.merge_preserving_out_of_scope(&[], &known)
 }
 
 async fn new_form(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -1362,7 +1373,7 @@ async fn new_form(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
         mode: FormMode::New,
         form: SpecForm {
             // Sensible defaults for a new app
@@ -1375,8 +1386,8 @@ async fn new_form(
         just_created: false,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
-        subject_suggestions: subject_suggestions(&state).await,
-        available_groups: group_names(&state).await,
+        subject_suggestions: subject_suggestions(&state, &scope).await,
+        available_groups: group_names(&state, &scope).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
@@ -1390,7 +1401,7 @@ struct EditFormQuery {
 }
 
 async fn edit_form(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -1408,6 +1419,11 @@ async fn edit_form(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // List filtering is not authorization. A foreign app deliberately
+    // returns 404 so its id is not disclosed through a direct URL (#990).
+    if !scope.may_touch_spec(&spec) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
     let page = SpecFormPage {
         locale: loc,
         theme,
@@ -1415,10 +1431,15 @@ async fn edit_form(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
         mode: FormMode::Edit,
         form: {
             let mut f = SpecForm::from_spec(&spec);
+            let visible_groups = scope.merge_preserving_out_of_scope(
+                &[],
+                spec.access_groups.as_deref().unwrap_or_default(),
+            );
+            f.access_groups = visible_groups.join(", ");
             // Optimistic-concurrency token (#745): the template emits it
             // as a hidden field; `update` rejects a stale submit.
             f.base_version = db::specs::fetch_version(pool, &id)
@@ -1432,8 +1453,8 @@ async fn edit_form(
         just_created: q.created.is_some(),
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
-        subject_suggestions: subject_suggestions(&state).await,
-        available_groups: group_names(&state).await,
+        subject_suggestions: subject_suggestions(&state, &scope).await,
+        available_groups: group_names(&state, &scope).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
@@ -1480,7 +1501,7 @@ fn pick_copy_id(base: &str, taken: &std::collections::HashSet<String>) -> String
 /// a handy way to fork a YAML-defined spec into an editable DB one. The
 /// registry password is write-only (#260), so it isn't carried over.
 async fn duplicate_form(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -1510,7 +1531,18 @@ async fn duplicate_form(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Duplicating is still an operation on the source app. Return 404 at
+    // the boundary so a guessed foreign id is indistinguishable from one
+    // that does not exist.
+    if !scope.may_touch_spec(&spec) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
     let mut form = SpecForm::from_spec(&spec);
+    let visible_groups = scope.merge_preserving_out_of_scope(
+        &[],
+        spec.access_groups.as_deref().unwrap_or_default(),
+    );
+    form.access_groups = visible_groups.join(", ");
     form.id = unique_copy_id(&state, &spec.id).await;
     let page = SpecFormPage {
         locale: loc,
@@ -1519,21 +1551,21 @@ async fn duplicate_form(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
         mode: FormMode::New,
         form,
         just_created: false,
         errors: Vec::new(),
         logo_images: logo_filenames(&state).await,
-        subject_suggestions: subject_suggestions(&state).await,
-        available_groups: group_names(&state).await,
+        subject_suggestions: subject_suggestions(&state, &scope).await,
+        available_groups: group_names(&state, &scope).await,
         credential_names: credential_names(&state).await,
     };
     super::render(&page)
 }
 
 async fn create(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -1544,6 +1576,20 @@ async fn create(
     };
 
     let mut errors = form.validate(FormMode::New);
+
+    if errors.is_empty() {
+        let candidate = match form.clone().into_spec(None, scope.role) {
+            Ok(spec) => spec,
+            Err(e) => {
+                tracing::error!(error = ?e, "form → spec failed during scope validation");
+                return (StatusCode::BAD_REQUEST, "invalid form data").into_response();
+            }
+        };
+        let requested = candidate.access_groups.as_deref().unwrap_or_default();
+        if !scope.may_assign_groups(requested) || !scope.may_touch_spec(&candidate) {
+            errors.push("spec-form-error-editor-scope");
+        }
+    }
 
     // Uniqueness check
     if errors.is_empty() {
@@ -1562,7 +1608,7 @@ async fn create(
             &state,
             loc,
             theme,
-            editor.role,
+            &scope,
             FormMode::New,
             form,
             errors,
@@ -1571,7 +1617,7 @@ async fn create(
     }
 
     let id = form.id.trim().to_string();
-    let spec = match form.into_spec(None, editor.role) {
+    let spec = match form.into_spec(None, scope.role) {
         Ok(s) => s,
         Err(e) => {
             tracing::error!(error = ?e, "form → spec failed");
@@ -1582,7 +1628,7 @@ async fn create(
     // insert_new fails CLOSED on an existing id (#745) — the friendly
     // pre-check above is just UX; this is the race-proof gate (the old
     // upsert silently overwrote the loser of a concurrent create).
-    match db::specs::insert_new(pool, &spec, Some(editor.actor())).await {
+    match db::specs::insert_new(pool, &spec, Some(scope.actor())).await {
         // Land on the new app's edit form with `?created=1` so the page
         // shows the post-create confirmation (#835): keep editing here, or
         // jump to the apps list.
@@ -1594,7 +1640,7 @@ async fn create(
                 &state,
                 loc,
                 theme,
-                editor.role,
+                &scope,
                 FormMode::New,
                 SpecForm::from_spec(&spec),
                 vec!["spec-form-error-id-duplicate"],
@@ -1609,7 +1655,7 @@ async fn create(
 }
 
 async fn update(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -1625,36 +1671,62 @@ async fn update(
     // log target). Renaming is a separate planned action.
     form.id = id.clone();
 
-    let errors = form.validate(FormMode::Edit);
-    if !errors.is_empty() {
-        return render_form_with_errors(
-            &state,
-            loc,
-            theme,
-            editor.role,
-            FormMode::Edit,
-            form,
-            errors,
-        )
-        .await;
-    }
-
     // Load the existing spec as the merge base so fields the form
     // doesn't model (registry creds, lifetimes, limits, scaling, custom
     // template-properties) survive the edit instead of being wiped.
     let base = match db::specs::fetch_one(pool, &id).await {
-        Ok(b) => b,
+        Ok(Some(base)) => base,
+        Ok(None) => {
+            return (StatusCode::NOT_FOUND, format!("spec `{id}` not found")).into_response();
+        }
         Err(e) => {
             tracing::error!(error = ?e, id, "load base spec failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
-    // This is the *edit* path — the spec must already exist. Without
-    // this guard `into_spec(None)` + `upsert_one` would silently
-    // (re)create a spec at this id (e.g. a stale tab POSTing to a
-    // since-deleted spec). #261
-    if base.is_none() {
-        return (StatusCode::NOT_FOUND, format!("spec `{id}` not found")).into_response();
+    // This is the *edit* path — the spec must already exist (#261). Check
+    // scope before validation so even a malformed crafted POST cannot use
+    // response differences to confirm an out-of-scope app id (#990).
+    if !scope.may_touch_spec(&base) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
+
+    let mut errors = form.validate(FormMode::Edit);
+    let mut candidate = if errors.is_empty() {
+        match form.clone().into_spec(Some(&base), scope.role) {
+            Ok(spec) => Some(spec),
+            Err(e) => {
+                tracing::error!(error = ?e, "form → spec failed during scope validation");
+                return (StatusCode::BAD_REQUEST, "invalid form data").into_response();
+            }
+        }
+    } else {
+        None
+    };
+    if let Some(spec) = candidate.as_mut() {
+        let requested = spec.access_groups.clone().unwrap_or_default();
+        if !scope.may_assign_groups(&requested) {
+            errors.push("spec-form-error-editor-scope");
+        } else {
+            let existing = base.access_groups.as_deref().unwrap_or_default();
+            let merged = scope.merge_preserving_out_of_scope(existing, &requested);
+            spec.access_groups = (!merged.is_empty()).then_some(merged);
+            if !scope.may_touch_spec(spec) {
+                errors.push("spec-form-error-editor-scope");
+            }
+        }
+    }
+    if !errors.is_empty() {
+        return render_form_with_errors(
+            &state,
+            loc,
+            theme,
+            &scope,
+            FormMode::Edit,
+            form,
+            errors,
+        )
+        .await;
     }
 
     // Optimistic concurrency (#745): the form carries the version it
@@ -1671,7 +1743,7 @@ async fn update(
                 &state,
                 loc,
                 theme,
-                editor.role,
+                &scope,
                 FormMode::Edit,
                 stale,
                 vec!["spec-form-error-stale"],
@@ -1680,15 +1752,9 @@ async fn update(
         }
     }
 
-    let spec = match form.into_spec(base.as_ref(), editor.role) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!(error = ?e, "form → spec failed");
-            return (StatusCode::BAD_REQUEST, "invalid form data").into_response();
-        }
-    };
+    let spec = candidate.expect("validated form always builds a candidate spec");
 
-    match db::specs::upsert_one(pool, &spec, Some(editor.actor())).await {
+    match db::specs::upsert_one(pool, &spec, Some(scope.actor())).await {
         Ok(_) => Redirect::to(&format!("/admin/specs/{}/edit", id)).into_response(),
         Err(e) => {
             tracing::error!(error = ?e, "save failed");
@@ -1698,14 +1764,26 @@ async fn update(
 }
 
 async fn delete(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    match db::specs::delete_one(pool, &id, Some(editor.actor())).await {
+    let spec = match db::specs::fetch_one(pool, &id).await {
+        Ok(Some(spec)) => spec,
+        Ok(None) => return (StatusCode::NOT_FOUND, "spec not found").into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, id, "load spec for delete failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    if !scope.may_touch_spec(&spec) {
+        // 404 avoids disclosing that a guessed foreign id exists.
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
+    match db::specs::delete_one(pool, &id, Some(scope.actor())).await {
         Ok(_) => {
             // Reap the app's containers so a delete doesn't leave orphans
             // eating disk (#453). Best-effort and logged inside; the DB row
@@ -1724,7 +1802,7 @@ async fn render_form_with_errors(
     state: &AppState,
     loc: Locale,
     theme: Theme,
-    role: Role,
+    scope: &EditorScope,
     mode: FormMode,
     form: SpecForm,
     errors: Vec<&'static str>,
@@ -1736,14 +1814,14 @@ async fn render_form_with_errors(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role,
+        role: scope.role,
         mode,
         form,
         just_created: false,
         errors,
         logo_images: logo_filenames(state).await,
-        subject_suggestions: subject_suggestions(state).await,
-        available_groups: group_names(state).await,
+        subject_suggestions: subject_suggestions(state, scope).await,
+        available_groups: group_names(state, scope).await,
         credential_names: credential_names(state).await,
     };
     let body = match page.render() {

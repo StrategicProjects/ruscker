@@ -11,11 +11,15 @@
 //! before the handler runs, and an *unauthenticated* request is
 //! redirected to the login form. We assert on those three shapes.
 
-use axum::body::Body;
+use axum::body::{to_bytes, Body};
 use axum::http::{Request, StatusCode};
+use axum::response::Response;
+use chrono::Utc;
 use ruscker_admin::auth::{AdminAuth, Role, COOKIE_NAME};
 use ruscker_admin::{router, AppState};
-use ruscker_config::Config;
+use ruscker_config::{Config, Spec};
+use ruscker_core::{Replica, ReplicaId, ReplicaState};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tower::ServiceExt;
 
@@ -77,13 +81,146 @@ async fn cookie_for(state: &AppState, role: Role) -> String {
 }
 
 async fn send(state: AppState, method: &str, uri: &str, cookie: Option<&str>) -> StatusCode {
+    send_request(state, method, uri, cookie, Body::empty(), None)
+        .await
+        .status()
+}
+
+async fn send_request(
+    state: AppState,
+    method: &str,
+    uri: &str,
+    cookie: Option<&str>,
+    body: Body,
+    content_type: Option<&str>,
+) -> Response {
     let app = router(state);
     let mut builder = Request::builder().method(method).uri(uri);
     if let Some(c) = cookie {
         builder = builder.header("cookie", c);
     }
-    let req = builder.body(Body::empty()).unwrap();
-    app.oneshot(req).await.unwrap().status()
+    if let Some(value) = content_type {
+        builder = builder.header("content-type", value);
+    }
+    let req = builder.body(body).unwrap();
+    app.oneshot(req).await.unwrap()
+}
+
+async fn response_body(response: Response) -> String {
+    let bytes = to_bytes(response.into_body(), 2 * 1024 * 1024)
+        .await
+        .expect("read response body");
+    String::from_utf8(bytes.to_vec()).expect("response body is utf-8")
+}
+
+const TIME_A_REPLICA: &str = "aaaaaaaa-1111-4111-8111-111111111111";
+const TIME_B_REPLICA: &str = "bbbbbbbb-2222-4222-8222-222222222222";
+const OPEN_REPLICA: &str = "cccccccc-3333-4333-8333-333333333333";
+
+fn replica(id: &str, spec_id: &str) -> Replica {
+    Replica {
+        id: ReplicaId(uuid::Uuid::parse_str(id).expect("valid replica id")),
+        spec_id: spec_id.to_string(),
+        container_id: format!("container-{spec_id}"),
+        upstream: "127.0.0.1:3838"
+            .parse::<SocketAddr>()
+            .expect("valid upstream"),
+        state: ReplicaState::Ready,
+        started_at: Utc::now(),
+        sessions_active: 0,
+        sessions_max: 1,
+        host: None,
+    }
+}
+
+fn app(yaml: &str) -> Spec {
+    serde_yaml_ng::from_str(yaml).expect("parse scoped test app")
+}
+
+/// Real SQLite catalog + real opaque account session for the #990 scope
+/// integration tests. `time-a` deliberately also carries `legacy-ops`:
+/// the Editor shares one group and may edit it, but must not erase the
+/// foreign membership that is hidden from their form.
+async fn scoped_state() -> (AppState, ruscker_admin::db::ConfigDb) {
+    let mut state = state();
+    state.config = Arc::new(
+        Config::from_yaml("proxy:\n  title: Scoped test\n  specs: []\n")
+            .expect("parse empty scoped config"),
+    );
+    let path =
+        std::env::temp_dir().join(format!("ruscker-rbac-scope-{}.db", uuid::Uuid::new_v4()));
+    let pool = ruscker_admin::db::open(&path).await.expect("open scoped db");
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    // `db::open` seeds the product showcase. This fixture needs a closed,
+    // exact three-app catalog so row/KPI assertions document scope precisely.
+    for seeded in ruscker_admin::db::specs::list_all(&db)
+        .await
+        .expect("list seeded showcase")
+    {
+        ruscker_admin::db::specs::delete_one(&db, &seeded.id, Some("test-reset"))
+            .await
+            .expect("remove seeded showcase app");
+    }
+    for spec in [
+        app(
+            "id: time-a\n\
+             display-name: Time A\n\
+             container-image: org/time-a:1\n\
+             access-groups: [time-a, legacy-ops]\n",
+        ),
+        app(
+            "id: time-b\n\
+             display-name: Time B\n\
+             container-image: org/time-b:1\n\
+             access-groups: [time-b]\n",
+        ),
+        app(
+            "id: open-app\n\
+             display-name: Open App\n\
+             container-image: org/open:1\n",
+        ),
+    ] {
+        ruscker_admin::db::specs::upsert_one(&db, &spec, Some("seed"))
+            .await
+            .expect("seed scoped app");
+    }
+    ruscker_admin::db::users::create(
+        &db,
+        "editor-a",
+        "EditorPass9!",
+        Role::Editor,
+        false,
+        &["time-a".to_string()],
+        Some("seed"),
+    )
+    .await
+    .expect("create scoped Editor");
+    {
+        let mut registry = state.replicas.write().await;
+        registry.add(replica(TIME_A_REPLICA, "time-a"));
+        registry.add(replica(TIME_B_REPLICA, "time-b"));
+        registry.add(replica(OPEN_REPLICA, "open-app"));
+    }
+    state.db = Some(db.clone());
+    (state, db)
+}
+
+async fn scoped_cookie(state: &AppState, role: Role, actor: Option<&str>) -> String {
+    let id = state
+        .admin_sessions
+        .create(role, actor.map(str::to_string))
+        .await;
+    format!("{COOKIE_NAME}={id}")
+}
+
+fn metric_values(body: &str) -> Vec<&str> {
+    const OPEN: &str = "<div class=\"metric__value tnum\">";
+    body.match_indices(OPEN)
+        .filter_map(|(start, _)| {
+            let value = &body[start + OPEN.len()..];
+            value.find("</div>").map(|end| value[..end].trim())
+        })
+        .collect()
 }
 
 // ── Viewer: no panel — portal authenticated-user role (#857) ─────────
@@ -294,5 +431,329 @@ async fn following_an_unknown_pull_job_is_404_for_editor() {
         send(st, "GET", "/admin/specs/image-pull/events?job=bogus", Some(&c)).await,
         StatusCode::NOT_FOUND,
         "unknown pull token ⇒ 404, never a side effect"
+    );
+}
+
+// ── Editor group scope over applications (#990 slice 1) ─────────────
+
+#[tokio::test]
+async fn scoped_editor_lists_only_shared_and_open_apps_with_matching_kpis() {
+    let (state, _db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/specs",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+    assert!(body.contains("data-id=\"time-a\""), "shared app is listed");
+    assert!(body.contains("data-id=\"open-app\""), "open app is global");
+    assert!(
+        !body.contains("data-id=\"time-b\""),
+        "foreign-team app stays hidden"
+    );
+    let listed = body.matches("<tr data-kind=").count();
+    assert_eq!(listed, 2, "exactly the two authorized app rows");
+    assert_eq!(
+        metric_values(&body).first().copied(),
+        Some("2"),
+        "Total KPI must equal the filtered list"
+    );
+
+    let response = send_request(
+        state,
+        "GET",
+        "/admin/dashboard",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let dashboard = response_body(response).await;
+    assert!(dashboard.contains(TIME_A_REPLICA));
+    assert!(dashboard.contains(OPEN_REPLICA));
+    assert!(
+        !dashboard.contains(TIME_B_REPLICA),
+        "foreign replica must not reach the dashboard grid"
+    );
+    assert!(
+        dashboard.contains(
+            "<div class=\"metric__value\" data-metric=\"containers\">2</div>"
+        ),
+        "container KPI must equal the filtered replica grid"
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
+    let (state, _db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    // Every current app route carrying `{id}` is enumerated here. Filtering
+    // the list alone is not authorization: a typed/guessed URL must fail.
+    for (method, uri) in [
+        ("GET", "/admin/specs/time-b/edit"),
+        ("GET", "/admin/specs/time-b/duplicate"),
+        ("POST", "/admin/specs/time-b"),
+        ("POST", "/admin/specs/time-b/delete"),
+        ("POST", "/admin/specs/time-b/featured/toggle"),
+        ("POST", "/admin/specs/time-b/state/toggle"),
+        ("POST", "/admin/specs/time-b/repull"),
+    ] {
+        let response = send_request(
+            state.clone(),
+            method,
+            uri,
+            Some(&cookie),
+            Body::empty(),
+            (method == "POST").then_some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "foreign app route must be 404: {method} {uri}"
+        );
+    }
+
+    // Replica ids are just another path to the owning spec. Logs, live logs,
+    // stop and restart all resolve the effective Spec before backend access.
+    for (method, uri) in [
+        (
+            "GET",
+            "/admin/dashboard/logs/bbbbbbbb-2222-4222-8222-222222222222",
+        ),
+        (
+            "GET",
+            "/admin/dashboard/logs/bbbbbbbb-2222-4222-8222-222222222222/stream",
+        ),
+        (
+            "POST",
+            "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/stop",
+        ),
+        (
+            "POST",
+            "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/restart",
+        ),
+    ] {
+        let status = send(state.clone(), method, uri, Some(&cookie)).await;
+        assert_eq!(
+            status,
+            StatusCode::NOT_FOUND,
+            "foreign replica route must be 404: {method} {uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn admin_remains_unscoped_for_foreign_apps_and_replicas() {
+    let (state, db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Admin, Some("admin")).await;
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/specs",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+    for id in ["time-a", "time-b", "open-app"] {
+        assert!(body.contains(&format!("data-id=\"{id}\"")), "Admin sees {id}");
+    }
+    assert_eq!(metric_values(&body).first().copied(), Some("3"));
+
+    assert_eq!(
+        send(
+            state.clone(),
+            "GET",
+            "/admin/specs/time-b/edit",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(
+            state.clone(),
+            "GET",
+            "/admin/specs/time-b/duplicate",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(
+            state.clone(),
+            "POST",
+            "/admin/specs/time-b/featured/toggle",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::OK
+    );
+    assert_eq!(
+        send(
+            state.clone(),
+            "POST",
+            "/admin/specs/time-b/state/toggle",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::OK
+    );
+    for uri in [
+        "/admin/specs/time-b/repull",
+        "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/stop",
+        "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/restart",
+    ] {
+        assert_eq!(
+            send(state.clone(), "POST", uri, Some(&cookie)).await,
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Admin passes scope and reaches the intentionally absent backend: {uri}"
+        );
+    }
+
+    let response = send_request(
+        state.clone(),
+        "POST",
+        "/admin/specs/time-b",
+        Some(&cookie),
+        Body::from(
+            "display_name=Time+B+admin&display_type=app&state=active&\
+             container_image=org%2Ftime-b%3A2&inject_base_href=on&access_groups=time-b",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ruscker_admin::db::specs::fetch_one(&db, "time-b")
+            .await
+            .unwrap()
+            .unwrap()
+            .display_name
+            .as_deref(),
+        Some("Time B admin")
+    );
+
+    assert_eq!(
+        send(
+            state,
+            "POST",
+            "/admin/specs/time-b/delete",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::SEE_OTHER,
+        "Admin can delete the foreign-team app"
+    );
+    assert!(
+        ruscker_admin::db::specs::fetch_one(&db, "time-b")
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_create_restricted_app_with_foreign_group() {
+    let (state, db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+    let response = send_request(
+        state,
+        "POST",
+        "/admin/specs",
+        Some(&cookie),
+        Body::from(
+            "id=foreign-new&display_name=Foreign+new&display_type=app&state=active&\
+             container_image=org%2Fforeign%3A1&inject_base_href=on&access_groups=time-b",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = response_body(response).await;
+    assert!(
+        body.contains("fora do seu escopo de Editor"),
+        "localized scope validation must explain the rejection"
+    );
+    assert!(
+        ruscker_admin::db::specs::fetch_one(&db, "foreign-new")
+            .await
+            .unwrap()
+            .is_none(),
+        "rejected app must not be persisted"
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_assign_foreign_group_and_edit_preserves_it() {
+    let (state, db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let edit = send_request(
+        state.clone(),
+        "GET",
+        "/admin/specs/time-a/edit",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(edit.status(), StatusCode::OK);
+    let edit_body = response_body(edit).await;
+    assert!(
+        !edit_body.contains("legacy-ops"),
+        "foreign memberships are preserved server-side, not exposed as editable pills"
+    );
+
+    let rejected = send_request(
+        state.clone(),
+        "POST",
+        "/admin/specs/time-a",
+        Some(&cookie),
+        Body::from(
+            "display_name=Time+A&display_type=app&state=active&\
+             container_image=org%2Ftime-a%3A1&inject_base_href=on&access_groups=time-b",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(rejected.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let saved = send_request(
+        state,
+        "POST",
+        "/admin/specs/time-a",
+        Some(&cookie),
+        Body::from(
+            "display_name=Time+A+edited&display_type=app&state=active&\
+             container_image=org%2Ftime-a%3A2&inject_base_href=on&access_groups=time-a",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let spec = ruscker_admin::db::specs::fetch_one(&db, "time-a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(spec.display_name.as_deref(), Some("Time A edited"));
+    assert_eq!(
+        spec.access_groups.as_deref(),
+        Some(&["legacy-ops".to_string(), "time-a".to_string()][..]),
+        "the out-of-scope group survives the Editor's replacement save"
     );
 }

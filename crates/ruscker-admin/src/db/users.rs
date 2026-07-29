@@ -361,7 +361,12 @@ fn push_visibility_sqlite(
     let Some(groups) = visible_groups else {
         return;
     };
-    qb.push(" AND role <> 'admin' AND (");
+    // `lower(role)` rather than a bare comparison: the column is plain TEXT
+    // with no CHECK, so it is only lowercase because every write goes through
+    // `Role::as_str`. An externally provisioned row — the OIDC/LDAP work of
+    // #934 adds another writer — storing `Admin` must not slip past the one
+    // boundary that keeps Editors away from admin accounts.
+    qb.push(" AND lower(role) <> 'admin' AND (");
     if groups.is_empty() {
         qb.push("1=0");
     } else {
@@ -384,7 +389,8 @@ fn push_visibility_postgres(
     let Some(groups) = visible_groups else {
         return;
     };
-    qb.push(" AND role <> 'admin' AND (");
+    // Same case-insensitive guard as the SQLite arm — see there for why.
+    qb.push(" AND lower(role) <> 'admin' AND (");
     if groups.is_empty() {
         qb.push("1=0");
     } else {

@@ -1133,6 +1133,56 @@ async fn scoped_editor_cannot_change_own_role_groups_or_password() {
     assert_eq!(editor.groups, vec!["time-a"]);
 }
 
+/// The admin-exclusion boundary must not depend on the stored casing of
+/// `role`. That column is plain TEXT with no CHECK — it is lowercase only
+/// because every write goes through `Role::as_str`, and #934 (OIDC/LDAP)
+/// will add another writer. A row stored as `Admin` must still be invisible
+/// to a scoped Editor.
+#[tokio::test]
+async fn scoped_editor_never_sees_an_admin_stored_with_odd_casing() {
+    let (state, db) = scoped_user_state().await;
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
+        panic!("fixture must use SQLite");
+    };
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO users
+           (id, username, password_hash, role, must_change_password,
+            groups, created_at, updated_at, created_by)
+         VALUES (?, ?, ?, 'Admin', 0, 'time-a', ?, ?, NULL)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind("shouty-admin")
+    .bind("unused-test-hash")
+    .bind(now)
+    .bind(now)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let body = String::from_utf8(
+        axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(
+        !body.contains("shouty-admin"),
+        "an admin row sharing the Editor's group must stay hidden regardless of casing"
+    );
+}
+
 #[tokio::test]
 async fn scoped_user_count_search_and_pagination_share_one_sql_filter() {
     let (state, db) = scoped_user_state().await;

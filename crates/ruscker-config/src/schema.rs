@@ -80,6 +80,23 @@ pub struct Server {
     /// [`Self::effective_base_path`] when the flat form isn't set.
     #[serde(rename = "servlet.context-path")]
     pub flat_servlet_context_path: Option<String>,
+
+    /// IANA timezone name (e.g. `America/Recife`) the **scheduler**
+    /// evaluates cron expressions in, and the Schedules page displays
+    /// its times in (#1042). An operator writing `0 8 * * *` means
+    /// eight in the morning where they live, not 08:00 UTC.
+    ///
+    /// Absent ⇒ **UTC**, which is the behaviour every existing install
+    /// already has: an upgrade must not silently move the firing time
+    /// of schedules that are running in production. Unparseable names
+    /// also fall back to UTC and raise a validation warning rather
+    /// than failing the boot — a typo here must not take the portal
+    /// down.
+    ///
+    /// This does NOT affect the admin tables (audit, activity, …):
+    /// those render in each viewer's own browser timezone (#1041).
+    /// The scheduler has no viewer, which is why it needs a setting.
+    pub timezone: Option<String>,
 }
 
 impl Server {
@@ -95,6 +112,20 @@ impl Server {
             .or(self.flat_servlet_context_path.as_deref())
             .unwrap_or("");
         normalize_base_path(raw)
+    }
+
+    /// The zone [`Self::timezone`] names, or UTC when it is unset,
+    /// empty or unparseable. Never fails: an invalid name is reported
+    /// by `validate` (as [`crate::validate::Warning::UnknownTimezone`])
+    /// and behaves as the historical UTC default, so a typo degrades
+    /// to "what it did before" instead of wedging the scheduler.
+    pub fn effective_timezone(&self) -> chrono_tz::Tz {
+        self.timezone
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .and_then(|s| s.parse::<chrono_tz::Tz>().ok())
+            .unwrap_or(chrono_tz::UTC)
     }
 }
 
@@ -2002,6 +2033,49 @@ mod tests {
         };
         assert_eq!(both.effective_base_path(), "/a");
         assert_eq!(Server::default().effective_base_path(), "");
+    }
+
+    /// `server.timezone` resolves to an IANA zone, and every way of NOT
+    /// naming one lands on UTC — the historical default, so an upgrade
+    /// can't move a production schedule's firing time (#1042).
+    #[test]
+    fn server_timezone_falls_back_to_utc() {
+        let named = Server {
+            timezone: Some("America/Recife".into()),
+            ..Default::default()
+        };
+        assert_eq!(named.effective_timezone(), chrono_tz::America::Recife);
+
+        assert_eq!(Server::default().effective_timezone(), chrono_tz::UTC);
+        for absent in ["", "   ", "BRT", "Mars/Olympus_Mons"] {
+            let s = Server {
+                timezone: Some(absent.into()),
+                ..Default::default()
+            };
+            assert_eq!(
+                s.effective_timezone(),
+                chrono_tz::UTC,
+                "`{absent}` must degrade to UTC, not panic"
+            );
+        }
+        // Surrounding whitespace is an editing artefact, not a new zone.
+        let padded = Server {
+            timezone: Some("  America/Recife  ".into()),
+            ..Default::default()
+        };
+        assert_eq!(padded.effective_timezone(), chrono_tz::America::Recife);
+    }
+
+    #[test]
+    fn server_timezone_parses_from_yaml() {
+        let cfg: Config = serde_yaml_ng::from_str(
+            "server:\n  timezone: America/Recife\nproxy:\n  specs: []\n",
+        )
+        .expect("parse");
+        assert_eq!(
+            cfg.server.effective_timezone(),
+            chrono_tz::America::Recife
+        );
     }
 
     #[test]

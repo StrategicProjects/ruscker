@@ -993,7 +993,7 @@ admin-schedules-subtitle = Run an app's image to completion on a cron schedule (
 admin-schedules-create = New schedule
 admin-schedules-spec = App
 admin-schedules-cron = Cron
-admin-schedules-cron-help = Standard 5-field cron, UTC. Examples: "0 3 * * *" = every day at 03:00; "*/15 * * * *" = every 15 minutes.
+admin-schedules-cron-help = Standard 5-field cron, in the server timezone. Examples: "0 3 * * *" = every day at 03:00; "*/15 * * * *" = every 15 minutes.
 admin-schedules-cmd = Command
 admin-schedules-cmd-help = One line per argument (argv). Empty = the app's own command (its container-cmd, else the image's CMD).
 admin-schedules-timeout = Timeout (minutes)

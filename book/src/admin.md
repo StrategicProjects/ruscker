@@ -352,7 +352,13 @@ nothing to run.
 Semantics worth knowing:
 
 - **No run on creation.** A new schedule waits for its next cron
-  occurrence (times are UTC).
+  occurrence.
+- **Which clock.** Cron expressions are evaluated in `server.timezone`
+  (an IANA name like `America/Recife` in `ruscker.yml`), and the
+  next/last run columns are shown in that same zone, labelled with it.
+  Unset ⇒ **UTC**, the historical behaviour — so `0 8 * * *` fires at
+  08:00 UTC until you configure a zone. Setting one shifts existing
+  schedules by your offset; review them afterwards.
 - **Downtime collapses.** If the server was down across several
   occurrences, the schedule fires **once** on the next tick — ETL
   semantics, not a message queue.
@@ -450,9 +456,9 @@ too; rows with a change diff expand to show it.
 
 Timestamps are stored in UTC and rendered in **your browser's timezone**, so
 two operators in different zones each read the local wall clock of the same
-event. Hovering a timestamp shows the full date with the zone name. (The
-scheduler's own times — next occurrence and last run on the Schedules page —
-are still labelled UTC.)
+event. Hovering a timestamp shows the full date with the zone name. (The Schedules page is
+deliberately different: those times are when the *server* will fire a job,
+so they follow `server.timezone` — see the Schedules section.)
 
 ### System
 

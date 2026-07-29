@@ -118,6 +118,14 @@ pub enum Warning {
         location: String,
         value: String,
     },
+    /// `server.timezone` isn't a name in the IANA zone database
+    /// (a typo, or an abbreviation like `BRT` rather than the zone
+    /// `America/Recife`). The scheduler falls back to UTC, so cron
+    /// expressions keep firing at UTC o'clock instead of the intended
+    /// local time — silent and easy to miss for a nightly job (#1042).
+    UnknownTimezone {
+        value: String,
+    },
     /// `container-cpu-limit` / `container-cpu-request` is set but isn't
     /// a positive, finite number of CPUs (e.g. `0,5` with a comma, `-1`,
     /// `abc`). The backend applies *no* CPU limit in that case, so the
@@ -426,6 +434,17 @@ pub fn run(config: &Config) -> ValidationReport {
             location: "proxy".to_string(),
             value: config.proxy.max_body_size.clone().unwrap_or_default(),
         });
+    }
+
+    // A timezone that doesn't resolve leaves the scheduler on UTC —
+    // the very default the operator was trying to move off (#1042).
+    if let Some(raw) = config.server.timezone.as_deref() {
+        let named = raw.trim();
+        if !named.is_empty() && named.parse::<chrono_tz::Tz>().is_err() {
+            warnings.push(Warning::UnknownTimezone {
+                value: named.to_string(),
+            });
+        }
     }
 
     check_hosts(&config.proxy.hosts, &mut warnings);
@@ -1021,6 +1040,39 @@ proxy:
             "valid rate-limit should not warn, got {:?}",
             report.warnings
         );
+    }
+
+    /// A zone name that isn't in the IANA database must be reported —
+    /// it silently leaves the scheduler on UTC, which is the very thing
+    /// the operator was configuring away from (#1042).
+    #[test]
+    fn flags_unknown_timezone() {
+        let yaml = "server:\n  timezone: BRT\nproxy:\n  specs: []\n";
+        let report = Config::from_yaml(yaml).expect("parse").validate();
+        assert!(
+            report.warnings.iter().any(|w| matches!(
+                w,
+                Warning::UnknownTimezone { value } if value == "BRT"
+            )),
+            "expected UnknownTimezone, got {:?}",
+            report.warnings
+        );
+
+        // A real zone, and no zone at all, are both quiet.
+        for yaml in [
+            "server:\n  timezone: America/Recife\nproxy:\n  specs: []\n",
+            "proxy:\n  specs: []\n",
+        ] {
+            let report = Config::from_yaml(yaml).expect("parse").validate();
+            assert!(
+                !report
+                    .warnings
+                    .iter()
+                    .any(|w| matches!(w, Warning::UnknownTimezone { .. })),
+                "should not warn for `{yaml}`, got {:?}",
+                report.warnings
+            );
+        }
     }
 
     #[test]

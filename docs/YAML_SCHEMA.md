@@ -27,6 +27,7 @@ server:
   context-path: /apps                  # Mount portal under a subpath (see below)
   # ShinyProxy's nested form is also accepted:
   servlet.context-path: /apps
+  timezone: America/Recife             # Zone the SCHEDULER uses (see below)
 ```
 
 Parsed for compatibility but **ignored** (each produces a startup
@@ -53,6 +54,32 @@ replaced). **If a reverse proxy terminates TLS in front of Ruscker,
 set it to `true`** — otherwise cookies are minted without `Secure`.
 ShinyProxy's `secure-cookies` flag is *not* what does this in Ruscker;
 it's ignored. Full rationale in `docs/SECURITY.md` §7.
+
+### `server.timezone` — the scheduler's clock
+
+An [IANA zone name](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones)
+(`America/Recife`, `Europe/Lisbon`, …) telling the **scheduled-jobs
+runner** which wall clock a cron expression refers to. `0 8 * * *`
+under `America/Recife` fires at 08:00 there — 11:00 UTC — instead of
+08:00 UTC. The Schedules page shows next/last run in the same zone,
+labelled with it.
+
+Absent ⇒ **UTC**, which is what every install did before this key
+existed: upgrading never moves the firing time of a schedule already
+running in production. Set it deliberately, and check your schedules
+afterwards — a nightly job *will* shift by your UTC offset.
+
+Use a zone name, not an abbreviation: `BRT` is not a zone and produces
+a startup warning while the scheduler quietly stays on UTC. Zone names
+also carry the historical DST rules, so a schedule keeps meaning
+"08:00 local" across a DST transition, which a fixed offset couldn't
+express.
+
+This key does **not** affect the admin tables (audit, user activity,
+apps, users, credentials) or the Logs tab. Those render in each
+viewer's own browser timezone — they're records of past events with a
+human looking at them, whereas the scheduler has no viewer, which is
+why it needs a configured zone.
 
 ### `server.context-path` — subpath mounting
 

@@ -997,7 +997,7 @@ admin-schedules-subtitle = Executa a imagem de um app até o fim em um horário 
 admin-schedules-create = Novo agendamento
 admin-schedules-spec = App
 admin-schedules-cron = Cron
-admin-schedules-cron-help = Cron padrão de 5 campos, em UTC. Exemplos: "0 3 * * *" = todo dia às 03:00; "*/15 * * * *" = a cada 15 minutos.
+admin-schedules-cron-help = Cron padrão de 5 campos, no fuso horário do servidor. Exemplos: "0 3 * * *" = todo dia às 03:00; "*/15 * * * *" = a cada 15 minutos.
 admin-schedules-cmd = Comando
 admin-schedules-cmd-help = Um argumento por linha (argv). Vazio = o comando do próprio app (o container-cmd, senão o CMD da imagem).
 admin-schedules-timeout = Timeout (minutos)

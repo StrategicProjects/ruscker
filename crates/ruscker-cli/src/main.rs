@@ -1000,6 +1000,13 @@ fn format_warning(w: &Warning) -> String {
                  (expected a size like `10m`, `1g`, or plain bytes) — no limit will be applied"
             )
         }
+        Warning::UnknownTimezone { value } => {
+            format!(
+                "server.timezone `{value}` is not an IANA zone name \
+                 (expected e.g. `America/Recife`, not an abbreviation like `BRT`) — \
+                 scheduled jobs will keep firing on UTC"
+            )
+        }
         Warning::InvalidCpuLimit {
             spec_id,
             field,

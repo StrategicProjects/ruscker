@@ -42,6 +42,17 @@ server:
   # recipe in /usr/share/doc/ruscker/README.Debian.
   #context-path: /apps
 
+  # IANA zone the SCHEDULED-JOBS runner evaluates cron expressions in.
+  # With this set, `0 8 * * *` on the Schedules page means 08:00 HERE;
+  # without it, 08:00 UTC (the default, and what every install did
+  # before this key existed — so setting it WILL shift existing
+  # schedules by your UTC offset; check them afterwards).
+  # Use a zone name, never an abbreviation: `BRT` is not a zone and
+  # leaves the scheduler on UTC with a startup warning.
+  # Admin tables and the Logs tab are unaffected — they follow each
+  # viewer's own browser timezone.
+  #timezone: America/Recife
+
 proxy:
   # Portal title. This is a SEED/fallback: once you set a title in the
   # admin's Appearance editor, the database value wins (that's the

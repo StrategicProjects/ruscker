@@ -13,6 +13,7 @@ thiserror = { workspace = true }
 regex = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
+chrono-tz = { workspace = true }
 ordered-float = { workspace = true }
 
 [dev-dependencies]

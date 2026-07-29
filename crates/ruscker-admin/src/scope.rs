@@ -133,6 +133,19 @@ impl EditorScope {
         self.unscoped || matches!(requested, Role::Viewer | Role::Editor)
     }
 
+    /// Build the authoritative SQL filter for the users table.
+    ///
+    /// `None` means the Admin/break-glass view is unrestricted; `Some([])`
+    /// is a scoped Editor with no groups and therefore matches no account.
+    /// Keeping that distinction explicit prevents a failed scope lookup from
+    /// accidentally becoming the unscoped query.
+    pub fn user_filter<'a>(&'a self, search: &'a str) -> db::users::UserFilter<'a> {
+        db::users::UserFilter {
+            search,
+            visible_groups: (!self.unscoped).then_some(self.groups.as_slice()),
+        }
+    }
+
     /// Merge an Editor's requested memberships without erasing another team's.
     ///
     /// `db::users::set_groups` replaces the whole list. For a user shared by

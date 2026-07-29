@@ -205,6 +205,54 @@ async fn scoped_state() -> (AppState, ruscker_admin::db::ConfigDb) {
     (state, db)
 }
 
+/// Insert an account without spending argon2 time in authorization tests.
+///
+/// These tests mint opaque sessions directly (the established RBAC harness
+/// pattern), so the password hash is never read. The row itself is real and
+/// authoritative: `EditorScope` refetches it from this table on every request.
+async fn seed_user(
+    db: &ruscker_admin::db::ConfigDb,
+    username: &str,
+    role: Role,
+    groups: &[&str],
+) {
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = db else {
+        panic!("RBAC scope fixture must use SQLite");
+    };
+    let now = Utc::now();
+    sqlx::query(
+        "INSERT INTO users
+           (id, username, password_hash, role, must_change_password,
+            groups, created_at, updated_at, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(username)
+    .bind("unused-test-hash")
+    .bind(role.as_str())
+    .bind(0_i64)
+    .bind(groups.join(","))
+    .bind(now)
+    .bind(now)
+    .bind("seed")
+    .execute(pool)
+    .await
+    .expect("seed scoped user");
+}
+
+async fn scoped_user_state() -> (AppState, ruscker_admin::db::ConfigDb) {
+    let (state, db) = scoped_state().await;
+    for (username, role, groups) in [
+        ("viewer-a", Role::Viewer, &["time-a"][..]),
+        ("shared-user", Role::Viewer, &["time-a", "time-b"][..]),
+        ("viewer-b", Role::Viewer, &["time-b"][..]),
+        ("admin-a", Role::Admin, &["time-a"][..]),
+    ] {
+        seed_user(&db, username, role, groups).await;
+    }
+    (state, db)
+}
+
 async fn scoped_cookie(state: &AppState, role: Role, actor: Option<&str>) -> String {
     let id = state
         .admin_sessions
@@ -755,5 +803,508 @@ async fn scoped_editor_cannot_assign_foreign_group_and_edit_preserves_it() {
         spec.access_groups.as_deref(),
         Some(&["legacy-ops".to_string(), "time-a".to_string()][..]),
         "the out-of-scope group survives the Editor's replacement save"
+    );
+}
+
+// ── Editor group scope over users (#990 slice 2) ───────────────────
+
+#[tokio::test]
+async fn scoped_editor_lists_only_shared_non_admin_users_and_matching_kpis() {
+    let (state, _db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+    let response = send_request(
+        state,
+        "GET",
+        "/admin/users",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = response_body(response).await;
+
+    for username in ["editor-a", "viewer-a", "shared-user"] {
+        assert!(body.contains(username), "shared user {username} is listed");
+    }
+    assert!(!body.contains("viewer-b"), "foreign user stays hidden");
+    assert!(
+        !body.contains("admin-a"),
+        "Admin stays hidden even with a shared group"
+    );
+    assert!(
+        body.contains(r#"href="/admin/users""#),
+        "the Users nav tab is visible to Editors"
+    );
+    assert_eq!(
+        metric_values(&body).first().copied(),
+        Some("3"),
+        "Total KPI equals the scoped row set"
+    );
+    assert!(body.contains(r#"data-users-total="3""#));
+    assert!(
+        !body.contains(r#"href="/admin/users/editor-a/edit""#),
+        "the Editor's own account has no edit affordance"
+    );
+    assert!(
+        !body.contains(r#"value="admin""#),
+        "the create-role selector does not offer Admin"
+    );
+    assert!(
+        !body.contains(r#"action="/admin/users/import""#),
+        "bulk import is not rendered for Editors"
+    );
+    assert!(
+        !body.contains("/delete\""),
+        "account deletion is not rendered for Editors"
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_gets_404_on_every_foreign_user_route() {
+    let (state, _db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    // Every username route opened to Editors is enumerated. The authoritative
+    // target row is checked before parsing form data, so malformed crafted
+    // POSTs cannot turn validation differences into an existence oracle.
+    for (method, uri) in [
+        ("GET", "/admin/users/viewer-b/edit"),
+        ("POST", "/admin/users/viewer-b/edit"),
+        ("POST", "/admin/users/viewer-b/role"),
+        ("POST", "/admin/users/viewer-b/groups"),
+        ("POST", "/admin/users/viewer-b/profile"),
+        ("POST", "/admin/users/viewer-b/password"),
+    ] {
+        let response = send_request(
+            state.clone(),
+            method,
+            uri,
+            Some(&cookie),
+            Body::empty(),
+            (method == "POST").then_some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::NOT_FOUND,
+            "foreign user route must be 404: {method} {uri}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn scoped_editor_creation_enforces_role_groups_and_audit_actor() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for (username, role, groups, flash) in [
+        ("bad-admin", "admin", "time-a", "scope-role"),
+        ("bad-group", "viewer", "time-b", "scope-groups"),
+        ("no-group", "viewer", "", "group-required"),
+    ] {
+        let body = format!(
+            "username={username}&password=Valid%21Pass9&role={role}&groups={groups}"
+        );
+        let response = send_request(
+            state.clone(),
+            "POST",
+            "/admin/users",
+            Some(&cookie),
+            Body::from(body),
+            Some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(
+            response.headers().get("location").unwrap(),
+            &format!("/admin/users?flash={flash}")
+        );
+        assert!(
+            ruscker_admin::db::users::fetch(&db, username)
+                .await
+                .unwrap()
+                .is_none(),
+            "rejected account {username} must not be persisted"
+        );
+    }
+
+    let localized = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users?flash=group-required",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let localized = response_body(localized).await;
+    assert!(
+        localized.contains("pelo menos um dos seus grupos"),
+        "the validation error is localized and actionable"
+    );
+
+    let created = send_request(
+        state,
+        "POST",
+        "/admin/users",
+        Some(&cookie),
+        Body::from(
+            "username=new-teammate&password=Valid%21Pass9&role=editor&groups=time-a",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    let user = ruscker_admin::db::users::fetch(&db, "new-teammate")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(user.role, Role::Editor);
+    assert_eq!(user.groups, vec!["time-a"]);
+
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
+        panic!("RBAC scope fixture must use SQLite");
+    };
+    let actors: Vec<(Option<String>,)> = sqlx::query_as(
+        "SELECT actor FROM audit_log
+          WHERE action = 'user.create' AND target = 'user:new-teammate'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(actors, vec![(Some("editor-a".to_string()),)]);
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_delete_import_or_reset_mfa() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for uri in [
+        "/admin/users/viewer-a/delete",
+        "/admin/users/viewer-a/mfa/reset",
+        "/admin/users/import",
+        "/admin/users/import/confirm",
+    ] {
+        assert_eq!(
+            send(state.clone(), "POST", uri, Some(&cookie)).await,
+            StatusCode::FORBIDDEN,
+            "Admin-only operation must reject Editor: {uri}"
+        );
+    }
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "viewer-a")
+            .await
+            .unwrap()
+            .is_some(),
+        "the forbidden delete leaves the account intact"
+    );
+}
+
+#[tokio::test]
+async fn scoped_editor_edit_preserves_foreign_group_and_can_reset_password() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let edit = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users/shared-user/edit",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(edit.status(), StatusCode::OK);
+    let edit = response_body(edit).await;
+    assert!(edit.contains(r#"value="time-a""#));
+    assert!(
+        edit.contains(r#"data-readonly-group="time-b""#),
+        "foreign membership is explained as read-only"
+    );
+
+    let saved = send_request(
+        state.clone(),
+        "POST",
+        "/admin/users/shared-user/edit",
+        Some(&cookie),
+        Body::from(
+            "role=editor&groups=time-a&setor=Helpdesk&email=shared%40example.com&celular=",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::SEE_OTHER);
+    let user = ruscker_admin::db::users::fetch(&db, "shared-user")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(user.role, Role::Editor);
+    assert_eq!(
+        user.groups,
+        vec!["time-a", "time-b"],
+        "out-of-scope group survives the replacement update"
+    );
+
+    let reset = send_request(
+        state,
+        "POST",
+        "/admin/users/viewer-a/password",
+        Some(&cookie),
+        Body::from("password=Helpdesk%21Pass9"),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(reset.status(), StatusCode::SEE_OTHER);
+    assert!(
+        ruscker_admin::db::users::verify_login(&db, "viewer-a", "Helpdesk!Pass9")
+            .await
+            .unwrap()
+            .is_some(),
+        "Editor helpdesk reset writes the new password"
+    );
+
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
+        panic!("RBAC scope fixture must use SQLite");
+    };
+    let wrong_actor: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log
+          WHERE action IN ('user.update', 'user.password')
+            AND target IN ('user:shared-user', 'user:viewer-a')
+            AND actor <> 'editor-a'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(wrong_actor.0, 0, "Editor is the audit actor on mutations");
+}
+
+#[tokio::test]
+async fn scoped_editor_cannot_change_own_role_groups_or_password() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    for (uri, body) in [
+        ("/admin/users/editor-a/role", "role=admin"),
+        (
+            "/admin/users/editor-a/groups",
+            "groups=time-a%2Ctime-b",
+        ),
+        (
+            "/admin/users/editor-a/edit",
+            "role=admin&groups=time-a%2Ctime-b&setor=&email=&celular=",
+        ),
+        (
+            "/admin/users/editor-a/password",
+            "password=Escalate%21Pass9",
+        ),
+    ] {
+        let response = send_request(
+            state.clone(),
+            "POST",
+            uri,
+            Some(&cookie),
+            Body::from(body),
+            Some("application/x-www-form-urlencoded"),
+        )
+        .await;
+        assert_eq!(
+            response.status(),
+            StatusCode::SEE_OTHER,
+            "self mutation is rejected with a localized flash: {uri}"
+        );
+        assert!(
+            response
+                .headers()
+                .get("location")
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("flash=self-edit")
+        );
+    }
+
+    let editor = ruscker_admin::db::users::fetch(&db, "editor-a")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(editor.role, Role::Editor);
+    assert_eq!(editor.groups, vec!["time-a"]);
+}
+
+#[tokio::test]
+async fn scoped_user_count_search_and_pagination_share_one_sql_filter() {
+    let (state, db) = scoped_user_state().await;
+    // The fixture starts with three visible non-Admin users. Add 49 visible
+    // and 60 newer foreign rows: post-page filtering would make page 1 empty,
+    // while the SQL-scoped implementation still yields 50 + 2 visible rows.
+    for i in 0..49 {
+        seed_user(&db, &format!("team-a-{i:02}"), Role::Viewer, &["time-a"]).await;
+    }
+    for i in 0..60 {
+        seed_user(&db, &format!("team-b-{i:02}"), Role::Viewer, &["time-b"]).await;
+    }
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let page_one = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let page_one = response_body(page_one).await;
+    assert_eq!(page_one.matches("class=\"user-cell\"").count(), 50);
+    assert!(page_one.contains(r#"data-users-total="52""#));
+    assert_eq!(metric_values(&page_one).first().copied(), Some("52"));
+
+    let page_two = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users?page=2",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let page_two = response_body(page_two).await;
+    assert_eq!(page_two.matches("class=\"user-cell\"").count(), 2);
+    assert!(page_two.contains(r#"data-users-page="2""#));
+    assert!(page_two.contains(r#"data-users-total="52""#));
+
+    let foreign_search = send_request(
+        state,
+        "GET",
+        "/admin/users?q=viewer-b",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let foreign_search = response_body(foreign_search).await;
+    assert!(foreign_search.contains(r#"data-users-total="0""#));
+    assert_eq!(foreign_search.matches("class=\"user-cell\"").count(), 0);
+}
+
+#[tokio::test]
+async fn admin_remains_unscoped_for_all_user_operations() {
+    let (state, db) = scoped_user_state().await;
+    let cookie = scoped_cookie(&state, Role::Admin, Some("admin-op")).await;
+
+    let list = send_request(
+        state.clone(),
+        "GET",
+        "/admin/users",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let list = response_body(list).await;
+    assert!(list.contains("viewer-b"));
+    assert!(list.contains("admin-a"));
+    assert!(list.contains(r#"value="admin""#));
+    assert!(list.contains(r#"action="/admin/users/import""#));
+    assert!(list.contains("/delete\""));
+
+    assert_eq!(
+        send(
+            state.clone(),
+            "GET",
+            "/admin/users/viewer-b/edit",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::OK
+    );
+    let created = send_request(
+        state.clone(),
+        "POST",
+        "/admin/users",
+        Some(&cookie),
+        Body::from(
+            "username=delegated-admin&password=Admin%21Pass9&role=admin&groups=time-b",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(created.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        ruscker_admin::db::users::fetch(&db, "delegated-admin")
+            .await
+            .unwrap()
+            .unwrap()
+            .role,
+        Role::Admin
+    );
+
+    assert_eq!(
+        send(
+            state.clone(),
+            "POST",
+            "/admin/users/viewer-b/mfa/reset",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert_eq!(
+        send(
+            state.clone(),
+            "POST",
+            "/admin/users/viewer-b/delete",
+            Some(&cookie),
+        )
+        .await,
+        StatusCode::SEE_OTHER
+    );
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "viewer-b")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let boundary = "RUSCKER-CSV-BOUNDARY";
+    let multipart = format!(
+        "--{boundary}\r\n\
+         Content-Disposition: form-data; name=\"file\"; filename=\"users.csv\"\r\n\
+         Content-Type: text/csv\r\n\r\n\
+         username,role,password,groups\r\n\
+         csv-user,viewer,Csv!Pass12,time-b\r\n\
+         --{boundary}--\r\n"
+    );
+    let preview = send_request(
+        state.clone(),
+        "POST",
+        "/admin/users/import",
+        Some(&cookie),
+        Body::from(multipart),
+        Some(&format!("multipart/form-data; boundary={boundary}")),
+    )
+    .await;
+    assert_eq!(preview.status(), StatusCode::OK);
+
+    let confirm = send_request(
+        state,
+        "POST",
+        "/admin/users/import/confirm",
+        Some(&cookie),
+        Body::from(
+            "raw_csv=username%2Crole%2Cpassword%2Cgroups%0Acsv-user%2Cviewer%2CCsv%21Pass12%2Ctime-b%0A",
+        ),
+        Some("application/x-www-form-urlencoded"),
+    )
+    .await;
+    assert_eq!(confirm.status(), StatusCode::SEE_OTHER);
+    assert!(
+        ruscker_admin::db::users::fetch(&db, "csv-user")
+            .await
+            .unwrap()
+            .is_some(),
+        "Admin bulk import remains functional"
     );
 }

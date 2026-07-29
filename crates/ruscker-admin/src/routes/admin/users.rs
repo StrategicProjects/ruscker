@@ -1,10 +1,11 @@
-//! User-account management — Admin only.
+//! User-account management — global for Admins, group-scoped for Editors.
 //!
 //! Create/edit/delete the per-user accounts that back password login
-//! (see [`crate::db::users`]). Guarded by [`RequireAdmin`]; the nav
-//! link is hidden for non-admins. A **last-admin guard** prevents
-//! deleting or demoting the only remaining admin, so an operator can't
-//! lock the role out of the portal.
+//! (see [`crate::db::users`]). [`EditorScope`] gives Editors delegated
+//! helpdesk access only to non-Admin users who share a group. Bulk import,
+//! MFA reset and account deletion remain [`RequireAdmin`] operations. A
+//! **last-admin guard** prevents deleting or demoting the only remaining
+//! admin, so an operator can't lock the role out of the portal.
 
 use askama::Template;
 use axum::{
@@ -19,6 +20,7 @@ use serde::Deserialize;
 use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
+use crate::scope::EditorScope;
 use crate::theme::Theme;
 use crate::AppState;
 
@@ -65,6 +67,9 @@ struct UsersPage<'a> {
     q: String,
     /// Username of the logged-in admin — flags the "you" row.
     me: String,
+    /// Admin/break-glass sessions may use the deliberately global controls
+    /// (CSV import and account deletion); Editors may not.
+    unscoped: bool,
     /// "" | "saved" | "created" | "deleted" | "last-admin" | "bad-input"
     /// | "weak-password" | "exists" | "imported"
     flash: &'static str,
@@ -95,8 +100,16 @@ impl UsersPage<'_> {
     }
 
     /// The three roles, for the create/edit selectors.
-    fn all_roles(&self) -> [Role; 3] {
-        [Role::Viewer, Role::Editor, Role::Admin]
+    fn assignable_roles(&self) -> Vec<Role> {
+        if self.unscoped {
+            vec![Role::Viewer, Role::Editor, Role::Admin]
+        } else {
+            vec![Role::Viewer, Role::Editor]
+        }
+    }
+
+    fn can_edit_user(&self, user: &db::users::UserRow) -> bool {
+        self.unscoped || user.username != self.me
     }
 
     fn kpis(&self) -> [KpiMetric; 5] {
@@ -126,6 +139,11 @@ struct UserEditPage<'a> {
     role: Role,
     user: db::users::UserRow,
     me: String,
+    /// Groups this caller may replace and the foreign memberships preserved
+    /// read-only by `merge_preserving_out_of_scope`.
+    editable_groups: Vec<String>,
+    readonly_groups: Vec<String>,
+    unscoped: bool,
     /// Empty means pending/not configured; otherwise the confirmation date.
     mfa_enrolled_at: String,
     /// "" | "saved" | "mfa-reset" | "last-admin" | "bad-input" | "weak-password"
@@ -141,8 +159,12 @@ impl UserEditPage<'_> {
         self.t(role.label_key())
     }
 
-    fn all_roles(&self) -> [Role; 3] {
-        [Role::Viewer, Role::Editor, Role::Admin]
+    fn assignable_roles(&self) -> Vec<Role> {
+        if self.unscoped {
+            vec![Role::Viewer, Role::Editor, Role::Admin]
+        } else {
+            vec![Role::Viewer, Role::Editor]
+        }
     }
 }
 
@@ -176,8 +198,35 @@ fn redirect_edit_flash(username: &str, flash: &str) -> Response {
     Redirect::to(&format!("/admin/users/{username}/edit?flash={flash}")).into_response()
 }
 
+/// Resolve a path username to its authoritative `users` row and apply the
+/// shared scope predicate. Every Editor-accessible username route calls this
+/// before validation or mutation, returning the same 404 for a missing and a
+/// foreign account so guessed usernames do not disclose membership.
+async fn scoped_target(
+    pool: &crate::db::ConfigDb,
+    scope: &EditorScope,
+    raw_username: &str,
+) -> Result<db::users::UserRow, Response> {
+    let username = db::users::normalize_username(raw_username);
+    if !db::users::is_valid_username(&username) {
+        return Err(StatusCode::NOT_FOUND.into_response());
+    }
+    match db::users::fetch(pool, &username).await {
+        Ok(Some(user)) if scope.may_touch_user(&user) => Ok(user),
+        Ok(Some(_)) | Ok(None) => Err(StatusCode::NOT_FOUND.into_response()),
+        Err(e) => {
+            tracing::error!(error = ?e, %username, "fetch scoped user target failed");
+            Err((StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response())
+        }
+    }
+}
+
+fn is_scoped_self_edit(scope: &EditorScope, username: &str) -> bool {
+    !scope.unscoped && scope.actor.as_deref() == Some(username)
+}
+
 async fn index(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -193,14 +242,15 @@ async fn index(
     // Server-side pagination + search (#999): count first, clamp the
     // requested page into range, then fetch only that page's rows.
     let search = q.q.as_deref().unwrap_or("").trim().to_string();
-    let total = match db::users::count_filtered(pool, &search).await {
+    let filter = scope.user_filter(&search);
+    let total = match db::users::count_filtered(pool, &filter).await {
         Ok(n) => n,
         Err(e) => {
             tracing::error!(error = ?e, "count users failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
-    let counts = match db::users::counts(pool).await {
+    let counts = match db::users::counts(pool, filter.visible_groups).await {
         Ok(counts) => counts,
         Err(e) => {
             tracing::error!(error = ?e, "count user KPIs failed");
@@ -210,10 +260,22 @@ async fn index(
     // Ceiling division (i64::div_ceil is still unstable on our floor).
     let pages = ((total + USERS_PER_PAGE - 1) / USERS_PER_PAGE).max(1);
     let page = q.page.unwrap_or(1).clamp(1, pages);
-    let users = match db::users::list_page(pool, &search, USERS_PER_PAGE, (page - 1) * USERS_PER_PAGE)
-        .await
+    let users = match db::users::list_page(
+        pool,
+        &filter,
+        USERS_PER_PAGE,
+        (page - 1) * USERS_PER_PAGE,
+    )
+    .await
     {
-        Ok(u) => u,
+        Ok(u) if u.iter().all(|user| scope.may_touch_user(user)) => u,
+        Ok(_) => {
+            // SQL owns pagination, but `may_touch_user` remains the policy
+            // oracle. A mismatch is a query bug and must fail closed rather
+            // than render a row the predicate rejects.
+            tracing::error!("users scope query returned an unauthorized row");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
         Err(e) => {
             tracing::error!(error = ?e, "list users failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
@@ -228,6 +290,10 @@ async fn index(
         Some("weak-password") => "weak-password",
         Some("exists") => "exists",
         Some("imported") => "imported",
+        Some("scope-role") => "scope-role",
+        Some("scope-groups") => "scope-groups",
+        Some("group-required") => "group-required",
+        Some("self-edit") => "self-edit",
         _ => "",
     };
     let import_summary = (flash == "imported")
@@ -239,7 +305,7 @@ async fn index(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "users",
-        role: admin.role,
+        role: scope.role,
         users,
         page,
         pages,
@@ -250,7 +316,8 @@ async fn index(
         kpi_viewers: counts.viewers,
         kpi_password_change: counts.must_change_password,
         q: search,
-        me: admin.actor().to_string(),
+        me: scope.actor().to_string(),
+        unscoped: scope.unscoped,
         flash,
         import_summary,
     };
@@ -275,7 +342,7 @@ pub struct CreateForm {
 }
 
 async fn create(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Form(form): Form<CreateForm>,
 ) -> Response {
@@ -291,6 +358,17 @@ async fn create(
         return redirect_flash("weak-password");
     }
     let groups = db::users::parse_groups(&form.groups);
+    if !scope.may_assign_role(role) {
+        return redirect_flash("scope-role");
+    }
+    if !scope.may_assign_groups(&groups) {
+        return redirect_flash("scope-groups");
+    }
+    if !scope.unscoped && groups.is_empty() {
+        // A delegated account needs a shared team boundary. Without one the
+        // creating Editor would immediately lose sight of the new account.
+        return redirect_flash("group-required");
+    }
     // New accounts get the "change your password?" prompt on first login.
     match db::users::create(
         pool,
@@ -299,7 +377,7 @@ async fn create(
         role,
         true,
         &groups,
-        Some(admin.actor()),
+        Some(scope.actor()),
     )
     .await
     {
@@ -316,7 +394,7 @@ async fn create(
                     Some(&form.setor),
                     Some(&form.email),
                     Some(&form.celular),
-                    Some(admin.actor()),
+                    Some(scope.actor()),
                 )
                 .await
                 {
@@ -338,7 +416,7 @@ struct EditQuery {
 }
 
 async fn edit(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -348,36 +426,40 @@ async fn edit(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    let username = db::users::normalize_username(&username);
-    if !db::users::is_valid_username(&username) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let user = match db::users::fetch(pool, &username).await {
-        Ok(Some(user)) => user,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            tracing::error!(error = ?e, %username, "fetch user for edit failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
-        }
+    let user = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
     };
+    let username = user.username.clone();
     let flash = match q.flash.as_deref() {
         Some("saved") => "saved",
         Some("mfa-reset") => "mfa-reset",
         Some("last-admin") => "last-admin",
         Some("bad-input") => "bad-input",
         Some("weak-password") => "weak-password",
+        Some("scope-role") => "scope-role",
+        Some("scope-groups") => "scope-groups",
+        Some("self-edit") => "self-edit",
         _ => "",
     };
-    let mfa_enrolled_at = match db::mfa::fetch(pool, &username).await {
-        Ok(row) => row
-            .and_then(|row| row.confirmed_at)
-            .map(|at| at.format("%Y-%m-%d %H:%M UTC").to_string())
-            .unwrap_or_default(),
-        Err(e) => {
-            tracing::error!(error = ?e, %username, "fetch MFA status for user edit failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+    // MFA is a security control and remains Admin-only. Editors neither see
+    // enrollment state nor receive the reset form.
+    let mfa_enrolled_at = if scope.unscoped {
+        match db::mfa::fetch(pool, &username).await {
+            Ok(row) => row
+                .and_then(|row| row.confirmed_at)
+                .map(|at| at.format("%Y-%m-%d %H:%M UTC").to_string())
+                .unwrap_or_default(),
+            Err(e) => {
+                tracing::error!(error = ?e, %username, "fetch MFA status for user edit failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+            }
         }
+    } else {
+        String::new()
     };
+    let editable_groups = scope.merge_preserving_out_of_scope(&[], &user.groups);
+    let readonly_groups = scope.merge_preserving_out_of_scope(&user.groups, &[]);
     super::render(&UserEditPage {
         locale: loc,
         theme,
@@ -385,9 +467,12 @@ async fn edit(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "users",
-        role: admin.role,
+        role: scope.role,
         user,
-        me: admin.actor().to_string(),
+        me: scope.actor().to_string(),
+        editable_groups,
+        readonly_groups,
+        unscoped: scope.unscoped,
         mfa_enrolled_at,
         flash,
     })
@@ -395,6 +480,7 @@ async fn edit(
 
 #[derive(Debug, Deserialize)]
 struct EditForm {
+    #[serde(default)]
     role: String,
     #[serde(default)]
     groups: String,
@@ -407,7 +493,7 @@ struct EditForm {
 }
 
 async fn save_edit(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(username): Path<String>,
     Form(form): Form<EditForm>,
@@ -415,22 +501,32 @@ async fn save_edit(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    let username = db::users::normalize_username(&username);
-    if !db::users::is_valid_username(&username) {
-        return redirect_flash("bad-input");
+    let current = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    let username = current.username.clone();
+    if is_scoped_self_edit(&scope, &username) {
+        // Editors manage their own password through `/admin/account`; letting
+        // this consolidated form touch self role/groups would be a direct
+        // privilege-escalation path.
+        return redirect_edit_flash(&username, "self-edit");
     }
     let Some(role) = Role::parse(&form.role) else {
         return redirect_edit_flash(&username, "bad-input");
     };
-    let current = match db::users::fetch(pool, &username).await {
-        Ok(Some(user)) => user,
-        _ => return redirect_edit_flash(&username, "bad-input"),
-    };
+    if !scope.may_assign_role(role) {
+        return redirect_edit_flash(&username, "scope-role");
+    }
     if would_strip_last_admin(pool, &username, Some(role)).await {
         return redirect_edit_flash(&username, "last-admin");
     }
 
-    let groups = db::users::parse_groups(&form.groups);
+    let requested_groups = db::users::parse_groups(&form.groups);
+    if !scope.may_assign_groups(&requested_groups) {
+        return redirect_edit_flash(&username, "scope-groups");
+    }
+    let groups = scope.merge_preserving_out_of_scope(&current.groups, &requested_groups);
     let update = db::users::AccountUpdate {
         role,
         groups: &groups,
@@ -438,7 +534,7 @@ async fn save_edit(
         email: Some(&form.email),
         celular: Some(&form.celular),
     };
-    match db::users::update_account(pool, &username, update, Some(admin.actor())).await {
+    match db::users::update_account(pool, &username, update, Some(scope.actor())).await {
         Ok(()) => {
             if current.role != role {
                 // Role changes take effect immediately, including self-demotion.
@@ -471,7 +567,7 @@ pub struct ProfileForm {
 }
 
 async fn set_profile(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(username): Path<String>,
     Form(form): Form<ProfileForm>,
@@ -479,13 +575,17 @@ async fn set_profile(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
+    let target = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
     match db::users::update_profile(
         pool,
-        &username,
+        &target.username,
         Some(&form.setor),
         Some(&form.email),
         Some(&form.celular),
-        Some(admin.actor()),
+        Some(scope.actor()),
     )
     .await
     {
@@ -510,7 +610,7 @@ pub struct GroupsForm {
 }
 
 async fn set_groups(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(username): Path<String>,
     Form(form): Form<GroupsForm>,
@@ -518,8 +618,19 @@ async fn set_groups(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    let groups = db::users::parse_groups(&form.groups);
-    match db::users::set_groups(pool, &username, &groups, Some(admin.actor())).await {
+    let target = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if is_scoped_self_edit(&scope, &target.username) {
+        return redirect_edit_flash(&target.username, "self-edit");
+    }
+    let requested = db::users::parse_groups(&form.groups);
+    if !scope.may_assign_groups(&requested) {
+        return redirect_edit_flash(&target.username, "scope-groups");
+    }
+    let groups = scope.merge_preserving_out_of_scope(&target.groups, &requested);
+    match db::users::set_groups(pool, &target.username, &groups, Some(scope.actor())).await {
         Ok(()) => {
             state.invalidate_identity_cache();
             redirect_flash("saved")
@@ -533,11 +644,12 @@ async fn set_groups(
 
 #[derive(Debug, Deserialize)]
 pub struct RoleForm {
+    #[serde(default)]
     pub role: String,
 }
 
 async fn set_role(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(username): Path<String>,
     Form(form): Form<RoleForm>,
@@ -545,18 +657,38 @@ async fn set_role(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
+    let target = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if is_scoped_self_edit(&scope, &target.username) {
+        return redirect_edit_flash(&target.username, "self-edit");
+    }
     let new_role = Role::parse(&form.role).unwrap_or(Role::Viewer);
+    if !scope.may_assign_role(new_role) {
+        return redirect_edit_flash(&target.username, "scope-role");
+    }
 
     // Last-admin guard: don't let the only admin be demoted.
-    if would_strip_last_admin(pool, &username, Some(new_role)).await {
+    if would_strip_last_admin(pool, &target.username, Some(new_role)).await {
         return redirect_flash("last-admin");
     }
-    match db::users::set_role(pool, &username, new_role, Some(admin.actor())).await {
+    match db::users::set_role(
+        pool,
+        &target.username,
+        new_role,
+        Some(scope.actor()),
+    )
+    .await
+    {
         Ok(()) => {
             // Kick the user's live sessions so the new role takes effect
             // now, not after the cookie expires (#544) — a demotion must
             // drop elevated access immediately.
-            state.admin_sessions.revoke_by_actor(&username).await;
+            state
+                .admin_sessions
+                .revoke_by_actor(&target.username)
+                .await;
             redirect_flash("saved")
         }
         Err(e) => {
@@ -568,11 +700,12 @@ async fn set_role(
 
 #[derive(Debug, Deserialize)]
 pub struct ResetForm {
+    #[serde(default)]
     pub password: String,
 }
 
 async fn reset_password(
-    admin: RequireAdmin,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(username): Path<String>,
     Form(form): Form<ResetForm>,
@@ -580,15 +713,32 @@ async fn reset_password(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
+    let target = match scoped_target(pool, &scope, &username).await {
+        Ok(user) => user,
+        Err(response) => return response,
+    };
+    if is_scoped_self_edit(&scope, &target.username) {
+        return redirect_edit_flash(&target.username, "self-edit");
+    }
     if !crate::auth::password_meets_policy(&form.password) {
-        return redirect_edit_flash(&db::users::normalize_username(&username), "weak-password");
+        return redirect_edit_flash(&target.username, "weak-password");
     }
     // Admin-assigned password ⇒ prompt the user to change it next login.
-    match db::users::set_password(pool, &username, &form.password, true, Some(admin.actor())).await
+    match db::users::set_password(
+        pool,
+        &target.username,
+        &form.password,
+        true,
+        Some(scope.actor()),
+    )
+    .await
     {
         Ok(()) => {
             // A password reset must invalidate existing sessions (#544).
-            state.admin_sessions.revoke_by_actor(&username).await;
+            state
+                .admin_sessions
+                .revoke_by_actor(&target.username)
+                .await;
             redirect_flash("saved")
         }
         Err(e) => {
@@ -598,6 +748,8 @@ async fn reset_password(
     }
 }
 
+/// MFA reset changes a security control, not ordinary team membership, so it
+/// deliberately remains Admin/break-glass only even for an in-scope user.
 async fn reset_mfa(
     admin: RequireAdmin,
     State(state): State<AppState>,
@@ -627,6 +779,9 @@ async fn reset_mfa(
     }
 }
 
+/// Account deletion removes every membership, including groups an Editor
+/// does not administer. It therefore remains Admin/break-glass only; an
+/// Editor offboards someone from their team by removing the shared group.
 async fn delete(
     admin: RequireAdmin,
     State(state): State<AppState>,
@@ -635,6 +790,18 @@ async fn delete(
     let Some(pool) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
+    let username = db::users::normalize_username(&username);
+    if !db::users::is_valid_username(&username) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    match db::users::fetch(pool, &username).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            tracing::error!(error = ?e, %username, "fetch user before delete failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    }
     // Last-admin guard: deleting the only admin would lock everyone out.
     if would_strip_last_admin(pool, &username, None).await {
         return redirect_flash("last-admin");
@@ -820,7 +987,8 @@ impl UsersImportPreviewPage<'_> {
 }
 
 /// `POST /admin/users/import` — multipart CSV upload → parse → preview
-/// (no writes). The valid rows are committed only by `import_confirm`.
+/// (no writes). Bulk import has no natural single-row scope boundary, so both
+/// preview and confirm deliberately remain Admin/break-glass only.
 async fn import(
     admin: RequireAdmin,
     State(state): State<AppState>,
@@ -887,6 +1055,7 @@ pub struct ImportConfirmForm {
 /// so the imported initial password is changed on first login. Existing
 /// usernames + invalid rows are skipped (create is fail-closed on a
 /// duplicate anyway). Redirects with an `imported`/`skipped` summary.
+/// This remains Admin-only for the same bulk-scope reason as [`import`].
 async fn import_confirm(
     admin: RequireAdmin,
     State(state): State<AppState>,

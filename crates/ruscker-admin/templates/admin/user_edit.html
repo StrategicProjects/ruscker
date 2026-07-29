@@ -14,11 +14,14 @@
   </a>
 </div>
 
-{% if flash == "last-admin" || flash == "bad-input" || flash == "weak-password" %}
+{% if flash == "last-admin" || flash == "bad-input" || flash == "weak-password" || flash == "scope-role" || flash == "scope-groups" || flash == "self-edit" %}
   <div class="admin-login-error mb-3" role="alert">
     <i class="ti ti-alert-circle" aria-hidden="true"></i>
     {% if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
     {% else if flash == "weak-password" %}{{ self.t("admin-users-flash-weak-password") }}
+    {% else if flash == "scope-role" %}{{ self.t("admin-users-flash-scope-role") }}
+    {% else if flash == "scope-groups" %}{{ self.t("admin-users-flash-scope-groups") }}
+    {% else if flash == "self-edit" %}{{ self.t("admin-users-flash-self-edit") }}
     {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
   </div>
 {% else if flash == "saved" || flash == "mfa-reset" %}
@@ -37,12 +40,18 @@
     </div>
   </div>
 
+  {% if !unscoped && user.username == me %}
+    <div class="admin-login-error" role="alert">
+      <i class="ti ti-lock" aria-hidden="true"></i>
+      {{ self.t("admin-users-flash-self-edit") }}
+    </div>
+  {% else %}
   <form method="post" action="{{ base }}/admin/users/{{ user.username }}/edit" autocomplete="off">
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <label class="admin-login-field" style="margin:0">
         <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
         <select name="role">
-          {% for r in self.all_roles() %}
+          {% for r in self.assignable_roles() %}
             <option value="{{ r.as_str() }}"{% if r == user.role %} selected{% endif %}>{{ self.role_label(r) }}</option>
           {% endfor %}
         </select>
@@ -50,9 +59,17 @@
 
       <label class="admin-login-field" style="margin:0">
         <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
-        <input type="text" name="groups" value="{{ user.groups|join(", ") }}" autocapitalize="none"
+        <input type="text" name="groups" value="{{ editable_groups|join(", ") }}" autocapitalize="none"
                placeholder="{{ self.t("admin-users-groups-placeholder") }}">
         <span class="text-xs text-[color:var(--text-faint)] mt-1">{{ self.t("admin-users-groups-hint") }}</span>
+        {% if !readonly_groups.is_empty() %}
+          <span class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-groups-readonly") }}</span>
+          <span class="group-badges mt-1">
+            {% for group in readonly_groups %}
+              <span class="group-badge" data-readonly-group="{{ group }}">{{ group }}</span>
+            {% endfor %}
+          </span>
+        {% endif %}
       </label>
 
       <label class="admin-login-field" style="margin:0">
@@ -82,8 +99,10 @@
       <a href="{{ base }}/admin/users" class="text-sm text-[color:var(--text-muted)] underline">{{ self.t("admin-users-cancel") }}</a>
     </div>
   </form>
+  {% endif %}
 </section>
 
+{% if unscoped %}
 <section style="padding:18px;margin-bottom:20px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
   <div class="text-sm font-medium">{{ self.t("admin-users-mfa-section") }}</div>
   {% if mfa_enrolled_at != "" %}
@@ -100,7 +119,9 @@
     <p class="text-sm text-[color:var(--text-muted)] mt-2" data-mfa-admin-state="not-configured">{{ self.t("admin-users-mfa-not-configured") }}</p>
   {% endif %}
 </section>
+{% endif %}
 
+{% if unscoped || user.username != me %}
 <section style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
   <div class="text-sm font-medium">{{ self.t("admin-users-password-section") }}</div>
   <p class="text-xs text-[color:var(--text-faint)] mt-1 mb-3">{{ self.t("admin-users-password-reset-hint") }}</p>
@@ -129,6 +150,7 @@
     </button>
   </form>
 </section>
+{% endif %}
 
 <script>
   document.addEventListener('click', function (e) {

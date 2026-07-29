@@ -15,12 +15,16 @@
 {# Flash split (#746): error vs success used to share one class + icon,
    distinguished only by an inline background colour — colour-only state,
    and errors never got role="alert". #}
-{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" || flash == "weak-password" %}
+{% if flash == "last-admin" || flash == "bad-input" || flash == "exists" || flash == "weak-password" || flash == "scope-role" || flash == "scope-groups" || flash == "group-required" || flash == "self-edit" %}
   <div class="admin-login-error mb-3" role="alert">
     <i class="ti ti-alert-circle" aria-hidden="true"></i>
     {% if flash == "last-admin" %}{{ self.t("admin-users-flash-last-admin") }}
     {% else if flash == "exists" %}{{ self.t("admin-users-flash-exists") }}
     {% else if flash == "weak-password" %}{{ self.t("admin-users-flash-weak-password") }}
+    {% else if flash == "scope-role" %}{{ self.t("admin-users-flash-scope-role") }}
+    {% else if flash == "scope-groups" %}{{ self.t("admin-users-flash-scope-groups") }}
+    {% else if flash == "group-required" %}{{ self.t("admin-users-flash-group-required") }}
+    {% else if flash == "self-edit" %}{{ self.t("admin-users-flash-self-edit") }}
     {% else %}{{ self.t("admin-users-flash-bad-input") }}{% endif %}
   </div>
 {% else if flash != "" %}
@@ -73,14 +77,15 @@
     <label class="admin-login-field" style="margin:0">
       <span class="admin-login-label">{{ self.t("admin-users-role") }}</span>
       <select name="role">
-        {% for r in self.all_roles() %}
+        {% for r in self.assignable_roles() %}
           <option value="{{ r.as_str() }}"{% if r == Role::Viewer %} selected{% endif %}>{{ self.role_label(r) }}</option>
         {% endfor %}
       </select>
     </label>
     <label class="admin-login-field" style="margin:0;flex:1 1 220px">
       <span class="admin-login-label">{{ self.t("admin-users-groups") }}</span>
-      <input type="text" name="groups" autocapitalize="none" placeholder="{{ self.t("admin-users-groups-placeholder") }}">
+      <input type="text" name="groups" autocapitalize="none"
+             placeholder="{{ self.t("admin-users-groups-placeholder") }}"{% if !unscoped %} required{% endif %}>
     </label>
     {# Optional profile fields (#856) — all blank-able. #}
     <label class="admin-login-field" style="margin:0;flex:1 1 140px">
@@ -103,6 +108,7 @@
   <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-users-initial-password-hint") }} · {{ self.t("admin-users-groups-hint") }}</p>
 </form>
 
+{% if unscoped %}
 {# ── Bulk import from CSV (#862) ────────────────────────────────── #}
 {# The native file input renders the browser's own "Choose file / No file
    chosen" text in the BROWSER's language — untranslatable. Hide it and
@@ -165,6 +171,7 @@
     change.addEventListener('click', function () { input.click(); });
   })();
 </script>
+{% endif %}
 
 {# ── Existing users ────────────────────────────────────────────── #}
 {# Search + pagination are SERVER-side (#999): with a large user base
@@ -228,14 +235,18 @@
         </td>
         <td class="dash-mono text-[color:var(--text-muted)]"><time datetime="{{ u.created_at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="date-iso">{{ u.created_at.format("%Y-%m-%d") }}</time></td>
         <td style="text-align:right;white-space:nowrap">
-          <a href="{{ base }}/admin/users/{{ u.username }}/edit" class="dash-action"
-             title="{{ self.t("admin-users-edit") }}" aria-label="{{ self.t("admin-users-edit") }}">
-            <i class="ti ti-edit" aria-hidden="true"></i>
-          </a>
-          <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
-                data-confirm="{{ self.t("admin-users-confirm-delete") }}">
-            <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>
-          </form>
+          {% if self.can_edit_user(u) %}
+            <a href="{{ base }}/admin/users/{{ u.username }}/edit" class="dash-action"
+               title="{{ self.t("admin-users-edit") }}" aria-label="{{ self.t("admin-users-edit") }}">
+              <i class="ti ti-edit" aria-hidden="true"></i>
+            </a>
+          {% endif %}
+          {% if unscoped %}
+            <form method="post" action="{{ base }}/admin/users/{{ u.username }}/delete" style="display:inline"
+                  data-confirm="{{ self.t("admin-users-confirm-delete") }}">
+              <button type="submit" class="dash-action dash-action--danger" title="{{ self.t("admin-users-delete") }}"><i class="ti ti-trash"></i></button>
+            </form>
+          {% endif %}
         </td>
       </tr>
     {% endfor %}
@@ -254,7 +265,7 @@
       <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
     </a>
   {% endif %}
-  <span>{{ self.pager_status() }}</span>
+  <span data-users-page="{{ page }}" data-users-pages="{{ pages }}" data-users-total="{{ total }}">{{ self.pager_status() }}</span>
   {% if page < pages %}
     <a class="admin-nav-link" style="width:auto"
        href="{{ base }}/admin/users?page={{ page + 1 }}{% if !q.is_empty() %}&q={{ q|urlencode }}{% endif %}">

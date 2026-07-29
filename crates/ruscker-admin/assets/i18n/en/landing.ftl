@@ -165,6 +165,7 @@ admin-users-import-done-prefix = Imported:
 admin-users-import-skipped-prefix = skipped:
 admin-users-groups-placeholder = analysts, managers
 admin-users-groups-hint = Comma-separated groups control which restricted apps the user sees.
+admin-users-groups-readonly = Groups managed by other teams (read-only):
 admin-users-col-groups = Groups
 admin-users-save-groups = Save groups
 admin-users-new-password = new password
@@ -181,6 +182,10 @@ admin-users-password-rule = At least 8 characters, with at least 1 uppercase, 1 
 admin-users-flash-weak-password = Weak password — the policy requires at least 8 characters, with 1 uppercase, 1 lowercase, 1 digit and 1 special character.
 admin-users-generate-password = Generate random password
 admin-users-flash-exists = A user with that name already exists.
+admin-users-flash-scope-role = Editors may only assign the Viewer or Editor role.
+admin-users-flash-scope-groups = Editors may only assign groups they already belong to.
+admin-users-flash-group-required = Add at least one of your groups so the new user remains within your scope.
+admin-users-flash-self-edit = You cannot change your own role, groups or password here. Use your account page to change your password.
 
 # Admin dashboard
 admin-dashboard-title = Container Management

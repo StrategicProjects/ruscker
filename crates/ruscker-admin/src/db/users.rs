@@ -48,6 +48,20 @@ pub struct UserCounts {
     pub must_change_password: i64,
 }
 
+/// Authoritative filter for the paginated users table (#990 slice 2).
+///
+/// `visible_groups = None` is the unscoped Admin/break-glass view.
+/// `Some(groups)` is an Editor view: Admin accounts are excluded and a row
+/// must share at least one exact, case-sensitive group. Keeping this filter
+/// in SQL makes the count, page offsets, search and KPI band derive from the
+/// same set; filtering a fetched page in Rust would produce lying totals and
+/// empty pages.
+#[derive(Debug, Clone, Copy)]
+pub struct UserFilter<'a> {
+    pub search: &'a str,
+    pub visible_groups: Option<&'a [String]>,
+}
+
 /// Normalize a username for storage/lookup: trimmed + lowercased.
 /// Usernames are case-insensitive and unique.
 pub fn normalize_username(raw: &str) -> String {
@@ -124,18 +138,32 @@ pub async fn count_admins(db: &ConfigDb) -> Result<i64> {
 }
 
 /// Count all roles and pending first-password changes in one query.
-/// This stays global even while the users table is searched or paginated.
-pub async fn counts(db: &ConfigDb) -> Result<UserCounts> {
-    let sql = "SELECT COUNT(*),
-                      COUNT(CASE WHEN role = 'admin' THEN 1 END),
-                      COUNT(CASE WHEN role = 'editor' THEN 1 END),
-                      COUNT(CASE WHEN role = 'viewer' THEN 1 END),
-                      COUNT(CASE WHEN must_change_password = TRUE THEN 1 END)
-                 FROM users";
+///
+/// The search term intentionally does not affect KPIs, matching the existing
+/// page behaviour, but the authorization scope does: an Editor's KPI band
+/// must never reveal accounts outside their group boundary.
+pub async fn counts(db: &ConfigDb, visible_groups: Option<&[String]>) -> Result<UserCounts> {
+    const SELECT: &str = "SELECT COUNT(*),
+                                 COUNT(CASE WHEN role = 'admin' THEN 1 END),
+                                 COUNT(CASE WHEN role = 'editor' THEN 1 END),
+                                 COUNT(CASE WHEN role = 'viewer' THEN 1 END),
+                                 COUNT(CASE WHEN must_change_password = TRUE THEN 1 END)
+                            FROM users
+                           WHERE 1=1";
     let (total, admins, editors, viewers, must_change_password): (i64, i64, i64, i64, i64) =
         match db {
-            ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_one(pool).await,
-            ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_one(pool).await,
+            ConfigDb::Sqlite(pool) => {
+                let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                    sqlx::QueryBuilder::new(SELECT);
+                push_visibility_sqlite(&mut qb, visible_groups);
+                qb.build_query_as().fetch_one(pool).await
+            }
+            ConfigDb::Postgres(pool) => {
+                let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
+                    sqlx::QueryBuilder::new(SELECT);
+                push_visibility_postgres(&mut qb, visible_groups);
+                qb.build_query_as().fetch_one(pool).await
+            }
         }
         .context("count users by role")?;
     Ok(UserCounts {
@@ -263,54 +291,141 @@ fn like_patterns_sqlite(term: &str) -> (String, String) {
     )
 }
 
+/// Push the search predicate shared by both SQL dialects.
+///
+/// SQLite receives lowercase + uppercase variants because its built-in
+/// `LIKE` only folds ASCII; Postgres uses the same predicate with `ILIKE`.
+fn push_search_sqlite(qb: &mut sqlx::QueryBuilder<sqlx::Sqlite>, search: &str) {
+    if search.is_empty() {
+        return;
+    }
+    let (lo, up) = like_patterns_sqlite(search);
+    qb.push(" AND (");
+    for (index, column) in ["username", "groups", "setor", "email", "celular"]
+        .into_iter()
+        .enumerate()
+    {
+        if index > 0 {
+            qb.push(" OR ");
+        }
+        if matches!(column, "setor" | "email" | "celular") {
+            qb.push("COALESCE(").push(column).push(", '')");
+        } else {
+            qb.push(column);
+        }
+        qb.push(" LIKE ").push_bind(lo.clone()).push(" ESCAPE '\\'");
+        qb.push(" OR ");
+        if matches!(column, "setor" | "email" | "celular") {
+            qb.push("COALESCE(").push(column).push(", '')");
+        } else {
+            qb.push(column);
+        }
+        qb.push(" LIKE ").push_bind(up.clone()).push(" ESCAPE '\\'");
+    }
+    qb.push(")");
+}
+
+fn push_search_postgres(qb: &mut sqlx::QueryBuilder<sqlx::Postgres>, search: &str) {
+    if search.is_empty() {
+        return;
+    }
+    let pattern = like_pattern(search);
+    qb.push(" AND (");
+    for (index, column) in ["username", "groups", "setor", "email", "celular"]
+        .into_iter()
+        .enumerate()
+    {
+        if index > 0 {
+            qb.push(" OR ");
+        }
+        if matches!(column, "setor" | "email" | "celular") {
+            qb.push("COALESCE(").push(column).push(", '')");
+        } else {
+            qb.push(column);
+        }
+        qb.push(" ILIKE ").push_bind(pattern.clone());
+    }
+    qb.push(")");
+}
+
+/// Push the Editor visibility boundary using exact CSV tokens.
+///
+/// The `users.groups` column is authoritative for this page. Delimiter
+/// wrapping makes `time-a` distinct from `time-ab`; `instr`/`strpos` keep
+/// matching case-sensitive and avoid treating `%` or `_` in group names as
+/// SQL wildcards. `Some([])` deliberately emits `1=0` (fail closed).
+fn push_visibility_sqlite(
+    qb: &mut sqlx::QueryBuilder<sqlx::Sqlite>,
+    visible_groups: Option<&[String]>,
+) {
+    let Some(groups) = visible_groups else {
+        return;
+    };
+    // `lower(role)` rather than a bare comparison: the column is plain TEXT
+    // with no CHECK, so it is only lowercase because every write goes through
+    // `Role::as_str`. An externally provisioned row — the OIDC/LDAP work of
+    // #934 adds another writer — storing `Admin` must not slip past the one
+    // boundary that keeps Editors away from admin accounts.
+    qb.push(" AND lower(role) <> 'admin' AND (");
+    if groups.is_empty() {
+        qb.push("1=0");
+    } else {
+        for (index, group) in groups.iter().enumerate() {
+            if index > 0 {
+                qb.push(" OR ");
+            }
+            qb.push("instr(',' || groups || ',', ")
+                .push_bind(format!(",{group},"))
+                .push(") > 0");
+        }
+    }
+    qb.push(")");
+}
+
+fn push_visibility_postgres(
+    qb: &mut sqlx::QueryBuilder<sqlx::Postgres>,
+    visible_groups: Option<&[String]>,
+) {
+    let Some(groups) = visible_groups else {
+        return;
+    };
+    // Same case-insensitive guard as the SQLite arm — see there for why.
+    qb.push(" AND lower(role) <> 'admin' AND (");
+    if groups.is_empty() {
+        qb.push("1=0");
+    } else {
+        for (index, group) in groups.iter().enumerate() {
+            if index > 0 {
+                qb.push(" OR ");
+            }
+            qb.push("strpos(',' || groups || ',', ")
+                .push_bind(format!(",{group},"))
+                .push(") > 0");
+        }
+    }
+    qb.push(")");
+}
+
 /// Count the users matching a search term — the total behind
 /// [`list_page`]'s pagination (#999). A blank `search` counts every
 /// account; otherwise it's the same case-insensitive substring filter
 /// over username, groups and the profile fields.
-pub async fn count_filtered(db: &ConfigDb, search: &str) -> Result<i64> {
-    let search = search.trim();
+pub async fn count_filtered(db: &ConfigDb, filter: &UserFilter<'_>) -> Result<i64> {
+    let search = filter.search.trim();
     let (n,): (i64,) = match db {
         ConfigDb::Sqlite(pool) => {
-            if search.is_empty() {
-                sqlx::query_as("SELECT COUNT(*) FROM users")
-                    .fetch_one(pool)
-                    .await
-            } else {
-                // Two case variants per column — see [`like_patterns_sqlite`].
-                let (lo, up) = like_patterns_sqlite(search);
-                sqlx::query_as(
-                    "SELECT COUNT(*) FROM users
-                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
-                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'",
-                )
-                .bind(lo)
-                .bind(up)
-                .fetch_one(pool)
-                .await
-            }
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> =
+                sqlx::QueryBuilder::new("SELECT COUNT(*) FROM users WHERE 1=1");
+            push_search_sqlite(&mut qb, search);
+            push_visibility_sqlite(&mut qb, filter.visible_groups);
+            qb.build_query_as().fetch_one(pool).await
         }
         ConfigDb::Postgres(pool) => {
-            if search.is_empty() {
-                sqlx::query_as("SELECT COUNT(*) FROM users")
-                    .fetch_one(pool)
-                    .await
-            } else {
-                // ILIKE for case-insensitivity; `\` is pg's default escape.
-                sqlx::query_as(
-                    "SELECT COUNT(*) FROM users
-                      WHERE username ILIKE $1
-                         OR groups ILIKE $1
-                         OR COALESCE(setor, '') ILIKE $1
-                         OR COALESCE(email, '') ILIKE $1
-                         OR COALESCE(celular, '') ILIKE $1",
-                )
-                .bind(like_pattern(search))
-                .fetch_one(pool)
-                .await
-            }
+            let mut qb: sqlx::QueryBuilder<sqlx::Postgres> =
+                sqlx::QueryBuilder::new("SELECT COUNT(*) FROM users WHERE 1=1");
+            push_search_postgres(&mut qb, search);
+            push_visibility_postgres(&mut qb, filter.visible_groups);
+            qb.build_query_as().fetch_one(pool).await
         }
     }
     .context("count users (filtered)")?;
@@ -325,7 +440,7 @@ pub async fn count_filtered(db: &ConfigDb, search: &str) -> Result<i64> {
 /// number.
 pub async fn list_page(
     db: &ConfigDb,
-    search: &str,
+    filter: &UserFilter<'_>,
     limit: i64,
     offset: i64,
 ) -> Result<Vec<UserRow>> {
@@ -341,72 +456,35 @@ pub async fn list_page(
         Option<String>,
         Option<String>,
     );
-    let search = search.trim();
+    let search = filter.search.trim();
     let rows: Vec<Row> = match db {
         ConfigDb::Sqlite(pool) => {
-            if search.is_empty() {
-                sqlx::query_as(
-                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                       FROM users
-                      ORDER BY created_at DESC, username ASC
-                      LIMIT ?1 OFFSET ?2",
-                )
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await
-            } else {
-                // Two case variants per column — see [`like_patterns_sqlite`].
-                let (lo, up) = like_patterns_sqlite(search);
-                sqlx::query_as(
-                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                       FROM users
-                      WHERE username LIKE ?1 ESCAPE '\\' OR username LIKE ?2 ESCAPE '\\'
-                         OR groups LIKE ?1 ESCAPE '\\' OR groups LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(setor, '') LIKE ?1 ESCAPE '\\' OR COALESCE(setor, '') LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(email, '') LIKE ?1 ESCAPE '\\' OR COALESCE(email, '') LIKE ?2 ESCAPE '\\'
-                         OR COALESCE(celular, '') LIKE ?1 ESCAPE '\\' OR COALESCE(celular, '') LIKE ?2 ESCAPE '\\'
-                      ORDER BY created_at DESC, username ASC
-                      LIMIT ?3 OFFSET ?4",
-                )
-                .bind(lo)
-                .bind(up)
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await
-            }
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
+                "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                   FROM users
+                  WHERE 1=1",
+            );
+            push_search_sqlite(&mut qb, search);
+            push_visibility_sqlite(&mut qb, filter.visible_groups);
+            qb.push(" ORDER BY created_at DESC, username ASC LIMIT ")
+                .push_bind(limit)
+                .push(" OFFSET ")
+                .push_bind(offset);
+            qb.build_query_as().fetch_all(pool).await
         }
         ConfigDb::Postgres(pool) => {
-            if search.is_empty() {
-                sqlx::query_as(
-                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                       FROM users
-                      ORDER BY created_at DESC, username ASC
-                      LIMIT $1 OFFSET $2",
-                )
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await
-            } else {
-                sqlx::query_as(
-                    "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                       FROM users
-                      WHERE username ILIKE $1
-                         OR groups ILIKE $1
-                         OR COALESCE(setor, '') ILIKE $1
-                         OR COALESCE(email, '') ILIKE $1
-                         OR COALESCE(celular, '') ILIKE $1
-                      ORDER BY created_at DESC, username ASC
-                      LIMIT $2 OFFSET $3",
-                )
-                .bind(like_pattern(search))
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(pool)
-                .await
-            }
+            let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(
+                "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                   FROM users
+                  WHERE 1=1",
+            );
+            push_search_postgres(&mut qb, search);
+            push_visibility_postgres(&mut qb, filter.visible_groups);
+            qb.push(" ORDER BY created_at DESC, username ASC LIMIT ")
+                .push_bind(limit)
+                .push(" OFFSET ")
+                .push_bind(offset);
+            qb.build_query_as().fetch_all(pool).await
         }
     }
     .context("list users (page)")?;
@@ -1184,6 +1262,13 @@ mod tests {
         ConfigDb::Sqlite(crate::db::open_memory().await.expect("memory db"))
     }
 
+    fn unscoped(search: &str) -> UserFilter<'_> {
+        UserFilter {
+            search,
+            visible_groups: None,
+        }
+    }
+
     #[test]
     fn hash_and_verify_roundtrip() {
         let h = hash_password("s3cret-pw").unwrap();
@@ -1391,7 +1476,7 @@ mod tests {
             .unwrap();
         assert_eq!(count_admins(&p).await.unwrap(), 1);
         assert_eq!(
-            counts(&p).await.unwrap(),
+            counts(&p, None).await.unwrap(),
             UserCounts {
                 total: 3,
                 admins: 1,
@@ -1474,9 +1559,9 @@ mod tests {
             .unwrap();
 
         // Unfiltered: pages partition the full set with no overlap.
-        assert_eq!(count_filtered(&p, "").await.unwrap(), 3);
-        let first = list_page(&p, "", 2, 0).await.unwrap();
-        let rest = list_page(&p, "", 2, 2).await.unwrap();
+        assert_eq!(count_filtered(&p, &unscoped("")).await.unwrap(), 3);
+        let first = list_page(&p, &unscoped(""), 2, 0).await.unwrap();
+        let rest = list_page(&p, &unscoped(""), 2, 2).await.unwrap();
         assert_eq!(first.len(), 2);
         assert_eq!(rest.len(), 1);
         let mut all: Vec<String> = first
@@ -1487,23 +1572,29 @@ mod tests {
         all.sort();
         assert_eq!(all, vec!["alice", "bob", "carol"]);
         // Past the end ⇒ empty page, not an error.
-        assert!(list_page(&p, "", 2, 4).await.unwrap().is_empty());
+        assert!(list_page(&p, &unscoped(""), 2, 4)
+            .await
+            .unwrap()
+            .is_empty());
 
         // Search is a case-insensitive substring over username, groups
         // and profile fields.
-        assert_eq!(count_filtered(&p, "ALI").await.unwrap(), 1);
-        let hit = list_page(&p, "ALI", 50, 0).await.unwrap();
+        assert_eq!(count_filtered(&p, &unscoped("ALI")).await.unwrap(), 1);
+        let hit = list_page(&p, &unscoped("ALI"), 50, 0).await.unwrap();
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].username, "alice");
-        assert_eq!(list_page(&p, "ops", 50, 0).await.unwrap()[0].username, "bob");
         assert_eq!(
-            list_page(&p, "@example", 50, 0).await.unwrap()[0].username,
+            list_page(&p, &unscoped("ops"), 50, 0).await.unwrap()[0].username,
+            "bob"
+        );
+        assert_eq!(
+            list_page(&p, &unscoped("@example"), 50, 0).await.unwrap()[0].username,
             "carol"
         );
         // LIKE wildcards in the term match literally, not as patterns.
-        assert_eq!(count_filtered(&p, "%").await.unwrap(), 0);
-        assert_eq!(count_filtered(&p, "a_i").await.unwrap(), 0);
-        assert_eq!(count_filtered(&p, "nobody").await.unwrap(), 0);
+        assert_eq!(count_filtered(&p, &unscoped("%")).await.unwrap(), 0);
+        assert_eq!(count_filtered(&p, &unscoped("a_i")).await.unwrap(), 0);
+        assert_eq!(count_filtered(&p, &unscoped("nobody")).await.unwrap(), 0);
 
         // Accented text: SQLite's LIKE only folds ASCII, so the sqlite
         // arm matches both Rust-cased variants of the term (codex
@@ -1512,16 +1603,85 @@ mod tests {
         update_profile(&p, "bob", Some("Gestão"), None, None, None)
             .await
             .unwrap();
-        assert_eq!(count_filtered(&p, "GESTÃO").await.unwrap(), 1);
-        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
+        assert_eq!(count_filtered(&p, &unscoped("GESTÃO")).await.unwrap(), 1);
+        assert_eq!(count_filtered(&p, &unscoped("gestão")).await.unwrap(), 1);
         assert_eq!(
-            list_page(&p, "GESTÃO", 50, 0).await.unwrap()[0].username,
+            list_page(&p, &unscoped("GESTÃO"), 50, 0).await.unwrap()[0].username,
             "bob"
         );
         update_profile(&p, "bob", Some("GESTÃO"), None, None, None)
             .await
             .unwrap();
-        assert_eq!(count_filtered(&p, "gestão").await.unwrap(), 1);
+        assert_eq!(count_filtered(&p, &unscoped("gestão")).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn scoped_filter_excludes_admins_and_matches_exact_groups_before_paging() {
+        let p = pool().await;
+        create(
+            &p,
+            "admin-shared",
+            "pw-admin",
+            Role::Admin,
+            false,
+            &["time-a".to_string()],
+            None,
+        )
+        .await
+        .unwrap();
+        create(
+            &p,
+            "viewer-shared",
+            "pw-viewer",
+            Role::Viewer,
+            true,
+            &["time-a".to_string(), "time-b".to_string()],
+            None,
+        )
+        .await
+        .unwrap();
+        create(
+            &p,
+            "viewer-prefix",
+            "pw-prefix",
+            Role::Viewer,
+            false,
+            &["time-ab".to_string()],
+            None,
+        )
+        .await
+        .unwrap();
+        let groups = vec!["time-a".to_string()];
+        let filter = UserFilter {
+            search: "",
+            visible_groups: Some(&groups),
+        };
+
+        assert_eq!(count_filtered(&p, &filter).await.unwrap(), 1);
+        let page = list_page(&p, &filter, 50, 0).await.unwrap();
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].username, "viewer-shared");
+        assert_eq!(
+            counts(&p, Some(&groups)).await.unwrap(),
+            UserCounts {
+                total: 1,
+                admins: 0,
+                editors: 0,
+                viewers: 1,
+                must_change_password: 1,
+            }
+        );
+
+        let empty: Vec<String> = Vec::new();
+        let fail_closed = UserFilter {
+            search: "",
+            visible_groups: Some(&empty),
+        };
+        assert_eq!(count_filtered(&p, &fail_closed).await.unwrap(), 0);
+        assert!(list_page(&p, &fail_closed, 50, 0)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     // Full user lifecycle through the `ConfigDb::Postgres` arm against a
@@ -1552,13 +1712,29 @@ mod tests {
         assert_eq!(list_all(&db).await.unwrap().len(), 2);
 
         // Pagination + ILIKE search through the Postgres arm (#999).
-        assert_eq!(count_filtered(&db, "").await.unwrap(), 2);
-        assert_eq!(list_page(&db, "", 1, 0).await.unwrap().len(), 1);
-        assert_eq!(list_page(&db, "", 10, 2).await.unwrap().len(), 0);
-        let hit = list_page(&db, "ED", 10, 0).await.unwrap();
+        assert_eq!(count_filtered(&db, &unscoped("")).await.unwrap(), 2);
+        assert_eq!(list_page(&db, &unscoped(""), 1, 0).await.unwrap().len(), 1);
+        assert_eq!(
+            list_page(&db, &unscoped(""), 10, 2)
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        let hit = list_page(&db, &unscoped("ED"), 10, 0).await.unwrap();
         assert_eq!(hit.len(), 1);
         assert_eq!(hit[0].username, "ed");
-        assert_eq!(count_filtered(&db, "%").await.unwrap(), 0);
+        assert_eq!(count_filtered(&db, &unscoped("%")).await.unwrap(), 0);
+        let leads = vec!["leads".to_string()];
+        let scoped = UserFilter {
+            search: "",
+            visible_groups: Some(&leads),
+        };
+        assert_eq!(count_filtered(&db, &scoped).await.unwrap(), 1);
+        assert_eq!(
+            list_page(&db, &scoped, 10, 0).await.unwrap()[0].username,
+            "ed"
+        );
 
         // Case-insensitive login + must_change BOOLEAN round-trip.
         let u = verify_login(&db, "ed", "edpw1234")

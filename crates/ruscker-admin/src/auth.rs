@@ -12,9 +12,9 @@
 //! never be locked out — treat it as a sensitive secret. When it isn't
 //! set, admin routes 503.
 //!
-//! Roles (see [`Role`]): **Viewer** (dashboard only), **Editor**
-//! (apps + media + dashboard), and **Admin** (everything, incl. user
-//! management). External IdPs (OIDC/SAML/LDAP) and per-app ACLs land
+//! Roles (see [`Role`]): **Viewer** (portal only), **Editor**
+//! (apps + media + group-scoped user management), and **Admin**
+//! (everything). External IdPs (OIDC/SAML/LDAP) and per-app ACLs land
 //! in Phase 8.
 //!
 //! Cookie: the value is an opaque server-side session id (never the
@@ -47,10 +47,10 @@ pub const COOKIE_NAME: &str = "ruscker_admin_session";
 /// `nav_section` strings the templates already use.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Role {
-    /// Read-only: the monitoring dashboard, nothing else.
+    /// Portal end user: app visibility comes from group membership.
     Viewer,
-    /// Manages apps and media (create/edit/delete + uploads) and has
-    /// the full dashboard, including the stop/restart actions.
+    /// Manages apps, media and group-scoped users and has the full
+    /// dashboard, including the stop/restart actions.
     Editor,
     /// Everything — credentials, landing editor, custom blocks, audit
     /// log. The historical single-token behaviour.
@@ -64,13 +64,13 @@ impl Role {
     /// `landing`, `blocks`, `audit`).
     pub fn can_access_section(&self, section: &str) -> bool {
         match section {
-            // Dashboard + apps + media: Editor and up. A Viewer is NOT
-            // an admin-panel operator (#857) — it's the portal's
+            // Dashboard + apps + media + scoped users: Editor and up. A
+            // Viewer is NOT an admin-panel operator (#857) — it's the portal's
             // authenticated-end-user role (group-based card visibility,
             // #155), so it reaches NO admin section.
-            "dashboard" | "specs" | "images" => *self >= Role::Editor,
-            // Everything else — credentials, landing, users, groups,
-            // logs, disk, audit, system, schedules — is admin-only.
+            "dashboard" | "specs" | "images" | "users" => *self >= Role::Editor,
+            // Everything else — credentials, landing, groups, logs, disk,
+            // audit, system, schedules — is admin-only.
             _ => *self == Role::Admin,
         }
     }
@@ -741,9 +741,9 @@ mod tests {
         assert!(Role::Admin > Role::Editor);
         assert!(Role::Editor > Role::Viewer);
 
-        // Dashboard + apps + media: Editor and up — a Viewer reaches no
-        // admin section (#857).
-        for sec in ["dashboard", "specs", "images"] {
+        // Dashboard + apps + media + scoped users: Editor and up — a Viewer
+        // reaches no admin section (#857).
+        for sec in ["dashboard", "specs", "images", "users"] {
             assert!(!Role::Viewer.can_access_section(sec));
             assert!(Role::Editor.can_access_section(sec));
             assert!(Role::Admin.can_access_section(sec));

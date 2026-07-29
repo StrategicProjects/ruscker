@@ -777,6 +777,8 @@ fn section_for_admin_path(path: &str) -> &'static str {
         "logs"
     } else if path.starts_with("/admin/schedules") {
         "schedules"
+    } else if path.starts_with("/admin/users") {
+        "users"
     } else {
         // /admin root and anything unrecognised → dashboard (every
         // role can reach it).

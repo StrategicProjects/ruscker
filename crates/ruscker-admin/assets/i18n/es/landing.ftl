@@ -165,6 +165,7 @@ admin-users-import-done-prefix = Importados:
 admin-users-import-skipped-prefix = omitidos:
 admin-users-groups-placeholder = analistas, gestores
 admin-users-groups-hint = Los grupos separados por comas controlan qué apps restringidas ve el usuario.
+admin-users-groups-readonly = Grupos administrados por otros equipos (solo lectura):
 admin-users-col-groups = Grupos
 admin-users-save-groups = Guardar grupos
 admin-users-new-password = nueva contraseña
@@ -181,6 +182,10 @@ admin-users-password-rule = Mínimo 8 caracteres, con al menos 1 mayúscula, 1 m
 admin-users-flash-weak-password = Contraseña débil — la política exige mínimo 8 caracteres, con 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial.
 admin-users-generate-password = Generar contraseña aleatoria
 admin-users-flash-exists = Ya existe un usuario con ese nombre.
+admin-users-flash-scope-role = Los Editores solo pueden asignar los roles Visualizador o Editor.
+admin-users-flash-scope-groups = Los Editores solo pueden asignar grupos a los que ya pertenecen.
+admin-users-flash-group-required = Añada al menos uno de sus grupos para que el nuevo usuario permanezca dentro de su ámbito.
+admin-users-flash-self-edit = No puede cambiar su propio rol, grupos ni contraseña aquí. Use la página de su cuenta para cambiar la contraseña.
 
 # Admin dashboard
 admin-dashboard-title = Gestión de Contenedores

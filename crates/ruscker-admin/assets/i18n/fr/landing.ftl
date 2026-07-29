@@ -165,6 +165,7 @@ admin-users-import-done-prefix = Importés :
 admin-users-import-skipped-prefix = ignorés :
 admin-users-groups-placeholder = analystes, gestionnaires
 admin-users-groups-hint = Les groupes séparés par des virgules déterminent les applis restreintes visibles par l'utilisateur.
+admin-users-groups-readonly = Groupes gérés par d'autres équipes (lecture seule) :
 admin-users-col-groups = Groupes
 admin-users-save-groups = Enregistrer les groupes
 admin-users-new-password = nouveau mot de passe
@@ -181,6 +182,10 @@ admin-users-password-rule = Au moins 8 caractères, dont 1 majuscule, 1 minuscul
 admin-users-flash-weak-password = Mot de passe faible — la politique exige au moins 8 caractères, dont 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial.
 admin-users-generate-password = Générer un mot de passe aléatoire
 admin-users-flash-exists = Un utilisateur portant ce nom existe déjà.
+admin-users-flash-scope-role = Les Éditeurs ne peuvent attribuer que les rôles Lecteur ou Éditeur.
+admin-users-flash-scope-groups = Les Éditeurs ne peuvent attribuer que les groupes auxquels ils appartiennent déjà.
+admin-users-flash-group-required = Ajoutez au moins un de vos groupes afin que le nouvel utilisateur reste dans votre périmètre.
+admin-users-flash-self-edit = Vous ne pouvez pas modifier ici votre propre rôle, vos groupes ou votre mot de passe. Utilisez la page de votre compte pour changer votre mot de passe.
 
 # Admin dashboard
 admin-dashboard-title = Gestion des Conteneurs

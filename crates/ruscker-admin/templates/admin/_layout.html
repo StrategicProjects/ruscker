@@ -309,6 +309,70 @@ window.ruscker.imagePicker = (filenames) => ({
   {% block content %}{% endblock %}
 </main>
 
+{# ── Local-time rendering (#1041) ──────────────────────────────────
+   Every timestamp in the DB is UTC (the right thing to store), and
+   chrono's `format` prints the wall clock OF THE VALUE — so a bare
+   day/month/year+hour interpolation renders UTC and reads as three
+   hours in the future for a UTC−3 operator (the audit log made this
+   obvious). There is no server-side timezone to convert to: box and
+   hugo would each need configuring, and operators can sit in
+   different zones anyway. So each timestamp cell ships as
+   `<time datetime="…Z" data-rk-time="pattern">` with the UTC text as
+   the no-JS fallback, and this rewrites it into the VIEWER's zone.
+   Patterns mirror the chrono formats they replace, so the digit
+   layout of each screen is unchanged — only the hour is now right.
+   Runs immediately (the cells above are already parsed) to keep the
+   wrong-time flash sub-frame; the DOMContentLoaded pass is the
+   belt-and-braces for anything still streaming in. #}
+<script>
+(function () {
+  function p(n) { return (n < 10 ? '0' : '') + n; }
+  function ymd(d) { return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear(); }
+  function hms(d, secs) {
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + (secs ? ':' + p(d.getSeconds()) : '');
+  }
+  var PATTERNS = {
+    'datetime-s': function (d) { return ymd(d) + ' ' + hms(d, true); },   // %d/%m/%Y %H:%M:%S
+    'datetime':   function (d) { return ymd(d) + ' ' + hms(d, false); },  // %d/%m/%Y %H:%M
+    'date':       function (d) { return ymd(d); },                        // %d/%m/%Y
+    'date-iso':   function (d) {                                          // %Y-%m-%d
+      return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+    }
+  };
+
+  function localize(root) {
+    (root || document).querySelectorAll('time[data-rk-time]:not([data-rk-tz])').forEach(function (el) {
+      var fmt = PATTERNS[el.dataset.rkTime];
+      var d = new Date(el.getAttribute('datetime'));
+      // Unknown pattern or unparseable value: leave the server's UTC
+      // text alone. A wrong-but-labelled time beats a blank cell.
+      if (!fmt || isNaN(d.getTime())) return;
+      el.textContent = fmt(d);
+      el.dataset.rkTz = '1';
+      // Hover shows the full date + the zone name, in the PAGE's locale
+      // (not the browser's — the operator picked pt/en/es/fr in the chrome
+      // cluster and the tooltip should follow that choice).
+      try {
+        var lang = document.documentElement.lang || undefined;
+        el.title = d.toLocaleString(lang, { dateStyle: 'full', timeStyle: 'long' });
+      } catch (e) { /* older engine without dateStyle — the cell text is enough */ }
+      // Sort the column by the instant, not by the rendered digits: the
+      // table enhancer's numeric compare strips the separators and reads
+      // `29/07/2026` as one big number, i.e. it sorts by day-of-month.
+      var cell = el.closest('td');
+      if (cell) cell.dataset.sortValue = String(d.getTime());
+    });
+  }
+
+  window.ruscker = window.ruscker || {};
+  window.ruscker.localizeTimes = localize;   // for fragments swapped in later
+  localize();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { localize(); });
+  }
+})();
+</script>
+
 {# Floating toasts (#623): promote any server-rendered flash banner into a
    bottom-centre toast that auto-dismisses. The banner markup is unchanged
    (still produced server-side from `?flash=…`); this only re-homes it, so

@@ -93,3 +93,56 @@ fn no_inline_onsubmit_confirm_handlers() {
         offenders.join("\n")
     );
 }
+
+/// A `DateTime<Utc>` formatted straight into the page prints UTC
+/// wall-clock — three hours in the future for a UTC−3 operator, which
+/// is exactly how the audit log was reported (#1041). Every visible
+/// timestamp must ship inside a `<time datetime="…Z" data-rk-time="…">`
+/// so the layout's `localizeTimes` can re-render it in the viewer's
+/// zone, with the UTC text kept as the no-JS fallback.
+#[test]
+fn timestamps_are_wrapped_for_local_time_rendering() {
+    // The chrono formats that render a date to the operator. The
+    // machine-readable `datetime` attribute we ADD uses `%Y-%m-%dT…`,
+    // so it never matches these on its own.
+    let visible = ["format(\"%d/%m", "format(\"%Y-%m-%d\"", "format(\"%H"];
+    let offenders: Vec<String> = template_files()
+        .iter()
+        .flat_map(|path| {
+            let body = std::fs::read_to_string(path).expect("read template");
+            body.lines()
+                .enumerate()
+                .filter(|(_, line)| {
+                    visible.iter().any(|pat| line.contains(pat)) && !line.contains("data-rk-time=")
+                })
+                .map(|(n, line)| format!("{}:{}: {}", path.display(), n + 1, line.trim()))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        offenders.is_empty(),
+        "timestamp rendered without a <time data-rk-time=…> wrapper — it \
+         will display UTC instead of the viewer's local time (#1041):\n{}",
+        offenders.join("\n")
+    );
+}
+
+/// The wrapper is only half the fix: the layout must actually carry the
+/// script that rewrites it. Guards against someone dropping the block
+/// while the `data-rk-time` attributes stay behind, silently reverting
+/// every screen to UTC.
+#[test]
+fn admin_layout_ships_the_local_time_script() {
+    let layout = Path::new(env!("CARGO_MANIFEST_DIR")).join("templates/admin/_layout.html");
+    let body = std::fs::read_to_string(&layout).expect("read admin layout");
+    assert!(
+        body.contains("window.ruscker.localizeTimes"),
+        "admin/_layout.html lost the local-time renderer (#1041)"
+    );
+    for pattern in ["datetime-s", "datetime", "date-iso", "date"] {
+        assert!(
+            body.contains(&format!("'{pattern}':")),
+            "local-time renderer is missing the `{pattern}` pattern (#1041)"
+        );
+    }
+}

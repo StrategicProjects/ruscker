@@ -104,7 +104,7 @@
             @keydown.enter.prevent="toggle({{ e.id }})" @keydown.space.prevent="toggle({{ e.id }})"
             tabindex="0" role="button" :aria-expanded="open === {{ e.id }} ? 'true' : 'false'"
             style="cursor:pointer"{% endif %}>
-          <td class="dash-mono text-[color:var(--text-faint)]" style="white-space:nowrap">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</td>
+          <td class="dash-mono text-[color:var(--text-faint)]" style="white-space:nowrap"><time datetime="{{ e.occurred_at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="datetime-s">{{ e.occurred_at.format("%d/%m/%Y %H:%M:%S") }}</time></td>
           <td>
             <span class="user-cell">
               <span class="rk-avatar" data-avatar="{% match e.actor %}{% when Some with (a) %}{{ a }}{% when None %}system{% endmatch %}" aria-hidden="true"></span>

@@ -189,7 +189,7 @@
             <span class="pill" title="{{ self.t("admin-specs-config-defined") }}">{{ self.t("admin-specs-config-badge") }}</span>
           </td>
           {% else %}
-          <td class="text-[color:var(--text-muted)]">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</td>
+          <td class="text-[color:var(--text-muted)]"><time datetime="{{ spec.updated_at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="datetime">{{ spec.updated_at.format("%d/%m/%Y %H:%M") }}</time></td>
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
           <td class="access-cell">
             <span class="access-num">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</span>

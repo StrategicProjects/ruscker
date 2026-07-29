@@ -152,7 +152,9 @@ drill into any container.
 - [ ] OIDC integration (Keycloak, Auth0, Google)
 - [ ] SAML for enterprise
 - [ ] LDAP directory integration
-- [x] Role-based access control (Viewer / Editor / Admin) — shipped
+- [x] Role-based access control (Viewer / Editor / Admin), including
+      group-scoped Editor delegation across Apps, Users and Groups; Admin
+      accounts and the break-glass token remain unrestricted
 - [x] Per-spec access lists (only group X can use this app) — shipped in Phase 6
 - [x] Per-app step-up MFA — one user-owned TOTP factor, recovery codes,
       trusted-device grants, and per-spec proof-freshness policy
@@ -160,8 +162,8 @@ drill into any container.
       ShinyProxy-compatible user/group headers plus selected profile claims
 
 > Only the external identity-provider items (OIDC / SAML / LDAP) remain; the
-> database-backed role model, per-spec access lists, step-up MFA, and
-> identity forwarding already ship.
+> database-backed role model (including group-scoped Editors), per-spec access
+> lists, step-up MFA, and identity forwarding already ship.
 
 ## Continuing shipped work
 

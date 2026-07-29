@@ -64,6 +64,36 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// in `ruscker-cli`'s `init_tracing`.
 pub const STARTUP_LOG_TARGET: &str = "ruscker_startup";
 
+/// Warn about the one access-loss edge introduced by scoped Editors (#990).
+///
+/// Before group scope, every Editor operated the whole catalog. An upgraded
+/// Editor account with no memberships now fails closed and reaches only open
+/// apps, so silently continuing would leave the operator with no clue which
+/// accounts need migration. This remains a warning: startup must not fail
+/// because an account is intentionally ungrouped or because the check itself
+/// cannot read the database.
+async fn warn_editors_without_groups(db: Option<&db::ConfigDb>) {
+    let Some(db) = db else { return };
+    match db::users::editors_without_groups(db).await {
+        Ok(editors) if editors.is_empty() => {}
+        Ok(editors) => {
+            tracing::warn!(
+                target: STARTUP_LOG_TARGET,
+                editors_without_groups = editors.len(),
+                editors = %editors.join(", "),
+                "Editor accounts without groups can manage only open apps; assign their groups"
+            );
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: STARTUP_LOG_TARGET,
+                error = ?error,
+                "could not check for Editor accounts without groups"
+            );
+        }
+    }
+}
+
 /// Identity attributes cached together for the proxy hot path (#1001).
 /// `celular`, roles, and authentication tokens are intentionally absent:
 /// they are not supported upstream identity claims.
@@ -482,6 +512,8 @@ impl AdminServer {
 
     /// Start listening. Blocks until the process is shut down.
     pub async fn run(self) -> Result<()> {
+        warn_editors_without_groups(self.state.db.as_ref()).await;
+
         // Reconcile the in-memory replica registry with whatever
         // the backend reports as already running. This lets
         // Ruscker survive its own restart without losing track
@@ -1408,5 +1440,110 @@ mod reconcile_tests {
         }];
         apply_seat_caps(&mut replicas, &[]);
         assert_eq!(replicas[0].sessions_max, 7, "untouched when spec is absent");
+    }
+}
+
+#[cfg(test)]
+mod startup_warning_tests {
+    use super::warn_editors_without_groups;
+    use crate::db::{ConfigDb, MIGRATIONS};
+    use sqlx::sqlite::SqlitePoolOptions;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing::instrument::WithSubscriber;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    #[derive(Clone, Default)]
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .write(bytes)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for CapturedWriter {
+        type Writer = Self;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    async fn user_db(editors: &[(&str, &str)]) -> ConfigDb {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        MIGRATIONS.run(&pool).await.unwrap();
+        let now = chrono::Utc::now();
+        for (username, groups) in editors {
+            sqlx::query(
+                "INSERT INTO users
+                    (id, username, password_hash, role, must_change_password,
+                     groups, created_at, updated_at, created_by)
+                 VALUES (?, ?, 'unused-test-hash', 'editor', 0, ?, ?, ?, NULL)",
+            )
+            .bind(uuid::Uuid::new_v4().to_string())
+            .bind(username)
+            .bind(groups)
+            .bind(now)
+            .bind(now)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        ConfigDb::Sqlite(pool)
+    }
+
+    async fn captured_warning(db: &ConfigDb) -> String {
+        let writer = CapturedWriter::default();
+        let subscriber = tracing_subscriber::fmt()
+            .without_time()
+            .with_ansi(false)
+            .with_target(true)
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(writer.clone())
+            .finish();
+        warn_editors_without_groups(Some(db))
+            .with_subscriber(subscriber)
+            .await;
+        let bytes = writer
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        String::from_utf8(bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn startup_warning_names_every_editor_without_groups_and_stays_silent_otherwise() {
+        let mixed = user_db(&[
+            ("zoe", ""),
+            ("alice", " , "),
+            ("grouped-editor", "operations"),
+        ])
+        .await;
+        let warning = captured_warning(&mixed).await;
+        assert!(warning.contains(" WARN "));
+        assert!(warning.contains("ruscker_startup"));
+        assert!(warning.contains("editors_without_groups=2"));
+        assert!(warning.contains("editors=alice, zoe"));
+        assert!(warning.contains("can manage only open apps"));
+        assert!(!warning.contains("grouped-editor"));
+
+        let grouped = user_db(&[("alice", "operations"), ("zoe", "analytics")]).await;
+        assert!(
+            captured_warning(&grouped).await.is_empty(),
+            "all grouped Editors must produce no startup warning"
+        );
     }
 }

@@ -16,8 +16,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 
-use crate::auth::{RequireEditor, Role};
+use crate::auth::Role;
 use crate::i18n::{Locale, Locales};
+use crate::scope::EditorScope;
 use crate::theme::Theme;
 use crate::AppState;
 
@@ -51,7 +52,7 @@ struct ToggleResult {
 /// flag from the Apps table's star (#521), without opening the editor.
 /// Editor-gated; returns the new state as JSON for the optimistic UI.
 async fn toggle_featured(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -66,10 +67,15 @@ async fn toggle_featured(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Out-of-scope specs deliberately look absent: returning 403 here would
+    // confirm an app id that the Editor is not allowed to discover (#990).
+    if !scope.may_touch_spec(&spec) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
     let now_featured = !spec.is_featured();
     // None when off so a normal spec carries no `featured` noise in JSON.
     spec.featured = now_featured.then_some(true);
-    if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(editor.actor())).await {
+    if let Err(e) = crate::db::specs::upsert_one(db, &spec, Some(scope.actor())).await {
         tracing::error!(id, error = ?e, "save featured toggle failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }
@@ -95,7 +101,7 @@ struct StateToggleResult {
 /// toggle (#787 — the original form POST + redirect reloaded the page
 /// and threw the scroll back to the top).
 async fn toggle_state(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
@@ -110,13 +116,18 @@ async fn toggle_state(
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
         }
     };
+    // Hide existence across Editor group boundaries; list filtering is only
+    // presentation and direct URLs must be protected independently (#990).
+    if !scope.may_touch_spec(&spec) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
     let next_active = !spec.template_properties.is_active();
     // `set_state`, not `upsert_one` (#780): the list sorts by
     // `updated_at` DESC and the upsert path stamps it, so archiving made
     // the row jump to the top of the table. The dedicated writer leaves
     // `updated_at` alone (a visibility flip is not a content edit) while
     // still bumping the version and auditing archive/unarchive.
-    if let Err(e) = crate::db::specs::set_state(db, &id, next_active, Some(editor.actor())).await {
+    if let Err(e) = crate::db::specs::set_state(db, &id, next_active, Some(scope.actor())).await {
         tracing::error!(id, error = ?e, "save state toggle failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }
@@ -261,8 +272,11 @@ struct ImportRow {
 async fn build_import_rows(
     pool: &crate::db::ConfigDb,
     raw: &str,
+    scope: &EditorScope,
+    effective_specs: &[ruscker_config::Spec],
 ) -> Result<(Vec<ImportRow>, usize), String> {
-    let config = ruscker_config::Config::from_yaml(raw).map_err(|e| format!("{e}"))?;
+    let config = ruscker_config::Config::from_yaml(raw)
+        .map_err(|e| format!("YAML parse failed: {e}"))?;
     let report = ruscker_config::validate::run(&config);
     let warning_count = report.warnings.len() + config.raw_warnings.len();
     let existing: std::collections::HashSet<String> = crate::db::specs::list_all(pool)
@@ -271,23 +285,99 @@ async fn build_import_rows(
         .into_iter()
         .map(|s| s.id)
         .collect();
-    let rows = config
-        .proxy
-        .specs
-        .iter()
-        .map(|s| ImportRow {
-            exists: existing.contains(&s.id),
-            kind: match s.kind() {
+    let mut rows = Vec::with_capacity(config.proxy.specs.len());
+    for spec in &config.proxy.specs {
+        if existing.contains(&spec.id) {
+            // A persisted id that disappeared from the effective catalog is
+            // not an open app. Scoped Editors fail closed because the lean
+            // existence query carries no ACL metadata (#990).
+            match effective_specs.iter().find(|current| current.id == spec.id) {
+                Some(current) if !scope.may_touch_spec(current) => {
+                    return Err(format!("app `{}` is outside your Editor scope", spec.id));
+                }
+                None if !scope.unscoped => {
+                    return Err(format!("app `{}` is outside your Editor scope", spec.id));
+                }
+                _ => {}
+            }
+        } else {
+            let requested = spec.access_groups.as_deref().unwrap_or_default();
+            if !scope.may_assign_groups(requested)
+                || (!spec.is_open() && !scope.may_touch_spec(spec))
+            {
+                return Err(format!(
+                    "restricted app `{}` must use only groups in your Editor scope",
+                    spec.id
+                ));
+            }
+        }
+        rows.push(ImportRow {
+            exists: existing.contains(&spec.id),
+            kind: match spec.kind() {
                 ruscker_config::SpecKind::Shiny => "shiny",
                 ruscker_config::SpecKind::InteractiveApp => "interactive",
                 ruscker_config::SpecKind::Api => "api",
                 ruscker_config::SpecKind::External => "external",
             },
-            display_name: s.display_name.clone().unwrap_or_default(),
-            id: s.id.clone(),
-        })
-        .collect();
+            display_name: spec.display_name.clone().unwrap_or_default(),
+            id: spec.id.clone(),
+        });
+    }
     Ok((rows, warning_count))
+}
+
+/// Apply Editor scope to the selected YAML specs immediately before import.
+///
+/// The preview is only UX; a crafted confirm POST must pass this same
+/// server-side gate. Existing foreign memberships are retained through the
+/// slice-0 merge primitive, while a new/restricted app must stay reachable
+/// to its creator and may name only groups the Editor owns.
+fn prepare_scoped_import(
+    config: &mut ruscker_config::Config,
+    ids: &[String],
+    persisted_ids: &std::collections::HashSet<String>,
+    effective_specs: &[ruscker_config::Spec],
+    scope: &EditorScope,
+) -> Result<(), String> {
+    use std::collections::HashSet;
+
+    let selected: HashSet<&str> = ids.iter().map(String::as_str).collect();
+    for spec in config
+        .proxy
+        .specs
+        .iter_mut()
+        .filter(|spec| selected.contains(spec.id.as_str()))
+    {
+        let current = effective_specs.iter().find(|current| current.id == spec.id);
+        if persisted_ids.contains(&spec.id) && current.is_none() && !scope.unscoped {
+            // A DB row without effective ACL metadata is not a new/open app.
+            // Fail closed before import_selected can overwrite it.
+            return Err(format!("app `{}` is outside your Editor scope", spec.id));
+        }
+        if current.is_some_and(|current| !scope.may_touch_spec(current)) {
+            return Err(format!("app `{}` is outside your Editor scope", spec.id));
+        }
+
+        let requested = spec.access_groups.clone().unwrap_or_default();
+        if !scope.may_assign_groups(&requested) {
+            return Err(format!(
+                "restricted app `{}` may only use groups in your Editor scope",
+                spec.id
+            ));
+        }
+        if let Some(current) = current {
+            let existing = current.access_groups.as_deref().unwrap_or_default();
+            let merged = scope.merge_preserving_out_of_scope(existing, &requested);
+            spec.access_groups = (!merged.is_empty()).then_some(merged);
+        }
+        if !spec.is_open() && !scope.may_touch_spec(spec) {
+            return Err(format!(
+                "restricted app `{}` must retain at least one of your groups",
+                spec.id
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// JSON shape returned by `POST /admin/specs/import/preview` for the live
@@ -394,7 +484,7 @@ fn build_flash(locales: &Locales, loc: Locale, q: &SpecsQuery) -> Option<Flash> 
 }
 
 async fn index(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -444,9 +534,9 @@ async fn index(
     // Card logo + access-groups per spec for the table (#623). The effective
     // catalog deserializes each spec once — fine here (admin page, not the
     // proxy/dashboard hot path the lean SELECT of #588 protects).
+    let catalog = crate::catalog::effective_specs_cached(&state).await;
     let meta: std::collections::HashMap<String, (Option<String>, Vec<String>, bool)> =
-        crate::catalog::effective_specs_cached(&state)
-            .await
+        catalog
             .iter()
             .map(|s| {
                 let logo = s.template_properties.get_str("logo").map(str::to_string);
@@ -456,6 +546,19 @@ async fn index(
                 (s.id.clone(), (logo, groups, restricted))
             })
             .collect();
+
+    if !scope.unscoped {
+        specs.retain(|row| {
+            // IMPORTANT: never authorize against the enriched `SpecRow`.
+            // A lean-SELECT row missing from the effective catalog has empty
+            // `access_groups` and would look open. A scoped Editor therefore
+            // fails closed unless the id resolves to the authoritative Spec.
+            catalog
+                .iter()
+                .find(|spec| spec.id == row.id)
+                .is_some_and(|spec| scope.may_touch_spec(spec))
+        });
+    }
 
     // Per-row access total + sparkline (#549). `featured` already came from
     // the lean SELECT (#588), so there's no second config_json deserialize.
@@ -479,6 +582,16 @@ async fn index(
         let db_ids: HashSet<String> = specs.iter().map(|s| s.id.clone()).collect();
         for s in &state.config.proxy.specs {
             if db_ids.contains(&s.id) {
+                continue;
+            }
+            if !scope.unscoped
+                && !catalog
+                    .iter()
+                    .find(|spec| spec.id == s.id)
+                    .is_some_and(|spec| scope.may_touch_spec(spec))
+            {
+                // Missing effective metadata also fails closed here. Treating
+                // the row's empty fallback ACL as "open" would leak it.
                 continue;
             }
             let kind = match s.kind() {
@@ -527,7 +640,7 @@ async fn index(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
         specs,
         kpi_total,
         kpi_active,
@@ -553,7 +666,7 @@ async fn index(
 /// with a checkbox — so the operator confirms which to import. Nothing is
 /// written to the DB here.
 async fn import(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -588,10 +701,12 @@ async fn import(
     };
 
     // Parse + diff via the shared core (#623). Parse failure → error flash.
-    let (rows, warning_count) = match build_import_rows(pool, &raw).await {
-        Ok(v) => v,
-        Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
-    };
+    let effective_specs = crate::catalog::effective_specs_cached(&state).await;
+    let (rows, warning_count) =
+        match build_import_rows(pool, &raw, &scope, &effective_specs).await {
+            Ok(v) => v,
+            Err(e) => return redirect_err(&e),
+        };
 
     let page = ImportPreviewPage {
         locale: loc,
@@ -600,7 +715,7 @@ async fn import(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
         rows,
         raw_yaml: raw,
         warning_count,
@@ -610,7 +725,7 @@ async fn import(
 
 /// `GET /admin/specs/import` — the live 2-pane import editor (#623).
 async fn import_editor(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -622,7 +737,7 @@ async fn import_editor(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "specs",
-        role: editor.role,
+        role: scope.role,
     };
     super::render(&page)
 }
@@ -637,7 +752,7 @@ struct PreviewForm {
 }
 
 async fn import_preview(
-    _: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     axum::Form(form): axum::Form<PreviewForm>,
 ) -> Response {
@@ -655,7 +770,8 @@ async fn import_preview(
         })
         .into_response();
     }
-    match build_import_rows(pool, &form.yaml).await {
+    let effective_specs = crate::catalog::effective_specs_cached(&state).await;
+    match build_import_rows(pool, &form.yaml, &scope, &effective_specs).await {
         Ok((rows, warning_count)) => {
             let update_count = rows.iter().filter(|r| r.exists).count();
             let new_count = rows.len() - update_count;
@@ -685,7 +801,7 @@ async fn import_preview(
 /// preview form re-posts the original YAML (hidden) plus one `ids` field
 /// per selected spec, as multipart so repeated `ids` collect cleanly.
 async fn import_confirm(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Response {
@@ -733,15 +849,28 @@ async fn import_confirm(
         Ok(c) => c,
         Err(e) => return redirect_err(&format!("YAML parse failed: {e}")),
     };
+    let effective_specs = crate::catalog::effective_specs_cached(&state).await;
+    let persisted_ids = match crate::db::specs::list_all(pool).await {
+        Ok(specs) => specs.into_iter().map(|spec| spec.id).collect(),
+        Err(error) => {
+            tracing::error!(error = ?error, "load catalog ids for scoped import failed");
+            return redirect_err("could not verify Editor scope");
+        }
+    };
+    if let Err(error) =
+        prepare_scoped_import(&mut config, &ids, &persisted_ids, &effective_specs, &scope)
+    {
+        return redirect_err(&error);
+    }
     // #560 B: lift inline registry passwords into the encrypted credential
     // store and rewire the selected specs to reference them by name, so the
     // plaintext never lands in `config_json`. Runs before the spec upsert
     // (it mutates the specs that get imported). Best-effort.
-    let creds = extract_inline_credentials(&state, &mut config, &ids, editor.actor()).await;
+    let creds = extract_inline_credentials(&state, &mut config, &ids, scope.actor()).await;
     match crate::db::specs::import_selected(pool, &config, &ids).await {
         Ok(r) => {
             // #560 A: bring the specs' --images-dir logos into the Media library.
-            let logos = import_referenced_logos(&state, &config, &ids, editor.actor()).await;
+            let logos = import_referenced_logos(&state, &config, &ids, scope.actor()).await;
             tracing::info!(
                 created = r.created, updated = r.updated, unchanged = r.unchanged,
                 selected = ids.len(), credentials = creds, logos = logos,

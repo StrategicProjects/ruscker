@@ -342,6 +342,7 @@ spec-form-error-cpu = CPU limit must be a positive number (e.g. 0.5).
 spec-form-error-memory = Memory limit must be a size like 512m or 1.5g.
 spec-form-error-replica-range = Max replicas must be greater than or equal to min replicas.
 spec-form-error-stale = Someone else saved this app while you were editing. Review the current values below and submit again.
+spec-form-error-editor-scope = A restricted app must keep at least one of your groups and cannot include groups outside your Editor scope.
 
 # Admin image library
 admin-images-title = Media library

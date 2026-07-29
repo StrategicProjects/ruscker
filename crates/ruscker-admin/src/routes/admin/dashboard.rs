@@ -39,6 +39,7 @@ use dashmap::DashMap;
 
 use crate::auth::{AdminSession, RequireEditor, Role};
 use crate::i18n::{Locale, Locales};
+use crate::scope::EditorScope;
 use crate::theme::Theme;
 use crate::AppState;
 
@@ -72,16 +73,48 @@ const SSE_INTERVAL: Duration = Duration::from_secs(5);
 /// handler.
 const SSE_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(15);
 
-/// Per-locale memoized dashboard snapshot (#291). Building a snapshot
-/// reads the registry, fetches the effective spec catalog (a DB query),
-/// and assembles the rows; with N open dashboard tabs each running its
-/// own [`SSE_INTERVAL`] loop that was N× the work every tick. The whole
-/// snapshot is the same for everyone in a given locale (only the state
-/// labels are localized), so cache it for one interval and let every
-/// tab/connection in that locale reuse it. Keyed by locale (≤4 entries);
-/// a clone of the cached snapshot is cheap next to a fresh DB build.
-static SNAPSHOT_CACHE: LazyLock<DashMap<Locale, (Instant, Arc<DashboardSnapshot>)>> =
+/// Memoized dashboard snapshot (#291). Building one reads the registry,
+/// fetches the effective spec catalog (a DB query) and assembles the rows;
+/// with N open dashboard tabs each running its own [`SSE_INTERVAL`] loop
+/// that was N× the work every tick.
+///
+/// Keyed by locale **and scope** (#990). The snapshot used to be identical
+/// for everyone in a locale, but a scoped Editor sees only their groups'
+/// rows, so a locale-only key would hand one team's containers to another.
+/// Sharing survives where it matters: every Admin/break-glass view shares
+/// one entry, and two Editors with the same group set share theirs — which
+/// keeps the #291 guarantee for the multi-tab case that made the admin
+/// hang on an HTTP/1.1 front end (#1039/#1040) instead of dropping caching
+/// for Editors altogether.
+static SNAPSHOT_CACHE: LazyLock<DashMap<SnapshotCacheKey, CachedSnapshot>> =
     LazyLock::new(DashMap::new);
+
+/// `(locale, scope)` — see [`SNAPSHOT_CACHE`].
+type SnapshotCacheKey = (Locale, ScopeKey);
+
+/// When it was built, and the snapshot itself behind an `Arc` so serving a
+/// cache hit clones a pointer rather than the whole row set.
+type CachedSnapshot = (Instant, Arc<DashboardSnapshot>);
+
+/// Cache identity of a viewer's authorization scope: `None` for the
+/// unscoped Admin/token view, or the caller's groups sorted and joined so
+/// two Editors with the same memberships hit the same entry. Sorting
+/// matters — `["a","b"]` and `["b","a"]` are the same scope and must not
+/// split the cache.
+type ScopeKey = Option<String>;
+
+fn scope_key(scope: &EditorScope) -> ScopeKey {
+    if scope.unscoped {
+        return None;
+    }
+    let mut groups: Vec<&str> = scope.groups.iter().map(String::as_str).collect();
+    groups.sort_unstable();
+    groups.dedup();
+    // `\u{1f}` (unit separator) can't appear in a group name, so the join is
+    // unambiguous where a plain comma would let `["a,b"]` collide with
+    // `["a","b"]`.
+    Some(groups.join("\u{1f}"))
+}
 
 /// One row of the replicas table — flattened for the template
 /// and also serialized as JSON over the SSE stream so the
@@ -364,7 +397,15 @@ async fn index(
     if !session.role.can_access_section("dashboard") {
         return Redirect::to("/").into_response();
     }
-    let snap = build_snapshot(&state, loc).await;
+    let scope = EditorScope::from_editor(
+        RequireEditor {
+            role: session.role,
+            actor: session.actor,
+        },
+        state.db.as_ref(),
+    )
+    .await;
+    let snap = build_snapshot(&state, loc, &scope).await;
     let snapshot_json = json_for_html_script(&snap);
     let page = DashboardPage {
         locale: loc,
@@ -373,7 +414,7 @@ async fn index(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "dashboard",
-        role: session.role,
+        role: scope.role,
         backend_connected: snap.backend_connected,
         total_containers: snap.total_containers,
         total_sessions: snap.total_sessions,
@@ -396,18 +437,30 @@ async fn index(
 /// Snapshot for the dashboard + SSE, memoized per locale for one
 /// [`SSE_INTERVAL`] (#291) so N concurrent tabs share one build instead
 /// of each re-querying the DB every tick.
-async fn build_snapshot(state: &AppState, locale: Locale) -> DashboardSnapshot {
-    if let Some(entry) = SNAPSHOT_CACHE.get(&locale) {
+async fn build_snapshot(
+    state: &AppState,
+    locale: Locale,
+    scope: &EditorScope,
+) -> DashboardSnapshot {
+    // Keyed by (locale, scope): a scoped Editor must never read an entry
+    // built for another group set, but two viewers with the SAME scope
+    // still share one build — that's the #291 guarantee for many tabs.
+    let key = (locale, scope_key(scope));
+    if let Some(entry) = SNAPSHOT_CACHE.get(&key) {
         if entry.0.elapsed() < SSE_INTERVAL {
             return (*entry.1).clone();
         }
     }
-    let snap = build_snapshot_uncached(state, locale).await;
-    SNAPSHOT_CACHE.insert(locale, (Instant::now(), Arc::new(snap.clone())));
+    let snap = build_snapshot_uncached(state, locale, scope).await;
+    SNAPSHOT_CACHE.insert(key, (Instant::now(), Arc::new(snap.clone())));
     snap
 }
 
-async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardSnapshot {
+async fn build_snapshot_uncached(
+    state: &AppState,
+    locale: Locale,
+    scope: &EditorScope,
+) -> DashboardSnapshot {
     let backend_connected = state.backend.is_some();
 
     // Snapshot the registry once. Cloning `Replica` is cheap
@@ -419,10 +472,22 @@ async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardS
     // #202 / admin-added specs), which aren't in the YAML config. The
     // old config-keyed walk silently dropped every such replica from
     // the dashboard even though it was running.
-    let snap: Vec<Replica> = {
+    let mut snap: Vec<Replica> = {
         let reg = state.replicas.read().await;
         reg.all().cloned().collect()
     };
+
+    let catalog = crate::catalog::effective_specs_cached(state).await;
+    if !scope.unscoped {
+        snap.retain(|replica| {
+            // Replica rows carry only a spec id. Missing catalog metadata is
+            // never equivalent to an open app: scoped Editors fail closed.
+            catalog
+                .iter()
+                .find(|spec| spec.id == replica.spec_id)
+                .is_some_and(|spec| scope.may_touch_spec(spec))
+        });
+    }
 
     let total_containers = snap.len();
     let total_sessions: u32 = snap.iter().map(|r| r.sessions_active).sum();
@@ -431,14 +496,20 @@ async fn build_snapshot_uncached(state: &AppState, locale: Locale) -> DashboardS
         .map(|r| r.spec_id.as_str())
         .collect::<std::collections::HashSet<_>>()
         .len();
-    let tracker_sessions = state.sessions.len();
+    let tracker_sessions = if scope.unscoped {
+        state.sessions.len()
+    } else {
+        // SessionStore exposes only a global length. For a scoped dashboard,
+        // use the visible replicas' committed counts rather than leaking the
+        // global tracker cardinality through a KPI.
+        total_sessions as usize
+    };
 
     // Resolve display names from the effective catalog (DB ∪ YAML,
     // DB-first) fetched **once** per snapshot — not a `find_spec` DB
     // round-trip per spec, which on the 5s SSE tick (× every open tab)
     // hammered the DB (#281). Still DB-first, so a renamed-in-admin spec
     // shows its current name (#275).
-    let catalog = crate::catalog::effective_specs_cached(state).await;
     let name_of: std::collections::HashMap<String, String> = snap
         .iter()
         .map(|r| r.spec_id.clone())
@@ -585,16 +656,11 @@ fn sse_no_buffer_headers() -> [(axum::http::HeaderName, &'static str); 2] {
 /// `no-store` so the browser always re-polls (freshness comes from the
 /// server-side cache, not the HTTP cache).
 async fn snapshot(
-    session: AdminSession,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
 ) -> Response {
-    // Same gate as the dashboard page (#857): a Viewer never gets the
-    // live metrics feed.
-    if !session.role.can_access_section("dashboard") {
-        return (StatusCode::FORBIDDEN, "forbidden").into_response();
-    }
-    let snap = build_snapshot(&state, loc).await;
+    let snap = build_snapshot(&state, loc, &scope).await;
     (
         [(axum::http::header::CACHE_CONTROL, "no-store")],
         axum::Json(snap),
@@ -614,7 +680,7 @@ async fn snapshot(
 async fn logs(
     // Container logs can carry sensitive data — gate behind Editor+
     // (Viewers can see the dashboard, not the logs). #261
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
@@ -624,6 +690,11 @@ async fn logs(
         return (StatusCode::BAD_REQUEST, "invalid replica id").into_response();
     };
     let rid = ReplicaId(uuid);
+
+    let (_, scoped_spec) = match scoped_replica_spec(&state, &scope, &rid).await {
+        Ok(found) => found,
+        Err(response) => return response,
+    };
 
     let Some(backend) = state.backend.as_ref() else {
         return (
@@ -636,18 +707,10 @@ async fn logs(
     // Resolve display_name + spec_id for the heading. Read the spec id
     // from the registry under the lock, then drop it before the DB-first
     // name lookup (#275) so we never hold the registry lock across I/O.
-    let spec_id_of_replica = {
-        let reg = state.replicas.read().await;
-        let found = reg.all().find(|r| r.id == rid).map(|r| r.spec_id.clone());
-        found
-    };
-    let (display_name, spec_id) = match spec_id_of_replica {
-        Some(sid) => {
-            let dn = crate::routes::proxy::find_spec(&state, &sid)
-                .await
-                .and_then(|s| s.display_name.clone())
-                .unwrap_or_else(|| sid.clone());
-            (dn, sid)
+    let (display_name, spec_id) = match scoped_spec {
+        Some(spec) => {
+            let display_name = spec.display_name.clone().unwrap_or_else(|| spec.id.clone());
+            (display_name, spec.id)
         }
         // Replica not in registry — still try to fetch logs (it may have
         // just been dropped from the registry but the container lingers).
@@ -674,7 +737,7 @@ async fn logs(
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
         nav_section: "dashboard",
-        role: editor.role,
+        role: scope.role,
         display_name,
         spec_id,
         replica_id,
@@ -693,7 +756,7 @@ async fn logs(
 /// Seeded with the last 100 lines so turning Live on shows
 /// recent context, not just lines that arrive after connect.
 async fn logs_stream(
-    _: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -701,6 +764,9 @@ async fn logs_stream(
         Ok(r) => r,
         Err(resp) => return *resp,
     };
+    if let Err(response) = scoped_replica_spec(&state, &scope, &rid).await {
+        return response;
+    }
     let Some(backend) = state.backend.clone() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
     };
@@ -731,6 +797,48 @@ fn parse_replica_id(s: &str) -> Result<ReplicaId, Box<Response>> {
         .map_err(|_| Box::new((StatusCode::BAD_REQUEST, "invalid replica id").into_response()))
 }
 
+/// Resolve a replica through the effective app catalog and enforce its scope.
+///
+/// A scoped Editor gets 404 both when the replica/spec is missing and when
+/// the spec belongs to another group. This is intentionally checked before
+/// backend access so a guessed UUID cannot reveal a foreign container through
+/// a 503/transport error. Admin and break-glass callers remain unrestricted,
+/// including the historical best-effort access to a just-orphaned container.
+async fn scoped_replica_spec(
+    state: &AppState,
+    scope: &EditorScope,
+    replica_id: &ReplicaId,
+) -> Result<(Option<String>, Option<ruscker_config::Spec>), Response> {
+    let spec_id = {
+        let registry = state.replicas.read().await;
+        let found = registry
+            .all()
+            .find(|replica| replica.id == *replica_id)
+            .map(|replica| replica.spec_id.clone());
+        found
+    };
+
+    let Some(spec_id) = spec_id else {
+        return if scope.unscoped {
+            Ok((None, None))
+        } else {
+            Err((StatusCode::NOT_FOUND, "replica not found").into_response())
+        };
+    };
+    let catalog = crate::catalog::effective_specs_cached(state).await;
+    let spec = catalog.iter().find(|spec| spec.id == spec_id).cloned();
+    if !scope.unscoped
+        && !spec
+            .as_ref()
+            .is_some_and(|spec| scope.may_touch_spec(spec))
+    {
+        // Missing effective metadata also fails closed; it does not make the
+        // replica's app "open".
+        return Err((StatusCode::NOT_FOUND, "replica not found").into_response());
+    }
+    Ok((Some(spec_id), spec))
+}
+
 /// POST `/admin/dashboard/replicas/{id}/stop` — stop a replica
 /// and drop it from the registry. The auto-scaler will respawn
 /// it to `min-replicas` on its next tick if the spec demands a
@@ -741,7 +849,7 @@ fn parse_replica_id(s: &str) -> Result<ReplicaId, Box<Response>> {
 /// Redirects back to the dashboard so the browser lands on a
 /// fresh render.
 async fn stop_replica(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
@@ -749,6 +857,9 @@ async fn stop_replica(
         Ok(r) => r,
         Err(resp) => return *resp,
     };
+    if let Err(response) = scoped_replica_spec(&state, &scope, &rid).await {
+        return response;
+    }
     let Some(backend) = state.backend.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
     };
@@ -765,7 +876,7 @@ async fn stop_replica(
     state.sessions.drop_replica(&rid).await;
     // Destructive operational action → audit row (#745); config
     // mutations were audited, replica stop/restart only hit the log.
-    record_replica_action(&state, editor.actor(), "replica.stop", &replica_id).await;
+    record_replica_action(&state, scope.actor(), "replica.stop", &replica_id).await;
     tracing::info!(replica = %replica_id, "replica stopped via dashboard");
     Redirect::to("/admin/dashboard").into_response()
 }
@@ -787,13 +898,17 @@ async fn record_replica_action(state: &AppState, actor: &str, action: &str, repl
 /// respawn ~one tick later), restart brings capacity back
 /// right away.
 async fn restart_replica(
-    editor: RequireEditor,
+    scope: EditorScope,
     State(state): State<AppState>,
     Path(replica_id): Path<String>,
 ) -> Response {
     let rid = match parse_replica_id(&replica_id) {
         Ok(r) => r,
         Err(resp) => return *resp,
+    };
+    let (spec_id, scoped_spec) = match scoped_replica_spec(&state, &scope, &rid).await {
+        Ok(found) => found,
+        Err(response) => return response,
     };
     let Some(backend) = state.backend.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no backend").into_response();
@@ -802,17 +917,12 @@ async fn restart_replica(
     // Resolve the spec before stopping so a restart of a
     // since-deleted spec fails cleanly without first killing
     // the running container.
-    let spec_id = {
-        let reg = state.replicas.read().await;
-        let found = reg.all().find(|r| r.id == rid).map(|r| r.spec_id.clone());
-        found
-    };
     let Some(spec_id) = spec_id else {
         return (StatusCode::NOT_FOUND, "replica not found").into_response();
     };
     // DB-first (admin edits + showcase seed), not just the YAML config —
     // otherwise a DB-only spec's replica couldn't be restarted (#257).
-    let Some(spec) = crate::routes::proxy::find_spec(&state, &spec_id).await else {
+    let Some(spec) = scoped_spec else {
         return (
             StatusCode::CONFLICT,
             format!("spec `{spec_id}` no longer exists; cannot restart"),
@@ -836,7 +946,7 @@ async fn restart_replica(
         )
             .into_response();
     }
-    record_replica_action(&state, editor.actor(), "replica.restart", &replica_id).await;
+    record_replica_action(&state, scope.actor(), "replica.restart", &replica_id).await;
     tracing::info!(replica = %replica_id, spec = %spec.id, "replica restarted via dashboard");
     Redirect::to("/admin/dashboard").into_response()
 }
@@ -1177,6 +1287,42 @@ mod tests {
         // shiny group's head, and its summed sessions are 2/10.
         assert_eq!(html.matches("class=\"app-group ").count(), 2, "one card per app");
         assert!(html.contains(">2<span class=\"faint\">/10<"), "summed sessions on the head");
+    }
+
+    /// The snapshot cache is keyed by scope as well as locale (#990): two
+    /// Editors with the same groups must share an entry (that's the #291
+    /// many-tabs guarantee), while a different group set — or the unscoped
+    /// Admin view — must never read someone else's rows.
+    #[test]
+    fn snapshot_cache_key_separates_scopes_but_shares_equal_ones() {
+        let scoped = |groups: &[&str]| EditorScope {
+            role: Role::Editor,
+            actor: Some("editor".into()),
+            groups: groups.iter().map(|g| (*g).to_string()).collect(),
+            unscoped: false,
+        };
+        let admin = EditorScope {
+            role: Role::Admin,
+            actor: Some("admin".into()),
+            groups: Vec::new(),
+            unscoped: true,
+        };
+
+        assert_eq!(scope_key(&admin), None, "the unscoped view is one entry");
+        assert_ne!(scope_key(&scoped(&["a"])), scope_key(&admin));
+        assert_ne!(scope_key(&scoped(&["a"])), scope_key(&scoped(&["b"])));
+        // Order and duplicates are not different scopes.
+        assert_eq!(
+            scope_key(&scoped(&["a", "b"])),
+            scope_key(&scoped(&["b", "a"]))
+        );
+        assert_eq!(scope_key(&scoped(&["a", "a"])), scope_key(&scoped(&["a"])));
+        // A group name containing the separator we join on can't forge
+        // another scope's key.
+        assert_ne!(
+            scope_key(&scoped(&["a", "b"])),
+            scope_key(&scoped(&["a,b"]))
+        );
     }
 
     #[test]

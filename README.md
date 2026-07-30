@@ -81,12 +81,9 @@ tool" cases) is in
 **Production-ready and running in production.** Releases are multi-arch
 (amd64 + arm64) and [cosign-signed]; the
 [releases page](https://github.com/StrategicProjects/ruscker/releases)
-has the current version. **Current release: [v0.2.49]** — the process
-Logs page uses finite cursor polling, so it cannot strand an HTTP/1.1
-connection and stall later admin navigation behind a reverse proxy.
+always identifies the current version and carries its release notes.
 
 [cosign-signed]: https://strategicprojects.github.io/ruscker/installation.html#verifying-release-artifacts
-[v0.2.49]: https://github.com/StrategicProjects/ruscker/releases/tag/v0.2.49
 
 > **~14 MB idle** — measured on a real production deployment serving a
 > real 31-spec config, with apps spawning on demand. (The JVM-based
@@ -113,13 +110,20 @@ What's in the box:
 - **Admin panel** — full apps CRUD (including API, scaling, resource and
   lifecycle settings), Media, encrypted Credentials, a live-preview
   Appearance editor, **Viewer / Editor / Admin** accounts with a password
-  policy and generator, consolidated per-user editing, server-side
-  pagination (50 per page) with case-insensitive search (accented letters
-  included) across usernames, groups and profiles, and an **Activity** section
-  with two tables — **user activity** (logins and interactive app accesses,
-  filterable and paginated) alongside the **administrative audit** trail.
-  The process-log terminal follows new lines with finite cursor requests,
-  pauses while hidden and never occupies a persistent browser connection.
+  policy and generator, and group-scoped delegation: Editors administer open
+  apps plus apps whose `access-groups` overlap their own, and non-Admin users
+  and memberships in those groups; Admin and break-glass sessions stay global,
+  while Media remains shared. Out-of-scope app and user ids deliberately
+  return `404`. User deletion, CSV import, MFA reset, and group
+  create/rename/delete remain Admin-only. The Users page has consolidated
+  editing, server-side pagination (50 per page), and case-insensitive search
+  (accented letters included) across usernames, groups and profiles. The
+  **Activity** section pairs user activity (logins and interactive app
+  accesses, filterable and paginated) with the administrative audit trail.
+  Historical timestamps render in each viewer's browser timezone and table
+  dates sort by instant. The process-log terminal also shows viewer-local
+  times, follows new lines with finite cursor requests, pauses while hidden
+  and never occupies a persistent browser connection.
 - **Containers dashboard** — CPU/memory sparklines, live-follow logs and
   stop/restart controls, refreshed every five seconds by polling
   `GET /admin/dashboard/snapshot`.
@@ -149,6 +153,9 @@ What's in the box:
   with an optional command override, run history/log tail, leader-only HA
   firing, no fire-on-create, one catch-up after downtime and a per-run
   timeout (1 hour by default); failures raise the `job-failed` alert webhook.
+  Cron is evaluated in the IANA zone configured by `server.timezone`, and
+  next/last-run times are labelled in that same zone. Unset or invalid values
+  use UTC, with invalid names reported as validation warnings.
   (Local Docker backend; not yet available with the multi-host backend.)
 - **Named-volume management** — the Disk panel lists Docker volumes with
   live reference counts and can create labelled volumes; removal is offered

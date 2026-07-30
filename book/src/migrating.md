@@ -160,14 +160,32 @@ says what to do for each. Two to know about:
   instead of Shiny's 3838 — apps that previously needed an explicit
   port "just work"; an explicit `container-port`/`port:` still wins.
 
+### Preserve or choose the scheduler clock
+
+An existing schedule keeps its historical behavior after migration:
+without `server.timezone`, Ruscker evaluates cron in UTC. To write cron in
+a local clock, opt in with an IANA name:
+
+```yaml
+server:
+  timezone: America/Recife
+```
+
+The Schedules page then labels next and last runs in that zone. Invalid
+names produce a validation warning and fall back to UTC instead of blocking
+startup; the startup banner reports the effective zone. This does not
+control Activity, audit, Apps, Credentials, Users or process Logs, whose
+stored UTC timestamps render in each viewer's browser timezone.
+
 ## What Ruscker adds
 
 Beyond parity, you also get: a real admin panel (no more hand-editing
 YAML), a live monitoring dashboard, per-spec `container-env` /
 `container-cmd` injection, per-API rate-limiting and CORS, per-user
-and per-group app visibility, per-app step-up MFA, scheduled jobs and named
-volume management (local Docker backend), health probes, graceful shutdown,
-and **~14 MB idle**.
+and per-group app visibility, group-scoped Editor delegation, viewer-local
+admin timestamps, per-app step-up MFA, timezone-aware scheduled jobs and
+named volume management (local Docker backend), health probes, graceful
+shutdown, and **~14 MB idle**.
 The JVM-based proxy it replaced on the same machine used about 540 MB. See
 [The admin panel](./admin.md).
 

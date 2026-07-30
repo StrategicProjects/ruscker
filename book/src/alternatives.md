@@ -19,14 +19,16 @@ catalog and operational state live in SQLite, or Postgres for HA.
   landing page; anything in a container is first-class.
 - **A real admin panel** — apps CRUD, a media library, an encrypted
   credentials store, a live monitoring dashboard, an audit log, and user
-  roles — instead of editing a file and restarting.
+  roles — instead of editing a file and restarting. Editors are scoped by
+  their group memberships to open/shared-group apps and non-Admin accounts;
+  Admin and break-glass access remains global.
 - **Sensitive internal apps** — per-app step-up TOTP MFA is enforced before
   a container starts, while opt-in identity headers let the app consume the
   signed-in username, groups and selected profile claims.
 - **Scheduled operations** (local Docker backend) — run the same app
   image/environment/volumes to completion on a cron for ETL, reports and
-  maintenance, with history,
-  timeouts and failure alerts.
+  maintenance, with history, timeouts and failure alerts. Cron uses the IANA
+  zone in `server.timezone` and remains on UTC when unset.
 - **Light to run** — **~14 MB idle**, a single static binary, no JVM and
   instant startup.
 
@@ -104,7 +106,7 @@ the systemd service) and reference them by name in the YAML.
   Ruscker schedules onto Docker hosts (over ssh/tcp), not Kubernetes.
 - You need **enterprise SSO gating app access per user** (OIDC/SAML/LDAP
   at the proxy level) — Ruscker's auth covers admin roles (Viewer /
-  Editor / Admin) and per-app visibility (`access-groups` /
+  group-scoped Editor / Admin) and per-app visibility (`access-groups` /
   `access-users`), but proxy-level SSO is not yet supported.
 
 If none of those apply, start with the [Quickstart](./quickstart.md).

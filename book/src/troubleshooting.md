@@ -218,9 +218,44 @@ slow/unreachable Docker daemon will stop or delay updates. nginx buffering
 does not affect the dashboard poll; it matters only for the explicitly
 enabled per-replica live log stream described in [Deploying](./deploying.md).
 
+## Admin dates or scheduled-job times look wrong
+
+These use two intentionally different clocks:
+
+- Activity, audit, Apps, Credentials and Users table dates render in the
+  viewer's browser timezone. Process Logs also show the viewer-local clock.
+  Check the operating system/browser timezone if they are wrong. Hover a
+  table date for the full localized timestamp and zone; process-log hover
+  keeps the original UTC token for correlation with downloaded logs.
+- The scheduler evaluates cron in `server.timezone`, and the Schedules page
+  labels next/last runs in that zone. With no setting, it uses UTC. Use an
+  IANA name such as `America/Recife`, not an abbreviation such as `BRT`.
+
+Run `ruscker validate <config>` after changing the setting. An invalid name
+produces a warning and falls back to UTC without blocking boot. The startup
+banner's `timezone` field shows the effective scheduler zone.
+
+## An Editor cannot find an app or user
+
+This is normally the group scope working as designed. An Editor sees and
+administers:
+
+- apps with no `access-groups` or `access-users`, plus restricted apps whose
+  `access-groups` overlap the Editor's groups;
+- non-Admin users who share at least one of those groups, and memberships in
+  the Editor's own groups;
+- the shared Media library.
+
+An app restricted only by `access-users` has no group boundary and is
+Admin-only. Direct requests for an out-of-scope app or user return `404`,
+not `403`, so a guessed id cannot reveal another team's resource. Editors
+may create Viewer/Editor accounts in their groups and reset their passwords,
+but deleting accounts, importing users by CSV, resetting MFA, and
+creating/renaming/deleting groups require Admin or break-glass access.
+
 ## Admin navigation hangs after visiting Logs
 
-Upgrade to **v0.2.49 or newer**. Older releases automatically opened
+Upgrade to a current release. Older builds automatically opened
 `/admin/logs/stream` as an infinite SSE response. On a deployment with an
 HTTP/1.1 load-balancer or reverse-proxy hop, an intermediary could retain
 that response after browser navigation and then reuse the same backend

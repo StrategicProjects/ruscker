@@ -123,12 +123,14 @@ Multiplex GPUs and isolate users in front of generative tools.
 ## Scheduled ETL, reports and maintenance
 
 The admin **Schedules** page (local Docker backend) can run a containerized
-spec to completion on a five-field UTC cron: nightly ETL, report generation,
-cache refreshes or
-small maintenance tasks. A job reuses the spec's image, environment,
-volumes, resource limits and registry credentials, with an optional command
-override. Runs have a configurable timeout (1 hour by default), history and
-log tails; failures can trigger the `job-failed` alert webhook.
+spec to completion on a five-field cron: nightly ETL, report generation,
+cache refreshes or small maintenance tasks. Set `server.timezone` to an IANA
+name for the clock the expressions use; absent or invalid values retain the
+UTC default. The Schedules page labels next and last executions in that same
+zone. A job reuses the spec's image, environment, volumes, resource limits
+and registry credentials, with an optional command override. Runs have a
+configurable timeout (1 hour by default), history and log tails; failures can
+trigger the `job-failed` alert webhook.
 
 ## Database admin consoles
 
@@ -158,8 +160,8 @@ Surface a DB console as just another card on the portal.
 
 ## Who it's for
 
-- **Public sector, universities and research centers** publishing analytics
-  dashboards for the public or for staff.
+- **Universities, research centers and other organizations** publishing
+  analytics dashboards for broad or internal audiences.
 - **BI and data-science teams** that want to ship R/Shiny and
   Python/Streamlit apps without standing up a Kubernetes cluster.
 - **Consultancies** delivering analytical tools to each client at isolated

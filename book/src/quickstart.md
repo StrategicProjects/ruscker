@@ -28,6 +28,18 @@ The master key encrypts saved registry credentials and TOTP secrets. Keep
 it stable if you reuse this database; without it, 2FA enrolment fails with
 `503`.
 
+If you plan to use **Schedules**, choose the clock in which cron expressions
+are written by adding an IANA timezone to the service config:
+
+```yaml
+server:
+  timezone: America/Recife
+```
+
+Leave it out to retain the UTC default. This setting controls the scheduler
+and its labelled next/last-run times; Activity, audit, Apps, Credentials,
+Users and process Logs instead follow the timezone of each viewer's browser.
+
 - Ruscker **auto-connects to Docker** when the daemon socket is
   reachable, so app containers spawn out of the box. Pass `--no-docker`
   to run landing-only (then `/app/*` returns 503); pass `--docker` to
@@ -124,7 +136,9 @@ limits…).
   apps by user / group.
 - [The admin panel](./admin.md) — manage specs, images, users, and the
   live container dashboard, identity headers, per-app 2FA and schedules
-  without editing YAML.
+  without editing YAML. Editors are delegated by group: they see open apps
+  plus apps and non-Admin accounts in groups they belong to; Admin and the
+  break-glass token remain global.
 - [Deploying in production](./deploying.md) — systemd + nginx, TLS,
   multi-host, and active-active HA (including
   [mounting the portal under a subpath][base-path] and the

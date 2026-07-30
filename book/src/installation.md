@@ -43,6 +43,19 @@ in the catalog DB, not the YAML). `ruscker.yml` holds **deployment**
 settings; put secrets in `/etc/ruscker/ruscker.env`. After editing either
 file, `sudo systemctl restart ruscker`.
 
+One such deployment setting is the scheduler's clock. Cron stays on UTC
+unless you opt into an IANA timezone:
+
+```yaml
+server:
+  timezone: America/Recife
+```
+
+The Schedules page labels next and last runs in the effective zone. An
+invalid name produces a validation warning and falls back to UTC instead of
+preventing startup. This setting does not change admin history timestamps,
+which render in each viewer's browser timezone.
+
 To actually run the demo apps (and your own containers) enable the Docker
 backend: `sudo ruscker-enable-docker`. See [Deploying in
 production](./deploying.md) for nginx + TLS, and

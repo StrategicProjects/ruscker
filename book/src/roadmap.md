@@ -8,7 +8,7 @@ live on a real deployment before the next. Phase 8 (external auth) is
 the main optional, demand-driven work left. For what changed in each
 release, see the [release notes](./news.md).
 
-![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-1.0 point releases add demo forks, URL-rewrite modernization, unified credentials, the media library, portal logos, admin UX polish, and security + perf fixes. Phase 8 (external auth) is planned and optional.](images/roadmap.svg)
+![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-phase releases add admin and portal UX, group-scoped Editor delegation, scheduled jobs, viewer-local admin timestamps, timezone-aware cron, and security + reliability fixes. Phase 8 contains only the planned, optional external identity-provider integrations.](images/roadmap.svg)
 
 ## Shipped
 
@@ -181,6 +181,20 @@ error + exit code instead of a generic "no port binding". Plus catalog
 cards expand their description on hover, and the dashboard's
 stop/restart actions show in-progress feedback.
 
+**Operations and delegated administration.** The Admin panel now runs
+scheduled, run-to-completion ETL jobs with history and alerting. Cron is
+evaluated on the IANA wall clock selected by `server.timezone`, preserving
+UTC when the setting is absent; the Schedules page uses that same clock.
+Other persisted admin timestamps stay in UTC and are converted in the
+browser to each viewer's timezone.
+
+Editor delegation is row-scoped from current group memberships across
+Applications, Users, and Groups. Open apps remain available to every
+Editor, Media is shared, and an out-of-scope target returns `404`.
+Admins and the break-glass token remain unrestricted. Account deletion,
+CSV user import, MFA reset, and creating, renaming, or deleting a group
+remain Admin-only.
+
 ## Planned (optional)
 
 Demand-driven — Ruscker is complete and useful without it.
@@ -206,10 +220,10 @@ Tracked in the GitHub issues; picked up as real usage asks for them:
   long-session flap has since shipped.)*
 
 ### Phase 8 — External auth
-OIDC (Keycloak / Auth0 / Google), SAML, and LDAP, plus per-app access
-lists ("only group X can use this app"). The coarse Viewer / Editor /
-Admin RBAC already shipped in Phase 5; this is the federated-identity
-and fine-grained-ACL layer on top.
+OIDC (Keycloak / Auth0 / Google), SAML, and LDAP. Per-app access lists
+and the Viewer / Editor / Admin model already ship, including
+group-scoped Editor delegation across Applications, Users, and Groups.
+This phase is only the federated-identity layer on top.
 
 ## Explicitly out of scope
 

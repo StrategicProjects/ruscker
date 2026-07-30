@@ -181,12 +181,32 @@ error + exit code instead of a generic "no port binding". Plus catalog
 cards expand their description on hover, and the dashboard's
 stop/restart actions show in-progress feedback.
 
-**Operations and delegated administration.** The Admin panel now runs
-scheduled, run-to-completion ETL jobs with history and alerting. Cron is
-evaluated on the IANA wall clock selected by `server.timezone`, preserving
-UTC when the setting is absent; the Schedules page uses that same clock.
-Other persisted admin timestamps stay in UTC and are converted in the
-browser to each viewer's timezone.
+**Migration fidelity, performance and citation (v0.2.20 – v0.2.44).**
+Bringing a real ShinyProxy catalog across drove import fidelity
+(`container-volumes`, logos ingested into the Media library) and a
+performance audit whose sharpest finding was the live dashboard: it held an
+SSE connection open, which starved the browser's per-origin connection pool
+where a reverse proxy served Ruscker beside another app on one hostname, so
+it moved to polling a snapshot endpoint. Apps also became cold-start by
+default, the Admin panel gained scheduled, run-to-completion ETL jobs with
+run history, log tails and failure alerting, and the project became citable
+with a DOI archived per release.
+
+**Reliability and identity (v0.2.45 – v0.2.49).** Step-up two-factor
+authentication can be required per app, with recovery codes and
+trusted-device grants. The scaler learned to self-heal when a container
+changes outside Ruscker — an external `docker rm -f` or an OOM kill no
+longer leaves a dead app behind — reconciling from an authoritative
+liveness check rather than assuming absence means stopped. A new Activity
+section records who logged in and who opened which app, captured off the
+proxy's hot path.
+
+**Timezones and delegated administration.** Cron is no longer read on the
+UTC clock: `server.timezone` names the IANA zone the scheduler evaluates
+expressions in, and the Schedules page labels firing times in that same
+zone. Leaving it unset preserves the historical UTC behaviour, so upgrading
+never moves an existing job. Other persisted admin timestamps stay in UTC
+and are converted in the browser to each viewer's own zone.
 
 Editor delegation is row-scoped from current group memberships across
 Applications, Users, and Groups. Open apps remain available to every

@@ -28,6 +28,34 @@ Keep `RUSCKER_MASTER_KEY` backed up: 2FA enrolment returns `503` without it,
 and changing it makes existing encrypted credentials and TOTP factors
 undecryptable.
 
+### Choose the scheduler clock
+
+Scheduled jobs interpret five-field cron expressions in the IANA timezone
+configured in `ruscker.yml`:
+
+```yaml
+server:
+  timezone: America/Recife
+```
+
+When the field is absent, cron stays on UTC, so upgrading does not move
+existing schedules. An invalid name emits a validation warning and also
+falls back to UTC rather than blocking startup. The Schedules page labels
+next/last runs in the effective zone, and the startup banner includes that
+zone. This setting is intentionally separate from historical admin
+timestamps: Activity, audit, Apps, Credentials, Users and process Logs use
+the timezone of each viewer's browser.
+
+### Delegate administration by group
+
+Editor memberships are authorization boundaries, not just labels. Editors
+can administer open apps, apps whose `access-groups` overlap their own,
+and non-Admin Viewer/Editor accounts and memberships in those groups. Media
+is shared across Editors. Admin accounts and the break-glass token remain
+global; account deletion, user CSV import, MFA reset, and group
+create/rename/delete remain Admin-only. Direct requests for an out-of-scope
+app or user return `404`, deliberately hiding whether the identifier exists.
+
 ## 2. Enable the container backend
 
 The shipped unit serves landing + admin + proxy but not the `--docker`
@@ -196,9 +224,9 @@ the flag already.
 > }
 > ```
 >
-> Since v0.2.49, `/admin/logs/stream` is a retired compatibility endpoint
-> that returns `204 No Content`, which tells pages loaded before a rolling
-> upgrade to stop reconnecting. Do not proxy it as a long-lived stream.
+> `/admin/logs/stream` is a retired compatibility endpoint that returns
+> `204 No Content`, which tells pages loaded before a rolling upgrade to
+> stop reconnecting. Do not proxy it as a long-lived stream.
 
 ## 4. Side-by-side with ShinyProxy
 

@@ -47,10 +47,19 @@ one warm). Routing is least-connections (interactive) or round-robin
 ### How does authentication work?
 
 The **admin panel** has user accounts with Viewer / Editor / Admin
-roles (plus a break-glass token). The same accounts gate **per-app
-visibility**: every spec can declare `access-groups` / `access-users`
-and only matching users see the card and reach `/app` / `/api`
-(specs with no access keys remain open to anyone) —
+roles (plus a break-glass token). An Editor's own group memberships are
+also their administrative boundary: they can manage open apps, apps whose
+`access-groups` overlap their groups, and non-Admin Viewer/Editor accounts
+and memberships in those groups. They can create those accounts and reset
+their passwords; account deletion, CSV import, MFA reset, and group
+create/rename/delete remain Admin-only. The Media library is shared.
+Out-of-scope app and user ids return `404` so guessed identifiers do not
+reveal another team's resources. Admin and break-glass sessions remain
+unrestricted.
+
+The same accounts gate **per-app visibility**: every spec can declare
+`access-groups` / `access-users` and only matching users see the card and
+reach `/app` / `/api` (specs with no access keys remain open to anyone) —
 see [Per-user access](./configuration.md#per-user-access).
 An app can also set `require-mfa: true` for a TOTP step-up before its
 container starts; each user enrols one factor and each app chooses how
@@ -89,6 +98,19 @@ interpolation. The named credentials store is AES-encrypted at rest; it
 also accepts a pure `${VAR}` env-ref as the password (stored verbatim,
 resolved at pull time, so the decryption key is never needed for env-based
 credentials).
+
+### Which timezone does Ruscker use?
+
+Stored instants remain UTC. Historical timestamps in Activity, audit, Apps,
+Credentials, Users and process Logs render in the viewer's browser timezone;
+sortable table dates compare the underlying instant, not the formatted text.
+Hover a table timestamp for its full localized date and zone.
+
+Cron has no viewer, so the scheduler uses the IANA zone in
+`server.timezone`. The Schedules page labels next/last runs in that zone.
+Leaving it unset preserves the historical UTC behavior, so an upgrade does
+not move existing jobs. An invalid name warns and also falls back to UTC;
+the effective zone is included in the startup banner.
 
 ### Can I run more than one instance for high availability?
 

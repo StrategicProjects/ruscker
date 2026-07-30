@@ -154,7 +154,8 @@ drill into any container.
 - [ ] LDAP directory integration
 - [x] Role-based access control (Viewer / Editor / Admin), including
       group-scoped Editor delegation across Apps, Users and Groups; Admin
-      accounts and the break-glass token remain unrestricted
+      accounts and the break-glass token remain unrestricted, open apps and
+      Media stay shared, and out-of-scope row targets return 404
 - [x] Per-spec access lists (only group X can use this app) — shipped in Phase 6
 - [x] Per-app step-up MFA — one user-owned TOTP factor, recovery codes,
       trusted-device grants, and per-spec proof-freshness policy
@@ -169,9 +170,13 @@ drill into any container.
 
 - [x] Scheduled jobs — Admin **Schedules** page, cron ETL semantics,
       no fire-on-create, collapsed downtime catch-up, leader-only HA firing,
+      IANA `server.timezone` evaluation with the historical UTC default,
       the spec's image/environment/volumes/credentials, optional command
       override, run history/log tail, one-hour default timeout, and the
       `job-failed` alert webhook
+- [x] Viewer-local admin timestamps — persisted UTC instants are emitted as
+      machine-readable `<time>` values and converted in the browser, while
+      scheduled firing times remain on the scheduler's configured clock
 - [x] Named-volume management — Admin Disk **Volumes** card with live
       reference counts; create labels Ruscker-owned volumes, and remove is
       offered only for Ruscker-created volumes with zero live references and

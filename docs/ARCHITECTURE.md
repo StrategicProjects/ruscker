@@ -102,6 +102,15 @@ per request. User/group/profile mutations invalidate the cache with a
 generation counter, preventing an in-flight stale read from repopulating
 revoked identity data.
 
+Admin-panel authorization keeps identity and row scope separate:
+`crate::auth` answers who the caller is and which role the session carries;
+`scope::EditorScope` answers which Application, User, and Group rows that
+caller may see or change. It refetches an Editor's groups on every request
+and fails closed; an out-of-scope target looks absent (`404`). Admin and
+break-glass sessions are unrestricted, open apps are shared by all Editors,
+and Media is shared. Account deletion, CSV user import, MFA reset, and group
+creation/rename/deletion remain Admin-only.
+
 The request guard then applies these boundaries in order:
 
 1. `Spec::access_allows` enforces per-user/per-group access server-side.
@@ -127,10 +136,16 @@ Postgres:
 
 `jobs::spawn` starts one scheduler loop per process when both a catalog DB
 and container backend exist (the local Docker backend runs jobs; the
-multi-host backend does not, so a due schedule there records an error). Every 30 seconds it loads enabled `schedules`;
-only the `LeaderElector` winner may fire in HA. `db::schedules::mark_fired`
-atomically advances `last_run_at` before execution, so a split-brain second
-runner loses the claim and a crash does not double-fire the occurrence.
+multi-host backend does not, so a due schedule there records an error).
+Every 30 seconds it loads enabled `schedules`; only the `LeaderElector`
+winner may fire in HA. Cron expressions are evaluated against the IANA wall
+clock named by `server.timezone`; when it is absent, the historical UTC
+behaviour is preserved. An invalid name also falls back to UTC with a
+validation warning. The Schedules page calls the same `next_occurrence`
+function and renders firing times in that operational zone.
+`db::schedules::mark_fired` atomically advances `last_run_at` before
+execution, so a split-brain second runner loses the claim and a crash does
+not double-fire the occurrence.
 
 A new schedule anchors at `created_at` (no fire-on-create). If downtime spans
 several cron occurrences, the next tick collapses them to one firing. The job
@@ -140,6 +155,15 @@ and runs to completion outside the interactive replica registry. A
 per-schedule timeout defaults to one hour in the backend. Results, duration,
 exit code, and log tail land in `schedule_runs`; failures enqueue the
 `job-failed` alert webhook.
+
+These are deliberately two different time models. Stored instants remain
+UTC. Ordinary admin tables emit those instants as `<time datetime="…Z">`;
+the shared layout converts them in the browser to the viewer's timezone and
+keeps UTC as the no-JavaScript fallback. Schedules stay on the configured
+operational clock because their timestamps explain when cron will fire.
+Changing `server.timezone` on an installation with existing schedules can
+produce one extra run on the switch-over day, so operators should review
+their next-run values after adopting a zone.
 
 ### Aggregated access counter
 
@@ -298,7 +322,8 @@ SQLite or the HA Postgres catalog.
   replica up and down. Set `min-replicas: 1`+ to keep an app warm.
 - The session-purger runs as a periodic task (every 5s).
 - The leader-only job scheduler checks cron schedules every 30s and detaches
-  each run-to-completion job so long ETL work cannot block later ticks.
+  each run-to-completion job so long ETL work cannot block later ticks. It
+  evaluates cron on the `server.timezone` wall clock (UTC when unset).
 - The access-counter drain batches in-memory deltas every 2s instead of
   writing on every proxy request.
 - `DashMap` backs the replica/in-flight state and the short-TTL identity/spec
@@ -312,9 +337,10 @@ SQLite or the HA Postgres catalog.
   Admin paths require an authenticated session.
 - **Privileged**: signed-in users. Authentication uses per-user passwords
   and three roles — **Viewer** (portal access only; no admin section),
-  **Editor** (dashboard, apps, and media), **Admin** (everything, incl. user
-  management) — enforced server-side. A break-glass `RUSCKER_ADMIN_TOKEN`
-  bootstraps the first account. See `docs/SECURITY.md` §2.
+  **Editor** (dashboard plus group-scoped Applications, Users, and Groups;
+  open apps and Media are shared), **Admin** (unrestricted) — enforced
+  server-side. A break-glass `RUSCKER_ADMIN_TOKEN` bootstraps the first
+  account and is also unrestricted. See `docs/SECURITY.md` §2.
 - **Operator**: filesystem access (the person running Ruscker). Can
   edit YAML, restart the process.
 

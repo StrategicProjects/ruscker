@@ -37,7 +37,7 @@
     <circle cx="60" cy="260" r="9" fill="#0F6E56"/>
     <path d="M55.5,260 l3,3 l6,-6.5" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <text x="86" y="257" font-weight="700" fill="#085041">Phase 4 · Monitoring dashboard</text>
-    <text x="86" y="273" font-size="11" fill="#5B6B66">live SSE · per-replica CPU/mem · logs · actions</text>
+    <text x="86" y="273" font-size="11" fill="#5B6B66">live metrics · per-replica CPU/mem · logs · actions</text>
 
     <!-- 5 -->
     <circle cx="60" cy="312" r="9" fill="#0F6E56"/>

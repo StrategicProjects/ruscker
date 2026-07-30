@@ -9,6 +9,57 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.51 — 2026-07-29
+
+- **Admin timestamps now read in your own timezone.** Every date in the
+  panel — the audit log, user activity, apps, credentials, users and the
+  Logs tab — used to render the stored UTC wall clock, so an operator
+  three hours behind UTC read every event three hours in the future. The
+  values were always stored correctly; only the display lacked a
+  conversion. Timestamps now render in the *viewer's* browser timezone,
+  keeping each screen's existing format, and hovering one shows the full
+  date with the zone name. Two operators in different zones each read the
+  local time of the same event. The date column also sorts by instant now,
+  instead of by day-of-month.
+
+- **Scheduled jobs can follow a real clock.** The scheduler evaluated cron
+  expressions against UTC, so `0 8 * * *` fired at 08:00 UTC rather than
+  08:00 where the operator lives. The new `server.timezone` key in
+  `ruscker.yml` takes an IANA zone name (`America/Recife`, `Europe/Lisbon`,
+  …); the Schedules page then shows next and last run in that zone,
+  labelled, and the cron field's help names it so nobody has to open the
+  YAML. Zone names carry the historical daylight-saving rules, so "08:00
+  local" keeps meaning that across a transition — a spring-forward gap
+  fires at the transition instant instead of being skipped, and a
+  fall-back repeat fires only once.
+
+  **Unset means UTC**, exactly what every install did before, so upgrading
+  never moves an existing schedule. Setting the key deliberately shifts
+  them by your offset, and the switch-over day can fire one extra run of a
+  job that already ran; disable the schedule around the restart if a
+  re-run would hurt. An unparseable name (`BRT` is an abbreviation, not a
+  zone) falls back to UTC with a startup warning rather than failing the
+  boot, and the effective zone now appears in the startup banner.
+
+- **Editors can be delegated their own teams.** An Editor's group
+  membership now scopes what they administer: they see and operate apps
+  whose `access-groups` overlap their groups, and manage the users and
+  memberships of those same groups. Apps with no access list stay open and
+  global to every Editor, and the Media library stays shared. An Editor
+  may create Viewer or Editor accounts inside their own groups and reset
+  those users' passwords; deleting accounts, importing users from CSV,
+  resetting MFA, and creating, renaming or deleting a group remain
+  Admin-only. Admin accounts and the break-glass token session are never
+  narrowed. A target outside an Editor's scope answers `404`, so a guessed
+  identifier can't reveal that another team's app or account exists, and
+  memberships belonging to other groups survive an Editor's edit.
+
+  **Before upgrading:** give every Editor account at least one group.
+  Previously an Editor operated the whole catalog; a group-less Editor now
+  reaches only open apps. Startup warns and names any such account.
+
+---
+
 ## v0.2.50 — 2026-07-26
 
 - **Group cards stay compact — even with hundreds of members.** On the

@@ -33,17 +33,18 @@ portal, plus your current **access level** and account actions.
 
 ## Users and access levels (roles)
 
-Each person gets their own account (username + password). Admins manage
-accounts under **Users** (`/admin/users`): create one, or open a row's
-**Edit** button for the consolidated page — role, groups and profile in
-one form with a single save, plus the password reset. Each row shows a
-coloured avatar with the user's initials and their groups as coloured
-badges (a group keeps the same colour on the Groups and Apps pages).
-The table is paginated on the server at 50 users per page. Its
-server-side, case-insensitive search (accented letters included — `GESTÃO`
-matches `Gestão`, though it does not strip diacritics, so `Joao` won't find
-`João`) covers username, groups, department, email and phone on both SQLite
-and Postgres.
+Each person gets their own account (username + password). Admins, and
+Editors within the group boundary described below, manage accounts under
+**Users** (`/admin/users`): create one, or open a row's **Edit** button for
+the consolidated page — role, groups and profile in one form with a single
+save, plus the password reset. Each row shows a coloured avatar with the
+user's initials and their groups as coloured badges (a group keeps the same
+colour on the Groups and Apps pages). The table is paginated on the server
+at 50 users per page. Its server-side, case-insensitive search (accented
+letters included — `GESTÃO` matches `Gestão`, though it does not strip
+diacritics, so `Joao` won't find `João`) covers username, groups,
+department, email and phone on both SQLite and Postgres. An Editor's totals,
+search and pages all cover only accounts in that Editor's scope.
 
 Passwords follow a **policy**: at least 8 characters, with at least one
 uppercase letter, one lowercase letter, one digit and one special
@@ -61,15 +62,52 @@ read a password as you type it.
 | Role | Can do |
 |---|---|
 | **Viewer** | a **portal** account, not a panel operator: signs in to unlock group-restricted cards on the landing; reaches no admin section |
-| **Editor** | view + manage Apps and Media; view Containers and stop/restart replicas |
-| **Admin** | everything, including managing users, credentials, the landing editor, custom blocks and the audit log |
+| **Editor** | manage Apps, Containers, Users and Group membership within their own groups; open apps and the Media library remain shared across Editors |
+| **Admin** | unrestricted panel access, including every app, user and group plus credentials, the landing editor, custom blocks and the audit log |
 
 The panel shows only the sections your role can reach. Enforcement is
 server-side — hiding a nav link is just UX; the routes themselves
-return `403` for a role that isn't allowed. The audit log records the
-acting username. A **last-admin guard** stops you deleting or demoting
-the only remaining admin (so the portal can't be locked out); the
+return `403` for a role that isn't allowed. When an Editor is allowed into
+a section but asks for an app, user, group or replica outside their scope,
+the handler returns `404`, deliberately making a forbidden target
+indistinguishable from a missing one. The audit log records the acting
+username. A **last-admin guard** stops you deleting or demoting the only
+remaining admin (so the portal can't be locked out); the
 `RUSCKER_ADMIN_TOKEN` break-glass login is the other safety net.
+
+An Editor's scope is the exact, case-sensitive set of groups on their own
+account, read from the database on every request:
+
+- **Applications and Containers.** An Editor can see and operate every
+  app whose `access-groups` overlaps their groups. Apps with neither
+  `access-groups` nor `access-users` are **open** and remain global to every
+  Editor. An app restricted only by `access-users` has no group boundary and
+  is therefore Admin-only. The same rule protects app lists, direct app
+  actions, YAML app imports, container details, logs, stop and restart.
+  When editing a shared app, groups outside the Editor's scope stay attached
+  but are not exposed as editable choices.
+- **Users.** The list, search, pagination and KPIs include only non-Admin
+  accounts sharing at least one group. An Editor may create Viewer or Editor
+  accounts, but must assign at least one of their own groups; they may edit
+  in-scope role, profile and membership and reset an in-scope user's
+  password. They cannot target an Admin, assign the Admin role, edit
+  themselves through the Users page, delete an account, import users from
+  CSV or reset MFA. Memberships belonging to other groups survive an
+  Editor's edit.
+- **Groups.** An Editor sees only their groups and may add or remove
+  non-Admin users from those memberships. Creating, renaming and deleting a
+  group remain Admin-only.
+
+Admin account sessions and the `RUSCKER_ADMIN_TOKEN` break-glass session are
+unrestricted; group membership never narrows either one.
+
+> **Before upgrading:** give every Editor account at least one group in the
+> current release's **Users** page before starting the upgraded Ruscker.
+> Previously, an Editor with no groups operated the whole catalog; under the
+> scoped model that account can operate only open apps and sees no users or
+> groups. Startup emits a warning on the Logs stream with the count and
+> usernames of every Editor still missing a group, but it does not block
+> startup.
 
 ### 2FA / MFA for selected apps
 

@@ -118,6 +118,7 @@ pretty_assertions = { workspace = true }
 insta = { workspace = true }
 tower = { workspace = true, features = ["util"] }
 tokio = { workspace = true }
+tracing-subscriber = { workspace = true }
 # WS client + mock upstream for the proxy upgrade tests (#730)
 tokio-tungstenite = { workspace = true }
 # Real Docker backend for the ws-e2e feature (#929) — dev-only; the

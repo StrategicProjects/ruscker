@@ -274,6 +274,28 @@ pub async fn list_all(db: &ConfigDb) -> Result<Vec<UserRow>> {
         .collect())
 }
 
+/// Editor usernames whose authoritative membership list is empty.
+///
+/// This is a startup migration safety check for scoped Editor delegation
+/// (#990). Read only Editor rows and apply [`parse_groups`] in Rust so a
+/// hand-edited value containing only commas/whitespace is treated exactly
+/// like the request-time scope resolver would treat it.
+pub async fn editors_without_groups(db: &ConfigDb) -> Result<Vec<String>> {
+    let sql = "SELECT username, groups
+                 FROM users
+                WHERE lower(role) = 'editor'
+                ORDER BY username ASC";
+    let rows: Vec<(String, String)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(sql).fetch_all(pool).await,
+    }
+    .context("list Editor accounts without groups")?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(username, groups)| parse_groups(&groups).is_empty().then_some(username))
+        .collect())
+}
+
 /// Escape `%`, `_` and `\` in a user-typed search term so each matches
 /// literally under SQL `LIKE`, then wrap it in `%…%` for a substring
 /// match. Both dialects use `\` as the escape character (Postgres by

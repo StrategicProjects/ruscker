@@ -138,20 +138,36 @@ Status: living document. Tracks the Phase 5 security audit
   a cooldown-deduplicated `mfa.break_glass_bypass` audit row. Reserved
   `__ruscker_mfa_*` cookies are consumed by Ruscker and stripped before HTTP
   or WebSocket proxying, so device and enrollment bearers never reach an app.
-- **[implemented]** Role-based access control (#101/#107) — three
-  roles (**Viewer** = signed-in portal user with no admin-panel section;
-  **Editor** = apps + media + dashboard incl. stop/restart; **Admin** =
-  everything, incl. user
-  management). Enforcement is **server-side** via the `AdminSession` /
-  `RequireEditor` / `RequireAdmin` extractors on each route group —
-  the permission matrix lives in `Role::can_access_section` /
-  `can_manage`, and the nav only *hides* links it can't reach (UX, not
-  the boundary). Denied → `403`. Admins manage accounts at
-  `/admin/users` (create/role/reset-password/delete) with a
-  **last-admin guard** that refuses to delete or demote the only
-  remaining admin. Audit entries record the acting username (or
-  `token` for a break-glass session). Per-app ACLs and external IdPs
-  (OIDC/SAML/LDAP) remain Phase 8.
+- **[implemented]** Role-based access control (#101/#107/#990). The nav
+  reflects the matrix below, but hiding a link is only UX. Coarse section
+  access is enforced server-side by `AdminSession` / `RequireEditor` /
+  `RequireAdmin`; handlers for group-scoped Apps, Containers, Users and
+  Groups then apply `EditorScope` to the authoritative database row.
+
+  | Session | Admin-panel trust boundary |
+  |---------|----------------------------|
+  | **Viewer** | Portal user only; no admin-panel section. |
+  | **Editor** | App-config-trusted but **group-scoped**. May operate open apps and apps/replicas sharing one of the Editor's exact, case-sensitive groups; may administer non-Admin users and membership within those groups. Media remains a shared Editor resource. |
+  | **Admin account** | Unrestricted across the panel and all catalog rows. |
+  | **`RUSCKER_ADMIN_TOKEN` break-glass** | Unrestricted Admin session even when the account database is absent or damaged. |
+
+  A role denied at the section guard receives `403`. Once an Editor is
+  admitted to Apps, Containers, Users or Groups, a missing **or
+  out-of-scope** target receives the same `404`; this is deliberate
+  non-disclosure, so guessed identifiers cannot reveal that another team's
+  app, account, group or replica exists. Scope is fetched on every request
+  rather than copied into the session, so membership removal takes effect on
+  the next request and lookup failure fails closed.
+
+  The #990 integration tests lock down the privilege-escalation invariants:
+  an Editor cannot grant a group they do not have, cannot view or mutate an
+  Admin account, cannot assign the Admin role, and cannot change their own
+  role or groups through delegated user management. An Editor update replaces
+  only memberships inside their scope; out-of-scope groups survive unchanged.
+  Account deletion, CSV user import, MFA reset, and group
+  create/rename/delete remain Admin-only. The **last-admin guard** still
+  refuses to delete or demote the only remaining Admin. Audit entries record
+  the acting username (or `token` for break-glass).
 - **[implemented]** Identifier charset validation (#429 / #423) — a
   username (`db::users::is_valid_username`) and a stored-credential name
   (`routes::admin::credentials::is_valid_credential_name`) must be

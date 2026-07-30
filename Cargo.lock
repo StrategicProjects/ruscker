@@ -3081,6 +3081,7 @@ dependencies = [
  "tower-cookies",
  "tower-http",
  "tracing",
+ "tracing-subscriber",
  "unic-langid",
  "url",
  "urlencoding",

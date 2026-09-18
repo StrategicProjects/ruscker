@@ -384,32 +384,72 @@ pub async fn recovery_code_counts(db: &ConfigDb, username: &str) -> Result<Recov
     Ok(RecoveryCodeCounts { unused, total })
 }
 
+/// The "generation" a status page was rendered against (#1054): the
+/// factor's `updated_at`, which regeneration bumps. The page posts it back
+/// and [`regenerate_recovery_codes`] compares-and-sets on it, so a
+/// re-submitted form (browser "resend?" after a refresh, a second tab) is
+/// refused instead of silently invalidating codes the user already saved.
+pub fn recovery_generation(row: &MfaRow) -> i64 {
+    row.updated_at.timestamp_micros()
+}
+
+/// What [`regenerate_recovery_codes`] decided. Operational failures are
+/// `Err`; these three are domain answers the page renders differently.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegenerateOutcome {
+    /// New set written and audited.
+    Done,
+    /// No CONFIRMED factor: a pending or reset account can't mint codes.
+    NotEnrolled,
+    /// The form's generation is not the current one: another regeneration
+    /// (or a resubmission) already ran. Nothing changed.
+    Stale,
+}
+
 /// Self-service regeneration (#1054): replace every recovery code of a
 /// CONFIRMED factor and audit `mfa.recovery_regenerated`, in one
-/// transaction. A pending or absent enrollment fails — the enrollment
-/// ceremony mints its own first set. Callers pass salted hashes only.
+/// transaction serialized on the `user_mfa` row (`FOR UPDATE` on Postgres;
+/// SQLite has one writer) with a compare-and-set on `updated_at` against
+/// `expected_generation` (see [`recovery_generation`]). Callers pass salted
+/// hashes only.
 pub async fn regenerate_recovery_codes(
     db: &ConfigDb,
     username: &str,
     actor: &str,
     hashes: &[String],
-) -> Result<()> {
+    expected_generation: i64,
+) -> Result<RegenerateOutcome> {
     let username = crate::db::users::normalize_username(username);
     let target = format!("user:{username}");
     let now = Utc::now();
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin recovery regeneration")?;
-            let (enrolled,): (bool,) = sqlx::query_as(
-                "SELECT EXISTS(SELECT 1 FROM user_mfa
-                            WHERE username = ? AND confirmed_at IS NOT NULL)",
+            let current: Option<(Option<DateTime<Utc>>, DateTime<Utc>)> = sqlx::query_as(
+                "SELECT confirmed_at, updated_at FROM user_mfa WHERE username = ?",
             )
             .bind(&username)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .context("check MFA enrollment before regeneration")?;
-            if !enrolled {
-                bail!("no confirmed MFA factor for {username}");
+            .context("read MFA factor before regeneration")?;
+            let Some((Some(_), updated_at)) = current else {
+                return Ok(RegenerateOutcome::NotEnrolled);
+            };
+            if updated_at.timestamp_micros() != expected_generation {
+                return Ok(RegenerateOutcome::Stale);
+            }
+            let bumped = sqlx::query(
+                "UPDATE user_mfa SET updated_at = ?
+                  WHERE username = ? AND confirmed_at IS NOT NULL AND updated_at = ?",
+            )
+            .bind(now)
+            .bind(&username)
+            .bind(updated_at)
+            .execute(&mut *tx)
+            .await
+            .context("bump MFA generation")?;
+            if bumped.rows_affected() == 0 {
+                return Ok(RegenerateOutcome::Stale);
             }
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = ?")
                 .bind(&username)
@@ -444,16 +484,31 @@ pub async fn regenerate_recovery_codes(
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin recovery regeneration")?;
-            let (enrolled,): (bool,) = sqlx::query_as(
-                "SELECT EXISTS(SELECT 1 FROM user_mfa
-                            WHERE username = $1 AND confirmed_at IS NOT NULL)",
+            let current: Option<(Option<DateTime<Utc>>, DateTime<Utc>)> = sqlx::query_as(
+                "SELECT confirmed_at, updated_at FROM user_mfa WHERE username = $1 FOR UPDATE",
             )
             .bind(&username)
-            .fetch_one(&mut *tx)
+            .fetch_optional(&mut *tx)
             .await
-            .context("check MFA enrollment before regeneration")?;
-            if !enrolled {
-                bail!("no confirmed MFA factor for {username}");
+            .context("read MFA factor before regeneration")?;
+            let Some((Some(_), updated_at)) = current else {
+                return Ok(RegenerateOutcome::NotEnrolled);
+            };
+            if updated_at.timestamp_micros() != expected_generation {
+                return Ok(RegenerateOutcome::Stale);
+            }
+            let bumped = sqlx::query(
+                "UPDATE user_mfa SET updated_at = $1
+                  WHERE username = $2 AND confirmed_at IS NOT NULL AND updated_at = $3",
+            )
+            .bind(now)
+            .bind(&username)
+            .bind(updated_at)
+            .execute(&mut *tx)
+            .await
+            .context("bump MFA generation")?;
+            if bumped.rows_affected() == 0 {
+                return Ok(RegenerateOutcome::Stale);
             }
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = $1")
                 .bind(&username)
@@ -487,7 +542,7 @@ pub async fn regenerate_recovery_codes(
             tx.commit().await.context("commit recovery regeneration")?;
         }
     }
-    Ok(())
+    Ok(RegenerateOutcome::Done)
 }
 
 /// Find the id of the unused recovery code matching `code`, WITHOUT
@@ -767,18 +822,28 @@ mod tests {
     async fn recovery_counts_and_regeneration_require_a_confirmed_factor() {
         let db = db_with_user("dave").await;
         let hash = |c: &str| crate::mfa::hash_recovery_code(c).unwrap();
+        async fn generation(db: &ConfigDb) -> i64 {
+            fetch(db, "dave").await.unwrap().map(|r| recovery_generation(&r)).unwrap_or(0)
+        }
         // Nothing enrolled yet: counts are zero and regeneration refuses.
         assert_eq!(recovery_code_counts(&db, "dave").await.unwrap(), RecoveryCodeCounts::default());
-        assert!(regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")])
-            .await
-            .is_err());
+        assert_eq!(
+            regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")], 0)
+                .await
+                .unwrap(),
+            RegenerateOutcome::NotEnrolled
+        );
         begin_enrollment(&db, "dave", b"cipher", b"nonce", "cer-1")
             .await
             .unwrap();
         // Pending (unconfirmed) still refuses — enrollment mints its own set.
-        assert!(regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")])
-            .await
-            .is_err());
+        let pending_gen = generation(&db).await;
+        assert_eq!(
+            regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")], pending_gen)
+                .await
+                .unwrap(),
+            RegenerateOutcome::NotEnrolled
+        );
         confirm_with_recovery_codes(&db, "dave", "dave", Some(&[hash("AAAAA22222"), hash("BBBBB33333")]), "cer-1")
             .await
             .unwrap();
@@ -791,14 +856,31 @@ mod tests {
             recovery_code_counts(&db, "dave").await.unwrap(),
             RecoveryCodeCounts { unused: 1, total: 2 }
         );
-        regenerate_recovery_codes(&db, "dave", "dave", &[hash("CCCCC44444"), hash("DDDDD55555"), hash("EEEEE66666")])
-            .await
-            .unwrap();
+        let gen1 = generation(&db).await;
+        assert_eq!(
+            regenerate_recovery_codes(&db, "dave", "dave", &[hash("CCCCC44444"), hash("DDDDD55555"), hash("EEEEE66666")], gen1)
+                .await
+                .unwrap(),
+            RegenerateOutcome::Done
+        );
         assert_eq!(
             recovery_code_counts(&db, "dave").await.unwrap(),
             RecoveryCodeCounts { unused: 3, total: 3 }
         );
-        // The old set is gone, the new one works, and the action is audited.
+        // A resubmission carrying the OLD generation is refused and changes
+        // nothing: the set just handed out stays valid (codex review).
+        assert_eq!(
+            regenerate_recovery_codes(&db, "dave", "dave", &[hash("FFFFF77777")], gen1)
+                .await
+                .unwrap(),
+            RegenerateOutcome::Stale
+        );
+        assert_eq!(
+            recovery_code_counts(&db, "dave").await.unwrap(),
+            RecoveryCodeCounts { unused: 3, total: 3 }
+        );
+        assert_ne!(generation(&db).await, gen1, "regeneration bumps the generation");
+        // The old set is gone, the new one works, and the action is audited once.
         assert!(!consume_recovery_code(&db, "dave", "BBBBB33333").await.unwrap());
         assert!(consume_recovery_code(&db, "dave", "ccccc-44444").await.unwrap());
         let ConfigDb::Sqlite(pool) = &db else { unreachable!() };
@@ -868,9 +950,20 @@ mod tests {
         assert!(is_enrolled(&db, &username).await.unwrap());
         // Recovery-code counting + regeneration on the pg dialect (#1054).
         let hash = |c: &str| crate::mfa::hash_recovery_code(c).unwrap();
-        regenerate_recovery_codes(&db, &username, &username, &[hash("AAAAA22222"), hash("BBBBB33333")])
-            .await
-            .unwrap();
+        let gen0 = recovery_generation(&fetch(&db, &username).await.unwrap().unwrap());
+        assert_eq!(
+            regenerate_recovery_codes(&db, &username, &username, &[hash("AAAAA22222"), hash("BBBBB33333")], gen0)
+                .await
+                .unwrap(),
+            RegenerateOutcome::Done
+        );
+        // Stale generation (a resubmission) is refused on pg too.
+        assert_eq!(
+            regenerate_recovery_codes(&db, &username, &username, &[hash("ZZZZZ99999")], gen0)
+                .await
+                .unwrap(),
+            RegenerateOutcome::Stale
+        );
         assert!(consume_recovery_code(&db, &username, "aaaaa-22222").await.unwrap());
         assert_eq!(
             recovery_code_counts(&db, &username).await.unwrap(),

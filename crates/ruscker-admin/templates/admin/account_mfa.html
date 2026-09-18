@@ -14,6 +14,7 @@
       {% else if error == "rate-limited" %}{{ self.t("admin-mfa-error-rate") }}
       {% else if error == "break-glass" %}{{ self.t("admin-mfa-break-glass") }}
       {% else if error == "not-enrolled" %}{{ self.t("admin-mfa-not-enrolled") }}
+      {% else if error == "stale" %}{{ self.t("admin-mfa-error-stale") }}
       {% else %}{{ self.t("admin-mfa-already") }}{% endif %}
     </div>
   {% endif %}
@@ -47,6 +48,8 @@
           <form method="post" action="{{ base }}/admin/account/mfa/recovery/regenerate" class="flex flex-col gap-3 mt-3" autocomplete="off"
                 data-confirm="{{ self.t("admin-mfa-recovery-regenerate-confirm") }}">
             {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            {# Compare-and-set token: a resubmitted/stale form is refused. #}
+            <input type="hidden" name="generation" value="{{ recovery_generation }}">
             <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-mfa-recovery-regenerate-help") }}</p>
             <label class="admin-login-field">
               <span class="admin-login-label">{{ self.t("admin-mfa-current-password") }}</span>

@@ -53,6 +53,8 @@ struct AccountMfaPage<'a> {
     next: String,
     /// Unused vs. issued recovery codes (#1054); zeros when not enrolled.
     recovery: db::mfa::RecoveryCodeCounts,
+    /// Generation the regenerate form posts back (compare-and-set).
+    recovery_generation: i64,
 }
 
 impl AccountMfaPage<'_> {
@@ -159,6 +161,15 @@ struct StartForm {
 }
 
 #[derive(Debug, Deserialize)]
+struct RegenerateForm {
+    current_password: String,
+    next: Option<String>,
+    /// [`db::mfa::recovery_generation`] the page was rendered with.
+    #[serde(default)]
+    generation: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ConfirmForm {
     code: String,
     next: Option<String>,
@@ -224,6 +235,10 @@ async fn render_status(
         None => None,
     };
     let enrolled_at = row.as_ref().and_then(|row| row.confirmed_at);
+    let recovery_generation = row
+        .as_ref()
+        .map(db::mfa::recovery_generation)
+        .unwrap_or_default();
     let pending = row.is_some_and(|row| row.confirmed_at.is_none());
     let recovery = match (enrolled_at, session.actor.as_deref()) {
         (Some(_), Some(username)) => match db::mfa::recovery_code_counts(db, username).await {
@@ -249,6 +264,7 @@ async fn render_status(
         error,
         next,
         recovery,
+        recovery_generation,
     };
     let body = match page.render() {
         Ok(body) => body,
@@ -765,7 +781,7 @@ async fn regenerate_recovery(
     State(state): State<AppState>,
     loc: Locale,
     theme: Theme,
-    Form(form): Form<StartForm>,
+    Form(form): Form<RegenerateForm>,
 ) -> Response {
     let next = safe_next(form.next.as_deref(), &state.base_path);
     let Some(username) = session.actor.clone() else {
@@ -840,20 +856,28 @@ async fn regenerate_recovery(
             }
         }
     }
-    // The DB refuses unless a CONFIRMED factor exists, so a pending or
-    // reset account can't mint codes for a factor it doesn't have.
-    if let Err(err) = db::mfa::regenerate_recovery_codes(db, &username, &username, &hashes).await {
-        tracing::warn!(error = ?err, %username, "regenerate recovery codes refused");
-        return render_status(
-            &state,
-            session,
-            loc,
-            theme,
-            "not-enrolled",
-            next,
-            StatusCode::CONFLICT,
-        )
-        .await;
+    // The DB refuses unless a CONFIRMED factor exists (a pending or reset
+    // account can't mint codes) and unless the form's generation is still
+    // current — a resubmitted form or a second tab must not silently
+    // invalidate a set the user already saved (codex review). Domain
+    // refusals render the status page with a reason; an operational
+    // failure is a 500, never disguised as "not enrolled".
+    let expected = form.generation.unwrap_or_default();
+    match db::mfa::regenerate_recovery_codes(db, &username, &username, &hashes, expected).await {
+        Ok(db::mfa::RegenerateOutcome::Done) => {}
+        Ok(outcome) => {
+            let reason = match outcome {
+                db::mfa::RegenerateOutcome::Stale => "stale",
+                _ => "not-enrolled",
+            };
+            tracing::info!(%username, ?outcome, "regenerate recovery codes refused");
+            return render_status(&state, session, loc, theme, reason, next, StatusCode::CONFLICT)
+                .await;
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "regenerate recovery codes failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
     }
 
     let page = AccountMfaRecoveryPage {

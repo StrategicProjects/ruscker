@@ -353,12 +353,41 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
             .unwrap();
     assert_eq!(still, old_hashes, "a failed re-auth must not touch the codes");
 
-    // Right password: a fresh set, shown once, audited, old set gone.
+    // The form carries the current generation (compare-and-set token).
+    let (_, status_page, _) = request(state.clone(), "GET", "/admin/account/mfa", "", &user_cookie).await;
+    let generation = status_page
+        .split("name=\"generation\" value=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("status page carries the generation")
+        .to_string();
+    // A form rendered against a stale generation is refused and changes nothing.
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        "current_password=CorrectPass9%21&generation=1",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("data-mfa-error=\"stale\""));
+    let still: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin'")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(still, old_hashes, "a stale form must not touch the codes");
+
+    // Right password + current generation: a fresh set, shown once, audited.
+    let regen_body = format!(
+        "current_password=CorrectPass9%21&next=%2Fapp%2Fdemo%2F&generation={generation}"
+    );
     let (status, page, _) = request(
         state.clone(),
         "POST",
         "/admin/account/mfa/recovery/regenerate",
-        "current_password=CorrectPass9%21&next=%2Fapp%2Fdemo%2F",
+        &regen_body,
         &user_cookie,
     )
     .await;
@@ -383,6 +412,24 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
     .await
     .unwrap();
     assert_eq!(audited, 1);
+    // Browser "resend the form?" after a refresh: the SAME submission again
+    // must be refused (409) and the set just shown must stay valid.
+    let (status, again, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        &regen_body,
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(again.contains("data-mfa-error=\"stale\"") && !again.contains("data-recovery-codes"));
+    let after: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin' AND used_at IS NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(after, fresh, "the resubmission must not replace the set");
     // A shown code (grouped form, as a person would copy it) is accepted.
     let shown = page
         .split("data-recovery-code=\"")

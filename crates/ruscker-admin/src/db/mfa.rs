@@ -349,6 +349,147 @@ pub async fn replace_recovery_codes(
     Ok(())
 }
 
+/// Unused vs. issued recovery codes for one account (#1054). The page can
+/// only ever show a COUNT: codes are stored as salted hashes, so "which
+/// ones are spent" is unknowable by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RecoveryCodeCounts {
+    pub unused: i64,
+    pub total: i64,
+}
+
+pub async fn recovery_code_counts(db: &ConfigDb, username: &str) -> Result<RecoveryCodeCounts> {
+    let username = crate::db::users::normalize_username(username);
+    let (unused, total): (i64, i64) = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT COUNT(CASE WHEN used_at IS NULL THEN 1 END), COUNT(*)
+                   FROM user_mfa_recovery WHERE username = ?",
+            )
+            .bind(&username)
+            .fetch_one(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT COUNT(CASE WHEN used_at IS NULL THEN 1 END), COUNT(*)
+                   FROM user_mfa_recovery WHERE username = $1",
+            )
+            .bind(&username)
+            .fetch_one(pool)
+            .await
+        }
+    }
+    .with_context(|| format!("count recovery codes for {username}"))?;
+    Ok(RecoveryCodeCounts { unused, total })
+}
+
+/// Self-service regeneration (#1054): replace every recovery code of a
+/// CONFIRMED factor and audit `mfa.recovery_regenerated`, in one
+/// transaction. A pending or absent enrollment fails — the enrollment
+/// ceremony mints its own first set. Callers pass salted hashes only.
+pub async fn regenerate_recovery_codes(
+    db: &ConfigDb,
+    username: &str,
+    actor: &str,
+    hashes: &[String],
+) -> Result<()> {
+    let username = crate::db::users::normalize_username(username);
+    let target = format!("user:{username}");
+    let now = Utc::now();
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin recovery regeneration")?;
+            let (enrolled,): (bool,) = sqlx::query_as(
+                "SELECT EXISTS(SELECT 1 FROM user_mfa
+                            WHERE username = ? AND confirmed_at IS NOT NULL)",
+            )
+            .bind(&username)
+            .fetch_one(&mut *tx)
+            .await
+            .context("check MFA enrollment before regeneration")?;
+            if !enrolled {
+                bail!("no confirmed MFA factor for {username}");
+            }
+            sqlx::query("DELETE FROM user_mfa_recovery WHERE username = ?")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("delete old recovery codes")?;
+            for hash in hashes {
+                sqlx::query(
+                    "INSERT INTO user_mfa_recovery
+                        (id, username, code_hash, used_at, created_at)
+                     VALUES (?, ?, ?, NULL, ?)",
+                )
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(&username)
+                .bind(hash)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("insert recovery code")?;
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, 'mfa.recovery_regenerated', ?, NULL, ?)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit recovery regeneration")?;
+            tx.commit().await.context("commit recovery regeneration")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin recovery regeneration")?;
+            let (enrolled,): (bool,) = sqlx::query_as(
+                "SELECT EXISTS(SELECT 1 FROM user_mfa
+                            WHERE username = $1 AND confirmed_at IS NOT NULL)",
+            )
+            .bind(&username)
+            .fetch_one(&mut *tx)
+            .await
+            .context("check MFA enrollment before regeneration")?;
+            if !enrolled {
+                bail!("no confirmed MFA factor for {username}");
+            }
+            sqlx::query("DELETE FROM user_mfa_recovery WHERE username = $1")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("delete old recovery codes")?;
+            for hash in hashes {
+                sqlx::query(
+                    "INSERT INTO user_mfa_recovery
+                        (id, username, code_hash, used_at, created_at)
+                     VALUES ($1, $2, $3, NULL, $4)",
+                )
+                .bind(uuid::Uuid::new_v4().to_string())
+                .bind(&username)
+                .bind(hash)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("insert recovery code")?;
+            }
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, 'mfa.recovery_regenerated', $2, NULL, $3)",
+            )
+            .bind(actor)
+            .bind(&target)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit recovery regeneration")?;
+            tx.commit().await.context("commit recovery regeneration")?;
+        }
+    }
+    Ok(())
+}
+
 /// Find the id of the unused recovery code matching `code`, WITHOUT
 /// consuming it. Consumption happens inside [`crate::db::mfa_grants::issue`]
 /// so a failed grant issuance rolls the spend back — a finite code must
@@ -623,6 +764,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recovery_counts_and_regeneration_require_a_confirmed_factor() {
+        let db = db_with_user("dave").await;
+        let hash = |c: &str| crate::mfa::hash_recovery_code(c).unwrap();
+        // Nothing enrolled yet: counts are zero and regeneration refuses.
+        assert_eq!(recovery_code_counts(&db, "dave").await.unwrap(), RecoveryCodeCounts::default());
+        assert!(regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")])
+            .await
+            .is_err());
+        begin_enrollment(&db, "dave", b"cipher", b"nonce", "cer-1")
+            .await
+            .unwrap();
+        // Pending (unconfirmed) still refuses — enrollment mints its own set.
+        assert!(regenerate_recovery_codes(&db, "dave", "dave", &[hash("AAAAA22222")])
+            .await
+            .is_err());
+        confirm_with_recovery_codes(&db, "dave", "dave", Some(&[hash("AAAAA22222"), hash("BBBBB33333")]), "cer-1")
+            .await
+            .unwrap();
+        assert_eq!(
+            recovery_code_counts(&db, "dave").await.unwrap(),
+            RecoveryCodeCounts { unused: 2, total: 2 }
+        );
+        assert!(consume_recovery_code(&db, "dave", "AAAAA22222").await.unwrap());
+        assert_eq!(
+            recovery_code_counts(&db, "dave").await.unwrap(),
+            RecoveryCodeCounts { unused: 1, total: 2 }
+        );
+        regenerate_recovery_codes(&db, "dave", "dave", &[hash("CCCCC44444"), hash("DDDDD55555"), hash("EEEEE66666")])
+            .await
+            .unwrap();
+        assert_eq!(
+            recovery_code_counts(&db, "dave").await.unwrap(),
+            RecoveryCodeCounts { unused: 3, total: 3 }
+        );
+        // The old set is gone, the new one works, and the action is audited.
+        assert!(!consume_recovery_code(&db, "dave", "BBBBB33333").await.unwrap());
+        assert!(consume_recovery_code(&db, "dave", "ccccc-44444").await.unwrap());
+        let ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+        let (audited,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM audit_log
+              WHERE action = 'mfa.recovery_regenerated' AND actor = 'dave' AND target = 'user:dave'",
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        assert_eq!(audited, 1);
+    }
+
+    #[tokio::test]
     async fn reset_removes_factor_and_codes_and_audits() {
         let db = db_with_user("alice").await;
         begin_enrollment(&db, "alice", b"cipher", b"nonce", "cer-1")
@@ -676,6 +866,16 @@ mod tests {
             .is_none());
         confirm_enrollment(&db, &username, &username, "cer-pg").await.unwrap();
         assert!(is_enrolled(&db, &username).await.unwrap());
+        // Recovery-code counting + regeneration on the pg dialect (#1054).
+        let hash = |c: &str| crate::mfa::hash_recovery_code(c).unwrap();
+        regenerate_recovery_codes(&db, &username, &username, &[hash("AAAAA22222"), hash("BBBBB33333")])
+            .await
+            .unwrap();
+        assert!(consume_recovery_code(&db, &username, "aaaaa-22222").await.unwrap());
+        assert_eq!(
+            recovery_code_counts(&db, &username).await.unwrap(),
+            RecoveryCodeCounts { unused: 1, total: 2 }
+        );
         let factor_confirmed_at = fetch(&db, &username)
             .await
             .unwrap()

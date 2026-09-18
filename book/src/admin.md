@@ -121,8 +121,17 @@ Users enrol once under **Account → 2FA**, either directly or when a
 protected app redirects them there. They re-enter their password, scan the
 QR code with a standard TOTP app such as Google Authenticator, Microsoft
 Authenticator, Authy or 1Password, confirm a six-digit code, and save the
-one-time recovery codes shown once. One successful proof satisfies every
-protected app, subject to each app's freshness policy.
+ten one-time recovery codes shown once — grouped `ABCDE-FGH23` with the
+digits tinted so `B`/`8` and `S`/`5` read apart, with **Download (.txt)**
+and **Copy all** buttons (built in the browser; the server never re-emits
+the codes). A code is accepted with or without the dash. One successful
+proof satisfies every protected app, subject to each app's freshness policy.
+
+The same **Two-factor authentication** page shows how many recovery codes
+remain (only a count is knowable: the database stores salted hashes) and
+warns when two or fewer are left. **Generate new codes** asks for the
+password again, invalidates the whole current set, shows the new one once
+and writes an `mfa.recovery_regenerated` audit row.
 
 **MFA validity days** (`mfa-validity-days`) controls that policy: 7 days by
 default, capped at 30; `0` limits the proof to the current login session.

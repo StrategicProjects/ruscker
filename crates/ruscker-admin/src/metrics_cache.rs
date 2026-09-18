@@ -99,9 +99,27 @@ impl MetricsCache {
     /// trend instead of resetting every tick. A replica that
     /// disappears and comes back starts its history fresh.
     pub fn replace(&self, fresh: Vec<(ReplicaId, ReplicaMetrics)>) {
+        self.replace_keeping(fresh, &[]);
+    }
+
+    /// [`replace`](Self::replace), but entries for `unsampled` replicas —
+    /// still in the registry, just not sampled this tick because their
+    /// `stats` call failed — are kept untouched (history AND the stale
+    /// `observed_at`) instead of evicted. One Docker timeout used to erase
+    /// a replica's whole 30-minute chart (codex review, #1058); only a
+    /// replica gone from the registry loses its history now.
+    pub fn replace_keeping(
+        &self,
+        fresh: Vec<(ReplicaId, ReplicaMetrics)>,
+        unsampled: &[ReplicaId],
+    ) {
         use std::collections::HashSet;
         let now = Instant::now();
-        let kept: HashSet<ReplicaId> = fresh.iter().map(|(id, _)| id.clone()).collect();
+        let kept: HashSet<&ReplicaId> = fresh
+            .iter()
+            .map(|(id, _)| id)
+            .chain(unsampled.iter())
+            .collect();
         self.inner.retain(|id, _| kept.contains(id));
         for (id, m) in fresh {
             // Carry the prior history forward, then append this sample.
@@ -193,15 +211,17 @@ async fn refresh_once(
         .await;
 
     let mut fresh = Vec::with_capacity(results.len());
+    let mut unsampled = Vec::new();
     for (id, result) in results {
         match result {
             Ok(m) => fresh.push((id, m)),
             Err(e) => {
                 warn!(replica = ?id, error = ?e, "metrics refresh failed");
+                unsampled.push(id);
             }
         }
     }
-    cache.replace(fresh);
+    cache.replace_keeping(fresh, &unsampled);
 }
 
 #[cfg(test)]
@@ -273,6 +293,67 @@ mod tests {
         assert!(cache.get(&id2).is_some());
     }
 
+    /// A backend whose `stats` call can be made to fail on demand.
+    struct FlakyMetricsBackend {
+        fail: std::sync::atomic::AtomicBool,
+    }
+    #[async_trait]
+    impl ContainerBackend for FlakyMetricsBackend {
+        async fn spawn(&self, _spec_id: &str, _image: &str) -> CoreResult<Replica> {
+            unimplemented!()
+        }
+        async fn stop(&self, _id: &ReplicaId) -> CoreResult<()> {
+            Ok(())
+        }
+        async fn list(&self) -> CoreResult<Vec<Replica>> {
+            Ok(vec![])
+        }
+        async fn metrics(&self, _id: &ReplicaId) -> CoreResult<ReplicaMetrics> {
+            if self.fail.load(Ordering::SeqCst) {
+                return Err(ruscker_core::CoreError::Backend("stats timed out".into()));
+            }
+            Ok(ReplicaMetrics {
+                cpu_percent: 1.0,
+                memory_bytes: 1,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            })
+        }
+    }
+
+    /// One failed `stats` round-trip must not erase the replica's history
+    /// (codex review, #1058): the entry survives untouched and the next
+    /// good sample appends to it.
+    #[tokio::test]
+    async fn transient_stats_failure_keeps_history() {
+        let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
+        let r1 = fake_replica("alpha");
+        let id1 = r1.id.clone();
+        reg.write().await.add(r1);
+        let cache = MetricsCache::new();
+        let backend = Arc::new(FlakyMetricsBackend {
+            fail: std::sync::atomic::AtomicBool::new(false),
+        });
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert_eq!(cache.get(&id1).unwrap().cpu_history.len(), 2);
+
+        backend.fail.store(true, Ordering::SeqCst);
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        let kept = cache.get(&id1).expect("entry survives a failed sample");
+        assert_eq!(kept.cpu_history.len(), 2, "history untouched by the failure");
+
+        backend.fail.store(false, Ordering::SeqCst);
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert_eq!(cache.get(&id1).unwrap().cpu_history.len(), 3, "resumes appending");
+
+        // Gone from the registry ⇒ evicted, failure or not.
+        reg.write().await.remove(&id1);
+        backend.fail.store(true, Ordering::SeqCst);
+        refresh_once(&cache, backend.as_ref(), &reg).await;
+        assert!(cache.is_empty());
+    }
+
     #[tokio::test]
     async fn replace_evicts_disappeared_replicas() {
         let reg = Arc::new(RwLock::new(ReplicaRegistry::new()));
@@ -315,6 +396,9 @@ mod tests {
         assert_eq!(c.mem_history, vec![10, 20]);
         assert_eq!(c.metrics.cpu_percent, 2.0); // latest
 
+        // The expanded chart promises 30 minutes at the 5 s cadence (#1058);
+        // a smaller cap would silently shorten it.
+        assert!(HISTORY_LEN * REFRESH_INTERVAL.as_secs() as usize >= 30 * 60);
         // Push well past the cap; only the most recent HISTORY_LEN survive.
         for i in 0..HISTORY_LEN + 10 {
             cache.replace(sample(i as f64, i as u64));

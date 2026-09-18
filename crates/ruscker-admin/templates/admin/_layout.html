@@ -398,7 +398,19 @@ window.ruscker.imagePicker = (filenames) => ({
     if (opener && opener.focus) opener.focus();
     opener = null;
   }
-  function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+  var FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+  function onKey(e) {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    // aria-modal promises focus stays inside: cycle Tab / Shift+Tab within
+    // the dialog instead of letting it wander into the obscured page.
+    if (e.key === 'Tab' && overlay) {
+      var items = overlay.querySelectorAll(FOCUSABLE);
+      if (!items.length) { e.preventDefault(); return; }
+      var first = items[0], last = items[items.length - 1], active = document.activeElement;
+      if (e.shiftKey && (active === first || !overlay.contains(active))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (active === last || !overlay.contains(active))) { e.preventDefault(); first.focus(); }
+    }
+  }
   // opts: { title, subtitle, closeLabel, panels:[{label, values, xLabels, fmt, noData}],
   //         periods:[{label, active, onSelect}], onClose }
   function open(opts) {

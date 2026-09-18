@@ -480,7 +480,7 @@
   // (`/replicas/{id}/history`, 30 min at 5 s), refreshed on the poll
   // cadence while open. Delegated on the container so it survives the
   // innerHTML rebuilds.
-  var histTimer = null;
+  var histTimer = null, histCtrl = null, histInflight = false;
   function clock(secsAgo) {
     var d = new Date(Date.now() - secsAgo * 1000);
     var p = function (n) { return (n < 10 ? '0' : '') + n; };
@@ -499,9 +499,15 @@
     ];
   }
   function fetchHist(rid) {
+    histCtrl = new AbortController();
     return fetch((window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(rid) + '/history',
-                 { headers: { 'X-Requested-With': 'fetch' } })
+                 { headers: { 'X-Requested-With': 'fetch' }, signal: histCtrl.signal })
       .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+  }
+  function stopHist() {
+    if (histTimer) { clearInterval(histTimer); histTimer = null; }
+    if (histCtrl) { histCtrl.abort(); histCtrl = null; }
+    histInflight = false;
   }
   function windowLabel(h) {
     var secs = Math.max(0, h.cpu.length - 1) * (h.step_secs || stepSecs);
@@ -510,14 +516,19 @@
   }
   function openHist(rid) {
     if (!chart) return;
+    stopHist();
     fetchHist(rid).then(function (h) {
       chart.open({ title: h.display_name || h.spec_id, subtitle: windowLabel(h), closeLabel: ds.chartClose,
-                   panels: histPanels(h),
-                   onClose: function () { if (histTimer) { clearInterval(histTimer); histTimer = null; } } });
+                   panels: histPanels(h), onClose: stopHist });
+      // Same rule as the main poll: never overlap a slow request (an
+      // HTTP/1.1 front end has ~6 connections per origin to give), and
+      // abort whatever is in flight when the modal closes.
       histTimer = setInterval(function () {
-        if (document.hidden) return;
+        if (document.hidden || histInflight) return;
+        histInflight = true;
         fetchHist(rid).then(function (h2) { chart.update(histPanels(h2), windowLabel(h2)); })
-          .catch(function () { /* keep the last render */ });
+          .catch(function () { /* keep the last render */ })
+          .finally(function () { histInflight = false; });
       }, POLL_MS);
     }).catch(function () { /* nothing to show */ });
   }

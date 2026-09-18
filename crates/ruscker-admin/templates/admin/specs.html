@@ -442,10 +442,16 @@
     if (!btn) return;
     var row = btn.closest('tr');
     var id = btn.dataset.sparkSpec, name = (row && row.dataset.name) || id, days = 14;
+    // A slower earlier period must not overwrite a faster later one: only
+    // the latest request may paint.
+    var gen = 0;
     var periods = [14, 30, 90].map(function (n) {
       return { label: d['chartP' + n], active: n === days, onSelect: function () {
         days = n;
-        load(id, name, n).then(function (panels) { window.ruscker.chartModal.update(panels); });
+        var mine = ++gen;
+        load(id, name, n).then(function (panels) {
+          if (mine === gen) window.ruscker.chartModal.update(panels);
+        }).catch(function () { /* keep the last render */ });
       } };
     });
     load(id, name, days).then(function (panels) {

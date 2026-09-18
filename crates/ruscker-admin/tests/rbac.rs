@@ -644,7 +644,57 @@ async fn scoped_editor_gets_chart_json_for_own_app_and_replica() {
     assert_eq!(json["spec_id"], "time-a");
     assert_eq!(json["display_name"], "Time A");
     assert_eq!(json["step_secs"], 5);
-    assert_eq!(json["cpu"].as_array().unwrap().len(), 0, "no metrics sampled in tests");
+    assert_eq!(json["cpu"].as_array().unwrap().len(), 0, "no metrics sampled yet");
+
+    // Seed 40 samples: the history endpoint returns the full window, the
+    // 5 s snapshot only its tail (SPARK_LEN = 30) — the whole point of the
+    // split (#1058). Reverting either truncation fails here.
+    let rid = ReplicaId(uuid::Uuid::parse_str(TIME_A_REPLICA).unwrap());
+    for i in 0..40u64 {
+        state.metrics.replace(vec![(
+            rid.clone(),
+            ruscker_core::ReplicaMetrics {
+                cpu_percent: i as f64,
+                memory_bytes: i * 1024,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            },
+        )]);
+    }
+    let response = send_request(
+        state.clone(),
+        "GET",
+        &format!("/admin/dashboard/replicas/{TIME_A_REPLICA}/history"),
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    let cpu = json["cpu"].as_array().unwrap();
+    assert_eq!(cpu.len(), 40, "history carries the full window");
+    assert_eq!(cpu[0], 0.0);
+    assert_eq!(cpu[39], 39.0, "oldest first");
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/dashboard/snapshot",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let snap: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    let row = snap["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["replica_id"] == TIME_A_REPLICA)
+        .expect("own replica in the snapshot");
+    let tail = row["cpu_history"].as_array().unwrap();
+    assert_eq!(tail.len(), 30, "the snapshot ships only the sparkline tail");
+    assert_eq!(tail[0], 10.0, "…and it is the most recent tail");
+    assert_eq!(snap["history_step_secs"], 5);
 
     // An unknown app id is 404 for everyone, not 500.
     assert_eq!(

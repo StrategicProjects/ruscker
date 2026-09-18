@@ -91,6 +91,7 @@ async fn users_table_sorts_server_side_and_carries_live_region_hooks() {
     assert!(page.contains("data-live=\"#live-users\""));
     assert!(page.contains("id=\"live-users\" data-live-region"));
     assert!(page.contains("data-server-sort=\"#users-filter\""));
+    assert!(page.contains("aria-live=\"polite\" aria-atomic=\"true\">"), "pager status is announced");
     assert!(page.contains("aria-sort=\"descending\""), "created desc is the active default");
     assert!(page.contains("name=\"sort\" value=\"created\" data-default=\"created\""));
 

@@ -11,7 +11,7 @@
   </div>
 </div>
 
-{% include "admin/_kpi_band.html" %}
+<div id="activity-kpis" data-live-sync>{% include "admin/_kpi_band.html" %}</div>
 
 {# ── Sub-nav: users activity ⇄ administrative audit ──────────── #}
 <div class="flex gap-1 mb-4">
@@ -28,7 +28,7 @@
 {# ── Filter bar ───────────────────────────────────────────── #}
 {# Live region (#1057): filters and the pager swap `#live-activity` in place. #}
 <form method="get" action="{{ base }}/admin/activity" class="audit-filter-bar" data-live="#live-activity">
-  <div class="select-wrap" :class="'{{ event }}' !== '' ? 'is-active' : ''">
+  <div class="select-wrap{% if !event.is_empty() %} is-active{% endif %}">
     <select name="event" class="theme-select" onchange="this.form.submit()"
             aria-label="{{ self.t("admin-activity-event") }}">
       <option value=""              {% if event.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-event-all") }}</option>
@@ -39,7 +39,7 @@
   </div>
 
   {% if !users.is_empty() %}
-    <div class="select-wrap" :class="'{{ user }}' !== '' ? 'is-active' : ''">
+    <div class="select-wrap{% if !user.is_empty() %} is-active{% endif %}">
       <select name="user" class="theme-select" onchange="this.form.submit()"
               aria-label="{{ self.t("admin-activity-user") }}">
         <option value="" {% if user.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-user-all") }}</option>
@@ -52,7 +52,7 @@
   {% endif %}
 
   {% if !apps.is_empty() %}
-    <div class="select-wrap" :class="'{{ app }}' !== '' ? 'is-active' : ''">
+    <div class="select-wrap{% if !app.is_empty() %} is-active{% endif %}">
       <select name="app" class="theme-select" onchange="this.form.submit()"
               aria-label="{{ self.t("admin-activity-app") }}">
         <option value="" {% if app.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-app-all") }}</option>
@@ -64,7 +64,7 @@
     </div>
   {% endif %}
 
-  <div class="select-wrap" :class="'{{ period }}' !== '' ? 'is-active' : ''">
+  <div class="select-wrap{% if !period.is_empty() %} is-active{% endif %}">
     <select name="period" class="theme-select" onchange="this.form.submit()"
             aria-label="{{ self.t("admin-activity-period") }}">
       <option value=""    {% if period.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-period-all") }}</option>
@@ -137,7 +137,7 @@
         <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
       </a>
     {% endif %}
-    <span>{{ self.pager_status() }}</span>
+    <span aria-live="polite" aria-atomic="true">{{ self.pager_status() }}</span>
     {% if page < pages %}
       <a class="admin-nav-link" style="width:auto"
          href="{{ base }}/admin/activity?page={{ page + 1 }}{{ self.query_suffix() }}">

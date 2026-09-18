@@ -643,6 +643,12 @@ window.ruscker.imagePicker = (filenames) => ({
     url.search = params.toString();
     return url.toString();
   }
+  // A select's wrapper highlights while a value is chosen (server-rendered
+  // on load; kept true through live changes and Back/Forward).
+  function markActive(el) {
+    var wrap = el.closest && el.closest('.select-wrap');
+    if (wrap) wrap.classList.toggle('is-active', el.value !== '');
+  }
   // After Back/Forward the form must show what the URL says.
   function syncForm(form, url) {
     var q = new URL(url, location.href).searchParams;
@@ -650,15 +656,43 @@ window.ruscker.imagePicker = (filenames) => ({
       if (!el.name || el.type === 'submit' || el.type === 'button') return;
       var v = q.get(el.name);
       el.value = v !== null ? v : (el.dataset.default !== undefined ? el.dataset.default : '');
+      if (el.tagName === 'SELECT') markActive(el);
     });
+  }
+  // What a keyboard user had focused inside the region, described
+  // structurally so it can be re-focused in the swapped-in markup; plus the
+  // horizontal scroll of the table box, which innerHTML would reset.
+  function focusKey(region) {
+    var el = document.activeElement;
+    if (!el || !region.contains(el)) return null;
+    if (el.hasAttribute('data-sort-key')) return { sel: 'th[data-sort-key="' + el.getAttribute('data-sort-key') + '"]' };
+    if (el.tagName === 'A' && el.getAttribute('href')) return { sel: 'a[href="' + el.getAttribute('href').replace(/"/g, '\\"') + '"]' };
+    return null;
+  }
+  function scrollKey(region) {
+    var box = region.querySelector('.admin-table-scroll');
+    return box ? box.scrollLeft : 0;
+  }
+  function restore(region, key, scrollLeft) {
+    var box = region.querySelector('.admin-table-scroll');
+    if (box && scrollLeft) box.scrollLeft = scrollLeft;
+    if (!key) return;
+    var el = null;
+    try { el = region.querySelector(key.sel); } catch (e) { el = null; }
+    var target = el || region.querySelector('th[data-sort-key], a[href]');
+    if (target && target.focus) target.focus();
+  }
+  function plainClick(e) {
+    return !(e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || (e.button !== undefined && e.button !== 0));
   }
   function bind(form) {
     var sel = form.dataset.live, region = document.querySelector(sel);
     if (!region) return;
-    var timer = null, ctrl = null;
+    var timer = null, ctrl = null, typing = false;
     function swap(url, push) {
       if (ctrl) ctrl.abort();
       ctrl = new AbortController();
+      var key = focusKey(region), scrollLeft = scrollKey(region);
       region.setAttribute('aria-busy', 'true');
       fetch(url, { headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin', signal: ctrl.signal })
         .then(function (r) { if (!r.ok || r.redirected) throw new Error('navigate'); return r.text(); })
@@ -674,6 +708,7 @@ window.ruscker.imagePicker = (filenames) => ({
           region.removeAttribute('aria-busy');
           if (window.ruscker.localizeTimes) window.ruscker.localizeTimes(region);
           if (window.ruscker.enhanceTables) window.ruscker.enhanceTables(region);
+          restore(region, key, scrollLeft);
           region.dispatchEvent(new CustomEvent('rk:live-swap', { bubbles: true }));
           var state = { rkLive: sel };
           if (push) history.pushState(state, '', url); else history.replaceState(state, '', url);
@@ -683,32 +718,45 @@ window.ruscker.imagePicker = (filenames) => ({
           location.assign(url);   // login bounce, server error, odd markup: fall back to a real navigation
         });
     }
-    function go(push) { if (timer) { clearTimeout(timer); timer = null; } swap(urlFor(form), push); }
+    // Discrete actions push a history entry; keystrokes replace — except
+    // the FIRST keystroke of a search, which pushes, so Back returns to the
+    // unfiltered list instead of leaving the screen.
+    function go(push) { if (timer) { clearTimeout(timer); timer = null; } typing = false; swap(urlFor(form), push); }
     form.__rkLiveGo = go;
     form.addEventListener('submit', function (e) { e.preventDefault(); go(true); });
     form.querySelectorAll('input[type="search"], input[type="text"]').forEach(function (inp) {
       inp.addEventListener('input', function () {
         if (timer) clearTimeout(timer);
-        timer = setTimeout(function () { timer = null; go(false); }, DEBOUNCE_MS);
+        timer = setTimeout(function () {
+          timer = null;
+          var first = !typing;
+          typing = true;
+          swap(urlFor(form), first);
+        }, DEBOUNCE_MS);
       });
     });
     form.querySelectorAll('select').forEach(function (s) {
       // The markup's `onchange="this.form.submit()"` is the no-JS path;
       // with JS the change becomes a live swap.
       s.removeAttribute('onchange'); s.onchange = null;
-      s.addEventListener('change', function () { go(true); });
+      s.addEventListener('change', function () { markActive(s); go(true); });
     });
-    // Pager links (any same-path link inside the region).
+    // Same-path links — the pager inside the region, the "clear" links
+    // inside the form — swap too. Modified clicks (new tab) stay native.
     var path = new URL(form.getAttribute('action') || location.pathname, location.href).pathname;
-    region.addEventListener('click', function (e) {
+    function linkSwap(e) {
       var a = e.target.closest && e.target.closest('a[href]');
-      if (!a || !region.contains(a) || a.target || a.hasAttribute('download')) return;
+      if (!a || a.target || a.hasAttribute('download') || !plainClick(e)) return;
       var url = new URL(a.href, location.href);
       if (url.origin !== location.origin || url.pathname !== path) return;
       e.preventDefault();
+      typing = false;
+      syncForm(form, url.toString());
       swap(url.toString(), true);
-    });
-    window.addEventListener('popstate', function () { syncForm(form, location.href); swap(location.href, false); });
+    }
+    region.addEventListener('click', linkSwap);
+    form.addEventListener('click', linkSwap);
+    window.addEventListener('popstate', function () { typing = false; syncForm(form, location.href); swap(location.href, false); });
     if (!history.state || !history.state.rkLive) history.replaceState({ rkLive: sel }, '', location.href);
   }
   window.ruscker = window.ruscker || {};

@@ -11,10 +11,10 @@
       <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-audit-title") }}</h1>
       <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-audit-subtitle") }}</p>
     </div>
-    <div class="text-xs text-[color:var(--text-faint)]">{{ entries.len() }}</div>
+    <div class="text-xs text-[color:var(--text-faint)]" id="audit-count" data-live-sync aria-live="polite" aria-atomic="true">{{ entries.len() }}</div>
   </div>
 
-  {% include "admin/_kpi_band.html" %}
+  <div id="audit-kpis" data-live-sync>{% include "admin/_kpi_band.html" %}</div>
 
   {# ── Sub-nav: users activity ⇄ administrative audit (#1021) ──── #}
   <div class="flex gap-1 mb-4">
@@ -32,7 +32,7 @@
   {# Live region (#1057): filters swap `#live-audit` in place. #}
   <form method="get" action="{{ base }}/admin/audit"
         class="audit-filter-bar" data-live="#live-audit">
-    <div class="select-wrap" :class="'{{ filter.family }}' !== '' ? 'is-active' : ''">
+    <div class="select-wrap{% if !filter.family.is_empty() %} is-active{% endif %}">
       <select name="family" class="theme-select" onchange="this.form.submit()"
               aria-label="{{ self.t("admin-audit-family") }}">
         <option value="" {% if filter.family.is_empty() %}selected{% endif %}>{{ self.t("admin-audit-family-all") }}</option>
@@ -52,7 +52,7 @@
     </label>
 
     {% if distinct_actors.len() > 1 %}
-      <div class="select-wrap" :class="'{{ filter.actor }}' !== '' ? 'is-active' : ''">
+      <div class="select-wrap{% if !filter.actor.is_empty() %} is-active{% endif %}">
         <select name="actor" class="theme-select" onchange="this.form.submit()"
                 aria-label="{{ self.t("admin-audit-actor") }}">
           <option value="" {% if filter.actor.is_empty() %}selected{% endif %}>{{ self.t("admin-audit-actor-all") }}</option>

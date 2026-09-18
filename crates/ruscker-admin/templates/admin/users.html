@@ -274,7 +274,7 @@
       <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
     </a>
   {% endif %}
-  <span data-users-page="{{ page }}" data-users-pages="{{ pages }}" data-users-total="{{ total }}">{{ self.pager_status() }}</span>
+  <span data-users-page="{{ page }}" data-users-pages="{{ pages }}" data-users-total="{{ total }}" aria-live="polite" aria-atomic="true">{{ self.pager_status() }}</span>
   {% if page < pages %}
     <a class="admin-nav-link" style="width:auto"
        href="{{ base }}/admin/users?page={{ page + 1 }}{{ self.query_suffix() }}">

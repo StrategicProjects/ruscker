@@ -17,6 +17,8 @@ use axum::{
 };
 use serde::Deserialize;
 
+use axum::http::header;
+
 use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
@@ -29,6 +31,7 @@ use super::KpiMetric;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/users", get(index).post(create))
+        .route("/admin/users/export.csv", get(export_csv))
         .route("/admin/users/import", post(import))
         .route("/admin/users/import/confirm", post(import_confirm))
         .route("/admin/users/{username}/edit", get(edit).post(save_edit))
@@ -322,6 +325,149 @@ async fn index(
         import_summary,
     };
     super::render(&page)
+}
+
+/// `GET /admin/users/export.csv?scope=all|filtered&q=…` (#1056).
+#[derive(Debug, Deserialize, Default)]
+pub struct ExportQuery {
+    /// `filtered` applies `q` (the page's search); anything else — the
+    /// default — exports every user the caller may list.
+    #[serde(default)]
+    pub scope: Option<String>,
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
+/// CSV export of the users table (#1056). Same visibility as the page:
+/// [`EditorScope::user_filter`] is the WHERE clause, so a scoped Editor
+/// gets exactly the rows they can list and an Admin gets everyone.
+/// Columns mirror the import contract (`admin-users-import-help`) minus
+/// `password`, plus `created_at`, so the file re-imports as-is; groups
+/// are `;`-joined inside the field exactly as the importer expects.
+async fn export_csv(
+    scope: EditorScope,
+    State(state): State<AppState>,
+    Query(q): Query<ExportQuery>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database not attached — start with --db <path>",
+        )
+            .into_response();
+    };
+    let filtered = q.scope.as_deref() == Some("filtered");
+    let search = if filtered {
+        q.q.as_deref().unwrap_or("").trim().to_string()
+    } else {
+        String::new()
+    };
+    let filter = scope.user_filter(&search);
+    let users = match db::users::list_filtered(pool, &filter).await {
+        // SQL owns the filter, `may_touch_user` stays the policy oracle —
+        // same fail-closed check as `index` (#990).
+        Ok(u) if u.iter().all(|user| scope.may_touch_user(user)) => u,
+        Ok(_) => {
+            tracing::error!("users export query returned an unauthorized row");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "export users failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let body = users_csv(&users);
+    // Exports are reads, but they move a user directory out of the portal:
+    // audit who took what (count + filter), never the rows themselves.
+    let diff = serde_json::json!({
+        "scope": if filtered { "filtered" } else { "all" },
+        "q": search,
+        "rows": users.len(),
+    })
+    .to_string();
+    if let Err(e) = db::audit::record(pool, scope.actor(), "users.export", "users", Some(&diff)).await
+    {
+        tracing::warn!(error = ?e, "audit users.export failed");
+    }
+    let filename = format!(
+        "ruscker-users-{}{}.csv",
+        chrono::Utc::now().format("%Y%m%d"),
+        if filtered { "-filtered" } else { "" }
+    );
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Column order of the export — the importer looks columns up by header
+/// name, so order is cosmetic, but keeping `username` first matches the
+/// documented import layout.
+const EXPORT_COLUMNS: [&str; 7] = [
+    "username",
+    "role",
+    "groups",
+    "setor",
+    "email",
+    "celular",
+    "created_at",
+];
+
+/// Render users as RFC-4180-style CSV (`,` delimiter, `"` quoting, `\n`
+/// rows, UTF-8, header row). Groups are `;`-joined inside one field —
+/// the importer's contract. Free-text profile fields get the usual
+/// spreadsheet formula-injection guard (a leading `= + - @` or tab is
+/// prefixed with `'`); usernames are identifier-safe and left as-is so
+/// the file round-trips through the importer unchanged.
+fn users_csv(rows: &[db::users::UserRow]) -> String {
+    let mut out = String::with_capacity(64 + rows.len() * 96);
+    out.push_str(&EXPORT_COLUMNS.join(","));
+    out.push('\n');
+    for u in rows {
+        let fields = [
+            csv_field(&u.username, false),
+            csv_field(u.role.as_str(), false),
+            csv_field(&u.groups.join(";"), false),
+            csv_field(u.setor.as_deref().unwrap_or(""), true),
+            csv_field(u.email.as_deref().unwrap_or(""), true),
+            csv_field(u.celular.as_deref().unwrap_or(""), true),
+            csv_field(&u.created_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(), false),
+        ];
+        out.push_str(&fields.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// Quote one CSV field when it needs it; `guard_formula` neutralizes a
+/// value a spreadsheet would otherwise evaluate.
+fn csv_field(value: &str, guard_formula: bool) -> String {
+    let guarded: std::borrow::Cow<'_, str> = if guard_formula
+        && value
+            .chars()
+            .next()
+            .is_some_and(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r'))
+    {
+        format!("'{value}").into()
+    } else {
+        value.into()
+    };
+    if guarded
+        .chars()
+        .any(|c| matches!(c, ',' | '"' | '\n' | '\r'))
+    {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded.into_owned()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1152,6 +1298,60 @@ async fn would_strip_last_admin(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The export must re-import as-is (#1056): same column names the
+    /// importer looks up, `;`-joined groups, quoting that survives
+    /// `split_csv_line`, and the formula guard only where it can't break
+    /// a round trip.
+    #[test]
+    fn users_csv_round_trips_through_the_importer() {
+        use chrono::TimeZone;
+        let at = chrono::Utc.with_ymd_and_hms(2026, 9, 18, 12, 0, 0).unwrap();
+        let rows = vec![
+            db::users::UserRow {
+                id: "1".into(),
+                username: "ana@x.gov".into(),
+                role: Role::Editor,
+                must_change_password: false,
+                groups: vec!["saude".into(), "educação".into()],
+                created_at: at,
+                created_by: None,
+                setor: Some("Dados, Estatística".into()),
+                email: Some("ana@x.gov".into()),
+                celular: Some("+55 81 9".into()),
+            },
+            db::users::UserRow {
+                id: "2".into(),
+                username: "bob".into(),
+                role: Role::Viewer,
+                must_change_password: true,
+                groups: vec![],
+                created_at: at,
+                created_by: Some("ana".into()),
+                setor: Some("=HYPERLINK(\"x\")".into()),
+                email: None,
+                celular: None,
+            },
+        ];
+        let csv = users_csv(&rows);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "username,role,groups,setor,email,celular,created_at");
+        assert_eq!(
+            lines[1],
+            "ana@x.gov,editor,saude;educação,\"Dados, Estatística\",ana@x.gov,'+55 81 9,2026-09-18T12:00:00Z"
+        );
+        assert_eq!(lines[2], "bob,viewer,,\"'=HYPERLINK(\"\"x\"\")\",,,2026-09-18T12:00:00Z");
+        // Round trip: the importer sees the same users, roles and groups.
+        let parsed = parse_csv_users(&csv).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].username, "ana@x.gov");
+        assert_eq!(parsed[0].role, Role::Editor);
+        assert_eq!(parsed[0].groups, vec!["saude".to_string(), "educação".to_string()]);
+        assert_eq!(parsed[0].setor, "Dados, Estatística");
+        assert_eq!(parsed[1].username, "bob");
+        assert_eq!(parsed[1].role, Role::Viewer);
+        assert!(parsed[1].groups.is_empty());
+    }
 
     #[test]
     fn splits_quoted_csv_fields() {

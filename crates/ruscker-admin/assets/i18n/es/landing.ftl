@@ -131,6 +131,8 @@ admin-users-you = tú
 # Búsqueda + paginación en el servidor en la tabla de usuarios (#999)
 admin-users-search = Buscar
 admin-users-search-clear = Limpiar búsqueda
+admin-users-export-all = Exportar CSV (todos)
+admin-users-export-filtered = Exportar filtrados
 admin-users-search-none = Ningún usuario coincide con la búsqueda.
 admin-users-pager-status = Página { $page } de { $pages } · { $total } { $total ->
         [one] usuario

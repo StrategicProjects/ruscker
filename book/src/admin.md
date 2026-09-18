@@ -46,6 +46,15 @@ diacritics, so `Joao` won't find `João`) covers username, groups,
 department, email and phone on both SQLite and Postgres. An Editor's totals,
 search and pages all cover only accounts in that Editor's scope.
 
+**Export CSV** sits beside the search: *all* ignores the search and writes
+every account the caller may list, *filtered* (shown only while a search is
+active, with its count) writes exactly the rows the search matches across
+every page. Columns are the import's (`username,role,groups,setor,email,
+celular` — `groups` joined with `;`) plus `created_at`, and never a
+password, so the file re-imports as-is. A scoped Editor exports only their
+own scope. Each export writes a `users.export` audit row with the scope,
+term and row count, never the rows.
+
 Passwords follow a **policy**: at least 8 characters, with at least one
 uppercase letter, one lowercase letter, one digit and one special
 character — enforced everywhere a password is set (create, reset,

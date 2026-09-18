@@ -9,6 +9,55 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.52 — 2026-09-18
+
+Six admin-panel requests from the operators, each reviewed by an
+independent code reviewer before merging (#1053–#1058).
+
+- **Recovery codes you can actually keep.** The one-time 2FA recovery
+  codes now show grouped as `ABCDE-FGH23`, numbered, with the digits
+  tinted so `B`/`8` and `S`/`5` read apart, and they are accepted with or
+  without the dash. **Download (.txt)** and **Copy all** buttons are built
+  in the browser — the server never re-emits the codes, and "Copied" only
+  appears when the copy really happened. The 2FA page shows **how many
+  codes remain** (only a count is knowable; the database holds salted
+  hashes), warns at two or fewer, and offers **Generate new codes** behind
+  your password. Regeneration is compare-and-set: re-submitting the same
+  form after a refresh, or from a second tab, is refused instead of
+  silently invalidating a set you already saved.
+
+- **Export users to CSV** (Admin-only, like the import): all accounts, or
+  exactly the rows the current search matches across every page. Same
+  columns as the import, with an always-empty `password` column, so the
+  file re-imports once you fill that in; values a spreadsheet would read as
+  a formula are guarded with a leading `'`, which the importer strips
+  again. Every export writes an audit row (scope, term, row count — never
+  the rows) and is refused if that row can't be written.
+
+- **KPI band on Disk and System**, the two screens the standard band had
+  not reached. Each Disk card shows `—` when its own inventory failed, so
+  a Docker outage never reads as "nothing here".
+
+- **Charts you can expand.** The Apps list's 14-day access sparkline opens
+  a full-width daily chart with 14 / 30 / 90-day periods. The Containers
+  page finally *draws* the CPU and memory history it always collected —
+  a sparkline per replica — and a chart button opens the last 30 minutes,
+  live while open. The 5 s dashboard poll ships only the sparkline's tail;
+  the full window is fetched for the one replica you open. A transient
+  `docker stats` failure no longer erases a replica's history.
+
+- **Filters, sort and paging without reloading** on Users, Audit and
+  Activity: the table region is fetched and swapped in place as you type,
+  the URL stays in sync (reload or share a link and you get the same view),
+  the Back button steps through the history, keyboard focus and horizontal
+  scroll survive a swap, and KPI bands follow the filter. Sorting Users by
+  user, role or created date is now **server-side**, so it orders the whole
+  result rather than the visible page.
+
+- Also: the MFA page's "forget device" buttons had no styles since the MFA
+  epic (they rendered as bare text) — fixed; the 2FA "configured since"
+  time now renders in your own timezone like every other admin timestamp.
+
 ## v0.2.51 — 2026-07-29
 
 - **Admin timestamps now read in your own timezone.** Every date in the

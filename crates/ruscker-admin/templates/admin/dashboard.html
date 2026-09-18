@@ -21,7 +21,8 @@
     gap: 8px;
   }
   /* Inline CPU/memory trend sparkline in a replica row. */
-  .dash-spark { vertical-align: middle; margin-left: 6px; opacity: 0.75; }
+  .dash-spark { display: inline-block; vertical-align: middle; margin-left: 6px; opacity: 0.75; line-height: 0; }
+  .dash-spark .sparkline { display: block; }
   /* Shimmer placeholder for a CPU/mem cell whose first reading hasn't
      arrived yet (#623 perceived-speed). Replaces the bare "—": a loading
      reading reads as loading, not as a zero/empty value. `.sk` (the
@@ -127,7 +128,13 @@
      data-restart-label="{{ self.t("admin-dashboard-action-restart") }}"
      data-confirm-stop="{{ self.t("admin-dashboard-confirm-stop") }}"
      data-confirm-restart="{{ self.t("admin-dashboard-confirm-restart") }}"
-     data-can-manage="{% if role.can_manage() %}1{% endif %}">
+     data-can-manage="{% if role.can_manage() %}1{% endif %}"
+     data-chart-expand="{{ self.t("admin-chart-expand") }}"
+     data-chart-close="{{ self.t("admin-chart-close") }}"
+     data-chart-no-data="{{ self.t("admin-chart-no-data") }}"
+     data-chart-cpu="{{ self.t("admin-chart-cpu") }}"
+     data-chart-mem="{{ self.t("admin-chart-mem") }}"
+     data-chart-window="{{ self.t("admin-chart-window") }}">
   {% for g in groups %}
   <div class="app-group is-open" data-spec-id="{{ g.spec_id }}">
     <div class="app-group__head" role="button" tabindex="0" aria-expanded="true">
@@ -159,6 +166,7 @@
         <span class="metric-cell tnum">{% match row.cpu_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="sk sk-line metric-sk" title="{{ self.t("admin-dashboard-metrics-pending") }}"></span>{% endmatch %}</span>
         <span class="metric-cell tnum">{% match row.memory_display %}{% when Some with (s) %}{{ s }}{% when None %}<span class="sk sk-line metric-sk"></span>{% endmatch %}</span>
         <span class="replica-actions">
+          <button type="button" class="spark-btn" data-hist="{{ row.replica_id }}" title="{{ self.t("admin-chart-expand") }}"><i class="ti ti-chart-line" aria-hidden="true"></i></button>
           {% if role.can_manage() %}
           <a href="{{ base }}/admin/dashboard/logs/{{ row.replica_id }}" title="{{ self.t("admin-logs-title") }}"><i class="ti ti-file-text" aria-hidden="true"></i></a>
           {# data-confirm + the delegated submit listener below — never an
@@ -204,6 +212,9 @@
   // The server route guard enforces it regardless; this keeps the
   // SSE-patched rows consistent with the initial server render.
   var canManage = !!ds.canManage;
+  var chart = window.ruscker && window.ruscker.chartModal;
+  var POLL_MS = 5000;
+  var stepSecs = 5;   // overwritten by every snapshot's history_step_secs
 
   // Which app groups the user has collapsed (spec_id → true). Groups are
   // open by default, so this survives the SSE rebuild and a new app shows
@@ -229,11 +240,20 @@
       : '<span class="sk sk-line metric-sk" title="' + escapeHtml(pendingLabel) + '"></span>';
   }
 
+  // Inline CPU/memory sparkline from the snapshot's history tail (#1058);
+  // empty until two samples exist.
+  function sparkHtml(values) {
+    var svg = chart ? chart.spark(values, 48, 14) : '';
+    return svg ? '<span class="dash-spark">' + svg + '</span>' : '';
+  }
+
   function actionsHtml(row) {
-    if (!canManage) return '';
     var base = window.RUSCKER_BASE || '';
     var rid = encodeURIComponent(row.replica_id);
-    return ''
+    var expand = '<button type="button" class="spark-btn" data-hist="' + escapeHtml(row.replica_id)
+      + '" title="' + escapeHtml(ds.chartExpand || '') + '"><i class="ti ti-chart-line"></i></button>';
+    if (!canManage) return expand;
+    return expand
       + '<a href="' + base + '/admin/dashboard/logs/' + rid + '" title="' + escapeHtml(logsTitle)
         + '"><i class="ti ti-file-text"></i></a>'
       + '<form method="post" action="' + base + '/admin/dashboard/replicas/' + rid
@@ -303,8 +323,8 @@
       + '<span class="mono faint">' + escapeHtml(row.uptime) + '</span>'
       + '<span class="muted">' + escapeHtml(row.state_label) + '</span>'
       + '<span class="metric-cell tnum">' + row.sessions_active + '<span class="faint">/' + row.sessions_max + '</span></span>'
-      + '<span class="metric-cell tnum">' + cell(row.cpu_display) + '</span>'
-      + '<span class="metric-cell tnum">' + cell(row.memory_display) + '</span>'
+      + '<span class="metric-cell tnum">' + cell(row.cpu_display) + sparkHtml(row.cpu_history) + '</span>'
+      + '<span class="metric-cell tnum">' + cell(row.memory_display) + sparkHtml(row.mem_history) + '</span>'
       + '<span class="replica-actions">' + actionsHtml(row) + '</span>'
       + '</div>';
   }
@@ -383,6 +403,7 @@
   }, false);
 
   function apply(snap) {
+    if (snap.history_step_secs) stepSecs = snap.history_step_secs;
     metric('containers', snap.total_containers);
     metric('sessions', snap.total_sessions);
     metric('specs', snap.spec_count);
@@ -453,6 +474,72 @@
     (el || scope).focus();
   }
   var lastGroupsHtml = null;
+
+  // Expanded per-replica chart (#1058): the row's expand button opens the
+  // shared modal with the FULL history window for that one replica
+  // (`/replicas/{id}/history`, 30 min at 5 s), refreshed on the poll
+  // cadence while open. Delegated on the container so it survives the
+  // innerHTML rebuilds.
+  var histTimer = null, histCtrl = null, histInflight = false;
+  function clock(secsAgo) {
+    var d = new Date(Date.now() - secsAgo * 1000);
+    var p = function (n) { return (n < 10 ? '0' : '') + n; };
+    return p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+  function histPanels(h) {
+    var n = h.cpu.length, step = h.step_secs || stepSecs;
+    var labels = h.cpu.map(function (_, i) { return clock((n - 1 - i) * step); });
+    return [
+      { label: ds.chartCpu || 'CPU', values: h.cpu, xLabels: labels, noData: ds.chartNoData || '',
+        // Idle containers sit under 1 %: one decimal below 10 % keeps
+        // the gridline labels from all reading "0%".
+        fmt: function (v) { return (v < 10 ? Math.round(v * 10) / 10 : Math.round(v)) + '%'; } },
+      { label: ds.chartMem || 'Memory', values: h.mem, xLabels: labels, noData: ds.chartNoData || '',
+        fmt: fmtBytes }
+    ];
+  }
+  function fetchHist(rid) {
+    histCtrl = new AbortController();
+    return fetch((window.RUSCKER_BASE || '') + '/admin/dashboard/replicas/' + encodeURIComponent(rid) + '/history',
+                 { headers: { 'X-Requested-With': 'fetch' }, signal: histCtrl.signal })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); });
+  }
+  function stopHist() {
+    if (histTimer) { clearInterval(histTimer); histTimer = null; }
+    if (histCtrl) { histCtrl.abort(); histCtrl = null; }
+    histInflight = false;
+  }
+  function windowLabel(h) {
+    var secs = Math.max(0, h.cpu.length - 1) * (h.step_secs || stepSecs);
+    var span = secs >= 60 ? Math.round(secs / 60) + ' min' : secs + ' s';
+    return h.spec_id + ' · ' + (ds.chartWindow || '') + ' ' + span;
+  }
+  function openHist(rid) {
+    if (!chart) return;
+    stopHist();
+    fetchHist(rid).then(function (h) {
+      chart.open({ title: h.display_name || h.spec_id, subtitle: windowLabel(h), closeLabel: ds.chartClose,
+                   panels: histPanels(h), onClose: stopHist });
+      // Same rule as the main poll: never overlap a slow request (an
+      // HTTP/1.1 front end has ~6 connections per origin to give), and
+      // abort whatever is in flight when the modal closes.
+      histTimer = setInterval(function () {
+        if (document.hidden || histInflight) return;
+        histInflight = true;
+        fetchHist(rid).then(function (h2) { chart.update(histPanels(h2), windowLabel(h2)); })
+          .catch(function () { /* keep the last render */ })
+          .finally(function () { histInflight = false; });
+      }, POLL_MS);
+    }).catch(function () { /* nothing to show */ });
+  }
+  if (container) {
+    container.addEventListener('click', function (e) {
+      var btn = e.target.closest && e.target.closest('[data-hist]');
+      if (!btn || !container.contains(btn)) return;
+      e.preventDefault(); e.stopPropagation();
+      openHist(btn.getAttribute('data-hist'));
+    });
+  }
 
   // Expand/collapse a group on head click or Enter/Space. Delegated on the
   // container so it keeps working after every innerHTML rebuild. Action
@@ -540,7 +627,7 @@
   // fetch returns and frees the connection between ticks; the snapshot is
   // server-cached so the cost is tiny. Paused while the tab is hidden.
   var live = document.getElementById('dash-live');
-  var POLL_MS = 5000;
+  POLL_MS = 5000;
   var timer = null, inflight = false;
   function poll() {
     if (inflight) return;            // never overlap a slow request

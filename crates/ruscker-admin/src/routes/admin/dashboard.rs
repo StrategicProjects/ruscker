@@ -47,6 +47,10 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/dashboard", get(index))
         .route("/admin/dashboard/snapshot", get(snapshot))
+        .route(
+            "/admin/dashboard/replicas/{replica_id}/history",
+            get(replica_history),
+        )
         .route("/admin/dashboard/logs/{replica_id}", get(logs))
         .route("/admin/dashboard/logs/{replica_id}/stream", get(logs_stream))
         .route("/admin/dashboard/replicas/{replica_id}/stop", post(stop_replica))
@@ -175,6 +179,9 @@ struct ReplicaRow {
 /// endpoints get the fix.
 #[derive(serde::Serialize, Clone)]
 struct DashboardSnapshot {
+    /// Seconds between two history samples (the metrics refresh cadence),
+    /// so the client can label the sparkline's time axis (#1058).
+    history_step_secs: u64,
     backend_connected: bool,
     total_containers: usize,
     total_sessions: u32,
@@ -561,8 +568,16 @@ async fn build_snapshot_uncached(
             let cached = state.metrics.get(&r.id);
             let cpu_display = cached.as_ref().map(|c| format!("{:.0}%", c.metrics.cpu_percent));
             let memory_display = cached.as_ref().map(|c| format_bytes(c.metrics.memory_bytes));
-            let cpu_history = cached.as_ref().map(|c| c.cpu_history.clone()).unwrap_or_default();
-            let mem_history = cached.as_ref().map(|c| c.mem_history.clone()).unwrap_or_default();
+            // Inline sparklines only need the tail; the full window is one
+            // on-demand fetch away (`replica_history`, #1058).
+            let cpu_history = cached
+                .as_ref()
+                .map(|c| tail(&c.cpu_history, SPARK_LEN))
+                .unwrap_or_default();
+            let mem_history = cached
+                .as_ref()
+                .map(|c| tail(&c.mem_history, SPARK_LEN))
+                .unwrap_or_default();
             if let Some(c) = cached.as_ref() {
                 total_memory_bytes = total_memory_bytes.saturating_add(c.metrics.memory_bytes);
             }
@@ -596,6 +611,7 @@ async fn build_snapshot_uncached(
     };
 
     DashboardSnapshot {
+        history_step_secs: crate::metrics_cache::REFRESH_INTERVAL.as_secs(),
         backend_connected,
         total_containers,
         total_sessions,
@@ -839,6 +855,78 @@ async fn scoped_replica_spec(
     Ok((Some(spec_id), spec))
 }
 
+/// How many trailing samples the 5 s snapshot carries per replica for
+/// the inline sparklines (#1058): 30 × 5 s = 2.5 min. The metrics cache
+/// keeps [`crate::metrics_cache::HISTORY_LEN`]; the expanded chart fetches
+/// that full window for ONE replica through [`replica_history`] instead of
+/// every replica shipping 30 min of samples on every poll.
+pub const SPARK_LEN: usize = 30;
+// The inline sparkline must never ship the whole cache window.
+const _: () = assert!(SPARK_LEN < crate::metrics_cache::HISTORY_LEN);
+
+/// Last `n` items of `v` (all of them when shorter), oldest first.
+fn tail<T: Clone>(v: &[T], n: usize) -> Vec<T> {
+    v[v.len().saturating_sub(n)..].to_vec()
+}
+
+/// JSON body of `GET /admin/dashboard/replicas/{id}/history` (#1058): the
+/// full CPU/memory sample window for one replica, oldest first.
+#[derive(serde::Serialize)]
+struct ReplicaHistory {
+    replica_id: String,
+    spec_id: String,
+    display_name: String,
+    /// Seconds between samples — `cpu.len() × step_secs` is the window.
+    step_secs: u64,
+    cpu: Vec<f64>,
+    mem: Vec<u64>,
+}
+
+/// `GET /admin/dashboard/replicas/{id}/history` — the expanded chart's
+/// data (#1058). Same authorization as logs/stop/restart: the replica must
+/// resolve to a spec inside the caller's scope, else **404** (an
+/// out-of-scope id must not be confirmable, #990). A replica the metrics
+/// cache hasn't sampled yet answers with empty series, not an error.
+async fn replica_history(
+    scope: EditorScope,
+    State(state): State<AppState>,
+    Path(replica_id): Path<String>,
+) -> Response {
+    let Ok(uuid) = uuid::Uuid::parse_str(&replica_id) else {
+        return (StatusCode::BAD_REQUEST, "invalid replica id").into_response();
+    };
+    let rid = ReplicaId(uuid);
+    let (spec_id, spec) = match scoped_replica_spec(&state, &scope, &rid).await {
+        Ok(found) => found,
+        Err(response) => return response,
+    };
+    // Unknown to the registry (only an unscoped Admin gets here with None):
+    // nothing to chart.
+    let Some(spec_id) = spec_id else {
+        return (StatusCode::NOT_FOUND, "replica not found").into_response();
+    };
+    let display_name = spec
+        .and_then(|s| s.display_name)
+        .unwrap_or_else(|| spec_id.clone());
+    let (cpu, mem) = state
+        .metrics
+        .get(&rid)
+        .map(|c| (c.cpu_history, c.mem_history))
+        .unwrap_or_default();
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        axum::Json(ReplicaHistory {
+            replica_id,
+            spec_id,
+            display_name,
+            step_secs: crate::metrics_cache::REFRESH_INTERVAL.as_secs(),
+            cpu,
+            mem,
+        }),
+    )
+        .into_response()
+}
+
 /// POST `/admin/dashboard/replicas/{id}/stop` — stop a replica
 /// and drop it from the registry. The auto-scaler will respawn
 /// it to `min-replicas` on its next tick if the spec demands a
@@ -1023,6 +1111,13 @@ mod tests {
         // produce a "-5s" label.
         use chrono::Duration as D;
         assert_eq!(format_uptime(D::seconds(-30)), "0s");
+    }
+
+    #[test]
+    fn tail_keeps_the_most_recent_samples() {
+        assert_eq!(tail(&[1, 2, 3, 4, 5], 3), vec![3, 4, 5]);
+        assert_eq!(tail(&[1, 2], 3), vec![1, 2]);
+        assert_eq!(tail::<i32>(&[], 3), Vec::<i32>::new());
     }
 
     #[test]

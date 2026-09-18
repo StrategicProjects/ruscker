@@ -204,7 +204,13 @@ count up on load. Below them, replicas are **grouped by app** in
 expandable cards: each card's header summarises the app — replica count,
 worst replica state, and aggregate sessions / CPU / memory with little
 meters — and expands to the per-replica detail (state, container id,
-uptime, sessions, CPU, memory) with stop / restart / logs actions.
+uptime, sessions, CPU, memory) with stop / restart / logs actions. The
+CPU and memory cells carry a small sparkline of the last 2.5 minutes,
+and the chart button on each row opens a full-width chart of the last
+30 minutes (one panel each for CPU and memory, hover for the exact
+reading), refreshed live while open. The dashboard poll ships only the
+sparkline's tail; the full window is fetched for the one replica you
+open, from `/admin/dashboard/replicas/{id}/history`.
 A toolbar offers an **expand/collapse-all** control. Shows a banner when
 started without `--docker`. Stop and restart take a few seconds (drain,
 signal, and a respawn for restart), so while one runs the replica row
@@ -220,7 +226,12 @@ a colour-coded **kind** pill, and an **Access** column with the spec's
 access-group badges (or a globe + "public" when ungated). Each row also
 has a **featured star** next to the actions: click it to toggle whether
 the app appears in the landing page's *Featured* carousel, inline,
-without opening the editor (solid = featured).
+without opening the editor (solid = featured). The **Accesses** column
+pairs the total with a 14-day sparkline; click it to open a full-width
+daily chart with 14 / 30 / 90-day periods (hover for the exact count),
+served by `/admin/specs/{id}/access-series`. Both chart endpoints answer
+404 for an app outside a scoped Editor's groups, like every other id
+route.
 
 The Actions column also carries an **archive toggle** and a **delete**
 button. Archiving deactivates the app in place — its card leaves the

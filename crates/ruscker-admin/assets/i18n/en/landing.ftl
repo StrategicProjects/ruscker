@@ -131,6 +131,8 @@ admin-users-you = you
 # Server-side search + pagination on the users table (#999)
 admin-users-search = Search
 admin-users-search-clear = Clear search
+admin-users-export-all = Export CSV (all)
+admin-users-export-filtered = Export filtered
 admin-users-search-none = No users match the search.
 admin-users-pager-status = Page { $page } of { $pages } · { $total } { $total ->
         [one] user

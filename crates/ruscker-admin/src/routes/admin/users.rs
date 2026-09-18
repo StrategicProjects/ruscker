@@ -17,6 +17,8 @@ use axum::{
 };
 use serde::Deserialize;
 
+use axum::http::header;
+
 use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::i18n::{Locale, Locales};
@@ -29,6 +31,7 @@ use super::KpiMetric;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/users", get(index).post(create))
+        .route("/admin/users/export.csv", get(export_csv))
         .route("/admin/users/import", post(import))
         .route("/admin/users/import/confirm", post(import_confirm))
         .route("/admin/users/{username}/edit", get(edit).post(save_edit))
@@ -322,6 +325,180 @@ async fn index(
         import_summary,
     };
     super::render(&page)
+}
+
+/// `?scope=` of [`export_csv`] (#1056). A closed enum: an unknown value
+/// is a 400 from the query extractor, never silently "all".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ExportScope {
+    #[default]
+    All,
+    Filtered,
+}
+
+/// `GET /admin/users/export.csv?scope=all|filtered&q=…` (#1056).
+#[derive(Debug, Deserialize, Default)]
+pub struct ExportQuery {
+    /// `filtered` applies `q` (the page's search); `all` — the default —
+    /// exports every account.
+    #[serde(default)]
+    pub scope: ExportScope,
+    #[serde(default)]
+    pub q: Option<String>,
+}
+
+/// CSV export of the users table (#1056). **Admin-only**, like the CSV
+/// import it mirrors: a bulk download of the directory (usernames,
+/// departments, e-mails, phones) is not something a group-scoped Editor
+/// gets, even over rows they could page through. Columns mirror the
+/// import contract — including an always-empty `password` column, so the
+/// file re-imports once that column is filled in — plus `created_at`;
+/// groups are `;`-joined inside the field exactly as the importer expects.
+async fn export_csv(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Query(q): Query<ExportQuery>,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "database not attached — start with --db <path>",
+        )
+            .into_response();
+    };
+    let search = match q.scope {
+        ExportScope::Filtered => q.q.as_deref().unwrap_or("").trim().to_string(),
+        ExportScope::All => String::new(),
+    };
+    // `scope=filtered` with an empty term IS "all" — say so in the audit
+    // row rather than recording a filter that filtered nothing.
+    let filtered = !search.is_empty();
+    let filter = db::users::UserFilter {
+        search: &search,
+        visible_groups: None,
+    };
+    let users = match db::users::list_filtered(pool, &filter).await {
+        Ok(u) => u,
+        Err(e) => {
+            tracing::error!(error = ?e, "export users failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    // Exports move a user directory out of the portal: the audit row (who,
+    // what filter, how many — never the rows) is written BEFORE the body
+    // leaves, and a failure to write it fails the export (codex review).
+    let diff = serde_json::json!({
+        "scope": if filtered { "filtered" } else { "all" },
+        "q": search,
+        "rows": users.len(),
+    })
+    .to_string();
+    if let Err(e) = db::audit::record(pool, admin.actor(), "users.export", "users", Some(&diff)).await
+    {
+        tracing::error!(error = ?e, "audit users.export failed; export refused");
+        return (StatusCode::INTERNAL_SERVER_ERROR, "audit error").into_response();
+    }
+    let body = users_csv(&users);
+    let filename = format!(
+        "ruscker-users-{}{}.csv",
+        chrono::Utc::now().format("%Y%m%d"),
+        if filtered { "-filtered" } else { "" }
+    );
+    (
+        [
+            (header::CONTENT_TYPE, "text/csv; charset=utf-8".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Column order of the export — the importer looks columns up by header
+/// name, so order is cosmetic, but keeping `username` first matches the
+/// documented import layout.
+const EXPORT_COLUMNS: [&str; 8] = [
+    "username",
+    "role",
+    "password",
+    "groups",
+    "setor",
+    "email",
+    "celular",
+    "created_at",
+];
+
+/// Render users as RFC-4180-style CSV (`,` delimiter, `"` quoting, `\n`
+/// rows, UTF-8, header row). Groups are `;`-joined inside one field —
+/// the importer's contract. Every free-text field (groups, department,
+/// e-mail, phone) gets the spreadsheet formula-injection guard (a
+/// leading `= + - @` or tab is prefixed with `'`), which the importer
+/// strips again (`csv_unguard`); usernames and roles are closed
+/// vocabularies and travel as-is. The `password` column is always empty:
+/// hashes never leave, and the importer needs the column filled in.
+fn users_csv(rows: &[db::users::UserRow]) -> String {
+    let mut out = String::with_capacity(64 + rows.len() * 96);
+    out.push_str(&EXPORT_COLUMNS.join(","));
+    out.push('\n');
+    for u in rows {
+        let fields = [
+            csv_field(&u.username, false),
+            csv_field(u.role.as_str(), false),
+            String::new(),
+            csv_field(&u.groups.join(";"), true),
+            csv_field(u.setor.as_deref().unwrap_or(""), true),
+            csv_field(u.email.as_deref().unwrap_or(""), true),
+            csv_field(u.celular.as_deref().unwrap_or(""), true),
+            csv_field(&u.created_at.format("%Y-%m-%dT%H:%M:%SZ").to_string(), false),
+        ];
+        out.push_str(&fields.join(","));
+        out.push('\n');
+    }
+    out
+}
+
+/// A value a spreadsheet would evaluate as a formula (or that would carry
+/// the guard apostrophe itself).
+fn csv_needs_guard(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .is_some_and(|c| matches!(c, '=' | '+' | '-' | '@' | '\t' | '\r' | '\''))
+}
+
+/// Inverse of the export's formula guard, applied by the importer to the
+/// free-text fields: `'=x` → `=x`, `'+55…` → `+55…`. Only a guard
+/// apostrophe is removed (one followed by a character we would have
+/// guarded), so a value that legitimately starts with `'` and a letter
+/// is untouched.
+fn csv_unguard(value: &str) -> &str {
+    match value.strip_prefix('\'') {
+        Some(rest) if csv_needs_guard(rest) => rest,
+        _ => value,
+    }
+}
+
+/// Quote one CSV field when it needs it; `guard_formula` neutralizes a
+/// value a spreadsheet would otherwise evaluate.
+fn csv_field(value: &str, guard_formula: bool) -> String {
+    let guarded: std::borrow::Cow<'_, str> = if guard_formula && csv_needs_guard(value) {
+        format!("'{value}").into()
+    } else {
+        value.into()
+    };
+    if guarded
+        .chars()
+        .any(|c| matches!(c, ',' | '"' | '\n' | '\r'))
+    {
+        format!("\"{}\"", guarded.replace('"', "\"\""))
+    } else {
+        guarded.into_owned()
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -931,7 +1108,7 @@ fn parse_csv_users(body: &str) -> Result<Vec<CsvRow>, &'static str> {
         // In a CSV the comma is the field delimiter, so groups inside a
         // single field are separated by `;` — normalize to `,` so the
         // shared `parse_groups` splits them.
-        let groups = db::users::parse_groups(&get(&f, i_groups).replace(';', ","));
+        let groups = db::users::parse_groups(&csv_unguard(&get(&f, i_groups)).replace(';', ","));
 
         let error = if !db::users::is_valid_username(&username) {
             Some("bad-username")
@@ -949,9 +1126,9 @@ fn parse_csv_users(body: &str) -> Result<Vec<CsvRow>, &'static str> {
             role,
             password,
             groups,
-            setor: get(&f, i_setor),
-            email: get(&f, i_email),
-            celular: get(&f, i_cel),
+            setor: csv_unguard(&get(&f, i_setor)).to_string(),
+            email: csv_unguard(&get(&f, i_email)).to_string(),
+            celular: csv_unguard(&get(&f, i_cel)).to_string(),
             error,
             exists: false,
         });
@@ -1152,6 +1329,74 @@ async fn would_strip_last_admin(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The export re-imports once the `password` column is filled (#1056):
+    /// same column names the importer looks up, `;`-joined groups,
+    /// quoting that survives `split_csv_line`, and a formula guard the
+    /// importer strips again — so nothing but the password stands between
+    /// the file and a clean import.
+    #[test]
+    fn users_csv_round_trips_through_the_importer_once_passwords_are_filled() {
+        use chrono::TimeZone;
+        let at = chrono::Utc.with_ymd_and_hms(2026, 9, 18, 12, 0, 0).unwrap();
+        let rows = vec![
+            db::users::UserRow {
+                id: "1".into(),
+                username: "ana@x.gov".into(),
+                role: Role::Editor,
+                must_change_password: false,
+                groups: vec!["saude".into(), "educação".into()],
+                created_at: at,
+                created_by: None,
+                setor: Some("Dados, Estatística".into()),
+                email: Some("ana@x.gov".into()),
+                celular: Some("+55 81 9".into()),
+            },
+            db::users::UserRow {
+                id: "2".into(),
+                username: "bob".into(),
+                role: Role::Viewer,
+                must_change_password: true,
+                groups: vec!["=cmd".into()],
+                created_at: at,
+                created_by: Some("ana".into()),
+                setor: Some("=HYPERLINK(\"x\")".into()),
+                email: None,
+                celular: None,
+            },
+        ];
+        let csv = users_csv(&rows);
+        let lines: Vec<&str> = csv.lines().collect();
+        assert_eq!(lines[0], "username,role,password,groups,setor,email,celular,created_at");
+        assert_eq!(
+            lines[1],
+            "ana@x.gov,editor,,saude;educação,\"Dados, Estatística\",ana@x.gov,'+55 81 9,2026-09-18T12:00:00Z"
+        );
+        assert_eq!(lines[2], "bob,viewer,,'=cmd,\"'=HYPERLINK(\"\"x\"\")\",,,2026-09-18T12:00:00Z");
+
+        // As exported: every row is refused ONLY for the missing password.
+        let parsed = parse_csv_users(&csv).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert!(parsed.iter().all(|r| r.error == Some("bad-password") && !r.importable()));
+
+        // With passwords filled in, the rows import and the guard is gone.
+        let filled = csv
+            .replace("ana@x.gov,editor,,", "ana@x.gov,editor,Strong#Pass1,")
+            .replace("bob,viewer,,", "bob,viewer,Strong#Pass2,");
+        let parsed = parse_csv_users(&filled).unwrap();
+        assert!(parsed.iter().all(|r| r.error.is_none() && r.importable()), "{:?}", parsed.iter().map(|r| r.error).collect::<Vec<_>>());
+        assert_eq!(parsed[0].username, "ana@x.gov");
+        assert_eq!(parsed[0].role, Role::Editor);
+        assert_eq!(parsed[0].groups, vec!["saude".to_string(), "educação".to_string()]);
+        assert_eq!(parsed[0].setor, "Dados, Estatística");
+        assert_eq!(parsed[0].celular, "+55 81 9", "the guard apostrophe is stripped");
+        assert_eq!(parsed[1].username, "bob");
+        assert_eq!(parsed[1].role, Role::Viewer);
+        assert_eq!(parsed[1].groups, vec!["=cmd".to_string()]);
+        assert_eq!(parsed[1].setor, "=HYPERLINK(\"x\")");
+        // A value that legitimately starts with an apostrophe is untouched.
+        assert_eq!(csv_unguard("'Ana"), "'Ana");
+    }
 
     #[test]
     fn splits_quoted_csv_fields() {

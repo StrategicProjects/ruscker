@@ -40,6 +40,7 @@ pub fn routes() -> Router<AppState> {
             post(toggle_featured),
         )
         .route("/admin/specs/{id}/state/toggle", post(toggle_state))
+        .route("/admin/specs/{id}/access-series", get(access_series))
         .layer(DefaultBodyLimit::max(IMPORT_BODY_LIMIT))
 }
 
@@ -252,6 +253,79 @@ impl<'a> SpecsPage<'a> {
             KpiMetric::new("ti-lock", "admin-specs-kpi-restricted", self.kpi_restricted),
         ]
     }
+}
+
+/// `?days=` of [`access_series`]; clamped to `7..=365`, default 30.
+#[derive(Debug, Deserialize, Default)]
+pub struct SeriesQuery {
+    #[serde(default)]
+    pub days: Option<usize>,
+}
+
+/// One day of the expanded access chart (#1058).
+#[derive(Serialize)]
+struct SeriesPoint {
+    day: String,
+    count: i64,
+}
+
+#[derive(Serialize)]
+struct AccessSeries {
+    spec_id: String,
+    days: usize,
+    series: Vec<SeriesPoint>,
+}
+
+/// `GET /admin/specs/{id}/access-series?days=N` — the expanded version of
+/// the table's 14-day sparkline (#1058): daily access counts, oldest
+/// first, 0-filled. Resolves the id against the EFFECTIVE catalog (never
+/// the enriched row, #990) and answers **404** for an unknown or
+/// out-of-scope app.
+async fn access_series(
+    scope: EditorScope,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<SeriesQuery>,
+) -> Response {
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let catalog = crate::catalog::effective_specs_cached(&state).await;
+    let Some(spec) = catalog.iter().find(|s| s.id == id) else {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    };
+    if !scope.may_touch_spec(spec) {
+        return (StatusCode::NOT_FOUND, "spec not found").into_response();
+    }
+    let days = q.days.unwrap_or(30).clamp(7, 365);
+    let all = match crate::db::spec_access::recent_series(db, days).await {
+        Ok(all) => all,
+        Err(e) => {
+            tracing::error!(id, error = ?e, "access series failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
+    let counts = all.get(&id).cloned().unwrap_or_else(|| vec![0; days]);
+    let today = chrono::Utc::now().date_naive();
+    let series = counts
+        .into_iter()
+        .enumerate()
+        .map(|(i, count)| SeriesPoint {
+            day: (today - chrono::Duration::days((days - 1 - i) as i64))
+                .format("%Y-%m-%d")
+                .to_string(),
+            count,
+        })
+        .collect();
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        axum::Json(AccessSeries {
+            spec_id: id,
+            days,
+            series,
+        }),
+    )
+        .into_response()
 }
 
 /// One row in the import preview (#557). `Serialize` feeds the live

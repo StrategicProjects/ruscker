@@ -2059,6 +2059,60 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
   display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;
 }
 
+/* Chart modal (#1058): an expanded minichart. Same overlay recipe as the
+   image picker (fixed, above the chrome, appended to <body>). */
+.chart-overlay {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.chart-modal {
+  background: var(--surface, #fff); color: var(--text);
+  border-radius: 12px; width: 100%; max-width: 880px; max-height: 90vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+  border: 0.5px solid var(--border);
+  animation: fade-in 0.2s ease both;
+}
+.chart-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 18px; border-bottom: 0.5px solid var(--border);
+}
+.chart-head > div:first-child { flex: 1; min-width: 0; }
+.chart-head h2 { font-size: 15px; font-weight: 600; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chart-sub { font-size: 12px; color: var(--text-muted); }
+.chart-periods { display: flex; gap: 6px; }
+.chart-body { position: relative; padding: 12px 18px 18px; overflow: auto; display: flex; flex-direction: column; gap: 16px; }
+.chart-panel__label {
+  display: flex; justify-content: space-between; font-size: 12px;
+  color: var(--text-muted); margin-bottom: 4px;
+}
+.chart-plot { position: relative; }
+.chart-svg { width: 100%; height: auto; display: block; font-size: 11px; aspect-ratio: 720 / 220; }
+.chart-svg .grid { stroke: var(--border); stroke-width: 0.5; }
+.chart-svg .axis { fill: var(--text-faint); font-variant-numeric: tabular-nums; }
+.chart-svg .line { fill: none; stroke: var(--color-teal-600); stroke-width: 1.75; stroke-linejoin: round; stroke-linecap: round; }
+.chart-svg .area { fill: var(--color-teal-600); opacity: 0.12; }
+.chart-svg .cursor { stroke: var(--text-muted); stroke-width: 0.75; stroke-dasharray: 3 3; }
+.chart-svg .pt { fill: var(--surface); stroke: var(--color-teal-600); stroke-width: 1.75; }
+.chart-tip {
+  position: absolute; pointer-events: none; z-index: 1;
+  background: var(--text); color: var(--bg);
+  font-size: 11px; padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+  transform: translate(-50%, -140%);
+}
+.chart-empty { padding: 28px; text-align: center; color: var(--text-muted); font-size: 13px; }
+/* A minichart that opens the modal: keeps the sparkline's look, adds an
+   affordance on hover/focus. */
+.spark-btn {
+  background: transparent; border: 0; padding: 1px 3px; margin: 0;
+  cursor: pointer; color: inherit; font: inherit;
+  display: inline-flex; align-items: center; gap: 4px; border-radius: 4px;
+}
+.spark-btn:hover, .spark-btn:focus-visible { background: var(--surface-soft); outline: 1px solid var(--border-strong); }
+.spark-btn .ti { font-size: 12px; opacity: 0.6; }
+.spark-btn:hover .ti { opacity: 1; }
+
 /* Image-picker modal (spec-form logo/cover) */
 .image-picker-overlay {
   position: fixed; inset: 0; z-index: 50;

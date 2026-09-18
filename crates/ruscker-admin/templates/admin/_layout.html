@@ -305,6 +305,159 @@ window.ruscker.imagePicker = (filenames) => ({
 });
 </script>
 
+{# Chart modal (#1058): expands a minichart into a full-width line chart.
+   Vanilla JS so pages without Alpine (the dashboard) can use it too, and
+   appended straight to <body> — the shell's `<main class="fade-in">`
+   transform would otherwise become the containing block of a fixed
+   overlay and centre it in the page, not the viewport. NO localized
+   string lives here: callers pass labels read from their own data-*.
+   Placed BEFORE <main>: page scripts run in document order and read
+   `window.ruscker.chartModal` while they initialise. #}
+<script>
+(function () {
+  var W = 720, H = 220, PL = 52, PR = 14, PT = 14, PB = 28;
+  var overlay = null, opener = null, body = null, tip = null, current = null;
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+    });
+  }
+  // A "nice" axis maximum (1/2/5 × 10^k) so gridline labels are round.
+  function niceMax(v) {
+    if (!(v > 0)) return 1;
+    var p = Math.pow(10, Math.floor(Math.log10(v)));
+    var m = v / p;
+    var n = m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10;
+    return n * p;
+  }
+  function panelHtml(p, idx) {
+    var vals = p.values || [], n = vals.length;
+    var html = '<div class="chart-panel" data-panel="' + idx + '">'
+      + '<div class="chart-panel__label"><span>' + esc(p.label || '') + '</span>'
+      + '<span class="tnum">' + (n ? esc((p.fmt || String)(vals[n - 1])) : '') + '</span></div>';
+    if (n < 2) return html + '<div class="chart-empty">' + esc(p.noData || '') + '</div></div>';
+    var max = niceMax(Math.max.apply(null, vals) * 1.05);
+    var x = function (i) { return PL + i * (W - PL - PR) / (n - 1); };
+    var y = function (v) { return PT + (H - PT - PB) * (1 - v / max); };
+    var svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img">';
+    for (var k = 0; k <= 4; k++) {
+      var gv = max * k / 4, gy = y(gv);
+      svg += '<line class="grid" x1="' + PL + '" x2="' + (W - PR) + '" y1="' + gy.toFixed(1) + '" y2="' + gy.toFixed(1) + '"/>'
+        + '<text class="axis" x="' + (PL - 6) + '" y="' + (gy + 3.5).toFixed(1) + '" text-anchor="end">' + esc((p.fmt || String)(gv)) + '</text>';
+    }
+    var ticks = Math.min(6, n), labels = p.xLabels || [];
+    for (var t = 0; t < ticks; t++) {
+      var i = Math.round(t * (n - 1) / Math.max(1, ticks - 1));
+      var anchor = t === 0 ? 'start' : t === ticks - 1 ? 'end' : 'middle';
+      svg += '<text class="axis" x="' + x(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="' + anchor + '">' + esc(labels[i] || '') + '</text>';
+    }
+    var pts = vals.map(function (v, i) { return x(i).toFixed(1) + ',' + y(v).toFixed(1); });
+    svg += '<path class="area" d="M' + x(0).toFixed(1) + ',' + y(0).toFixed(1) + ' L' + pts.join(' L') + ' L' + x(n - 1).toFixed(1) + ',' + y(0).toFixed(1) + ' Z"/>'
+      + '<polyline class="line" points="' + pts.join(' ') + '"/>'
+      + '<line class="cursor" x1="0" x2="0" y1="' + PT + '" y2="' + (H - PB) + '" style="display:none"/>'
+      + '<circle class="pt" r="3.5" cx="0" cy="0" style="display:none"/>'
+      + '<rect class="hit" x="' + PL + '" y="' + PT + '" width="' + (W - PL - PR) + '" height="' + (H - PT - PB) + '" fill="transparent"/>'
+      + '</svg>';
+    return html + '<div class="chart-plot">' + svg + '</div></div>';
+  }
+  function wireHover(panelEl, p) {
+    var svg = panelEl.querySelector('svg'); if (!svg) return;
+    var vals = p.values, n = vals.length, labels = p.xLabels || [];
+    var cursor = svg.querySelector('.cursor'), dot = svg.querySelector('.pt');
+    var x = function (i) { return PL + i * (W - PL - PR) / (n - 1); };
+    var max = niceMax(Math.max.apply(null, vals) * 1.05);
+    var y = function (v) { return PT + (H - PT - PB) * (1 - v / max); };
+    svg.addEventListener('mousemove', function (e) {
+      var r = svg.getBoundingClientRect();
+      var vx = (e.clientX - r.left) * W / r.width;
+      var i = Math.max(0, Math.min(n - 1, Math.round((vx - PL) / (W - PL - PR) * (n - 1))));
+      cursor.setAttribute('x1', x(i)); cursor.setAttribute('x2', x(i)); cursor.style.display = '';
+      dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(vals[i])); dot.style.display = '';
+      tip.textContent = (labels[i] ? labels[i] + ' · ' : '') + (p.fmt || String)(vals[i]);
+      var br = body.getBoundingClientRect();
+      tip.style.left = (r.left - br.left + x(i) * r.width / W + body.scrollLeft) + 'px';
+      tip.style.top = (r.top - br.top + y(vals[i]) * r.height / H + body.scrollTop) + 'px';
+      tip.style.display = '';
+    });
+    svg.addEventListener('mouseleave', function () {
+      cursor.style.display = 'none'; dot.style.display = 'none'; tip.style.display = 'none';
+    });
+  }
+  function renderPanels(panels) {
+    var host = body.querySelector('.chart-panels');
+    host.innerHTML = panels.map(panelHtml).join('');
+    panels.forEach(function (p, i) { wireHover(host.querySelector('[data-panel="' + i + '"]'), p); });
+    tip.style.display = 'none';
+  }
+  function close() {
+    if (!overlay) return;
+    if (current && current.onClose) { try { current.onClose(); } catch (e) { /* caller's problem */ } }
+    overlay.remove(); overlay = null; body = null; tip = null; current = null;
+    document.removeEventListener('keydown', onKey);
+    if (opener && opener.focus) opener.focus();
+    opener = null;
+  }
+  function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+  // opts: { title, subtitle, closeLabel, panels:[{label, values, xLabels, fmt, noData}],
+  //         periods:[{label, active, onSelect}], onClose }
+  function open(opts) {
+    close();
+    current = opts;
+    opener = document.activeElement;
+    overlay = document.createElement('div');
+    overlay.className = 'chart-overlay';
+    overlay.innerHTML = '<div class="chart-modal" role="dialog" aria-modal="true" aria-labelledby="chart-modal-title">'
+      + '<div class="chart-head"><div><h2 id="chart-modal-title"></h2><div class="chart-sub"></div></div>'
+      + '<div class="chart-periods"></div>'
+      + '<button type="button" class="admin-nav-link chart-close"><i class="ti ti-x" aria-hidden="true"></i></button></div>'
+      + '<div class="chart-body"><div class="chart-panels"></div><div class="chart-tip" style="display:none"></div></div></div>';
+    body = overlay.querySelector('.chart-body');
+    tip = overlay.querySelector('.chart-tip');
+    overlay.querySelector('h2').textContent = opts.title || '';
+    overlay.querySelector('.chart-sub').textContent = opts.subtitle || '';
+    var closeBtn = overlay.querySelector('.chart-close');
+    closeBtn.setAttribute('aria-label', opts.closeLabel || 'Close');
+    closeBtn.title = opts.closeLabel || 'Close';
+    closeBtn.addEventListener('click', close);
+    overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+    var periods = overlay.querySelector('.chart-periods');
+    (opts.periods || []).forEach(function (pd) {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chip' + (pd.active ? ' on-all' : ''); b.textContent = pd.label;
+      b.addEventListener('click', function () {
+        periods.querySelectorAll('.chip').forEach(function (c) { c.classList.toggle('on-all', c === b); });
+        pd.onSelect();
+      });
+      periods.appendChild(b);
+    });
+    document.body.appendChild(overlay);
+    renderPanels(opts.panels || []);
+    document.addEventListener('keydown', onKey);
+    closeBtn.focus();
+  }
+  function update(panels, subtitle) {
+    if (!overlay) return;
+    if (subtitle !== undefined) overlay.querySelector('.chart-sub').textContent = subtitle;
+    renderPanels(panels);
+  }
+  // Tiny inline sparkline (same geometry as the server's `sparkline_svg`).
+  function spark(values, w, h) {
+    var n = values ? values.length : 0;
+    if (n < 2) return '';
+    w = w || 64; h = h || 18;
+    var pad = 1.5, max = Math.max(1, Math.max.apply(null, values)), step = w / (n - 1);
+    var pts = values.map(function (v, i) {
+      return (i * step).toFixed(1) + ',' + (h - pad - (v / max) * (h - 2 * pad)).toFixed(1);
+    }).join(' ');
+    return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" class="sparkline" aria-hidden="true">'
+      + '<polyline fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" points="' + pts + '"/></svg>';
+  }
+  window.ruscker = window.ruscker || {};
+  window.ruscker.chartModal = { open: open, update: update, close: close, isOpen: function () { return !!overlay; }, spark: spark };
+})();
+</script>
+
 <main class="flex-1 px-6 py-6 max-w-7xl mx-auto w-full fade-in">
   {% block content %}{% endblock %}
 </main>

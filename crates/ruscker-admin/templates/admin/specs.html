@@ -123,7 +123,13 @@
   </div>
   {# data-no-search: the sticky toolbar's pill is THE search here —
      the enhancer's injected input fought it over the same rows (#746). #}
-  <table class="admin-table" data-enhance data-no-search>
+  <table class="admin-table" data-enhance data-no-search
+       data-chart-title="{{ self.t("admin-chart-access-title") }}"
+       data-chart-close="{{ self.t("admin-chart-close") }}"
+       data-chart-no-data="{{ self.t("admin-chart-no-data") }}"
+       data-chart-p14="{{ self.t("admin-chart-period-14") }}"
+       data-chart-p30="{{ self.t("admin-chart-period-30") }}"
+       data-chart-p90="{{ self.t("admin-chart-period-90") }}">
     <thead>
       <tr>
         <th>{{ self.t("admin-specs-col-id") }}</th>
@@ -165,7 +171,7 @@
           <td class="text-[color:var(--text-faint)]">—</td>
           <td class="access-cell">
             <span class="access-num">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</span>
-            {% if !spec.trend_svg.is_empty() %}<span class="sparkline-wrap" title="{{ self.t("admin-specs-col-access-help") }}">{{ spec.trend_svg|safe }}</span>{% endif %}
+            {% if !spec.trend_svg.is_empty() %}<button type="button" class="sparkline-wrap spark-btn" data-spark-spec="{{ spec.id }}" title="{{ self.t("admin-chart-expand") }}">{{ spec.trend_svg|safe }}<i class="ti ti-chart-line" aria-hidden="true"></i></button>{% endif %}
           </td>
           <td class="actions-cell">
             {# Featured star (#521) — read-only for config-defined specs (the
@@ -193,7 +199,7 @@
           <td class="text-[color:var(--text-muted)]">v{{ spec.version }}</td>
           <td class="access-cell">
             <span class="access-num">{% if spec.access_count > 0 %}{{ spec.access_count }}{% else %}<span class="text-[color:var(--text-faint)]">0</span>{% endif %}</span>
-            {% if !spec.trend_svg.is_empty() %}<span class="sparkline-wrap" title="{{ self.t("admin-specs-col-access-help") }}">{{ spec.trend_svg|safe }}</span>{% endif %}
+            {% if !spec.trend_svg.is_empty() %}<button type="button" class="sparkline-wrap spark-btn" data-spark-spec="{{ spec.id }}" title="{{ self.t("admin-chart-expand") }}">{{ spec.trend_svg|safe }}<i class="ti ti-chart-line" aria-hidden="true"></i></button>{% endif %}
           </td>
           <td class="actions-cell">
             <div class="row-actions">
@@ -411,4 +417,42 @@
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 
+{# Expanded access chart (#1058): click a row's sparkline → the shared
+   chart modal with 14/30/90-day series from `/access-series`. Labels come
+   from the table's data-* (never a localized string inside the script). #}
+<script>
+(function () {
+  var table = document.querySelector('table.admin-table[data-chart-title]');
+  if (!table || !window.ruscker || !window.ruscker.chartModal) return;
+  var d = table.dataset, base = window.RUSCKER_BASE || '';
+  function dm(day) { return day.slice(8, 10) + '/' + day.slice(5, 7); }
+  function load(id, name, days) {
+    return fetch(base + '/admin/specs/' + encodeURIComponent(id) + '/access-series?days=' + days,
+                 { headers: { 'X-Requested-With': 'fetch' } })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (j) {
+        return [{ label: d.chartTitle, noData: d.chartNoData,
+                  values: j.series.map(function (p) { return p.count; }),
+                  xLabels: j.series.map(function (p) { return dm(p.day); }),
+                  fmt: function (v) { return String(Math.round(v)); } }];
+      });
+  }
+  table.addEventListener('click', function (e) {
+    var btn = e.target.closest && e.target.closest('[data-spark-spec]');
+    if (!btn) return;
+    var row = btn.closest('tr');
+    var id = btn.dataset.sparkSpec, name = (row && row.dataset.name) || id, days = 14;
+    var periods = [14, 30, 90].map(function (n) {
+      return { label: d['chartP' + n], active: n === days, onSelect: function () {
+        days = n;
+        load(id, name, n).then(function (panels) { window.ruscker.chartModal.update(panels); });
+      } };
+    });
+    load(id, name, days).then(function (panels) {
+      window.ruscker.chartModal.open({ title: name, subtitle: id, closeLabel: d.chartClose,
+                                       panels: panels, periods: periods });
+    }).catch(function () { /* nothing to show; the row's number stays */ });
+  });
+})();
+</script>
 {% endblock %}

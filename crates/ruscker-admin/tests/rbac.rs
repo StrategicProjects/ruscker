@@ -554,6 +554,7 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
         ("POST", "/admin/specs/time-b/featured/toggle"),
         ("POST", "/admin/specs/time-b/state/toggle"),
         ("POST", "/admin/specs/time-b/repull"),
+        ("GET", "/admin/specs/time-b/access-series?days=30"),
     ] {
         let response = send_request(
             state.clone(),
@@ -590,6 +591,10 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
             "POST",
             "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/restart",
         ),
+        (
+            "GET",
+            "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/history",
+        ),
     ] {
         let status = send(state.clone(), method, uri, Some(&cookie)).await;
         assert_eq!(
@@ -598,6 +603,54 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
             "foreign replica route must be 404: {method} {uri}"
         );
     }
+}
+
+/// The chart endpoints (#1058) answer JSON for an in-scope id — the 404
+/// loop above covers the foreign ones. `days` is clamped, the series is
+/// 0-filled per day, and an unsampled replica has empty history.
+#[tokio::test]
+async fn scoped_editor_gets_chart_json_for_own_app_and_replica() {
+    let (state, _db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/specs/time-a/access-series?days=3",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    assert_eq!(json["spec_id"], "time-a");
+    assert_eq!(json["days"], 7, "days clamps up to the 7-day floor");
+    let series = json["series"].as_array().unwrap();
+    assert_eq!(series.len(), 7);
+    assert!(series.iter().all(|p| p["count"] == 0 && p["day"].as_str().unwrap().len() == 10));
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        &format!("/admin/dashboard/replicas/{TIME_A_REPLICA}/history"),
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    assert_eq!(json["spec_id"], "time-a");
+    assert_eq!(json["display_name"], "Time A");
+    assert_eq!(json["step_secs"], 5);
+    assert_eq!(json["cpu"].as_array().unwrap().len(), 0, "no metrics sampled in tests");
+
+    // An unknown app id is 404 for everyone, not 500.
+    assert_eq!(
+        send(state, "GET", "/admin/specs/nope/access-series", Some(&cookie)).await,
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

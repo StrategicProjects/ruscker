@@ -39,10 +39,13 @@ pub const REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 /// still overlap, just not all at once.
 const MAX_CONCURRENT_STATS: usize = 8;
 
-/// How many recent samples to keep per replica for the dashboard
-/// sparklines. 30 × [`REFRESH_INTERVAL`] (5 s) ≈ 2.5 min of history —
-/// enough to show a trend without unbounded growth.
-pub const HISTORY_LEN: usize = 30;
+/// How many recent samples to keep per replica. 360 × [`REFRESH_INTERVAL`]
+/// (5 s) = 30 min of history for the expanded per-replica chart (#1058).
+/// The dashboard snapshot ships only the tail of it for the inline
+/// sparklines (`dashboard::SPARK_LEN`), so the 5 s poll stays small; the
+/// full window travels once, on demand, through the replica history
+/// endpoint. Memory: 360 × 16 B per replica — negligible.
+pub const HISTORY_LEN: usize = 360;
 
 /// What we keep per replica: the latest reading plus a short rolling
 /// history of CPU% and memory for the dashboard sparklines (oldest

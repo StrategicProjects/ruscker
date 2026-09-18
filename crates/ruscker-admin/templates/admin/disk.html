@@ -45,6 +45,9 @@
   </div>
 {% else %}
 
+  {# KPI band (#1055) — the standard partial; counts mirror the panels. #}
+  {% include "admin/_kpi_band.html" %}
+
   {# ── Storage hero (#623): host disk usage + a stacked bar split into
      Ruscker images / other used / free. Hidden if statvfs failed. ── #}
   {% if disk_available %}

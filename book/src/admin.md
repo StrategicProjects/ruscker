@@ -450,9 +450,11 @@ SSE follow stream only when requested by an operator.
 
 ### Disk
 
-Storage at a glance (Admin-only). A usage hero shows host disk used /
-total with a percentage and a stacked bar split into Ruscker images,
-other used, and free. Below it, two panels list the Ruscker-managed
+Storage at a glance (Admin-only). A KPI band (containers, stopped,
+images, unused images, volumes — the same band the other screens carry)
+sits above a usage hero showing host disk used / total with a percentage
+and a stacked bar split into Ruscker images, other used, and free. Below
+it, two panels list the Ruscker-managed
 containers and images — each removable, with an "in use" cross-reference
 so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
@@ -500,10 +502,11 @@ so they follow `server.timezone` — see the Schedules section.)
 
 ### System
 
-A read-only diagnostic of the running server (version, bind address,
-base path, Docker and database status, catalog and replica counts,
-forwarded-header trust, HA leadership), plus one operational control:
-the **alert webhook**.
+A read-only diagnostic of the running server: a KPI band (version, apps,
+replicas, Docker version, database kind) above the detail table (bind
+address, base path, Docker and database status, catalog and replica
+counts, forwarded-header trust, HA leadership), plus one operational
+control: the **alert webhook**.
 
 Set a URL there and Ruscker `POST`s a JSON payload when something an
 operator should know about happens:

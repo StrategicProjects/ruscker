@@ -21,6 +21,8 @@ use crate::auth::{RequireAdmin, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
+
+use super::KpiMetric;
 use ruscker_core::{CoreResult, ImageInfo, ManagedContainer, VolumeInfo};
 
 pub fn routes() -> Router<AppState> {
@@ -195,6 +197,19 @@ fn disk_usage(path: &str) -> Option<DiskUsage> {
 impl DiskPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// KPI band (#1055, same partial as #1032): inventory counts the
+    /// tables below already hold. Rendered only when the backend is
+    /// available — zeros during an outage would read as "nothing here".
+    fn kpis(&self) -> [KpiMetric; 5] {
+        [
+            KpiMetric::new("ti-box", "admin-disk-kpi-containers", self.containers.len()),
+            KpiMetric::new("ti-player-stop", "admin-disk-kpi-stopped", self.stopped_count),
+            KpiMetric::new("ti-photo", "admin-disk-kpi-images", self.images.len()),
+            KpiMetric::new("ti-archive", "admin-disk-kpi-unused", self.unused_images_count),
+            KpiMetric::new("ti-device-floppy", "admin-disk-kpi-volumes", self.volumes.len()),
+        ]
     }
 
     /// Human-readable byte size (binary units). Kept tiny — the disk

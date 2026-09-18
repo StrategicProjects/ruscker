@@ -46,6 +46,18 @@ diacritics, so `Joao` won't find `João`) covers username, groups,
 department, email and phone on both SQLite and Postgres. An Editor's totals,
 search and pages all cover only accounts in that Editor's scope.
 
+**Export CSV** (Admin-only, like the import) sits beside the search: *all*
+ignores the search and writes every account, *filtered* (shown only while
+a search is active, with its count) writes exactly the rows the search
+matches across every page. Columns are the import's
+(`username,role,password,groups,setor,email,celular` — `groups` joined
+with `;`) plus `created_at`. The `password` column is always empty (hashes
+never leave), so the file re-imports once you fill it in; free-text
+fields that a spreadsheet would read as a formula are guarded with a
+leading `'`, which the importer strips again. Each export writes a
+`users.export` audit row with the scope, term and row count, never the
+rows; if that row can't be written the export is refused.
+
 Searching, sorting and paging **don't reload the page**: the table region
 is fetched and swapped in place (debounced as you type), the URL is kept
 in sync so a reload or a shared link reproduces the view, and the Back
@@ -130,8 +142,17 @@ Users enrol once under **Account → 2FA**, either directly or when a
 protected app redirects them there. They re-enter their password, scan the
 QR code with a standard TOTP app such as Google Authenticator, Microsoft
 Authenticator, Authy or 1Password, confirm a six-digit code, and save the
-one-time recovery codes shown once. One successful proof satisfies every
-protected app, subject to each app's freshness policy.
+ten one-time recovery codes shown once — grouped `ABCDE-FGH23` with the
+digits tinted so `B`/`8` and `S`/`5` read apart, with **Download (.txt)**
+and **Copy all** buttons (built in the browser; the server never re-emits
+the codes). A code is accepted with or without the dash. One successful
+proof satisfies every protected app, subject to each app's freshness policy.
+
+The same **Two-factor authentication** page shows how many recovery codes
+remain (only a count is knowable: the database stores salted hashes) and
+warns when two or fewer are left. **Generate new codes** asks for the
+password again, invalidates the whole current set, shows the new one once
+and writes an `mfa.recovery_regenerated` audit row.
 
 **MFA validity days** (`mfa-validity-days`) controls that policy: 7 days by
 default, capped at 30; `0` limits the proof to the current login session.
@@ -192,7 +213,13 @@ count up on load. Below them, replicas are **grouped by app** in
 expandable cards: each card's header summarises the app — replica count,
 worst replica state, and aggregate sessions / CPU / memory with little
 meters — and expands to the per-replica detail (state, container id,
-uptime, sessions, CPU, memory) with stop / restart / logs actions.
+uptime, sessions, CPU, memory) with stop / restart / logs actions. The
+CPU and memory cells carry a small sparkline of the last 2.5 minutes,
+and the chart button on each row opens a full-width chart of the last
+30 minutes (one panel each for CPU and memory, hover for the exact
+reading), refreshed live while open. The dashboard poll ships only the
+sparkline's tail; the full window is fetched for the one replica you
+open, from `/admin/dashboard/replicas/{id}/history`.
 A toolbar offers an **expand/collapse-all** control. Shows a banner when
 started without `--docker`. Stop and restart take a few seconds (drain,
 signal, and a respawn for restart), so while one runs the replica row
@@ -208,7 +235,12 @@ a colour-coded **kind** pill, and an **Access** column with the spec's
 access-group badges (or a globe + "public" when ungated). Each row also
 has a **featured star** next to the actions: click it to toggle whether
 the app appears in the landing page's *Featured* carousel, inline,
-without opening the editor (solid = featured).
+without opening the editor (solid = featured). The **Accesses** column
+pairs the total with a 14-day sparkline; click it to open a full-width
+daily chart with 14 / 30 / 90-day periods (hover for the exact count),
+served by `/admin/specs/{id}/access-series`. Both chart endpoints answer
+404 for an app outside a scoped Editor's groups, like every other id
+route.
 
 The Actions column also carries an **archive toggle** and a **delete**
 button. Archiving deactivates the app in place — its card leaves the
@@ -459,9 +491,11 @@ SSE follow stream only when requested by an operator.
 
 ### Disk
 
-Storage at a glance (Admin-only). A usage hero shows host disk used /
-total with a percentage and a stacked bar split into Ruscker images,
-other used, and free. Below it, two panels list the Ruscker-managed
+Storage at a glance (Admin-only). A KPI band (containers, stopped,
+images, unused images, volumes — the same band the other screens carry)
+sits above a usage hero showing host disk used / total with a percentage
+and a stacked bar split into Ruscker images, other used, and free. Below
+it, two panels list the Ruscker-managed
 containers and images — each removable, with an "in use" cross-reference
 so you don't delete something a running app or the effective catalog
 needs, plus bulk "prune stopped containers" and "remove unused images".
@@ -509,10 +543,11 @@ so they follow `server.timezone` — see the Schedules section.)
 
 ### System
 
-A read-only diagnostic of the running server (version, bind address,
-base path, Docker and database status, catalog and replica counts,
-forwarded-header trust, HA leadership), plus one operational control:
-the **alert webhook**.
+A read-only diagnostic of the running server: a KPI band (version, apps,
+replicas, Docker version, database kind) above the detail table (bind
+address, base path, Docker and database status, catalog and replica
+counts, forwarded-header trust, HA leadership), plus one operational
+control: the **alert webhook**.
 
 Set a URL there and Ruscker `POST`s a JSON payload when something an
 operator should know about happens:

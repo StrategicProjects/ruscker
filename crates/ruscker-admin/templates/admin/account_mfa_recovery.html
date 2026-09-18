@@ -1,21 +1,149 @@
 {% extends "admin/_layout.html" %}
 
-{% block title %}{{ self.t("admin-mfa-recovery-title") }} · Ruscker{% endblock %}
+{% block title %}{% if regenerated %}{{ self.t("admin-mfa-recovery-regenerated-title") }}{% else %}{{ self.t("admin-mfa-recovery-title") }}{% endif %} · Ruscker{% endblock %}
 
 {% block content %}
+<style>
+  /* Recovery codes (#1054): numbered, grouped `ABCDE-FGH23`, digits tinted
+     so `B`/`8` and `S`/`5` — the confusions the alphabet can't remove —
+     read apart at a glance. Page-local: no other screen shows codes. */
+  .rc-list { counter-reset: rc; list-style: none; margin: 0; padding: 0; }
+  .rc-list li { counter-increment: rc; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .rc-list li::before {
+    content: counter(rc, decimal-leading-zero);
+    font-variant-numeric: tabular-nums; font-size: 11px; color: var(--text-faint);
+    width: 1.6em; flex: none; text-align: right;
+  }
+  .rc-list code {
+    font-size: 15px; letter-spacing: 0.08em; font-variant-numeric: tabular-nums;
+    white-space: nowrap; color: var(--text);
+  }
+  .rc-d { color: var(--color-teal-600); font-weight: 600; }
+  :root[data-theme="dark"] .rc-d { color: var(--color-teal-400); }
+  /* Auto theme carries no data-theme; follow the OS like the rest of the shell. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .rc-d { color: var(--color-teal-400); }
+  }
+  .rc-sep { opacity: 0.45; }
+</style>
 <div class="max-w-lg mx-auto">
-  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-mfa-recovery-title") }}</h1>
+  <h1 class="text-xl font-medium tracking-tight">{% if regenerated %}{{ self.t("admin-mfa-recovery-regenerated-title") }}{% else %}{{ self.t("admin-mfa-recovery-title") }}{% endif %}</h1>
   <div class="admin-login-error mt-3" role="alert">
     <i class="ti ti-alert-triangle" aria-hidden="true"></i>
     {{ self.t("admin-mfa-recovery-warning") }}
   </div>
   <p class="text-sm text-[color:var(--text-muted)] mt-3">{{ self.t("admin-mfa-recovery-help") }}</p>
-  <ol class="grid grid-cols-2 gap-2 mt-4 p-4" style="background:var(--surface);border:0.5px solid var(--border);border-radius:12px" data-recovery-codes>
-    {% for code in codes %}<li><code class="select-all">{{ code }}</code></li>{% endfor %}
+  {# Each <code> carries the grouped plain text in `data-recovery-code` so
+     the copy/download scripts read the codes without parsing the tinted
+     markup. The visible text is the same code with digits wrapped. #}
+  <ol class="rc-list grid grid-cols-2 gap-x-6 gap-y-2 mt-4 p-4" style="background:var(--surface);border:0.5px solid var(--border);border-radius:12px" data-recovery-codes>
+    {% for code in codes %}<li><code class="select-all" data-recovery-code="{{ self.grouped(code) }}">{{ self.code_html(code)|safe }}</code></li>
+    {% endfor %}
   </ol>
-  <a href="{{ base }}{% if next != "" %}{{ next }}{% else %}/{% endif %}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
-    <i class="ti ti-arrow-right" aria-hidden="true"></i>
-    {{ self.t("admin-mfa-continue") }}
-  </a>
+  {# Download + copy (#1053). Built client-side from the DOM so the plain
+     codes stay single-shot: no server route ever re-emits them. Every
+     localized string travels in a data-* attribute — never inside the
+     script (tests/template_lint.rs). #}
+  <div class="flex flex-wrap gap-2 mt-4">
+    <button type="button" class="admin-btn admin-btn-secondary" data-recovery-download
+            data-filename="ruscker-recovery-codes-{{ username }}.txt"
+            data-file-header="{{ self.t("admin-mfa-recovery-file-header") }}"
+            data-file-user="{{ self.t("admin-mfa-recovery-file-user") }}"
+            data-file-username="{{ username }}"
+            data-file-generated="{{ self.t("admin-mfa-recovery-file-generated") }}"
+            data-file-note="{{ self.t("admin-mfa-recovery-file-note") }}">
+      <i class="ti ti-download" aria-hidden="true"></i>
+      {{ self.t("admin-mfa-recovery-download") }}
+    </button>
+    <button type="button" class="admin-btn admin-btn-secondary" data-recovery-copy
+            data-copied-label="{{ self.t("admin-mfa-recovery-copied") }}"
+            data-failed-label="{{ self.t("admin-mfa-recovery-copy-failed") }}">
+      <i class="ti ti-copy" aria-hidden="true"></i>
+      <span data-label>{{ self.t("admin-mfa-recovery-copy") }}</span>
+    </button>
+    <span class="text-xs text-[color:var(--text-muted)]" role="status" aria-live="polite" data-copy-status></span>
+  </div>
+  {% if regenerated %}
+    <a href="{{ base }}/admin/account/mfa{% if next != "" %}?next={{ next|urlencode }}{% endif %}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
+      <i class="ti ti-arrow-right" aria-hidden="true"></i>
+      {{ self.t("admin-mfa-continue") }}
+    </a>
+  {% else %}
+    <a href="{{ base }}{% if next != "" %}{{ next }}{% else %}/{% endif %}" class="admin-login-btn mt-4" style="width:auto;display:inline-flex">
+      <i class="ti ti-arrow-right" aria-hidden="true"></i>
+      {{ self.t("admin-mfa-continue") }}
+    </a>
+  {% endif %}
 </div>
+<script>
+(function () {
+  var list = document.querySelector('[data-recovery-codes]');
+  if (!list) return;
+  function codes() {
+    return Array.prototype.map.call(list.querySelectorAll('[data-recovery-code]'), function (el) {
+      return el.getAttribute('data-recovery-code');
+    });
+  }
+  var dl = document.querySelector('[data-recovery-download]');
+  if (dl) {
+    dl.addEventListener('click', function () {
+      var d = dl.dataset;
+      var lines = [d.fileHeader, '', d.fileUser + ': ' + d.fileUsername,
+                   d.fileGenerated + ': ' + new Date().toISOString(), ''];
+      codes().forEach(function (c, i) { lines.push((i < 9 ? '0' : '') + (i + 1) + '. ' + c); });
+      lines.push('', d.fileNote, '');
+      var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = d.filename.replace(/[^\w.@-]+/g, '_');
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    });
+  }
+  var cp = document.querySelector('[data-recovery-copy]');
+  if (cp) {
+    var label = cp.querySelector('[data-label]');
+    var status = document.querySelector('[data-copy-status]');
+    var idle = label.textContent;
+    // Only a CONFIRMED copy says "Copied": a false success here would let
+    // someone navigate away from the one-time plaintext with an empty
+    // clipboard (codex review). A refusal keeps the codes on screen and
+    // says so, in an aria-live status.
+    function done() {
+      label.textContent = cp.dataset.copiedLabel;
+      cp.disabled = true;
+      if (status) status.textContent = '';
+      setTimeout(function () { label.textContent = idle; cp.disabled = false; }, 2000);
+    }
+    function failed() {
+      if (status) status.textContent = cp.dataset.failedLabel || '';
+      list.querySelector('[data-recovery-code]') && list.focus && list.focus();
+    }
+    function fallback(text) {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy') === true; } catch (e) { ok = false; }
+      ta.remove();
+      return ok;
+    }
+    cp.addEventListener('click', function () {
+      var text = codes().join('\n');
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { fallback(text) ? done() : failed(); });
+      } else {
+        fallback(text) ? done() : failed();
+      }
+    });
+  }
+})();
+</script>
 {% endblock %}

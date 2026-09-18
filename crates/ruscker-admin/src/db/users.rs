@@ -486,6 +486,14 @@ pub async fn list_page(
     list_page_ordered(db, filter, UserOrder::default(), limit, offset).await
 }
 
+/// Every user matching `filter`, unpaginated — the CSV export (#1056).
+/// Same WHERE clause (search + Editor visibility) as [`list_page`], so
+/// "export filtered" is exactly the set the page would show across all
+/// its pages, and a scoped Editor can't export rows they can't list.
+pub async fn list_filtered(db: &ConfigDb, filter: &UserFilter<'_>) -> Result<Vec<UserRow>> {
+    list_with(db, filter, UserOrder::default(), None).await
+}
+
 /// Server-side sort of the users table (#1057): with pagination in SQL
 /// (#999) a client-side sort could only reorder the visible page, so the
 /// order lives in the query. A closed enum, never a user string, reaches
@@ -551,6 +559,17 @@ pub async fn list_page_ordered(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<UserRow>> {
+    list_with(db, filter, order, Some((limit, offset))).await
+}
+
+/// Shared SELECT for [`list_page_ordered`] / [`list_filtered`]: one place
+/// owns the column list, the search/visibility predicates and the ordering.
+async fn list_with(
+    db: &ConfigDb,
+    filter: &UserFilter<'_>,
+    order: UserOrder,
+    page: Option<(i64, i64)>,
+) -> Result<Vec<UserRow>> {
     type Row = (
         String,
         String,
@@ -563,40 +582,33 @@ pub async fn list_page_ordered(
         Option<String>,
         Option<String>,
     );
+    const SELECT: &str = "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+                   FROM users
+                  WHERE 1=1";
     let search = filter.search.trim();
     let rows: Vec<Row> = match db {
         ConfigDb::Sqlite(pool) => {
-            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(
-                "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                   FROM users
-                  WHERE 1=1",
-            );
+            let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(SELECT);
             push_search_sqlite(&mut qb, search);
             push_visibility_sqlite(&mut qb, filter.visible_groups);
-            qb.push(order.sql())
-                .push(" LIMIT ")
-                .push_bind(limit)
-                .push(" OFFSET ")
-                .push_bind(offset);
+            qb.push(order.sql());
+            if let Some((limit, offset)) = page {
+                qb.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
+            }
             qb.build_query_as().fetch_all(pool).await
         }
         ConfigDb::Postgres(pool) => {
-            let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(
-                "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
-                   FROM users
-                  WHERE 1=1",
-            );
+            let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(SELECT);
             push_search_postgres(&mut qb, search);
             push_visibility_postgres(&mut qb, filter.visible_groups);
-            qb.push(order.sql())
-                .push(" LIMIT ")
-                .push_bind(limit)
-                .push(" OFFSET ")
-                .push_bind(offset);
+            qb.push(order.sql());
+            if let Some((limit, offset)) = page {
+                qb.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
+            }
             qb.build_query_as().fetch_all(pool).await
         }
     }
-    .context("list users (page)")?;
+    .context("list users")?;
     Ok(rows
         .into_iter()
         .map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce))

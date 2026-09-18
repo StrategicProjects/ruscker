@@ -13,18 +13,55 @@
       {% if error == "wrong-password" %}{{ self.t("admin-mfa-error-password") }}
       {% else if error == "rate-limited" %}{{ self.t("admin-mfa-error-rate") }}
       {% else if error == "break-glass" %}{{ self.t("admin-mfa-break-glass") }}
+      {% else if error == "not-enrolled" %}{{ self.t("admin-mfa-not-enrolled") }}
+      {% else if error == "stale" %}{{ self.t("admin-mfa-error-stale") }}
       {% else %}{{ self.t("admin-mfa-already") }}{% endif %}
     </div>
   {% endif %}
 
-  {% if enrolled_at != "" %}
+  {% if let Some(at) = enrolled_at %}
     <section class="mt-4" data-mfa-state="enrolled" style="padding:18px;background:var(--surface);border:0.5px solid var(--border);border-radius:12px">
       <div class="flex items-center gap-2 text-sm font-medium">
         <i class="ti ti-circle-check" aria-hidden="true"></i>
         {{ self.t("admin-mfa-enrolled") }}
       </div>
-      <p class="text-xs text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-enrolled-since") }} {{ enrolled_at }}</p>
+      {# Stored UTC, rendered in the viewer's zone by the layout (#1041). #}
+      <p class="text-xs text-[color:var(--text-muted)] mt-2">{{ self.t("admin-mfa-enrolled-since") }} <time datetime="{{ at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="datetime">{{ at.format("%d/%m/%Y %H:%M") }} UTC</time></p>
       <p class="text-xs text-[color:var(--text-faint)] mt-2">{{ self.t("admin-mfa-reenroll-note") }}</p>
+      {# Recovery codes (#1054): only a COUNT is knowable — the DB holds
+         salted hashes — plus self-service regeneration behind the same
+         password re-auth as enrollment. #}
+      <div class="mt-4 pt-4" style="border-top:0.5px solid var(--border)">
+        <div class="flex items-center gap-2 text-sm">
+          <i class="ti ti-key" aria-hidden="true"></i>
+          <span>{{ self.t("admin-mfa-recovery-remaining") }}</span>
+          <strong class="tnum" data-recovery-remaining="{{ recovery.unused }}" data-recovery-total="{{ recovery.total }}">{{ recovery.unused }} / {{ recovery.total }}</strong>
+        </div>
+        {% if self.recovery_low() %}
+          <div class="admin-login-error mt-2" role="status" data-recovery-low>
+            <i class="ti ti-alert-triangle" aria-hidden="true"></i>
+            {{ self.t("admin-mfa-recovery-low") }}
+          </div>
+        {% endif %}
+        <details class="mt-3">
+          <summary class="text-xs underline cursor-pointer text-[color:var(--text-muted)]">{{ self.t("admin-mfa-recovery-regenerate") }}</summary>
+          <form method="post" action="{{ base }}/admin/account/mfa/recovery/regenerate" class="flex flex-col gap-3 mt-3" autocomplete="off"
+                data-confirm="{{ self.t("admin-mfa-recovery-regenerate-confirm") }}">
+            {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+            {# Compare-and-set token: a resubmitted/stale form is refused. #}
+            <input type="hidden" name="generation" value="{{ recovery_generation }}">
+            <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("admin-mfa-recovery-regenerate-help") }}</p>
+            <label class="admin-login-field">
+              <span class="admin-login-label">{{ self.t("admin-mfa-current-password") }}</span>
+              <input type="password" name="current_password" required autocomplete="current-password">
+            </label>
+            <button type="submit" class="admin-btn admin-btn-secondary" style="align-self:flex-start">
+              <i class="ti ti-refresh" aria-hidden="true"></i>
+              {{ self.t("admin-mfa-recovery-regenerate") }}
+            </button>
+          </form>
+        </details>
+      </div>
       <div class="flex flex-wrap gap-2 mt-4">
         <form method="post" action="{{ base }}/admin/account/mfa/device/forget"
               data-confirm="{{ self.t("admin-mfa-forget-confirm") }}">

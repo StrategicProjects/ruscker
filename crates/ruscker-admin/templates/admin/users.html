@@ -198,6 +198,22 @@
     <a href="{{ base }}/admin/users" class="text-xs text-[color:var(--text-faint)] underline">{{ self.t("admin-users-search-clear") }}</a>
   {% endif %}
   </span>
+  {# CSV export (#1056, Admin-only like the import): "all" ignores the
+     search; "filtered" shows only while a search is active and carries it.
+     Same columns the importer reads (password left blank), so the file
+     re-imports. Plain GET anchors — no JS. #}
+  {% if unscoped %}
+  <span id="users-export" data-live-sync style="margin-left:auto;display:inline-flex;gap:4px;align-items:center">
+    <a href="{{ base }}/admin/users/export.csv?scope=all" class="admin-nav-link" style="width:auto" data-users-export="all" download>
+      <i class="ti ti-download" aria-hidden="true"></i> {{ self.t("admin-users-export-all") }}
+    </a>
+    {% if !q.is_empty() %}
+      <a href="{{ base }}/admin/users/export.csv?scope=filtered&q={{ q|urlencode }}" class="admin-nav-link" style="width:auto" data-users-export="filtered" download>
+        <i class="ti ti-download" aria-hidden="true"></i> {{ self.t("admin-users-export-filtered") }} ({{ total }})
+      </a>
+    {% endif %}
+  </span>
+  {% endif %}
 </form>
 <div id="live-users" data-live-region>
 <table class="admin-table" data-enhance data-no-search data-server-sort="#users-filter">

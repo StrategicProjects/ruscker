@@ -271,6 +271,38 @@ fn metric_values(body: &str) -> Vec<&str> {
         .collect()
 }
 
+/// KPI band on the System page (#1055): the standard partial with the
+/// five facts, values matching the detail table. The Disk page has no
+/// backend in this state, so it must show its banner and NO band —
+/// zeros during an outage would read as "nothing here".
+#[tokio::test]
+async fn system_page_carries_the_kpi_band_and_disk_hides_it_without_a_backend() {
+    let st = state();
+    let c = cookie_for(&st, Role::Admin).await;
+    let response = send_request(st.clone(), "GET", "/admin/system", Some(&c), Body::empty(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let system = response_body(response).await;
+    let values = metric_values(&system);
+    assert_eq!(values.len(), 5, "{values:?}");
+    assert_eq!(values[0], env!("CARGO_PKG_VERSION"));
+    // The band must agree with the detail table on the same page.
+    let cell = |key: &str| -> String {
+        let marker = format!(">{key}</td><td class=\"dash-mono\">");
+        let start = system.find(&marker).map(|i| i + marker.len()).expect(key);
+        system[start..].split("</td>").next().unwrap().trim().to_string()
+    };
+    assert_eq!(values[1], cell("Apps no catálogo"), "spec KPI vs table");
+    assert_eq!(values[2], cell("Réplicas em execução"), "replica KPI vs table");
+    assert_eq!(values[2], "0", "no replicas registered");
+    assert_eq!(values[4], "none", "no --db in this state");
+
+    let response = send_request(st, "GET", "/admin/disk", Some(&c), Body::empty(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let disk = response_body(response).await;
+    assert!(metric_values(&disk).is_empty(), "no backend ⇒ no KPI band");
+    assert!(disk.contains("admin-disk-backend-missing") || disk.contains("--docker"), "banner expected");
+}
+
 // ── Viewer: no panel — portal authenticated-user role (#857) ─────────
 
 #[tokio::test]
@@ -554,6 +586,7 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
         ("POST", "/admin/specs/time-b/featured/toggle"),
         ("POST", "/admin/specs/time-b/state/toggle"),
         ("POST", "/admin/specs/time-b/repull"),
+        ("GET", "/admin/specs/time-b/access-series?days=30"),
     ] {
         let response = send_request(
             state.clone(),
@@ -590,6 +623,10 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
             "POST",
             "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/restart",
         ),
+        (
+            "GET",
+            "/admin/dashboard/replicas/bbbbbbbb-2222-4222-8222-222222222222/history",
+        ),
     ] {
         let status = send(state.clone(), method, uri, Some(&cookie)).await;
         assert_eq!(
@@ -598,6 +635,109 @@ async fn scoped_editor_gets_404_on_every_foreign_app_or_replica_id_route() {
             "foreign replica route must be 404: {method} {uri}"
         );
     }
+}
+
+/// The chart endpoints (#1058) answer JSON for an in-scope id — the 404
+/// loop above covers the foreign ones. `days` is clamped, the series is
+/// 0-filled per day, and an unsampled replica has empty history.
+#[tokio::test]
+async fn scoped_editor_gets_chart_json_for_own_app_and_replica() {
+    let (state, _db) = scoped_state().await;
+    let cookie = scoped_cookie(&state, Role::Editor, Some("editor-a")).await;
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/specs/time-a/access-series?days=3",
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    assert_eq!(json["spec_id"], "time-a");
+    assert_eq!(json["days"], 7, "days clamps up to the 7-day floor");
+    let series = json["series"].as_array().unwrap();
+    assert_eq!(series.len(), 7);
+    assert!(series.iter().all(|p| p["count"] == 0 && p["day"].as_str().unwrap().len() == 10));
+
+    let response = send_request(
+        state.clone(),
+        "GET",
+        &format!("/admin/dashboard/replicas/{TIME_A_REPLICA}/history"),
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    assert_eq!(json["spec_id"], "time-a");
+    assert_eq!(json["display_name"], "Time A");
+    assert_eq!(json["step_secs"], 5);
+    assert_eq!(json["cpu"].as_array().unwrap().len(), 0, "no metrics sampled yet");
+
+    // Seed 40 samples: the history endpoint returns the full window, the
+    // 5 s snapshot only its tail (SPARK_LEN = 30) — the whole point of the
+    // split (#1058). Reverting either truncation fails here.
+    let rid = ReplicaId(uuid::Uuid::parse_str(TIME_A_REPLICA).unwrap());
+    for i in 0..40u64 {
+        state.metrics.replace(vec![(
+            rid.clone(),
+            ruscker_core::ReplicaMetrics {
+                cpu_percent: i as f64,
+                memory_bytes: i * 1024,
+                network_rx_bytes: 0,
+                network_tx_bytes: 0,
+            },
+        )]);
+    }
+    let response = send_request(
+        state.clone(),
+        "GET",
+        &format!("/admin/dashboard/replicas/{TIME_A_REPLICA}/history"),
+        Some(&cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let json: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    let cpu = json["cpu"].as_array().unwrap();
+    assert_eq!(cpu.len(), 40, "history carries the full window");
+    assert_eq!(cpu[0], 0.0);
+    assert_eq!(cpu[39], 39.0, "oldest first");
+    // The snapshot is cached for 5 s per (locale, scope) in a process-wide
+    // static; a sibling test may have just cached this scope's snapshot
+    // (without our seeded samples) in the default locale. Ask in another
+    // locale so this request owns its cache key.
+    let fr_cookie = format!("{cookie}; {}=fr", ruscker_admin::i18n::COOKIE_NAME);
+    let response = send_request(
+        state.clone(),
+        "GET",
+        "/admin/dashboard/snapshot",
+        Some(&fr_cookie),
+        Body::empty(),
+        None,
+    )
+    .await;
+    let snap: serde_json::Value = serde_json::from_str(&response_body(response).await).unwrap();
+    let row = snap["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["replica_id"] == TIME_A_REPLICA)
+        .expect("own replica in the snapshot");
+    let tail = row["cpu_history"].as_array().unwrap();
+    assert_eq!(tail.len(), 30, "the snapshot ships only the sparkline tail");
+    assert_eq!(tail[0], 10.0, "…and it is the most recent tail");
+    assert_eq!(snap["history_step_secs"], 5);
+
+    // An unknown app id is 404 for everyone, not 500.
+    assert_eq!(
+        send(state, "GET", "/admin/specs/nope/access-series", Some(&cookie)).await,
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

@@ -675,11 +675,16 @@ async fn scoped_editor_gets_chart_json_for_own_app_and_replica() {
     assert_eq!(cpu.len(), 40, "history carries the full window");
     assert_eq!(cpu[0], 0.0);
     assert_eq!(cpu[39], 39.0, "oldest first");
+    // The snapshot is cached for 5 s per (locale, scope) in a process-wide
+    // static; a sibling test may have just cached this scope's snapshot
+    // (without our seeded samples) in the default locale. Ask in another
+    // locale so this request owns its cache key.
+    let fr_cookie = format!("{cookie}; {}=fr", ruscker_admin::i18n::COOKIE_NAME);
     let response = send_request(
         state.clone(),
         "GET",
         "/admin/dashboard/snapshot",
-        Some(&cookie),
+        Some(&fr_cookie),
         Body::empty(),
         None,
     )

@@ -21,6 +21,8 @@ use crate::auth::{RequireAdmin, Role};
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
+
+use super::KpiMetric;
 use ruscker_core::{CoreResult, ImageInfo, ManagedContainer, VolumeInfo};
 
 pub fn routes() -> Router<AppState> {
@@ -195,6 +197,54 @@ fn disk_usage(path: &str) -> Option<DiskUsage> {
 impl DiskPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// KPI band (#1055, same partial as #1032): inventory counts the
+    /// tables below already hold. Rendered only when the backend is
+    /// available, and each card shows `—` when ITS inventory failed —
+    /// the page turns a failed listing into an empty one so the tables
+    /// still render, but "Containers 0" beside an outage banner would read
+    /// as "nothing here" (codex review). Unused images also depend on the
+    /// container listing (`usage_unknown` ⇒ every image counts as in use).
+    fn kpis(&self) -> [KpiMetric; 5] {
+        const UNKNOWN: &str = "—";
+        let count = |unavailable: bool, n: usize| -> String {
+            if unavailable {
+                UNKNOWN.to_string()
+            } else {
+                n.to_string()
+            }
+        };
+        [
+            KpiMetric::new(
+                "ti-box",
+                "admin-disk-kpi-containers",
+                count(self.containers_unavailable, self.containers.len()),
+            ),
+            KpiMetric::new(
+                "ti-player-stop",
+                "admin-disk-kpi-stopped",
+                count(self.containers_unavailable, self.stopped_count),
+            ),
+            KpiMetric::new(
+                "ti-photo",
+                "admin-disk-kpi-images",
+                count(self.images_unavailable, self.images.len()),
+            ),
+            KpiMetric::new(
+                "ti-archive",
+                "admin-disk-kpi-unused",
+                count(
+                    self.images_unavailable || self.usage_unknown,
+                    self.unused_images_count,
+                ),
+            ),
+            KpiMetric::new(
+                "ti-device-floppy",
+                "admin-disk-kpi-volumes",
+                count(self.volumes_unavailable, self.volumes.len()),
+            ),
+        ]
     }
 
     /// Human-readable byte size (binary units). Kept tiny — the disk

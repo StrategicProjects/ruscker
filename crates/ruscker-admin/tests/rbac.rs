@@ -271,6 +271,38 @@ fn metric_values(body: &str) -> Vec<&str> {
         .collect()
 }
 
+/// KPI band on the System page (#1055): the standard partial with the
+/// five facts, values matching the detail table. The Disk page has no
+/// backend in this state, so it must show its banner and NO band —
+/// zeros during an outage would read as "nothing here".
+#[tokio::test]
+async fn system_page_carries_the_kpi_band_and_disk_hides_it_without_a_backend() {
+    let st = state();
+    let c = cookie_for(&st, Role::Admin).await;
+    let response = send_request(st.clone(), "GET", "/admin/system", Some(&c), Body::empty(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let system = response_body(response).await;
+    let values = metric_values(&system);
+    assert_eq!(values.len(), 5, "{values:?}");
+    assert_eq!(values[0], env!("CARGO_PKG_VERSION"));
+    // The band must agree with the detail table on the same page.
+    let cell = |key: &str| -> String {
+        let marker = format!(">{key}</td><td class=\"dash-mono\">");
+        let start = system.find(&marker).map(|i| i + marker.len()).expect(key);
+        system[start..].split("</td>").next().unwrap().trim().to_string()
+    };
+    assert_eq!(values[1], cell("Apps no catálogo"), "spec KPI vs table");
+    assert_eq!(values[2], cell("Réplicas em execução"), "replica KPI vs table");
+    assert_eq!(values[2], "0", "no replicas registered");
+    assert_eq!(values[4], "none", "no --db in this state");
+
+    let response = send_request(st, "GET", "/admin/disk", Some(&c), Body::empty(), None).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let disk = response_body(response).await;
+    assert!(metric_values(&disk).is_empty(), "no backend ⇒ no KPI band");
+    assert!(disk.contains("admin-disk-backend-missing") || disk.contains("--docker"), "banner expected");
+}
+
 // ── Viewer: no panel — portal authenticated-user role (#857) ─────────
 
 #[tokio::test]

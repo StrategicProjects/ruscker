@@ -18,6 +18,8 @@ use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
 use crate::AppState;
 
+use super::KpiMetric;
+
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/system", get(index))
@@ -70,6 +72,23 @@ struct SystemPage<'a> {
 impl SystemPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// KPI band (#1055): the handful of facts an operator scans first —
+    /// the detail table below keeps everything else.
+    fn kpis(&self) -> [KpiMetric; 5] {
+        let docker = match (&self.docker_connected, &self.docker_version) {
+            (true, Some(v)) => v.clone(),
+            (true, None) => self.t("admin-system-yes"),
+            (false, _) => self.t("admin-system-no"),
+        };
+        [
+            KpiMetric::new("ti-tag", "admin-system-kpi-version", self.version),
+            KpiMetric::new("ti-apps", "admin-system-kpi-specs", self.spec_count),
+            KpiMetric::new("ti-box", "admin-system-kpi-replicas", self.replica_count),
+            KpiMetric::new("ti-package", "admin-system-kpi-docker", docker),
+            KpiMetric::new("ti-database", "admin-system-kpi-db", self.db_kind),
+        ]
     }
 }
 

@@ -119,12 +119,21 @@ async fn admin_exports_all_or_filtered_with_download_headers_and_audit() {
     assert!(ct.starts_with("text/csv"), "content-type: {ct}");
     assert!(cd.starts_with("attachment; filename=\"ruscker-users-"), "disposition: {cd}");
     let lines: Vec<&str> = body.lines().collect();
-    assert_eq!(lines[0], "username,role,groups,setor,email,celular,created_at");
-    // `scope=all` ignores `q`: every user, one row each.
+    assert_eq!(lines[0], "username,role,password,groups,setor,email,celular,created_at");
+    // `scope=all` ignores `q`: every user, one row each; password blank.
     assert_eq!(lines.len(), 4, "{body}");
-    assert!(lines.iter().any(|l| l.starts_with("ana,editor,saude;dados,Estatística,")));
-    assert!(lines.iter().any(|l| l.starts_with("bob,viewer,educacao,,")));
-    assert!(lines.iter().any(|l| l.starts_with("root,admin,,,")));
+    assert!(lines.iter().any(|l| l.starts_with("ana,editor,,saude;dados,Estatística,")));
+    assert!(lines.iter().any(|l| l.starts_with("bob,viewer,,educacao,,")));
+    assert!(lines.iter().any(|l| l.starts_with("root,admin,,,,")));
+    // An unknown scope is a 400, never silently "all".
+    let (status, _, ct, _) = get(state.clone(), "/admin/users/export.csv?scope=everything", &admin).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!ct.starts_with("text/csv"));
+    // `filtered` with an empty term is "all" — and audited as such.
+    let (status, body, _, cd) = get(state.clone(), "/admin/users/export.csv?scope=filtered&q=", &admin).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body.lines().count(), 4);
+    assert!(!cd.contains("-filtered"));
 
     // `scope=filtered` applies the page's search (username/groups/profile).
     let (status, body, _, cd) =
@@ -142,40 +151,38 @@ async fn admin_exports_all_or_filtered_with_download_headers_and_audit() {
     .fetch_all(&pool)
     .await
     .unwrap();
-    assert_eq!(audits.len(), 2);
+    assert_eq!(audits.len(), 3);
     assert!(audits[0].0.contains("\"scope\":\"all\"") && audits[0].0.contains("\"rows\":3"));
-    assert!(audits[1].0.contains("\"scope\":\"filtered\"") && audits[1].0.contains("\"rows\":1"));
+    assert!(audits[1].0.contains("\"scope\":\"all\"") && audits[1].0.contains("\"rows\":3"));
+    assert!(audits[2].0.contains("\"scope\":\"filtered\"") && audits[2].0.contains("\"rows\":1"));
     assert!(!audits.iter().any(|(d,)| d.contains("Estatística")));
 }
 
-/// A group-scoped Editor (#990) exports exactly the users they can list:
-/// members of their groups, never Admins, never other teams.
+/// Admin-only, like the CSV import (#1056): an Editor — scoped or not —
+/// and a Viewer get no file and no rows, and no audit row is written.
 #[tokio::test]
-async fn scoped_editor_exports_only_visible_users() {
+async fn export_is_admin_only() {
     let (state, pool) = state_with_db().await;
     user(&pool, "root", Role::Admin, &[], None).await;
     user(&pool, "ana", Role::Editor, &["saude"], None).await;
-    user(&pool, "carla", Role::Viewer, &["saude", "dados"], None).await;
     user(&pool, "bob", Role::Viewer, &["educacao"], None).await;
+    for (role, who) in [(Role::Editor, "ana"), (Role::Viewer, "bob")] {
+        let c = cookie(&state, role, who).await;
+        let (status, body, ct, _) = get(state.clone(), "/admin/users/export.csv?scope=all", &c).await;
+        assert_ne!(status, StatusCode::OK, "{who}");
+        assert!(!ct.starts_with("text/csv"), "{who}");
+        assert!(!body.contains("username,role"), "{who}");
+    }
+    let (n,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM audit_log WHERE action = 'users.export'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(n, 0, "a refused export must not be audited as one");
+    // The Editor's page carries no export links at all.
     let editor = cookie(&state, Role::Editor, "ana").await;
-
-    let (status, body, _, _) = get(state.clone(), "/admin/users/export.csv?scope=all", &editor).await;
+    let (status, page, _, _) = get(state, "/admin/users", &editor).await;
     assert_eq!(status, StatusCode::OK);
-    let names: Vec<&str> = body
-        .lines()
-        .skip(1)
-        .map(|l| l.split(',').next().unwrap())
-        .collect();
-    assert_eq!(names.len(), 2, "{body}");
-    assert!(names.contains(&"ana") && names.contains(&"carla"));
-    assert!(!names.contains(&"root") && !names.contains(&"bob"));
-
-    // Viewers reach no admin section (#857): 403/redirect, never a file.
-    let viewer = cookie(&state, Role::Viewer, "bob").await;
-    let (status, body, ct, _) = get(state, "/admin/users/export.csv?scope=all", &viewer).await;
-    assert_ne!(status, StatusCode::OK);
-    assert!(!ct.starts_with("text/csv"));
-    assert!(!body.contains("username,role"));
+    assert!(!page.contains("data-users-export"));
 }
 
 /// The page offers the export links: "all" always, "filtered" only with an

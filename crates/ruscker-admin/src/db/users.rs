@@ -483,7 +483,7 @@ pub async fn list_page(
     limit: i64,
     offset: i64,
 ) -> Result<Vec<UserRow>> {
-    list_with(db, filter, Some((limit, offset))).await
+    list_page_ordered(db, filter, UserOrder::default(), limit, offset).await
 }
 
 /// Every user matching `filter`, unpaginated — the CSV export (#1056).
@@ -491,14 +491,83 @@ pub async fn list_page(
 /// "export filtered" is exactly the set the page would show across all
 /// its pages, and a scoped Editor can't export rows they can't list.
 pub async fn list_filtered(db: &ConfigDb, filter: &UserFilter<'_>) -> Result<Vec<UserRow>> {
-    list_with(db, filter, None).await
+    list_with(db, filter, UserOrder::default(), None).await
 }
 
-/// Shared SELECT for [`list_page`] / [`list_filtered`]: one place owns
-/// the column list, the search/visibility predicates and the ordering.
+/// Server-side sort of the users table (#1057): with pagination in SQL
+/// (#999) a client-side sort could only reorder the visible page, so the
+/// order lives in the query. A closed enum, never a user string, reaches
+/// the `ORDER BY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum UserOrder {
+    /// The historical default: newest accounts first.
+    #[default]
+    CreatedDesc,
+    CreatedAsc,
+    UsernameAsc,
+    UsernameDesc,
+    RoleAsc,
+    RoleDesc,
+}
+
+impl UserOrder {
+    /// `(sort, dir)` from the page's query string → an order. Unknown
+    /// values fall back to the default rather than erroring: a stale or
+    /// hand-typed URL still renders the page.
+    pub fn parse(sort: &str, dir: &str) -> Self {
+        let desc = dir.eq_ignore_ascii_case("desc");
+        match sort.to_ascii_lowercase().as_str() {
+            "username" if desc => Self::UsernameDesc,
+            "username" => Self::UsernameAsc,
+            "role" if desc => Self::RoleDesc,
+            "role" => Self::RoleAsc,
+            "created" if dir.eq_ignore_ascii_case("asc") => Self::CreatedAsc,
+            _ => Self::CreatedDesc,
+        }
+    }
+
+    /// Canonical `(sort, dir)` pair for links and hidden inputs.
+    pub fn as_query(self) -> (&'static str, &'static str) {
+        match self {
+            Self::CreatedDesc => ("created", "desc"),
+            Self::CreatedAsc => ("created", "asc"),
+            Self::UsernameAsc => ("username", "asc"),
+            Self::UsernameDesc => ("username", "desc"),
+            Self::RoleAsc => ("role", "asc"),
+            Self::RoleDesc => ("role", "desc"),
+        }
+    }
+
+    /// The `ORDER BY` clause, with `username` as the tie-breaker so pages
+    /// never overlap or skip a row between two requests.
+    fn sql(self) -> &'static str {
+        match self {
+            Self::CreatedDesc => " ORDER BY created_at DESC, username ASC",
+            Self::CreatedAsc => " ORDER BY created_at ASC, username ASC",
+            Self::UsernameAsc => " ORDER BY username ASC",
+            Self::UsernameDesc => " ORDER BY username DESC",
+            Self::RoleAsc => " ORDER BY role ASC, username ASC",
+            Self::RoleDesc => " ORDER BY role DESC, username ASC",
+        }
+    }
+}
+
+pub async fn list_page_ordered(
+    db: &ConfigDb,
+    filter: &UserFilter<'_>,
+    order: UserOrder,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<UserRow>> {
+    list_with(db, filter, order, Some((limit, offset))).await
+}
+
+/// Shared SELECT for [`list_page_ordered`] / [`list_filtered`]: one place
+/// owns the column list, the search/visibility predicates and the ordering.
 async fn list_with(
     db: &ConfigDb,
     filter: &UserFilter<'_>,
+    order: UserOrder,
     page: Option<(i64, i64)>,
 ) -> Result<Vec<UserRow>> {
     type Row = (
@@ -522,7 +591,7 @@ async fn list_with(
             let mut qb: sqlx::QueryBuilder<sqlx::Sqlite> = sqlx::QueryBuilder::new(SELECT);
             push_search_sqlite(&mut qb, search);
             push_visibility_sqlite(&mut qb, filter.visible_groups);
-            qb.push(" ORDER BY created_at DESC, username ASC");
+            qb.push(order.sql());
             if let Some((limit, offset)) = page {
                 qb.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
             }
@@ -532,7 +601,7 @@ async fn list_with(
             let mut qb: sqlx::QueryBuilder<sqlx::Postgres> = sqlx::QueryBuilder::new(SELECT);
             push_search_postgres(&mut qb, search);
             push_visibility_postgres(&mut qb, filter.visible_groups);
-            qb.push(" ORDER BY created_at DESC, username ASC");
+            qb.push(order.sql());
             if let Some((limit, offset)) = page {
                 qb.push(" LIMIT ").push_bind(limit).push(" OFFSET ").push_bind(offset);
             }
@@ -1612,6 +1681,32 @@ mod tests {
 
         // Unfiltered: pages partition the full set with no overlap.
         assert_eq!(count_filtered(&p, &unscoped("")).await.unwrap(), 3);
+        // Server-side order (#1057): a closed enum, unknown input → default.
+        assert_eq!(UserOrder::parse("username", "asc"), UserOrder::UsernameAsc);
+        assert_eq!(UserOrder::parse("USERNAME", "DESC"), UserOrder::UsernameDesc);
+        assert_eq!(UserOrder::parse("role", ""), UserOrder::RoleAsc);
+        assert_eq!(UserOrder::parse("created", "asc"), UserOrder::CreatedAsc);
+        assert_eq!(UserOrder::parse("created", ""), UserOrder::CreatedDesc);
+        assert_eq!(UserOrder::parse("nope; DROP TABLE users", "asc"), UserOrder::CreatedDesc);
+        let by_name = list_page_ordered(&p, &unscoped(""), UserOrder::UsernameAsc, 50, 0)
+            .await
+            .unwrap();
+        let mut names: Vec<String> = by_name.iter().map(|u| u.username.clone()).collect();
+        let sorted = {
+            let mut v = names.clone();
+            v.sort();
+            v
+        };
+        assert_eq!(names, sorted, "username asc");
+        names.reverse();
+        let by_name_desc = list_page_ordered(&p, &unscoped(""), UserOrder::UsernameDesc, 50, 0)
+            .await
+            .unwrap();
+        assert_eq!(
+            by_name_desc.iter().map(|u| u.username.clone()).collect::<Vec<_>>(),
+            names,
+            "username desc"
+        );
         let first = list_page(&p, &unscoped(""), 2, 0).await.unwrap();
         let rest = list_page(&p, &unscoped(""), 2, 2).await.unwrap();
         assert_eq!(first.len(), 2);

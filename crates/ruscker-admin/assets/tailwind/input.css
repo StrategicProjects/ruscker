@@ -2130,6 +2130,11 @@ textarea.spec-form-input { resize: vertical; min-height: 64px; }
 .spark-btn .ti { font-size: 12px; opacity: 0.6; }
 .spark-btn:hover .ti { opacity: 1; }
 
+/* Live filter region (#1057): dims while the swap is in flight, so a slow
+   query reads as loading instead of stale. */
+[data-live-region] { transition: opacity 0.15s; }
+[data-live-region][aria-busy="true"] { opacity: 0.55; pointer-events: none; }
+
 /* Image-picker modal (spec-form logo/cover) */
 .image-picker-overlay {
   position: fixed; inset: 0; z-index: 50;

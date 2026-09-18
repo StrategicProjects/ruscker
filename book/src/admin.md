@@ -58,6 +58,15 @@ leading `'`, which the importer strips again. Each export writes a
 `users.export` audit row with the scope, term and row count, never the
 rows; if that row can't be written the export is refused.
 
+Searching, sorting and paging **don't reload the page**: the table region
+is fetched and swapped in place (debounced as you type), the URL is kept
+in sync so a reload or a shared link reproduces the view, and the Back
+button steps through the history. Sorting by user, role or created date
+is **server-side** (`?sort=username|role|created&dir=asc|desc`), so it
+orders the whole result, not just the visible page. The Audit and
+Activity filters work the same way. Without JavaScript every form still
+submits normally.
+
 Passwords follow a **policy**: at least 8 characters, with at least one
 uppercase letter, one lowercase letter, one digit and one special
 character — enforced everywhere a password is set (create, reset,

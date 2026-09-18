@@ -203,6 +203,23 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
     assert_eq!(confirm_status, StatusCode::OK);
     assert!(recovery.contains("data-recovery-codes"));
     assert!(recovery.contains("/app/demo/"));
+    // #1053: download + copy affordances, file named after the owner, every
+    // string in data-* (never inside the script — template_lint).
+    assert!(recovery.contains("data-recovery-download"));
+    assert!(recovery.contains("data-filename=\"ruscker-recovery-codes-alice.txt\""));
+    assert!(recovery.contains("data-recovery-copy"));
+    // #1054: ten codes, each grouped `XXXXX-XXXXX` in the plain data attr
+    // and tinted digits in the visible markup.
+    assert_eq!(recovery.matches("data-recovery-code=\"").count(), 10);
+    let grouped_ok = recovery
+        .split("data-recovery-code=\"")
+        .skip(1)
+        .all(|rest| {
+            let code = rest.split('"').next().unwrap();
+            code.len() == 11 && code.as_bytes()[5] == b'-'
+        });
+    assert!(grouped_ok, "every code must render grouped as XXXXX-XXXXX");
+    assert!(recovery.contains("class=\"rc-d\""), "digits are wrapped for tinting");
     let row = ruscker_admin::db::mfa::fetch(&db, "alice")
         .await
         .unwrap()
@@ -260,6 +277,185 @@ async fn full_enrollment_persists_encrypted_pending_then_displays_codes_once() {
     assert!(status_page.contains("href=\"/app/demo/\""));
     assert!(!status_page.contains("data-recovery-codes"));
     assert!(!status_page.contains(&secret));
+    // #1054: the status page counts unused codes and offers regeneration;
+    // #1041: the enrolment instant ships through the viewer-zone wrapper.
+    assert!(status_page.contains("data-recovery-remaining=\"10\" data-recovery-total=\"10\""));
+    assert!(!status_page.contains("data-recovery-low"));
+    assert!(status_page.contains("/admin/account/mfa/recovery/regenerate"));
+    assert!(status_page.contains("data-rk-time=\"datetime\""));
+}
+
+/// Self-service regeneration (#1054): password-gated, refuses without a
+/// confirmed factor, replaces the whole set, audits, shows the new codes
+/// once, and the low-water warning appears when codes run out.
+#[tokio::test]
+async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
+    let (state, db) = state_with_db(true).await;
+    create_user(&db, "erin", false).await;
+    let user_cookie = cookie(&state, Role::Viewer, Some("erin".into())).await;
+
+    // Not enrolled yet: even the right password is refused (409) and the
+    // status page explains why.
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        "current_password=CorrectPass9%21",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("data-mfa-error=\"not-enrolled\""));
+
+    // Enrol for real.
+    let (_, _, browser_cookie) = start_with_ceremony(state.clone(), &user_cookie).await;
+    let pending = ruscker_admin::db::mfa::fetch(&db, "erin").await.unwrap().unwrap();
+    let secret = decrypted_secret(&state, &pending);
+    let code = ruscker_admin::mfa::totp(&secret, "erin")
+        .unwrap()
+        .generate_current()
+        .unwrap();
+    let (confirm_status, _, _, _) = request_full(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/confirm",
+        &format!("code={code}"),
+        &browser_cookie,
+    )
+    .await;
+    assert_eq!(confirm_status, StatusCode::OK);
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
+        unreachable!()
+    };
+    let old_hashes: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin'")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(old_hashes.len(), 10);
+
+    // Wrong password: 401, nothing replaced.
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        "current_password=WrongPass9%21",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(body.contains("data-mfa-error=\"wrong-password\""));
+    assert!(!body.contains("data-recovery-codes"));
+    let still: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin'")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(still, old_hashes, "a failed re-auth must not touch the codes");
+
+    // The form carries the current generation (compare-and-set token).
+    let (_, status_page, _) = request(state.clone(), "GET", "/admin/account/mfa", "", &user_cookie).await;
+    let generation = status_page
+        .split("name=\"generation\" value=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("status page carries the generation")
+        .to_string();
+    // A form rendered against a stale generation is refused and changes nothing.
+    let (status, body, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        "current_password=CorrectPass9%21&generation=1",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(body.contains("data-mfa-error=\"stale\""));
+    let still: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin'")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(still, old_hashes, "a stale form must not touch the codes");
+
+    // Right password + current generation: a fresh set, shown once, audited.
+    let regen_body = format!(
+        "current_password=CorrectPass9%21&next=%2Fapp%2Fdemo%2F&generation={generation}"
+    );
+    let (status, page, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        &regen_body,
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(page.contains("data-recovery-codes"));
+    assert_eq!(page.matches("data-recovery-code=\"").count(), 10);
+    assert!(page.contains("data-recovery-download"));
+    // Regenerated variant links back to the MFA page, not into the app.
+    assert!(page.contains("href=\"/admin/account/mfa?next="));
+    let fresh: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin' AND used_at IS NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(fresh.len(), 10);
+    assert!(fresh.iter().all(|h| !old_hashes.contains(h)));
+    let (audited,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM audit_log
+          WHERE action = 'mfa.recovery_regenerated' AND actor = 'erin' AND target = 'user:erin'",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(audited, 1);
+    // Browser "resend the form?" after a refresh: the SAME submission again
+    // must be refused (409) and the set just shown must stay valid.
+    let (status, again, _) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        &regen_body,
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(again.contains("data-mfa-error=\"stale\"") && !again.contains("data-recovery-codes"));
+    let after: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin' AND used_at IS NULL")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(after, fresh, "the resubmission must not replace the set");
+    // A shown code (grouped form, as a person would copy it) is accepted.
+    let shown = page
+        .split("data-recovery-code=\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .unwrap()
+        .to_string();
+    assert!(ruscker_admin::db::mfa::consume_recovery_code(&db, "erin", &shown)
+        .await
+        .unwrap());
+
+    // Burn down to the low-water mark: 2 left → warning shown.
+    sqlx::query(
+        "UPDATE user_mfa_recovery SET used_at = '2026-01-01T00:00:00Z'
+          WHERE username = 'erin' AND used_at IS NULL
+            AND id IN (SELECT id FROM user_mfa_recovery
+                        WHERE username = 'erin' AND used_at IS NULL LIMIT 7)",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let (status, status_page, _) =
+        request(state, "GET", "/admin/account/mfa", "", &user_cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(status_page.contains("data-recovery-remaining=\"2\" data-recovery-total=\"10\""));
+    assert!(status_page.contains("data-recovery-low"));
 }
 
 #[tokio::test]

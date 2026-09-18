@@ -26,6 +26,10 @@ pub fn routes() -> Router<AppState> {
             "/admin/account/mfa/challenge",
             get(challenge).post(challenge_submit),
         )
+        .route(
+            "/admin/account/mfa/recovery/regenerate",
+            post(regenerate_recovery),
+        )
         .route("/admin/account/mfa/device/forget", post(forget_device))
         .route("/admin/account/mfa/devices/revoke", post(revoke_devices))
 }
@@ -40,14 +44,26 @@ struct AccountMfaPage<'a> {
     base: std::sync::Arc<str>,
     nav_section: &'static str,
     role: Role,
-    enrolled_at: String,
+    /// Confirmation instant, rendered through the layout's viewer-zone
+    /// `<time data-rk-time>` wrapper (#1041) — never pre-formatted here.
+    enrolled_at: Option<chrono::DateTime<chrono::Utc>>,
     pending: bool,
     break_glass: bool,
     error: &'static str,
     next: String,
+    /// Unused vs. issued recovery codes (#1054); zeros when not enrolled.
+    recovery: db::mfa::RecoveryCodeCounts,
+    /// Generation the regenerate form posts back (compare-and-set).
+    recovery_generation: i64,
 }
 
 impl AccountMfaPage<'_> {
+    /// Nudge threshold: at or below this many unused codes the page tells
+    /// the user to regenerate before the last one is spent.
+    fn recovery_low(&self) -> bool {
+        self.recovery.total > 0 && self.recovery.unused <= RECOVERY_LOW_WATER
+    }
+
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
@@ -87,11 +103,28 @@ struct AccountMfaRecoveryPage<'a> {
     role: Role,
     codes: Vec<String>,
     next: String,
+    /// Owner of the codes — names the downloaded file (#1053).
+    username: String,
+    /// `true` when reached through self-service regeneration (#1054)
+    /// rather than the enrollment ceremony: different heading + no
+    /// "continue to app" link.
+    regenerated: bool,
 }
 
 impl AccountMfaRecoveryPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// Grouped display form (`ABCDE-FGH23`) for the copy/download text.
+    fn grouped(&self, code: &str) -> String {
+        crate::mfa::format_recovery_code(code)
+    }
+
+    /// Grouped code with digits wrapped for tinting; safe HTML by
+    /// construction (see `crate::mfa::recovery_code_html`).
+    fn code_html(&self, code: &str) -> String {
+        crate::mfa::recovery_code_html(code)
     }
 }
 
@@ -125,6 +158,15 @@ struct NextQuery {
 struct StartForm {
     current_password: String,
     next: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RegenerateForm {
+    current_password: String,
+    next: Option<String>,
+    /// [`db::mfa::recovery_generation`] the page was rendered with.
+    #[serde(default)]
+    generation: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,12 +234,22 @@ async fn render_status(
         },
         None => None,
     };
-    let enrolled_at = row
+    let enrolled_at = row.as_ref().and_then(|row| row.confirmed_at);
+    let recovery_generation = row
         .as_ref()
-        .and_then(|row| row.confirmed_at)
-        .map(|at| at.format("%Y-%m-%d %H:%M UTC").to_string())
+        .map(db::mfa::recovery_generation)
         .unwrap_or_default();
     let pending = row.is_some_and(|row| row.confirmed_at.is_none());
+    let recovery = match (enrolled_at, session.actor.as_deref()) {
+        (Some(_), Some(username)) => match db::mfa::recovery_code_counts(db, username).await {
+            Ok(counts) => counts,
+            Err(err) => {
+                tracing::error!(error = ?err, "count own recovery codes failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+            }
+        },
+        _ => db::mfa::RecoveryCodeCounts::default(),
+    };
     let page = AccountMfaPage {
         locale: loc,
         theme,
@@ -211,6 +263,8 @@ async fn render_status(
         break_glass: session.actor.is_none(),
         error,
         next,
+        recovery,
+        recovery_generation,
     };
     let body = match page.render() {
         Ok(body) => body,
@@ -229,6 +283,10 @@ async fn render_status(
 /// secret + QR via the retry re-render. Short-lived; scoped to the MFA
 /// pages; cleared on success.
 const CEREMONY_COOKIE: &str = "__ruscker_mfa_ceremony";
+
+/// Unused recovery codes at or below which the status page shows the
+/// "generate a new set" warning (#1054).
+const RECOVERY_LOW_WATER: i64 = 2;
 
 fn ceremony_cookie_path(base: &str) -> String {
     format!("{base}/admin/account/mfa")
@@ -704,6 +762,136 @@ async fn confirm(
         role: session.role,
         codes,
         next,
+        username: username.to_string(),
+        regenerated: false,
+    };
+    let mut response = super::render(&page);
+    response
+        .headers_mut()
+        .insert(CACHE_CONTROL, "no-store".parse().unwrap());
+    response
+}
+
+/// Self-service recovery-code regeneration (#1054): password re-auth (same
+/// limiter as enrollment start), then a fresh set replaces the old one
+/// atomically with its audit row, and the new codes render exactly once —
+/// the same page and `no-store` policy as the enrollment ceremony.
+async fn regenerate_recovery(
+    session: AdminSession,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    Form(form): Form<RegenerateForm>,
+) -> Response {
+    let next = safe_next(form.next.as_deref(), &state.base_path);
+    let Some(username) = session.actor.clone() else {
+        return render_status(
+            &state,
+            session,
+            loc,
+            theme,
+            "break-glass",
+            next,
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "no database — start with --db",
+        )
+            .into_response();
+    };
+    if !crate::mfa::REAUTH_LIMITER.try_reserve(&username) {
+        let mut response = render_status(
+            &state,
+            session,
+            loc,
+            theme,
+            "rate-limited",
+            next,
+            StatusCode::TOO_MANY_REQUESTS,
+        )
+        .await;
+        response
+            .headers_mut()
+            .insert(RETRY_AFTER, "60".parse().unwrap());
+        return response;
+    }
+    match db::users::verify_login(db, &username, &form.current_password).await {
+        Ok(Some(_)) => crate::mfa::REAUTH_LIMITER.record_success(&username),
+        Ok(None) => {
+            return render_status(
+                &state,
+                session,
+                loc,
+                theme,
+                "wrong-password",
+                next,
+                StatusCode::UNAUTHORIZED,
+            )
+            .await;
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "MFA re-authentication failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "login error").into_response();
+        }
+    }
+
+    let codes = match crate::mfa::generate_recovery_codes() {
+        Ok(codes) => codes,
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "generate recovery codes failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "recovery-code error").into_response();
+        }
+    };
+    let mut hashes = Vec::with_capacity(codes.len());
+    for code in &codes {
+        match crate::mfa::hash_recovery_code(code) {
+            Ok(hash) => hashes.push(hash),
+            Err(err) => {
+                tracing::error!(error = ?err, %username, "hash recovery code failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "recovery-code error").into_response();
+            }
+        }
+    }
+    // The DB refuses unless a CONFIRMED factor exists (a pending or reset
+    // account can't mint codes) and unless the form's generation is still
+    // current — a resubmitted form or a second tab must not silently
+    // invalidate a set the user already saved (codex review). Domain
+    // refusals render the status page with a reason; an operational
+    // failure is a 500, never disguised as "not enrolled".
+    let expected = form.generation.unwrap_or_default();
+    match db::mfa::regenerate_recovery_codes(db, &username, &username, &hashes, expected).await {
+        Ok(db::mfa::RegenerateOutcome::Done) => {}
+        Ok(outcome) => {
+            let reason = match outcome {
+                db::mfa::RegenerateOutcome::Stale => "stale",
+                _ => "not-enrolled",
+            };
+            tracing::info!(%username, ?outcome, "regenerate recovery codes refused");
+            return render_status(&state, session, loc, theme, reason, next, StatusCode::CONFLICT)
+                .await;
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, %username, "regenerate recovery codes failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    }
+
+    let page = AccountMfaRecoveryPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "account",
+        role: session.role,
+        codes,
+        next,
+        username,
+        regenerated: true,
     };
     let mut response = super::render(&page);
     response

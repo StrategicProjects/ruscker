@@ -1591,6 +1591,23 @@ input[type="range"]::-moz-range-thumb {
 .admin-login-btn--danger { background: var(--color-lock); }
 .admin-login-btn--danger:hover { background: #dc2626; }
 .admin-login-btn:disabled { opacity: 0.6; cursor: default; }
+/* Secondary / destructive labelled buttons (`admin-btn`, #1053): the MFA
+   pages used these classes since #1005 but nothing defined them, so
+   "forget device" / "revoke all" rendered as bare text. Outlined so they
+   read as actions beside the filled primary `admin-login-btn`. */
+.admin-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--surface); color: var(--text);
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  border: 0.5px solid var(--border-strong); border-radius: 6px;
+  padding: 9px 12px; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.admin-btn:hover { background: var(--surface-soft); border-color: var(--text-muted); }
+.admin-btn i { font-size: 14px; }
+.admin-btn:disabled { opacity: 0.6; cursor: default; }
+.admin-btn-danger { color: var(--color-lock); border-color: var(--color-lock); }
+.admin-btn-danger:hover { background: var(--color-lock); color: #fff; }
 .admin-login-error {
   display: flex; align-items: center; gap: 8px;
   background: rgba(239, 68, 68, 0.08);

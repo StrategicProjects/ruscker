@@ -131,7 +131,7 @@ pub fn hash_recovery_code(code: &str) -> Result<String> {
     let mut salt = [0u8; 16];
     ring_rand::SecureRandom::fill(&rng, &mut salt)
         .map_err(|_| anyhow!("generate recovery-code salt"))?;
-    let normalized = code.trim().to_ascii_uppercase();
+    let normalized = normalize_recovery_code(code);
     let mut input = Vec::with_capacity(salt.len() + normalized.len());
     input.extend_from_slice(&salt);
     input.extend_from_slice(normalized.as_bytes());
@@ -141,6 +141,60 @@ pub fn hash_recovery_code(code: &str) -> Result<String> {
         hex::encode(salt),
         hex::encode(hash.as_ref())
     ))
+}
+
+/// Canonical form of a recovery code as typed by a person: upper-case, with
+/// the display grouping (`ABCDE-FGH23`) and any whitespace removed. The
+/// page shows codes grouped for legibility (#1054), so the hash must be
+/// computed over the same bytes whether the user copies the grouped form or
+/// retypes the raw one. `-` and space are not in [`RECOVERY_ALPHABET`], so
+/// stripping them can never merge two distinct codes.
+pub fn normalize_recovery_code(code: &str) -> String {
+    code.chars()
+        .filter(|c| !c.is_whitespace() && *c != '-')
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
+/// How many characters between separators when a code is displayed.
+const RECOVERY_GROUP: usize = 5;
+
+/// Display form of a recovery code: `ABCDEFGH23` → `ABCDE-FGH23`. Purely
+/// cosmetic — [`normalize_recovery_code`] undoes it before hashing.
+pub fn format_recovery_code(code: &str) -> String {
+    let chars: Vec<char> = code.chars().collect();
+    chars
+        .chunks(RECOVERY_GROUP)
+        .map(|g| g.iter().collect::<String>())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Grouped recovery code as HTML with every digit wrapped in
+/// `<span class="rc-d">` so the page can tint digits differently from
+/// letters (#1054): `B` vs `8` and `S` vs `5` are the confusions the
+/// alphabet cannot remove, and colour is the cheapest disambiguation left.
+///
+/// Safe to render unescaped: only ASCII alphanumerics from the code are
+/// emitted (anything else is dropped), and the markup is fixed.
+pub fn recovery_code_html(code: &str) -> String {
+    let mut out = String::with_capacity(code.len() * 4);
+    let clean: Vec<char> = code.chars().filter(|c| c.is_ascii_alphanumeric()).collect();
+    for (i, group) in clean.chunks(RECOVERY_GROUP).enumerate() {
+        if i > 0 {
+            out.push_str("<span class=\"rc-sep\">-</span>");
+        }
+        for c in group {
+            if c.is_ascii_digit() {
+                out.push_str("<span class=\"rc-d\">");
+                out.push(*c);
+                out.push_str("</span>");
+            } else {
+                out.push(*c);
+            }
+        }
+    }
+    out
 }
 
 /// Constant-time verification against a stored salted SHA-256 value.
@@ -154,7 +208,7 @@ pub fn verify_recovery_code(code: &str, stored: &str) -> bool {
     if salt.len() != 16 || expected.len() != digest::SHA256_OUTPUT_LEN {
         return false;
     }
-    let normalized = code.trim().to_ascii_uppercase();
+    let normalized = normalize_recovery_code(code);
     let mut input = Vec::with_capacity(salt.len() + normalized.len());
     input.extend_from_slice(&salt);
     input.extend_from_slice(normalized.as_bytes());
@@ -421,5 +475,35 @@ mod tests {
         assert_ne!(first, second);
         assert!(verify_recovery_code("abcd234567", &first));
         assert!(!verify_recovery_code("ABCD234568", &first));
+    }
+
+    /// The grouped display form (#1054) must verify exactly like the raw
+    /// code: a person copying `ABCD2-34567` from the page or the .txt
+    /// file, with or without stray spaces, is entering the same code.
+    #[test]
+    fn recovery_code_verifies_in_grouped_and_spaced_forms() {
+        let stored = hash_recovery_code("ABCD234567").unwrap();
+        assert_eq!(format_recovery_code("ABCD234567"), "ABCD2-34567");
+        assert!(verify_recovery_code("ABCD2-34567", &stored));
+        assert!(verify_recovery_code(" abcd2 34567 ", &stored));
+        assert!(verify_recovery_code(&format_recovery_code("abcd234567"), &stored));
+        assert_eq!(normalize_recovery_code("ab-cd 23\t45 67"), "ABCD234567");
+        // Generated codes never contain the separator, so grouping is
+        // lossless for every code we hand out.
+        for code in generate_recovery_codes().unwrap() {
+            assert_eq!(code.len(), RECOVERY_CODE_LEN);
+            assert_eq!(normalize_recovery_code(&format_recovery_code(&code)), code);
+        }
+    }
+
+    #[test]
+    fn recovery_code_html_wraps_digits_only_and_drops_foreign_chars() {
+        assert_eq!(
+            recovery_code_html("AB23CDEFG7"),
+            "AB<span class=\"rc-d\">2</span><span class=\"rc-d\">3</span>C\
+             <span class=\"rc-sep\">-</span>DEFG<span class=\"rc-d\">7</span>"
+        );
+        // Nothing but the code's own alphanumerics ever reaches the page.
+        assert_eq!(recovery_code_html("<b>AB</b>"), "bABb");
     }
 }

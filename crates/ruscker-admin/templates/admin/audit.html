@@ -29,8 +29,9 @@
   </div>
 
   {# ── Filter bar ───────────────────────────────────────────── #}
+  {# Live region (#1057): filters swap `#live-audit` in place. #}
   <form method="get" action="{{ base }}/admin/audit"
-        class="audit-filter-bar">
+        class="audit-filter-bar" data-live="#live-audit">
     <div class="select-wrap" :class="'{{ filter.family }}' !== '' ? 'is-active' : ''">
       <select name="family" class="theme-select" onchange="this.form.submit()"
               aria-label="{{ self.t("admin-audit-family") }}">
@@ -68,14 +69,17 @@
       <span>{{ self.t("admin-audit-apply") }}</span>
     </button>
 
+    <span id="audit-filter-clear" data-live-sync>
     {% if !filter.family.is_empty() || !filter.target.is_empty() || !filter.actor.is_empty() %}
       <a href="{{ base }}/admin/audit" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
         {{ self.t("filter-clear") }}
       </a>
     {% endif %}
+    </span>
   </form>
 
   {# ── Entries ──────────────────────────────────────────────── #}
+  <div id="live-audit" data-live-region>
   {% if entries.is_empty() %}
     <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)] mt-4">
       {{ self.t("admin-audit-empty") }}
@@ -136,6 +140,7 @@
       </p>
     {% endif %}
   {% endif %}
+  </div>{# /#live-audit #}
 
 </div>
 
@@ -158,12 +163,16 @@ window.ruscker.audit = () => ({
     var p = s.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
     return ((p[0] || '').charAt(0) + (p.length > 1 ? (p[1] || '').charAt(0) : '')).toUpperCase() || '?';
   }
-  document.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
-    var name = el.getAttribute('data-avatar'), c = color(name);
-    el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
-    el.style.color = c;
-    if (!el.textContent) el.textContent = initials(name);
-  });
+  function paint(root) {
+    root.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
+      var name = el.getAttribute('data-avatar'), c = color(name);
+      el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
+      el.style.color = c;
+      if (!el.textContent) el.textContent = initials(name);
+    });
+  }
+  paint(document);
+  document.addEventListener('rk:live-swap', function (e) { paint(e.target); });   // #1057
 })();
 </script>
 

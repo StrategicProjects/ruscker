@@ -179,26 +179,35 @@
    enhancer's client-side search would only see the current page —
    `data-no-search` disables it and this form queries the DB instead.
    Column sort (still client-side) stays and sorts the visible page. #}
+{# Live region (#1057): the form swaps `#live-users` in place instead of
+   reloading; `sort`/`dir` ride as hidden inputs (their defaults are
+   dropped from the URL), and the header sort is server-side. #}
 <form method="get" action="{{ base }}/admin/users" class="admin-table-toolbar"
+      id="users-filter" data-live="#live-users"
       style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
   <input type="search" name="q" value="{{ q }}" autocapitalize="none"
          placeholder="{{ self.t("admin-table-search") }}"
          class="admin-table-search" style="max-width:280px">
+  <input type="hidden" name="sort" value="{{ sort }}" data-default="created" data-default-group="order">
+  <input type="hidden" name="dir" value="{{ dir }}" data-default="desc" data-default-group="order">
   <button type="submit" class="admin-nav-link" style="width:auto;cursor:pointer">
     <i class="ti ti-search" aria-hidden="true"></i> {{ self.t("admin-users-search") }}
   </button>
+  <span id="users-search-clear" data-live-sync>
   {% if !q.is_empty() %}
     <a href="{{ base }}/admin/users" class="text-xs text-[color:var(--text-faint)] underline">{{ self.t("admin-users-search-clear") }}</a>
   {% endif %}
+  </span>
 </form>
-<table class="admin-table" data-enhance data-no-search>
+<div id="live-users" data-live-region>
+<table class="admin-table" data-enhance data-no-search data-server-sort="#users-filter">
   <thead>
     <tr>
-      <th>{{ self.t("admin-users-col-user") }}</th>
-      <th>{{ self.t("admin-users-col-role") }}</th>
-      <th>{{ self.t("admin-users-col-groups") }}</th>
-      <th>{{ self.t("admin-users-col-profile") }}</th>
-      <th>{{ self.t("admin-users-col-created") }}</th>
+      <th data-sort-key="username"{% if sort == "username" %} data-sort-dir="{{ dir }}" aria-sort="{{ self.aria_sort("username") }}"{% endif %}>{{ self.t("admin-users-col-user") }}</th>
+      <th data-sort-key="role"{% if sort == "role" %} data-sort-dir="{{ dir }}" aria-sort="{{ self.aria_sort("role") }}"{% endif %}>{{ self.t("admin-users-col-role") }}</th>
+      <th data-nosort>{{ self.t("admin-users-col-groups") }}</th>
+      <th data-nosort>{{ self.t("admin-users-col-profile") }}</th>
+      <th data-sort-key="created"{% if sort == "created" %} data-sort-dir="{{ dir }}" aria-sort="{{ self.aria_sort("created") }}"{% endif %}>{{ self.t("admin-users-col-created") }}</th>
       <th class="actions-cell" style="text-align:right" data-nosort>{{ self.t("admin-users-col-actions") }}</th>
     </tr>
   </thead>
@@ -261,18 +270,19 @@
 <div class="flex items-center gap-3 mt-3 text-xs text-[color:var(--text-muted)]" style="flex-wrap:wrap">
   {% if page > 1 %}
     <a class="admin-nav-link" style="width:auto"
-       href="{{ base }}/admin/users?page={{ page - 1 }}{% if !q.is_empty() %}&q={{ q|urlencode }}{% endif %}">
+       href="{{ base }}/admin/users?page={{ page - 1 }}{{ self.query_suffix() }}">
       <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
     </a>
   {% endif %}
   <span data-users-page="{{ page }}" data-users-pages="{{ pages }}" data-users-total="{{ total }}">{{ self.pager_status() }}</span>
   {% if page < pages %}
     <a class="admin-nav-link" style="width:auto"
-       href="{{ base }}/admin/users?page={{ page + 1 }}{% if !q.is_empty() %}&q={{ q|urlencode }}{% endif %}">
+       href="{{ base }}/admin/users?page={{ page + 1 }}{{ self.query_suffix() }}">
       {{ self.t("admin-users-next") }} <i class="ti ti-chevron-right" aria-hidden="true"></i>
     </a>
   {% endif %}
 </div>
+</div>{# /#live-users #}
 
 <script>
   // Reveal/hide toggle for the admin user password inputs (#430). One
@@ -338,17 +348,22 @@
       var p = s.replace(/[^A-Za-z0-9]+/g, " ").trim().split(" ");
       return ((p[0] || "").charAt(0) + (p.length > 1 ? (p[1] || "").charAt(0) : "")).toUpperCase() || "?";
     }
-    document.querySelectorAll(".rk-avatar[data-avatar]").forEach(function (el) {
-      var name = el.getAttribute("data-avatar"), c = color(name);
-      el.style.background = "color-mix(in srgb, " + c + " 18%, var(--surface))";
-      el.style.color = c;
-      if (!el.textContent) el.textContent = initials(name);
-    });
-    document.querySelectorAll(".group-badge[data-group]").forEach(function (el) {
-      var c = color(el.getAttribute("data-group"));
-      el.style.background = "color-mix(in srgb, " + c + " 16%, transparent)";
-      el.style.color = c;
-    });
+    function paint(root) {
+      root.querySelectorAll(".rk-avatar[data-avatar]").forEach(function (el) {
+        var name = el.getAttribute("data-avatar"), c = color(name);
+        el.style.background = "color-mix(in srgb, " + c + " 18%, var(--surface))";
+        el.style.color = c;
+        if (!el.textContent) el.textContent = initials(name);
+      });
+      root.querySelectorAll(".group-badge[data-group]").forEach(function (el) {
+        var c = color(el.getAttribute("data-group"));
+        el.style.background = "color-mix(in srgb, " + c + " 16%, transparent)";
+        el.style.color = c;
+      });
+    }
+    paint(document);
+    // Rows swapped in by the live filter (#1057) arrive unpainted.
+    document.addEventListener('rk:live-swap', function (e) { paint(e.target); });
   })();
 </script>
 {% endblock %}

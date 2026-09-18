@@ -26,7 +26,8 @@
 </div>
 
 {# ── Filter bar ───────────────────────────────────────────── #}
-<form method="get" action="{{ base }}/admin/activity" class="audit-filter-bar">
+{# Live region (#1057): filters and the pager swap `#live-activity` in place. #}
+<form method="get" action="{{ base }}/admin/activity" class="audit-filter-bar" data-live="#live-activity">
   <div class="select-wrap" :class="'{{ event }}' !== '' ? 'is-active' : ''">
     <select name="event" class="theme-select" onchange="this.form.submit()"
             aria-label="{{ self.t("admin-activity-event") }}">
@@ -79,14 +80,17 @@
     <span>{{ self.t("admin-audit-apply") }}</span>
   </button>
 
+  <span id="activity-filter-clear" data-live-sync>
   {% if self.filtered() %}
     <a href="{{ base }}/admin/activity" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
       {{ self.t("filter-clear") }}
     </a>
   {% endif %}
+  </span>
 </form>
 
 {# ── Rows ─────────────────────────────────────────────────── #}
+<div id="live-activity" data-live-region>
 {% if rows.is_empty() %}
   <div class="card-surface rounded-lg p-12 text-center text-sm text-[color:var(--text-muted)] mt-4">
     {{ self.t("admin-activity-empty") }}
@@ -142,6 +146,7 @@
     {% endif %}
   </div>
 {% endif %}
+</div>{# /#live-activity #}
 
 <script src="{{ base }}/assets/js/alpine.min.js?v={{ crate::APP_VERSION }}" defer></script>
 <script>
@@ -156,12 +161,16 @@
     var p = s.replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
     return ((p[0] || '').charAt(0) + (p.length > 1 ? (p[1] || '').charAt(0) : '')).toUpperCase() || '?';
   }
-  document.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
-    var name = el.getAttribute('data-avatar'), c = color(name);
-    el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
-    el.style.color = c;
-    if (!el.textContent) el.textContent = initials(name);
-  });
+  function paint(root) {
+    root.querySelectorAll('.rk-avatar[data-avatar]').forEach(function (el) {
+      var name = el.getAttribute('data-avatar'), c = color(name);
+      el.style.background = 'color-mix(in srgb, ' + c + ' 18%, var(--surface))';
+      el.style.color = c;
+      if (!el.textContent) el.textContent = initials(name);
+    });
+  }
+  paint(document);
+  document.addEventListener('rk:live-swap', function (e) { paint(e.target); });   // #1057
 })();
 </script>
 

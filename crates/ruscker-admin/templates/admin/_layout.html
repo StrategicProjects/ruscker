@@ -464,10 +464,23 @@ window.ruscker.imagePicker = (filenames) => ({
     return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
   }
 
+  // Hidden input helper for the server-sorted tables (#1057).
+  function setHidden(form, name, value) {
+    var inp = form.querySelector('input[type="hidden"][name="' + name + '"]');
+    if (!inp) { inp = document.createElement('input'); inp.type = 'hidden'; inp.name = name; form.appendChild(inp); }
+    inp.value = value;
+  }
+
   function enhance(table) {
     var tbody = table.tBodies[0];
     var headRow = table.tHead && table.tHead.rows[0];
     if (!tbody || !headRow) return;
+    if (table.dataset.enhanced) return;   // a swapped-in table is fresh; a kept one isn't re-wired
+    table.dataset.enhanced = '1';
+    // Server-sorted table (#1057): with pagination in SQL a DOM sort would
+    // only reorder the visible page, so header clicks write `sort`/`dir`
+    // into the page's filter form and let the live region refetch.
+    var serverForm = table.dataset.serverSort ? document.querySelector(table.dataset.serverSort) : null;
 
     function dataRows() {
       return Array.prototype.filter.call(tbody.rows, function (r) { return !r.dataset.tableEmpty; });
@@ -524,11 +537,19 @@ window.ruscker.imagePicker = (filenames) => ({
     // the glyph-only cue.
     Array.prototype.forEach.call(headRow.cells, function (th, idx) {
       if (th.hasAttribute('data-nosort')) return;
+      if (serverForm && !th.hasAttribute('data-sort-key')) return;
       th.classList.add('admin-th-sort');
       th.setAttribute('tabindex', '0');
       th.setAttribute('role', 'columnheader');
       var doSort = function () {
         var asc = th.dataset.sortDir !== 'asc';
+        if (serverForm) {
+          setHidden(serverForm, 'sort', th.dataset.sortKey);
+          setHidden(serverForm, 'dir', asc ? 'asc' : 'desc');
+          if (window.ruscker && window.ruscker.live) window.ruscker.live.submit(serverForm, true);
+          else serverForm.submit();
+          return;
+        }
         Array.prototype.forEach.call(headRow.cells, function (h) {
           if (h !== th) { delete h.dataset.sortDir; h.removeAttribute('aria-sort'); }
         });
@@ -546,21 +567,27 @@ window.ruscker.imagePicker = (filenames) => ({
     });
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
+  // Runs on load for the whole document and again for any live-swapped
+  // region (#1057), which arrives as fresh, un-enhanced markup.
+  function enhanceAll(root) {
+    root = root || document;
     // Wrap every admin table in a horizontal-scroll box so a wide table
     // scrolls inside its card on mobile, with the table kept as
     // display:table so its columns always line up. (The earlier
     // display:block trick split thead/tbody into separate column tracks
     // and could overlap columns with some data — #845.)
-    document.querySelectorAll('table.admin-table').forEach(function (t) {
+    root.querySelectorAll('table.admin-table').forEach(function (t) {
       if (t.parentElement && t.parentElement.classList.contains('admin-table-scroll')) return;
       var box = document.createElement('div');
       box.className = 'admin-table-scroll';
       t.parentNode.insertBefore(box, t);
       box.appendChild(t);
     });
-    document.querySelectorAll('table[data-enhance]').forEach(enhance);
-  });
+    root.querySelectorAll('table[data-enhance]').forEach(enhance);
+  }
+  window.ruscker = window.ruscker || {};
+  window.ruscker.enhanceTables = enhanceAll;
+  document.addEventListener('DOMContentLoaded', function () { enhanceAll(document); });
 
   // Global confirm guard for destructive forms (#741): the form carries
   // its localized message in `data-confirm="…"` instead of an inline
@@ -576,6 +603,119 @@ window.ruscker.imagePicker = (filenames) => ({
     var msg = f && f.getAttribute && f.getAttribute('data-confirm');
     if (msg && !window.confirm(msg)) e.preventDefault();
   }, true);
+})();
+</script>
+
+{# Live filter regions (#1057). A `<form data-live="#region">` (GET) no
+   longer reloads the page: typing (debounced), changing a select, pressing
+   Enter, a header sort or a pager link fetch the SAME URL the form would
+   have navigated to, and only `#region` (plus any `[data-live-sync]`
+   element, matched by id) is swapped from the response. The server keeps
+   rendering full pages — no fragment route, no second template — and
+   the URL is kept in sync so a reload or a shared link reproduces the
+   view. Without JS the form still submits normally. #}
+<script>
+(function () {
+  var DEBOUNCE_MS = 300;
+  function urlFor(form) {
+    var url = new URL(form.getAttribute('action') || location.pathname, location.href);
+    var params = new URLSearchParams();
+    // A field at its `data-default` is left out of the URL (no noise). A
+    // `data-default-group` is left out only when EVERY field of the group
+    // is at its default: `sort=username` needs its `dir` even when that
+    // dir happens to be the default of the default column.
+    var groupAtDefault = {};
+    Array.prototype.forEach.call(form.elements, function (el) {
+      var g = el.dataset.defaultGroup;
+      if (!g) return;
+      if (!(g in groupAtDefault)) groupAtDefault[g] = true;
+      if (String(el.value) !== String(el.dataset.default)) groupAtDefault[g] = false;
+    });
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || el.disabled) return;
+      if ((el.type === 'checkbox' || el.type === 'radio') && !el.checked) return;
+      var v = String(el.value);
+      if (v.trim() === '') return;
+      var g = el.dataset.defaultGroup;
+      if (g ? groupAtDefault[g] : (el.dataset.default !== undefined && v === el.dataset.default)) return;
+      params.append(el.name, v);
+    });
+    url.search = params.toString();
+    return url.toString();
+  }
+  // After Back/Forward the form must show what the URL says.
+  function syncForm(form, url) {
+    var q = new URL(url, location.href).searchParams;
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name || el.type === 'submit' || el.type === 'button') return;
+      var v = q.get(el.name);
+      el.value = v !== null ? v : (el.dataset.default !== undefined ? el.dataset.default : '');
+    });
+  }
+  function bind(form) {
+    var sel = form.dataset.live, region = document.querySelector(sel);
+    if (!region) return;
+    var timer = null, ctrl = null;
+    function swap(url, push) {
+      if (ctrl) ctrl.abort();
+      ctrl = new AbortController();
+      region.setAttribute('aria-busy', 'true');
+      fetch(url, { headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin', signal: ctrl.signal })
+        .then(function (r) { if (!r.ok || r.redirected) throw new Error('navigate'); return r.text(); })
+        .then(function (html) {
+          var doc = new DOMParser().parseFromString(html, 'text/html');
+          var fresh = doc.querySelector(sel);
+          if (!fresh) throw new Error('navigate');
+          region.innerHTML = fresh.innerHTML;
+          document.querySelectorAll('[data-live-sync][id]').forEach(function (el) {
+            var mine = doc.getElementById(el.id);
+            if (mine) el.replaceWith(mine);
+          });
+          region.removeAttribute('aria-busy');
+          if (window.ruscker.localizeTimes) window.ruscker.localizeTimes(region);
+          if (window.ruscker.enhanceTables) window.ruscker.enhanceTables(region);
+          region.dispatchEvent(new CustomEvent('rk:live-swap', { bubbles: true }));
+          var state = { rkLive: sel };
+          if (push) history.pushState(state, '', url); else history.replaceState(state, '', url);
+        })
+        .catch(function (err) {
+          if (err && err.name === 'AbortError') return;
+          location.assign(url);   // login bounce, server error, odd markup: fall back to a real navigation
+        });
+    }
+    function go(push) { if (timer) { clearTimeout(timer); timer = null; } swap(urlFor(form), push); }
+    form.__rkLiveGo = go;
+    form.addEventListener('submit', function (e) { e.preventDefault(); go(true); });
+    form.querySelectorAll('input[type="search"], input[type="text"]').forEach(function (inp) {
+      inp.addEventListener('input', function () {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(function () { timer = null; go(false); }, DEBOUNCE_MS);
+      });
+    });
+    form.querySelectorAll('select').forEach(function (s) {
+      // The markup's `onchange="this.form.submit()"` is the no-JS path;
+      // with JS the change becomes a live swap.
+      s.removeAttribute('onchange'); s.onchange = null;
+      s.addEventListener('change', function () { go(true); });
+    });
+    // Pager links (any same-path link inside the region).
+    var path = new URL(form.getAttribute('action') || location.pathname, location.href).pathname;
+    region.addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('a[href]');
+      if (!a || !region.contains(a) || a.target || a.hasAttribute('download')) return;
+      var url = new URL(a.href, location.href);
+      if (url.origin !== location.origin || url.pathname !== path) return;
+      e.preventDefault();
+      swap(url.toString(), true);
+    });
+    window.addEventListener('popstate', function () { syncForm(form, location.href); swap(location.href, false); });
+    if (!history.state || !history.state.rkLive) history.replaceState({ rkLive: sel }, '', location.href);
+  }
+  window.ruscker = window.ruscker || {};
+  window.ruscker.live = { submit: function (form, push) { if (form.__rkLiveGo) form.__rkLiveGo(push); else form.submit(); } };
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('form[data-live]').forEach(bind);
+  });
 })();
 </script>
 

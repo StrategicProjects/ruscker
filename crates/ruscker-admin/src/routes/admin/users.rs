@@ -65,6 +65,10 @@ struct UsersPage<'a> {
     /// The active search term, echoed back into the search box and
     /// carried on the pager links; `""` when unfiltered.
     q: String,
+    /// Canonical sort column + direction (#1057) for the header state,
+    /// the hidden form inputs and the pager links.
+    sort: &'static str,
+    dir: &'static str,
     /// Username of the logged-in admin — flags the "you" row.
     me: String,
     /// Admin/break-glass sessions may use the deliberately global controls
@@ -84,6 +88,35 @@ impl UsersPage<'_> {
     }
 
     /// Localized "Page X of Y · N users" line under the table (#999).
+    /// `&q=…&sort=…&dir=…` for pager links — only the non-default parts,
+    /// so a plain listing keeps a plain URL.
+    fn query_suffix(&self) -> String {
+        let mut out = String::new();
+        if !self.q.is_empty() {
+            out.push_str("&q=");
+            out.push_str(&urlencoding::encode(&self.q));
+        }
+        if (self.sort, self.dir) != ("created", "desc") {
+            out.push_str("&sort=");
+            out.push_str(self.sort);
+            out.push_str("&dir=");
+            out.push_str(self.dir);
+        }
+        out
+    }
+
+    /// `aria-sort` value for a header, or empty when it isn't the active
+    /// sort column.
+    fn aria_sort(&self, col: &str) -> &'static str {
+        if self.sort != col {
+            ""
+        } else if self.dir == "asc" {
+            "ascending"
+        } else {
+            "descending"
+        }
+    }
+
     fn pager_status(&self) -> String {
         use fluent_bundle::FluentArgs;
         let mut args = FluentArgs::new();
@@ -188,6 +221,12 @@ pub struct UsersQuery {
     /// groups and the profile fields.
     #[serde(default)]
     pub q: Option<String>,
+    /// Server-side sort (#1057): `username` | `role` | `created` + `asc` |
+    /// `desc`; anything else is the default (newest first).
+    #[serde(default)]
+    pub sort: Option<String>,
+    #[serde(default)]
+    pub dir: Option<String>,
 }
 
 fn redirect_flash(flash: &str) -> Response {
@@ -260,9 +299,14 @@ async fn index(
     // Ceiling division (i64::div_ceil is still unstable on our floor).
     let pages = ((total + USERS_PER_PAGE - 1) / USERS_PER_PAGE).max(1);
     let page = q.page.unwrap_or(1).clamp(1, pages);
-    let users = match db::users::list_page(
+    let order = db::users::UserOrder::parse(
+        q.sort.as_deref().unwrap_or(""),
+        q.dir.as_deref().unwrap_or(""),
+    );
+    let users = match db::users::list_page_ordered(
         pool,
         &filter,
+        order,
         USERS_PER_PAGE,
         (page - 1) * USERS_PER_PAGE,
     )
@@ -316,6 +360,8 @@ async fn index(
         kpi_viewers: counts.viewers,
         kpi_password_change: counts.must_change_password,
         q: search,
+        sort: order.as_query().0,
+        dir: order.as_query().1,
         me: scope.actor().to_string(),
         unscoped: scope.unscoped,
         flash,

@@ -352,6 +352,22 @@ In the spec form the Registry section is a **credential picker**: type or
 select the name of a stored credential and Ruscker resolves it at spawn.
 There is no need to inline registry passwords in a spec.
 
+#### SSO clients
+
+The **SSO clients** tab registers external systems that will be allowed
+to sign users in through the portal (OpenID Connect; see
+[ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md)).
+The registry is in place; the sign-in endpoints themselves are not
+shipped yet, so a registered client cannot log anyone in for now.
+
+Each client has an ID, a display name, its exact redirect URIs (HTTPS,
+or loopback HTTP for development; no wildcards), an optional list of
+**allowed groups** (empty means any signed-in user) and an optional
+**two-step verification** requirement. The client secret is shown once,
+on creation or when you generate a new one, and only a salted hash is
+stored. Deleting a group that is a client's last allowed group disables
+that client instead of opening it to everyone.
+
 ### Appearance
 Customise the public landing without a custom template. Every control
 is mirrored instantly in a **live portal preview** on the right — the

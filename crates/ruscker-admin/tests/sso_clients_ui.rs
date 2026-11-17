@@ -1,0 +1,311 @@
+//! Integration tests for the SSO client registry (OIDC provider, slice 1):
+//! the secret is shown exactly once and never cached, invalid input and
+//! duplicate ids change nothing, edit/rotate/delete, and the admin-only
+//! gate. Harness copied from `schedules_ui.rs`.
+
+use axum::body::Body;
+use axum::http::{header, Request, StatusCode};
+use ruscker_admin::auth::{AdminAuth, Role, COOKIE_NAME};
+use ruscker_admin::db::ConfigDb;
+use ruscker_admin::i18n::Locales;
+use ruscker_admin::{router, AppState};
+use ruscker_config::Config;
+use std::sync::Arc;
+use tower::ServiceExt;
+
+const CONFIG: &str = r#"
+proxy:
+  title: Ruscker Test
+  port: 8088
+  specs:
+    - id: etl-app
+      display-name: ETL App
+      container-image: demo/etl
+    # No container-image ⇒ auto-classified External (nothing to run).
+    - id: external-app
+      display-name: External App
+"#;
+
+async fn open_db() -> ConfigDb {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static N: AtomicU64 = AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!(
+        "ruscker-sso-clients-{}-{}.db",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _ = std::fs::remove_file(&path);
+    ConfigDb::Sqlite(ruscker_admin::db::open(&path).await.unwrap())
+}
+
+async fn app_state(db: ConfigDb) -> AppState {
+    std::env::set_var("DOCKER_REGISTRY_PASSWORD", "test");
+    let config = Config::from_yaml(CONFIG).expect("parse config");
+    let locales = Locales::load().expect("load locales");
+    AppState {
+        config: Arc::new(config),
+        base_path: Arc::from(""),
+        locales: Arc::new(locales),
+        admin_auth: AdminAuth::with_token("test-token"),
+        admin_sessions: Arc::new(ruscker_admin::auth::InMemoryAdminSessionStore::default()),
+        log_buffer: None,
+        login_limiter: Arc::new(ruscker_admin::auth::LoginRateLimiter::default_policy()),
+        api_limiter: Arc::new(ruscker_admin::ratelimit::ApiRateLimiter::new()),
+        db: Some(db),
+        images_dir: None,
+        master_key: Default::default(),
+        backend: None,
+        replicas: Arc::new(tokio::sync::RwLock::new(Default::default())),
+        cookie_key: ruscker_proxy::sticky::CookieKey::random(),
+        spawn_locks: Arc::new(dashmap::DashMap::new()),
+        sessions: Arc::new(ruscker_admin::sessions::InMemorySessionStore::new()),
+        logout_index: Arc::new(dashmap::DashMap::new()),
+        leader: Arc::new(ruscker_admin::leader::AlwaysLeader),
+        metrics: ruscker_admin::metrics_cache::MetricsCache::new(),
+        draining: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        spec_cache: std::sync::Arc::new(dashmap::DashMap::new()),
+        identity_cache: Default::default(),
+        catalog_cache: std::sync::Arc::new(tokio::sync::RwLock::new(None)),
+        access_counter: Arc::new(ruscker_admin::access_counter::AccessCounter::default()),
+        alerts: ruscker_admin::alerts::AlertSink::default(),
+        activity: ruscker_admin::activity::ActivitySink::default(),
+    }
+}
+
+/// Mint an admin session straight into the shared store and return the
+/// cookie header value.
+async fn admin_cookie(state: &AppState) -> String {
+    let sid = state
+        .admin_sessions
+        .create(Role::Admin, Some("root".into()))
+        .await;
+    format!("{COOKIE_NAME}={sid}")
+}
+
+async fn get(state: AppState, path: &str, cookie: &str) -> (StatusCode, String) {
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(path)
+                .header(header::COOKIE, cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// POST a form; returns (status, Location header).
+async fn post(state: AppState, uri: &str, body: &str, cookie: &str) -> (StatusCode, String) {
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let loc = resp
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    (status, loc)
+}
+
+/// POST a form; returns (status, Cache-Control header, body).
+async fn post_page(state: AppState, uri: &str, body: &str, cookie: &str) -> (StatusCode, String, String) {
+    let app = router(state);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header(header::COOKIE, cookie)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = resp.status();
+    let cache = resp
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+    (status, cache, String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Pull the 64-hex secret out of the one-time banner.
+fn shown_secret(html: &str) -> Option<String> {
+    let marker = "data-sso-secret-value";
+    let at = html.find(marker)?;
+    let rest = &html[at..];
+    let start = rest.find('>')? + 1;
+    let end = rest[start..].find('<')? + start;
+    Some(rest[start..end].trim().to_string())
+}
+
+const CREATE: &str = "client_id=radar-fiscal&name=Radar+Fiscal\
+&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=fiscal%2C+gestores&require_mfa=on";
+
+#[tokio::test]
+async fn create_shows_the_secret_once_and_persists_the_gate() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+
+    let (status, cache, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store", "a page carrying a secret must not be cached");
+    let secret = shown_secret(&html).expect("secret banner");
+    assert_eq!(secret.len(), 64);
+
+    let db = state.db.clone().unwrap();
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal")
+        .await
+        .unwrap()
+        .expect("persisted");
+    assert!(c.verify_secret(&secret), "the shown secret is the stored one");
+    assert_eq!(c.access_groups, vec!["fiscal".to_string(), "gestores".to_string()]);
+    assert!(c.require_mfa && c.enabled);
+    assert_eq!(c.redirect_uris, vec!["https://radar.example/cb".to_string()]);
+
+    // A plain reload of the list never shows the secret again.
+    let (status, html) = get(state, "/admin/sso-clients", &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("radar-fiscal"));
+    assert!(!html.contains(&secret));
+    assert!(shown_secret(&html).is_none());
+}
+
+#[tokio::test]
+async fn invalid_input_is_rejected_and_not_persisted() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+
+    for body in [
+        // Uppercase / slash in the id.
+        "client_id=Bad%2FId&name=X&redirect_uris=https%3A%2F%2Fa.example%2Fcb",
+        // Plain http to a non-loopback host.
+        "client_id=okid&name=X&redirect_uris=http%3A%2F%2Fa.example%2Fcb",
+        // Wildcard.
+        "client_id=okid&name=X&redirect_uris=https%3A%2F%2F*.example%2Fcb",
+        // No redirect URI at all.
+        "client_id=okid&name=X&redirect_uris=",
+    ] {
+        let (status, _, html) = post_page(state.clone(), "/admin/sso-clients", body, &cookie).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(html.contains("role=\"alert\""), "error banner for {body}");
+        assert!(shown_secret(&html).is_none(), "no secret for {body}");
+    }
+    assert!(ruscker_admin::db::oidc_clients::list_all(&db).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn duplicate_id_keeps_the_existing_client_and_secret() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let (_, _, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &cookie).await;
+    let secret = shown_secret(&html).unwrap();
+
+    let (status, _, html) = post_page(
+        state.clone(),
+        "/admin/sso-clients",
+        "client_id=radar-fiscal&name=Other&redirect_uris=https%3A%2F%2Fevil.example%2Fcb",
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(shown_secret(&html).is_none());
+
+    let db = state.db.clone().unwrap();
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert_eq!(c.name, "Radar Fiscal");
+    assert!(c.verify_secret(&secret));
+    assert!(!c.redirect_uri_registered("https://evil.example/cb"));
+}
+
+#[tokio::test]
+async fn edit_rotate_and_delete() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    let (_, _, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &cookie).await;
+    let old = shown_secret(&html).unwrap();
+
+    // Edit: drop MFA, disable (no `enabled` field = unchecked), new groups.
+    let (status, cache, html) = post_page(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=",
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(cache, "no-store", "no secret on a plain save");
+    assert!(shown_secret(&html).is_none());
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert_eq!(c.name, "Radar");
+    assert!(!c.require_mfa && !c.enabled && c.access_groups.is_empty());
+    assert!(c.verify_secret(&old), "saving settings never touches the secret");
+
+    // Rotate: new secret shown once, old one dead.
+    let (status, cache, html) =
+        post_page(state.clone(), "/admin/sso-clients/radar-fiscal/rotate", "", &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cache, "no-store");
+    let new = shown_secret(&html).expect("rotated secret banner");
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert!(c.verify_secret(&new) && !c.verify_secret(&old));
+
+    // Delete.
+    let (status, loc) = post(state.clone(), "/admin/sso-clients/radar-fiscal/delete", "", &cookie).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/sso-clients?flash=deleted");
+    assert!(ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().is_none());
+
+    // Unknown ids are 404 on every per-client route.
+    let (status, _) = get(state.clone(), "/admin/sso-clients/nope/edit", &cookie).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = post(state.clone(), "/admin/sso-clients/nope/rotate", "", &cookie).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = post(state, "/admin/sso-clients/nope/delete", "", &cookie).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn registry_is_admin_only() {
+    let state = app_state(open_db().await).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Editor, Some("ed".into()))
+        .await;
+    let editor = format!("{COOKIE_NAME}={sid}");
+
+    let (status, _) = get(state.clone(), "/admin/sso-clients", &editor).await;
+    assert_ne!(status, StatusCode::OK, "an Editor must not see the registry");
+    let (status, _, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &editor).await;
+    assert_ne!(status, StatusCode::OK);
+    assert!(shown_secret(&html).is_none());
+    let (status, _) = get(state.clone(), "/admin/sso-clients", "").await;
+    assert_ne!(status, StatusCode::OK, "anonymous is refused too");
+
+    let db = state.db.clone().unwrap();
+    assert!(ruscker_admin::db::oidc_clients::list_all(&db).await.unwrap().is_empty());
+}

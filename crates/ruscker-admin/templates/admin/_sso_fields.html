@@ -1,0 +1,35 @@
+{# Editable client fields shared by the create and edit forms. Needs
+   `form: ClientForm` in scope. #}
+<div class="spec-form-field">
+  <label class="spec-form-label" for="sso-name">{{ self.t("admin-sso-name") }}</label>
+  <input id="sso-name" type="text" name="name" required maxlength="80"
+         value="{{ form.name }}" class="spec-form-input">
+  <div class="spec-form-help">{{ self.t("admin-sso-name-help") }}</div>
+</div>
+
+<div class="spec-form-field">
+  <label class="spec-form-label" for="sso-uris">{{ self.t("admin-sso-redirect-uris") }}</label>
+  <textarea id="sso-uris" name="redirect_uris" rows="3" required spellcheck="false"
+            placeholder="https://app.example.org/auth/callback"
+            class="spec-form-input spec-form-input--mono">{{ form.redirect_uris }}</textarea>
+  <div class="spec-form-help">{{ self.t("admin-sso-redirect-uris-help") }}</div>
+</div>
+
+<div class="spec-form-field">
+  <label class="spec-form-label" for="sso-groups">{{ self.t("admin-sso-groups") }}</label>
+  <input id="sso-groups" type="text" name="access_groups"
+         value="{{ form.access_groups }}" class="spec-form-input">
+  <div class="spec-form-help">{{ self.t("admin-sso-groups-help") }}</div>
+</div>
+
+<label class="toggle-row">
+  <div>
+    <div class="toggle-row__label">{{ self.t("admin-sso-require-mfa") }}</div>
+    <div class="toggle-row__hint">{{ self.t("admin-sso-require-mfa-help") }}</div>
+  </div>
+  <span class="switch">
+    <input type="checkbox" name="require_mfa" value="on"
+           {% if form.require_mfa.is_some() %}checked{% endif %}>
+    <span class="switch__track"><span class="switch__dot"></span></span>
+  </span>
+</label>

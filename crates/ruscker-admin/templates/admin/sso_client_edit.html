@@ -1,0 +1,77 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ client_id }} · {{ self.t("admin-sso-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="mb-5">
+  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-sso-edit-title") }} <code>{{ client_id }}</code></h1>
+  <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-sso-subtitle") }}</p>
+</div>
+
+{% let sso_active = true %}
+{% include "admin/_sso_subnav.html" %}
+
+{% match flash_error %}{% when Some with (msg) %}
+  <div class="admin-login-error mb-4" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {{ msg }}
+  </div>
+{% when None %}{% endmatch %}
+
+{% match flash_ok %}{% when Some with (msg) %}
+  <div class="admin-flash-ok mb-4" role="status">
+    <i class="ti ti-check" aria-hidden="true"></i>
+    {{ msg }}
+  </div>
+{% when None %}{% endmatch %}
+
+{% include "admin/_sso_secret.html" %}
+
+<form method="post" action="{{ base }}/admin/sso-clients/{{ client_id }}/edit" class="creds-form" autocomplete="off">
+  {% include "admin/_sso_fields.html" %}
+
+  <label class="toggle-row">
+    <div>
+      <div class="toggle-row__label">{{ self.t("admin-sso-enabled") }}</div>
+      <div class="toggle-row__hint">{{ self.t("admin-sso-enabled-help") }}</div>
+    </div>
+    <span class="switch">
+      <input type="checkbox" name="enabled" value="on"
+             {% if form.enabled.is_some() %}checked{% endif %}>
+      <span class="switch__track"><span class="switch__dot"></span></span>
+    </span>
+  </label>
+
+  <div class="flex justify-end gap-2 mt-2">
+    <a href="{{ base }}/admin/sso-clients" class="btn">{{ self.t("admin-sso-back") }}</a>
+    <button type="submit" class="btn btn--primary">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i>
+      {{ self.t("admin-sso-save") }}
+    </button>
+  </div>
+</form>
+
+{# Destructive actions live outside the settings form so Enter in a
+   field can never trigger them. #}
+<div class="creds-form mt-6">
+  <div class="creds-form-section-title">{{ self.t("admin-sso-danger-title") }}</div>
+  <div class="flex flex-wrap gap-2">
+    <form method="post" action="{{ base }}/admin/sso-clients/{{ client_id }}/rotate"
+          data-confirm="{{ self.t("admin-sso-rotate-confirm") }}" class="inline">
+      <button type="submit" class="btn">
+        <i class="ti ti-refresh" aria-hidden="true"></i>
+        {{ self.t("admin-sso-rotate") }}
+      </button>
+    </form>
+    <form method="post" action="{{ base }}/admin/sso-clients/{{ client_id }}/delete"
+          data-confirm="{{ self.t("admin-sso-delete-confirm") }}" class="inline">
+      <button type="submit" class="btn" style="color:var(--color-lock)">
+        <i class="ti ti-trash" aria-hidden="true"></i>
+        {{ self.t("admin-sso-delete") }}
+      </button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

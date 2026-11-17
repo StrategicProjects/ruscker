@@ -1,0 +1,76 @@
+name: Client packages
+
+# Unit tests of the sign-in client packages under `clients/`. They need
+# no network and no portal: each package's end-to-end tests skip
+# themselves unless RUSCKER_ISSUER is set (see clients/README.md).
+
+on:
+  push:
+    branches: [main]
+    paths: ["clients/**", ".github/workflows/clients.yml"]
+  pull_request:
+    paths: ["clients/**", ".github/workflows/clients.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: TypeScript
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: clients/js } }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  python:
+    name: Python
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: clients/python } }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.10" }
+      - run: python -m pip install '.[test]'
+      - run: python -m pytest -q
+
+  rust:
+    name: Rust
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: clients/rust } }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: clients/rust }
+      - run: cargo test
+      - run: cargo clippy --all-targets -- -D warnings
+
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    defaults: { run: { working-directory: clients/go } }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v5
+        with: { go-version-file: clients/go/go.mod }
+      - run: go vet ./...
+      - run: go test ./...
+
+  r:
+    name: R
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: r-lib/actions/setup-r@v2
+        with: { use-public-rspm: true }
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: clients/r
+          extra-packages: any::testthat
+      - run: Rscript -e 'testthat::test_local()'
+        working-directory: clients/r

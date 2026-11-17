@@ -297,6 +297,21 @@ pub async fn evaluate(
     if !spec.effective_require_mfa() {
         return MfaDecision::Satisfied;
     }
+    evaluate_with_validity(state, username, session_id, cookies, spec.effective_mfa_validity_days())
+        .await
+}
+
+/// The decision behind [`evaluate`], for a caller that is not a hosted
+/// app: the OIDC provider asks the same question for an SSO client that
+/// requires MFA. `validity_days == 0` means the proof must have been
+/// given in THIS session; otherwise a proof at most that old is enough.
+pub async fn evaluate_with_validity(
+    state: &crate::AppState,
+    username: &str,
+    session_id: &str,
+    cookies: &Cookies,
+    validity_days: u16,
+) -> MfaDecision {
     let Some(db) = state.db.as_ref() else {
         return MfaDecision::ChallengeRequired;
     };
@@ -355,7 +370,6 @@ pub async fn evaluate(
         return MfaDecision::ChallengeRequired;
     }
 
-    let validity_days = spec.effective_mfa_validity_days();
     if validity_days == 0 {
         return if constant_time_equal(
             grant.session_binding.as_bytes(),

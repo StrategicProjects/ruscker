@@ -106,8 +106,10 @@ Status: living document. Tracks the Phase 5 security audit
     the table nor push real events out of the queue. The classes have
     separate ceilings, so anonymous traffic against the login cannot
     silence the record of SSO refusals; and when a ceiling is reached a
-    marker row ("recording limit reached") is written for that minute,
-    so the gap is visible rather than looking like nothing happened;
+    marker row ("recording limit reached") is written for that minute —
+    typed `sso.suppressed` for SSO refusals, so it appears on the SSO
+    Access tab too — and both markers can be filtered for, so the gap is
+    visible rather than looking like nothing happened;
   - a refused sign-in keeps the typed username **only if it names an
     existing account**; anything else (people type passwords in the wrong
     field) is not stored;

@@ -133,18 +133,24 @@ struct SsoClientBrand {
     logo_src: Option<String>,
 }
 
-/// The SSO client behind a post-login destination, if it is an
-/// authorization request for a registered, enabled client.
+/// The SSO client behind a post-login destination — but only for a
+/// request the authorization endpoint itself would accept.
 ///
-/// `next` has already been validated as a local path. Only the
-/// `client_id` is read from it, and only its registered display name and
-/// logo are shown — never anything else from the query — so a crafted
-/// link cannot put arbitrary text on the sign-in page.
+/// `/oauth/authorize` deliberately answers the same way for an unknown
+/// client, a disabled one and an unregistered redirect URI, so that it
+/// tells a prober nothing. This page is reachable without signing in and
+/// with any `next`, so it must not undo that: naming a system for a bare
+/// `client_id` would let anyone list the registered clients and read
+/// the names of internal systems. Hence the same conditions as the
+/// endpoint: no repeated parameter, an enabled client, and a
+/// `redirect_uri` registered for it — at which point the endpoint would
+/// already have sent the browser here.
+///
+/// Only the client's REGISTERED name and logo are shown, never anything
+/// else from the query.
 async fn sso_client_brand(state: &AppState, next: &str) -> Option<SsoClientBrand> {
     let query = next.strip_prefix("/oauth/authorize?")?;
-    let client_id = url::form_urlencoded::parse(query.as_bytes())
-        .find(|(k, _)| k == "client_id")
-        .map(|(_, v)| v.into_owned())?;
+    let (client_id, redirect_uri) = super::oidc::client_and_redirect(query)?;
     if !db::oidc_clients::is_valid_client_id(&client_id) {
         return None;
     }
@@ -152,7 +158,7 @@ async fn sso_client_brand(state: &AppState, next: &str) -> Option<SsoClientBrand
         .await
         .ok()
         .flatten()
-        .filter(|c| c.enabled)?;
+        .filter(|c| c.enabled && c.redirect_uri_registered(&redirect_uri))?;
     Some(SsoClientBrand {
         name: client.name,
         logo_src: client

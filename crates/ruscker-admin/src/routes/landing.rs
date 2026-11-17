@@ -948,18 +948,17 @@ pub(crate) async fn portal_brand(state: &AppState, loc: Locale) -> PortalBrand {
                 cfg.to_string()
             }
         });
+    // Only a logo served by this portal (a root-absolute path, i.e. a
+    // Media-library file). An external URL would be blocked by the page's
+    // CSP anyway — a broken image next to a password field — and a
+    // relative one would resolve under `/admin/`. Anything else falls
+    // back to the built-in mark.
     let logo_src = lc
         .logos
         .iter()
         .find(|l| l.slot == "header" && l.align == "left")
-        .map(|l| {
-            let u = &l.url;
-            if u.starts_with("http://") || u.starts_with("https://") || u.starts_with("//") {
-                u.clone()
-            } else {
-                format!("{}{}", state.base_path, u)
-            }
-        });
+        .filter(|l| l.url.starts_with('/') && !l.url.starts_with("//"))
+        .map(|l| format!("{}{}", state.base_path, l.url));
     PortalBrand {
         title,
         logo_src,

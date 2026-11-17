@@ -696,15 +696,34 @@ async fn the_sign_in_page_carries_the_portal_brand_and_the_target_system() {
         logo: Some("logo radar.svg".into()),
     };
     ruscker_admin::db::oidc_clients::update(&db, "radar", &hostile, None).await.unwrap();
-    let page = get(&state, &format!("/admin/login?next={next}&evil=%3Cb%3Ex"), "").await;
+    let page = get(&state, &format!("/admin/login?next={next}"), "").await;
     assert!(!page.body.contains("<script>alert(1)"));
     assert!(
         page.body.contains("&#60;script&#62;alert(1)") || page.body.contains("&lt;script&gt;alert(1)"),
         "the name is shown, escaped"
     );
-    assert!(!page.body.contains("<b>x"), "nothing else from the URL is echoed as markup");
+
     // Its logo comes from the Media library, percent-encoded.
     assert!(page.body.contains(r#"src="/assets/img/logo%20radar.svg""#), "client logo");
+
+    // The page names a system only for a request the authorization
+    // endpoint itself would accept — it must not become a way to list
+    // registered clients. A bare client_id, an unregistered redirect
+    // URI, or a repeated parameter: no note, and no name anywhere.
+    let enc = |q: String| -> String { url::form_urlencoded::byte_serialize(q.as_bytes()).collect() };
+    let probes = [
+        "/oauth/authorize?client_id=radar".to_string(),
+        request("", &["redirect_uri"]),
+        request("", &["redirect_uri"]) + "&redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
+        request("&client_id=radar", &[]),
+        request("&redirect_uri=https%3A%2F%2Fradar.example%2Fcb", &[]),
+    ];
+    for probe in probes {
+        let page = get(&state, &format!("/admin/login?next={}", enc(probe.clone())), "").await;
+        assert_eq!(page.status, StatusCode::OK);
+        assert!(!page.body.contains("admin-login-sso\""), "no note for {probe}");
+        assert!(!page.body.contains("script&#62;alert") && !page.body.contains("logo%20radar"), "no name or logo for {probe}");
+    }
 
     // No note for: an unknown client, a disabled one, or an app destination.
     let unknown: String =
@@ -717,4 +736,19 @@ async fn the_sign_in_page_carries_the_portal_brand_and_the_target_system() {
     assert!(!page.body.contains("admin-login-sso\""));
     let page = get(&state, "/admin/login?next=%2Fapp%2Fdemo%2F", "").await;
     assert!(!page.body.contains("admin-login-sso\""));
+}
+
+/// Under a base path the note still appears (the destination arrives
+/// with the prefix and is stripped before it is inspected).
+#[tokio::test]
+async fn the_sign_in_note_works_under_a_base_path() {
+    let db = open_db().await;
+    seed(&db, false).await;
+    let mut state = app_state(db.clone(), ON_BOX, Some(KEY)).await;
+    state.base_path = Arc::from("/box");
+    let next: String =
+        url::form_urlencoded::byte_serialize(format!("/box{}", request("", &[])).as_bytes()).collect();
+    let page = get(&state, &format!("/box/admin/login?next={next}"), "").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("admin-login-sso\"") && page.body.contains(">Radar</div>"));
 }

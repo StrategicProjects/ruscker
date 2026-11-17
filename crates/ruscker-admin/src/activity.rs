@@ -60,6 +60,10 @@ pub enum ActivityEventType {
     /// events was reached, so further ones in that minute were not
     /// recorded. Without it a gap in the audit would look like silence.
     AuditSuppressed,
+    /// The same marker for SSO refusals. Its own type, in the `sso.`
+    /// family, so it shows up on the SSO "Access" tab — the place an
+    /// Admin looks at refusals.
+    SsoSuppressed,
 }
 
 impl ActivityEventType {
@@ -71,6 +75,7 @@ impl ActivityEventType {
             ActivityEventType::LoginFailed => "login.failed",
             ActivityEventType::SsoDenied => "sso.denied",
             ActivityEventType::AuditSuppressed => "audit.suppressed",
+            ActivityEventType::SsoSuppressed => "sso.suppressed",
         }
     }
 }
@@ -207,7 +212,11 @@ impl ActivityEvent {
     /// [`ActivityEventType::AuditSuppressed`].
     fn audit_suppressed(class: &str) -> Self {
         Self {
-            event_type: ActivityEventType::AuditSuppressed,
+            event_type: if class.starts_with("sso.") {
+                ActivityEventType::SsoSuppressed
+            } else {
+                ActivityEventType::AuditSuppressed
+            },
             username: None,
             spec_id: None,
             event_key: uuid::Uuid::new_v4().to_string(),
@@ -455,7 +464,11 @@ pub const FAILURE_BUDGET_PER_MINUTE: u32 = 240;
 /// the /64 for IPv6 — one subscriber owns a whole /64 and could
 /// otherwise present a fresh address per request.
 pub fn address_bucket(ip: Option<&str>) -> String {
-    match ip.and_then(|ip| ip.parse::<std::net::IpAddr>().ok()) {
+    // Canonical first: an IPv4 client seen as `::ffff:a.b.c.d` (a
+    // dual-stack listener, or a proxy that reports mapped addresses) is
+    // an IPv4 client — otherwise every one of them would share the single
+    // bucket `0:0:0:0::/64`.
+    match ip.and_then(|ip| ip.parse::<std::net::IpAddr>().ok()).map(|ip| ip.to_canonical()) {
         Some(std::net::IpAddr::V6(v6)) => {
             let s = v6.segments();
             format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
@@ -553,6 +566,19 @@ mod tests {
             ActivityEvent::sso_denied(Some("bia".into()), "radar", "not-in-group"),
         );
         assert_eq!(drain(&mut rx), vec![ActivityEventType::SsoDenied]);
+        // When the SSO class itself overflows, its marker is an `sso.`
+        // event (so the SSO tab shows it), again once.
+        for i in 0..400 {
+            sink.record_limited(
+                "sso.denied",
+                &format!("sso.denied|user{i}|radar|not-in-group"),
+                1,
+                ActivityEvent::sso_denied(Some(format!("user{i}")), "radar", "not-in-group"),
+            );
+        }
+        let kinds = drain(&mut rx);
+        assert_eq!(kinds.iter().filter(|k| **k == ActivityEventType::SsoSuppressed).count(), 1);
+        assert_eq!(kinds.iter().filter(|k| **k == ActivityEventType::AuditSuppressed).count(), 0);
 
         // A real sign-in is not a failure-class event and still goes in.
         sink.record(ActivityEvent::login_success("alice", AuthMethod::Password, "k", None));
@@ -567,6 +593,9 @@ mod tests {
             address_bucket(Some("2001:db8:1:2::1"))
         );
         assert_ne!(address_bucket(Some("2001:db8:1:2::1")), address_bucket(Some("2001:db8:1:3::1")));
+        // IPv4-mapped IPv6 is the IPv4 address, not a shared /64.
+        assert_eq!(address_bucket(Some("::ffff:203.0.113.9")), "203.0.113.9");
+        assert_ne!(address_bucket(Some("::ffff:203.0.113.9")), address_bucket(Some("::ffff:203.0.113.10")));
         assert_eq!(address_bucket(None), "-");
         assert_eq!(address_bucket(Some("not-an-ip")), "-");
     }

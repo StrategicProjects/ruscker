@@ -225,6 +225,12 @@ async fn render_index(
             refs.push_str(&format!("/assets/img/{f}\n"));
         }
     }
+    // SSO client logos (#1080) store a bare filename too.
+    if let Ok(clients) = db::oidc_clients::list_all(pool).await {
+        for f in clients.iter().filter_map(|c| c.logo.as_deref()) {
+            refs.push_str(&format!("/assets/img/{f}\n"));
+        }
+    }
     let kpi_files = images.len() as i64;
     let kpi_in_use = images
         .iter()

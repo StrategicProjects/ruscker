@@ -153,7 +153,7 @@ Claims, by scope:
 | `email` | `email`, when the account has one |
 | `setor` | `setor` (department), when the account has one |
 | `groups` | `groups` — only the groups that grant access to the system when it is restricted, all of the user's groups when it is open |
-| `roles` | `group_roles` — an object mapping each of those groups to the [group roles](./admin.md#groups) the user holds in it, e.g. `{"fiscal": ["analista", "gestor"]}`; `{}` when there are none |
+| `roles` | `group_roles` — an object mapping each of those groups to the [group roles](./admin.md#groups) the user holds in it, e.g. `{"fiscal": ["analista", "gestor"]}`; `{}` when there are none. Its keys are group names, so this scope names those groups even without `groups` |
 
 The same claims are available from `{issuer}/oauth/userinfo` with the
 access token.

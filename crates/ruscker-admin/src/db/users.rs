@@ -1185,20 +1185,46 @@ pub async fn full_name(db: &ConfigDb, username: &str) -> Result<Option<String>> 
         .filter(|n| !n.is_empty()))
 }
 
-/// Set (or, with a blank value, clear) the person's full name. Trimmed,
-/// control characters dropped, at most [`MAX_FULL_NAME_LEN`] characters.
-/// Audited. Errors when the account does not exist.
+/// Normalise a full name for storage: whitespace and control characters
+/// become single spaces (a pasted tab or line break must not fuse two
+/// words), invisible formatting characters that can reorder or hide text
+/// are dropped (bidirectional overrides and isolates, zero-width space,
+/// BOM — the name is shown by other systems, and must read as written),
+/// the result is trimmed and cut at [`MAX_FULL_NAME_LEN`] characters.
+/// Zero-width joiners stay: some scripts need them. Blank → `None`.
+pub fn clean_full_name(raw: &str) -> Option<String> {
+    let invisible = |c: char| {
+        matches!(c, '\u{200B}' | '\u{FEFF}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    };
+    let spaced: String = raw
+        .chars()
+        .filter(|c| !invisible(*c))
+        .map(|c| if c.is_whitespace() || c.is_control() { ' ' } else { c })
+        .collect();
+    let joined = spaced.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let cut: String = joined.chars().take(MAX_FULL_NAME_LEN).collect();
+    let cut = cut.trim_end();
+    (!cut.is_empty()).then(|| cut.to_string())
+}
+
+/// Set (or, with a blank value, clear) the person's full name, cleaned
+/// by [`clean_full_name`]. Audited. Errors when the account does not
+/// exist. Returns whether anything changed: an unchanged name writes
+/// nothing — no audit row repeating a person's name on every edit.
 pub async fn set_full_name(
     db: &ConfigDb,
     username: &str,
     full_name: Option<&str>,
     actor: Option<&str>,
-) -> Result<()> {
+) -> Result<bool> {
     let username = normalize_username(username);
-    let clean: Option<String> = full_name
-        .map(|n| n.chars().filter(|c| !c.is_control()).collect::<String>())
-        .map(|n| n.trim().chars().take(MAX_FULL_NAME_LEN).collect::<String>())
-        .filter(|n| !n.is_empty());
+    let clean: Option<String> = full_name.and_then(clean_full_name);
+    if fetch(db, &username).await?.is_none() {
+        anyhow::bail!("no such user: {username}");
+    }
+    if self::full_name(db, &username).await? == clean {
+        return Ok(false);
+    }
     let now = Utc::now();
     let target = format!("user:{username}");
     let diff = serde_json::json!({ "full_name": clean }).to_string();
@@ -1259,7 +1285,7 @@ pub async fn set_full_name(
     if affected == 0 {
         anyhow::bail!("no such user: {username}");
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Replace a user's optional profile fields (#856): setor, e-mail,
@@ -1550,8 +1576,24 @@ mod tests {
         create(&p, "ana", "CorrectPass9!", Role::Viewer, false, &[], None).await.unwrap();
         assert_eq!(full_name(&p, "ana").await.unwrap(), None);
 
-        set_full_name(&p, "ANA", Some("  Ana Maria\tde\u{7} Souza  "), Some("root")).await.unwrap();
-        assert_eq!(full_name(&p, "ana").await.unwrap().as_deref(), Some("Ana Mariade Souza"));
+        // A pasted tab or line break separates words, it does not fuse them;
+        // invisible direction overrides and zero-width spaces are dropped.
+        let changed = set_full_name(&p, "ANA", Some("  Ana Maria\tde\n\u{7}Souza\u{202E}\u{200B}  "), Some("root"))
+            .await
+            .unwrap();
+        assert!(changed);
+        assert_eq!(full_name(&p, "ana").await.unwrap().as_deref(), Some("Ana Maria de Souza"));
+
+        // Saving the same name again writes nothing: one audit row so far.
+        let audit_rows = || async {
+            let ConfigDb::Sqlite(pool) = &p else { unreachable!() };
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_log WHERE action = 'user.full-name'")
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        };
+        assert!(!set_full_name(&p, "ana", Some("Ana Maria de Souza "), None).await.unwrap());
+        assert_eq!(audit_rows().await, 1);
 
         // Bounded: it travels in tokens.
         set_full_name(&p, "ana", Some(&"é".repeat(500)), None).await.unwrap();

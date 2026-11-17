@@ -44,7 +44,6 @@ use serde_json::{json, Map, Value};
 use tower_cookies::Cookies;
 
 use crate::auth::MaybeSession;
-use crate::db::oidc_clients::OidcClient;
 use crate::db::oidc_codes::Grant;
 use crate::db::users::UserRow;
 use crate::mfa::MfaDecision;
@@ -613,25 +612,27 @@ struct ClaimExtras {
     group_roles: Vec<(String, String)>,
 }
 
-/// Load [`ClaimExtras`] for `scope`. A failed read degrades to "nothing
-/// extra" (the claim is simply absent) rather than failing the sign-in;
-/// it is logged.
-async fn claim_extras(db: &crate::db::ConfigDb, user: &UserRow, scope: &str) -> ClaimExtras {
+/// Load [`ClaimExtras`] for `scope`.
+///
+/// A failed read is an ERROR, not "nothing extra": a client that syncs a
+/// person's profile and permissions at each sign-in would otherwise take
+/// `{}` for "this person has no roles any more" (and the username for
+/// their name) because of a passing database hiccup. The caller answers
+/// `server_error` and the client retries.
+async fn claim_extras(
+    db: &crate::db::ConfigDb,
+    user: &UserRow,
+    scope: &str,
+) -> anyhow::Result<ClaimExtras> {
     let granted = |s: &str| scope.split(' ').any(|g| g == s);
     let mut extras = ClaimExtras::default();
     if granted("profile") {
-        match crate::db::users::full_name(db, &user.username).await {
-            Ok(name) => extras.full_name = name,
-            Err(err) => tracing::warn!(error = ?err, "full name lookup for claims failed"),
-        }
+        extras.full_name = crate::db::users::full_name(db, &user.username).await?;
     }
     if granted("roles") {
-        match crate::db::group_roles::roles_of_user(db, &user.username).await {
-            Ok(roles) => extras.group_roles = roles,
-            Err(err) => tracing::warn!(error = ?err, "group roles lookup for claims failed"),
-        }
+        extras.group_roles = crate::db::group_roles::roles_of_user(db, &user.username).await?;
     }
-    extras
+    Ok(extras)
 }
 
 /// The identity claims a client may see, by granted scope. Used for the
@@ -651,17 +652,19 @@ async fn claim_extras(db: &crate::db::ConfigDb, user: &UserRow, scope: &str) -> 
 /// THIS client when it is restricted, all of the user's groups when it
 /// is open: a client learns what it needs to authorize, not the user's
 /// memberships in unrelated teams. Roles of a group the user no longer
-/// belongs to are never sent.
+/// belongs to are never sent. Note that `group_roles` names groups (its
+/// keys) even without the `groups` scope — the same set, limited to the
+/// groups in which the user holds a role.
 fn identity_claims(
     user: &UserRow,
     extras: &ClaimExtras,
-    client: &OidcClient,
+    access_groups: &[String],
     scope: &str,
 ) -> Map<String, Value> {
     let granted = |s: &str| scope.split(' ').any(|g| g == s);
     // Which of the user's groups this client is allowed to learn about.
     let visible = |g: &String| {
-        user.groups.contains(g) && (client.access_groups.is_empty() || client.access_groups.contains(g))
+        user.groups.contains(g) && (access_groups.is_empty() || access_groups.contains(g))
     };
     let non_blank = |v: &Option<String>| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
 
@@ -857,8 +860,14 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     let now = chrono::Utc::now().timestamp();
     let exp = now + TOKEN_TTL_SECS;
 
-    let extras = claim_extras(db, &user, &grant.scope).await;
-    let mut id_claims = identity_claims(&user, &extras, &client, &grant.scope);
+    let extras = match claim_extras(db, &user, &grant.scope).await {
+        Ok(extras) => extras,
+        Err(err) => {
+            tracing::error!(error = ?err, "claims lookup failed at the token endpoint");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+    let mut id_claims = identity_claims(&user, &extras, &client.access_groups, &grant.scope);
     id_claims.insert("iss".into(), json!(issuer));
     id_claims.insert("aud".into(), json!(client.client_id));
     id_claims.insert("iat".into(), json!(now));
@@ -997,10 +1006,16 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
         }
     };
-    let extras = claim_extras(db, &user, scope).await;
+    let extras = match claim_extras(db, &user, scope).await {
+        Ok(extras) => extras,
+        Err(err) => {
+            tracing::error!(error = ?err, "claims lookup failed at userinfo");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
+        }
+    };
     (
         [(CACHE_CONTROL, "no-store")],
-        Json(Value::Object(identity_claims(&user, &extras, &client, scope))),
+        Json(Value::Object(identity_claims(&user, &extras, &client.access_groups, scope))),
     )
         .into_response()
 }
@@ -1008,6 +1023,55 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The group filter of `groups` / `group_roles`, on its own: what a
+    /// restricted client may learn, and that a role row for a group the
+    /// user is NOT in (stale, or simply not theirs) is never sent.
+    #[test]
+    fn claims_show_only_groups_the_client_may_learn_and_the_user_is_in() {
+        let user = UserRow {
+            id: "u1".into(),
+            username: "ana".into(),
+            role: crate::auth::Role::Viewer,
+            must_change_password: false,
+            groups: vec!["fiscal".into(), "outro".into()],
+            created_at: chrono::Utc::now(),
+            created_by: None,
+            setor: Some(" GAPE ".into()),
+            email: None,
+            celular: None,
+        };
+        let pair = |g: &str, r: &str| (g.to_string(), r.to_string());
+        let extras = ClaimExtras {
+            full_name: Some("  ".into()),
+            group_roles: vec![
+                pair("fiscal", "gestor"),
+                pair("fiscal", "gestor"),
+                pair("outro", "leitor"),
+                pair("saiu", "chefe"),  // a group the user is not in
+                pair("gestao", "chefe"), // listed by the client, user not in it
+            ],
+        };
+        let scope = "openid profile setor groups roles";
+
+        // Restricted to `fiscal` and `gestao`: only `fiscal` (user ∩ client).
+        let restricted = ["fiscal".to_string(), "gestao".to_string()];
+        let c = identity_claims(&user, &extras, &restricted, scope);
+        assert_eq!(c["groups"], json!(["fiscal"]));
+        assert_eq!(c["group_roles"], json!({"fiscal": ["gestor"]}));
+        // A blank full name falls back to the username; setor is trimmed.
+        assert_eq!(c["name"], "ana");
+        assert_eq!(c["setor"], "GAPE");
+
+        // Open client: every group the user is in — still not `saiu`.
+        let c = identity_claims(&user, &extras, &[], scope);
+        assert_eq!(c["groups"], json!(["fiscal", "outro"]));
+        assert_eq!(c["group_roles"], json!({"fiscal": ["gestor"], "outro": ["leitor"]}));
+
+        // Only `sub` without scopes.
+        let c = identity_claims(&user, &extras, &[], "openid");
+        assert_eq!(c.keys().collect::<Vec<_>>(), vec!["sub"]);
+    }
 
     #[test]
     fn repeated_parameters_are_refused() {

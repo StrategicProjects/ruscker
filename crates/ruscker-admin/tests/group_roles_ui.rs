@@ -562,6 +562,28 @@ async fn edit_form_saves_and_clears_the_full_name() {
     assert_eq!(st, StatusCode::NOT_FOUND);
     assert_eq!(full(&db, "bia").await, None);
 
+    // A form that does not send the field leaves the name alone, and a
+    // refused update (demoting the only Admin) does not touch it either.
+    let (st, _) = post(&state, "/admin/users/ana/edit", "role=viewer&groups=fazenda&setor=X&email=&celular=", Some(&admin)).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await.as_deref(), Some("Ana Maria de Souza"));
+    let (st, _) = post(
+        &state,
+        "/admin/users/ana/edit",
+        "full_name=Nobody&role=bogus&groups=fazenda&setor=&email=&celular=",
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await.as_deref(), Some("Ana Maria de Souza"), "refused update leaves the name");
+    // An Editor cannot name themselves through this form, but can name
+    // someone in their own group.
+    let _ = post(&state, "/admin/users/ed/edit", "full_name=Chefe&role=editor&groups=fazenda&setor=&email=&celular=", Some(&ed)).await;
+    assert_eq!(full(&db, "ed").await, None);
+    let (st, _) = post(&state, "/admin/users/cris/edit", "full_name=Cris+Lima&role=viewer&groups=fazenda&setor=&email=&celular=", Some(&ed)).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "cris").await.as_deref(), Some("Cris Lima"));
+
     // Blank clears it.
     let (st, _) = post(
         &state,

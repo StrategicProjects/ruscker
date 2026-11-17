@@ -11,7 +11,9 @@
 //! * [`jwks`] and [`discovery`] — the two JSON documents a client reads
 //!   to learn where the endpoints are and how to verify a token.
 //!
-//! Nothing here issues a token yet; that is slices 3 and 4.
+//! * [`sign_jwt`] / [`verify_jwt`] — compact JWS (RFC 7515) with that
+//!   key: what an ID token and the provider's own access token are.
+//! * [`pkce_matches`] — the S256 proof-key check of RFC 7636.
 //!
 //! ## Why ES256
 //!
@@ -25,7 +27,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::Utc;
 use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_FIXED_SIGNING};
+use ring::signature::{
+    EcdsaKeyPair, KeyPair, UnparsedPublicKey, ECDSA_P256_SHA256_FIXED,
+    ECDSA_P256_SHA256_FIXED_SIGNING,
+};
 use serde_json::{json, Value};
 
 use crate::crypto::MasterKey;
@@ -225,6 +230,113 @@ pub fn warn_if_misconfigured(
     }
 }
 
+/// Build a signed compact JWT: `base64url(header).base64url(claims).base64url(signature)`.
+///
+/// `typ` goes in the header and is how the two kinds of token this
+/// provider mints are told apart (`JWT` for an ID token, `at+jwt` for
+/// an access token, RFC 9068) — so one can never be accepted as the
+/// other.
+pub fn sign_jwt(key: &SigningKey, typ: &str, claims: &Value) -> Result<String> {
+    let header = json!({ "alg": ALG, "typ": typ, "kid": key.kid });
+    let signing_input = format!(
+        "{}.{}",
+        URL_SAFE_NO_PAD.encode(header.to_string()),
+        URL_SAFE_NO_PAD.encode(claims.to_string())
+    );
+    let signature = key.sign(signing_input.as_bytes())?;
+    Ok(format!("{signing_input}.{}", URL_SAFE_NO_PAD.encode(signature)))
+}
+
+/// A JWT whose signature checked out against one of OUR published keys.
+/// Only the signature is established here — the caller must still check
+/// `typ`, `iss`, `aud`, `exp` and whatever else gives the token meaning.
+#[derive(Debug)]
+pub struct VerifiedJwt {
+    pub typ: String,
+    pub claims: Value,
+}
+
+/// Verify a compact JWT against the stored public keys. `None` for
+/// anything that is not a well-formed ES256 token signed by a key we
+/// published — malformed input is not an error, just not a valid token.
+///
+/// The algorithm is pinned to ES256 and the key is looked up by `kid`
+/// among OUR keys; nothing in the token can choose a different
+/// algorithm or supply its own key (the classic `alg: none` / embedded
+/// `jwk` attacks).
+pub async fn verify_jwt(db: &ConfigDb, token: &str) -> Result<Option<VerifiedJwt>> {
+    let mut parts = token.split('.');
+    let (Some(h), Some(c), Some(sig), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Ok(None);
+    };
+    let decode = |part: &str| URL_SAFE_NO_PAD.decode(part).ok();
+    let (Some(header), Some(claims), Some(signature)) = (decode(h), decode(c), decode(sig)) else {
+        return Ok(None);
+    };
+    let Ok(header) = serde_json::from_slice::<Value>(&header) else {
+        return Ok(None);
+    };
+    if header["alg"] != ALG {
+        return Ok(None);
+    }
+    let (Some(kid), Some(typ)) = (header["kid"].as_str(), header["typ"].as_str()) else {
+        return Ok(None);
+    };
+    let Some(stored) = oidc_keys::list_newest_first(db)
+        .await?
+        .into_iter()
+        .find(|k| k.kid == kid && k.alg == ALG)
+    else {
+        return Ok(None);
+    };
+    let jwk: Value = serde_json::from_str(&stored.public_jwk)
+        .with_context(|| format!("stored JWK for key {kid} is not JSON"))?;
+    let (Some(x), Some(y)) = (
+        jwk["x"].as_str().and_then(decode),
+        jwk["y"].as_str().and_then(decode),
+    ) else {
+        bail!("stored JWK for key {kid} has no usable coordinates");
+    };
+    let mut point = Vec::with_capacity(65);
+    point.push(0x04);
+    point.extend(x);
+    point.extend(y);
+    let signing_input = &token[..h.len() + 1 + c.len()];
+    if UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point)
+        .verify(signing_input.as_bytes(), &signature)
+        .is_err()
+    {
+        return Ok(None);
+    }
+    let Ok(claims) = serde_json::from_slice::<Value>(&claims) else {
+        return Ok(None);
+    };
+    Ok(Some(VerifiedJwt { typ: typ.to_string(), claims }))
+}
+
+/// PKCE (RFC 7636) with `S256`: does `verifier` hash to `challenge`?
+///
+/// The verifier must be 43–128 characters of the unreserved set — the
+/// RFC's own bounds; shorter would be guessable, and refusing odd
+/// characters keeps every client library's encoding in agreement.
+pub fn pkce_matches(verifier: &str, challenge: &str) -> bool {
+    let well_formed = (43..=128).contains(&verifier.len())
+        && verifier
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'.' | b'_' | b'~'));
+    if !well_formed {
+        return false;
+    }
+    let digest = ring::digest::digest(&ring::digest::SHA256, verifier.as_bytes());
+    let computed = URL_SAFE_NO_PAD.encode(digest.as_ref());
+    // Constant time: the challenge is not a secret, but there is no
+    // reason to make this the one comparison that leaks.
+    #[allow(deprecated)]
+    ring::constant_time::verify_slices_are_equal(computed.as_bytes(), challenge.as_bytes()).is_ok()
+}
+
 /// The OpenID Provider Metadata document (OIDC Discovery 1.0 §3),
 /// served at `{issuer}/.well-known/openid-configuration`.
 ///
@@ -260,7 +372,6 @@ pub fn discovery(issuer: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_FIXED};
 
     const KEY_A: &str = "0000000000000000000000000000000000000000000000000000000000000001";
     const KEY_B: &str = "0000000000000000000000000000000000000000000000000000000000000002";
@@ -513,6 +624,67 @@ mod tests {
         assert_eq!(kid.len(), 43);
         assert_eq!(jwk["kid"], kid.as_str());
         assert!(public_jwk(&point[..64]).is_err(), "wrong length");
+    }
+
+    #[tokio::test]
+    async fn a_signed_jwt_verifies_and_tampering_does_not() {
+        let db = mem_db().await;
+        let mk = MasterKey::parse(KEY_A).unwrap();
+        let key = ensure_signing_key(&db, &mk).await.unwrap();
+        let token = sign_jwt(&key, "JWT", &json!({"sub": "u-1", "aud": "radar"})).unwrap();
+        assert_eq!(token.split('.').count(), 3);
+
+        let ok = verify_jwt(&db, &token).await.unwrap().expect("valid");
+        assert_eq!(ok.typ, "JWT");
+        assert_eq!(ok.claims["sub"], "u-1");
+
+        let parts: Vec<&str> = token.split('.').collect();
+        let enc = |v: Value| URL_SAFE_NO_PAD.encode(v.to_string());
+        // Different claims under the same signature.
+        let forged = format!("{}.{}.{}", parts[0], enc(json!({"sub": "admin", "aud": "radar"})), parts[2]);
+        assert!(verify_jwt(&db, &forged).await.unwrap().is_none());
+        // `alg: none`, with and without a signature.
+        let none = enc(json!({"alg": "none", "typ": "JWT", "kid": key.kid}));
+        assert!(verify_jwt(&db, &format!("{none}.{}.", parts[1])).await.unwrap().is_none());
+        assert!(verify_jwt(&db, &format!("{none}.{}.{}", parts[1], parts[2])).await.unwrap().is_none());
+        // A symmetric algorithm name (the "public key as HMAC secret" trick).
+        let hs = enc(json!({"alg": "HS256", "typ": "JWT", "kid": key.kid}));
+        assert!(verify_jwt(&db, &format!("{hs}.{}.{}", parts[1], parts[2])).await.unwrap().is_none());
+        // Unknown kid; a key the token brings along is ignored.
+        let other = enc(json!({"alg": "ES256", "typ": "JWT", "kid": "nope", "jwk": {"kty": "EC"}}));
+        assert!(verify_jwt(&db, &format!("{other}.{}.{}", parts[1], parts[2])).await.unwrap().is_none());
+        // Garbage.
+        for junk in ["", "a.b", "a.b.c.d", "!!.!!.!!", &token[..token.len() - 2]] {
+            assert!(verify_jwt(&db, junk).await.unwrap().is_none(), "{junk:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_jwt_signed_by_another_installation_is_refused() {
+        let ours = mem_db().await;
+        let theirs = mem_db().await;
+        let mk = MasterKey::parse(KEY_A).unwrap();
+        ensure_signing_key(&ours, &mk).await.unwrap();
+        let their_key = ensure_signing_key(&theirs, &mk).await.unwrap();
+        let token = sign_jwt(&their_key, "JWT", &json!({"sub": "u-1"})).unwrap();
+        assert!(verify_jwt(&theirs, &token).await.unwrap().is_some());
+        assert!(verify_jwt(&ours, &token).await.unwrap().is_none());
+    }
+
+    /// RFC 7636 Appendix B: the worked S256 example.
+    #[test]
+    fn pkce_known_answer_and_bounds() {
+        let verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+        let challenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+        assert!(pkce_matches(verifier, challenge));
+        assert!(!pkce_matches(verifier, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cN"));
+        assert!(!pkce_matches("wrong-verifier-wrong-verifier-wrong-verifier-1", challenge));
+        // `plain` must not work: the challenge itself is not a verifier.
+        assert!(!pkce_matches(challenge, challenge));
+        // Bounds and alphabet.
+        assert!(!pkce_matches(&verifier[..42], challenge));
+        assert!(!pkce_matches(&"a".repeat(129), challenge));
+        assert!(!pkce_matches(&format!("{} ", &verifier[..42]), challenge));
     }
 
     #[test]

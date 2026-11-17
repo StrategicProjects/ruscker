@@ -8,6 +8,11 @@
 //!   user's browser arrives here from a client, proves who the user is
 //!   (existing session or login), passes the client's gates, and leaves
 //!   with a one-use code. See [`authorize`].
+//! * `POST /oauth/token` — the client's back-channel call (slice 4): it
+//!   proves who IT is, redeems the code and receives the ID token. See
+//!   [`token`].
+//! * `GET|POST /oauth/userinfo` — the same identity claims, fetched
+//!   with the access token. See [`userinfo`].
 //!
 //! The first two are public by definition and carry no secret. All answer **404
 //! unless the provider is enabled with a usable issuer**
@@ -22,19 +27,26 @@
 //! leaves the provider off (`oidc::active_issuer`).
 
 use axum::{
-    extract::{RawQuery, State},
+    extract::{DefaultBodyLimit, RawQuery, State},
     http::{
-        header::{CACHE_CONTROL, LOCATION, REFERRER_POLICY},
+        header::{
+            AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, LOCATION, PRAGMA, REFERRER_POLICY,
+            WWW_AUTHENTICATE,
+        },
         HeaderMap, HeaderValue, StatusCode,
     },
     response::{Html, IntoResponse, Redirect, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
+use base64::Engine;
+use serde_json::{json, Map, Value};
 use tower_cookies::Cookies;
 
 use crate::auth::MaybeSession;
+use crate::db::oidc_clients::OidcClient;
 use crate::db::oidc_codes::Grant;
+use crate::db::users::UserRow;
 use crate::mfa::MfaDecision;
 use crate::AppState;
 
@@ -43,6 +55,12 @@ pub fn routes() -> Router<AppState> {
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/oauth/jwks", get(jwks))
         .route("/oauth/authorize", get(authorize))
+        // A token request is a few hundred bytes. The cap is enforced
+        // while the body is READ, so an oversized one is rejected before
+        // any of it is parsed — this endpoint is reachable without
+        // credentials.
+        .route("/oauth/token", post(token).layer(DefaultBodyLimit::max(MAX_QUERY_LEN)))
+        .route("/oauth/userinfo", get(userinfo).post(userinfo))
 }
 
 /// Clients cache these documents; five minutes keeps a key rotation
@@ -137,10 +155,18 @@ const MAX_QUERY_LEN: usize = 4096;
 /// refuses duplicates up front, so every later `get` is unambiguous.
 struct AuthParams(Vec<(String, String)>);
 
+/// No legitimate request comes near this many parameters. The bound
+/// also keeps the duplicate check below (a scan per parameter) cheap
+/// whatever the caller sends.
+const MAX_PARAMS: usize = 32;
+
 impl AuthParams {
     fn parse(query: &str) -> Option<Self> {
         let mut out: Vec<(String, String)> = Vec::new();
         for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+            if out.len() == MAX_PARAMS {
+                return None;
+            }
             if out.iter().any(|(seen, _)| seen == &*k) {
                 return None;
             }
@@ -299,7 +325,7 @@ async fn authorize(
         return refuse("malformed authorization request");
     }
     let Some(params) = AuthParams::parse(&raw_query) else {
-        return refuse("a request parameter is repeated");
+        return refuse("a request parameter is repeated, or there are too many");
     };
 
     // 2. Client and redirect URI — no redirect before these pass.
@@ -481,6 +507,367 @@ async fn authorize(
     }
 }
 
+// ── Token endpoint ───────────────────────────────────────────────
+
+/// Lifetime of the ID token and of the access token. Clients keep their
+/// own session after the exchange (ADR 0005), so these only have to
+/// outlive the handful of requests a login makes.
+const TOKEN_TTL_SECS: i64 = 300;
+
+/// An OAuth error response for the token endpoint (RFC 6749 §5.2):
+/// JSON `{error, error_description}`, never cached.
+fn token_error(status: StatusCode, error: &str, description: &str) -> Response {
+    (
+        status,
+        [(CACHE_CONTROL, "no-store"), (PRAGMA, "no-cache")],
+        Json(json!({ "error": error, "error_description": description })),
+    )
+        .into_response()
+}
+
+/// 401 `invalid_client`. When the client tried HTTP Basic, the response
+/// must carry a matching `WWW-Authenticate` challenge (RFC 6749 §5.2).
+fn invalid_client(used_basic: bool) -> Response {
+    let mut resp = token_error(StatusCode::UNAUTHORIZED, "invalid_client", "client authentication failed");
+    if used_basic {
+        resp.headers_mut()
+            .insert(WWW_AUTHENTICATE, HeaderValue::from_static("Basic realm=\"oidc\""));
+    }
+    resp
+}
+
+/// The value after an `Authorization` scheme name, matched without
+/// regard to case as RFC 7235 requires (`Basic`, `basic`, `BASIC`…).
+fn auth_scheme_value<'a>(headers: &'a HeaderMap, scheme: &str) -> Option<&'a str> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let (name, rest) = value.split_once(' ')?;
+    name.eq_ignore_ascii_case(scheme).then_some(rest.trim())
+}
+
+/// Credentials from an `Authorization: Basic` header. Per RFC 6749
+/// §2.3.1 both halves are form-urlencoded before being joined with `:`
+/// and base64-encoded, so they are decoded the same way here.
+fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
+    let encoded = auth_scheme_value(headers, "Basic")?;
+    let raw = base64::engine::general_purpose::STANDARD.decode(encoded.trim()).ok()?;
+    let raw = String::from_utf8(raw).ok()?;
+    let (id, secret) = raw.split_once(':')?;
+    // `+` means space in this encoding; then ordinary percent-decoding.
+    let decode = |part: &str| -> Option<String> {
+        urlencoding::decode(&part.replace('+', " ")).ok().map(|c| c.into_owned())
+    };
+    Some((decode(id)?, decode(secret)?))
+}
+
+/// The identity claims a client may see, by granted scope. Used for the
+/// ID token and for `/oauth/userinfo`, so the two can never disagree.
+///
+/// * always: `sub` — the account's immutable id (a username can be
+///   reused after an account is deleted; the id cannot);
+/// * `profile`: `preferred_username`, `name`;
+/// * `email`: `email`, when the account has one;
+/// * `groups`: `groups` — only the groups that grant access to THIS
+///   client when it is restricted, all of the user's groups when it is
+///   open. A client learns what it needs to authorize, not the user's
+///   memberships in unrelated teams.
+fn identity_claims(user: &UserRow, client: &OidcClient, scope: &str) -> Map<String, Value> {
+    let granted = |s: &str| scope.split(' ').any(|g| g == s);
+    let mut claims = Map::new();
+    claims.insert("sub".into(), json!(user.id));
+    if granted("profile") {
+        claims.insert("preferred_username".into(), json!(user.username));
+        claims.insert("name".into(), json!(user.username));
+    }
+    if granted("email") {
+        if let Some(email) = user.email.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+            claims.insert("email".into(), json!(email));
+        }
+    }
+    if granted("groups") {
+        let groups: Vec<&String> = user
+            .groups
+            .iter()
+            .filter(|g| client.access_groups.is_empty() || client.access_groups.contains(g))
+            .collect();
+        claims.insert("groups".into(), json!(groups));
+    }
+    claims
+}
+
+/// `POST /oauth/token` — redeem an authorization code.
+///
+/// The caller is the client's BACKEND, not a browser. Order matters
+/// here too:
+///
+/// 1. **Authenticate the client** (secret via HTTP Basic or the form
+///    body, never both). Nothing else is looked at before this passes,
+///    so someone who merely intercepted a code cannot even burn it.
+/// 2. **Redeem the code** — atomically, once. From this point the code
+///    is spent whatever happens next: a failed attempt is not retried.
+/// 3. **Check everything the code was bound to**: the same client, the
+///    same redirect URI, and the PKCE verifier matching the challenge
+///    stored at authorization time.
+/// 4. **Re-read the user**: the account must still exist (same id, not
+///    merely the same name) and still pass the client's group gate.
+/// 5. Only then are the ID token and access token signed.
+///
+/// Every failure after step 1 is the same `invalid_grant`, so the
+/// response does not reveal which binding failed.
+async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) -> Response {
+    let issuer = match provider(&state) {
+        Ok(issuer) => issuer,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let bad_request = |d: &str| token_error(StatusCode::BAD_REQUEST, "invalid_request", d);
+    let form_encoded = headers
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| {
+            v.split(';').next().unwrap_or("").trim().eq_ignore_ascii_case("application/x-www-form-urlencoded")
+        });
+    if !form_encoded {
+        return bad_request("the body must be application/x-www-form-urlencoded");
+    }
+    let Some(params) = AuthParams::parse(&body) else {
+        return bad_request("a request parameter is repeated, or there are too many");
+    };
+
+    // 1. Client authentication.
+    let basic = basic_credentials(&headers);
+    let used_basic = headers.contains_key(AUTHORIZATION);
+    // An `Authorization` header we cannot read as Basic is a failed
+    // authentication — it must not quietly fall through to credentials
+    // in the body ("one method, never both").
+    if used_basic && basic.is_none() {
+        return invalid_client(true);
+    }
+    let (client_id, client_secret) = match (basic, params.get("client_secret")) {
+        (Some(_), Some(_)) => return bad_request("use one client authentication method"),
+        (Some((id, secret)), None) => {
+            // A client_id repeated in the body must agree with the header.
+            if params.get("client_id").is_some_and(|b| b != id) {
+                return invalid_client(true);
+            }
+            (id, secret)
+        }
+        (None, Some(secret)) => match params.get("client_id") {
+            Some(id) => (id.to_string(), secret.to_string()),
+            None => return invalid_client(used_basic),
+        },
+        (None, None) => return invalid_client(used_basic),
+    };
+    // Shape first, as in `authorize`: an id that could never have been
+    // registered does not reach the database (where, on Postgres, a NUL
+    // byte would turn a bad request into a logged 500).
+    if !crate::db::oidc_clients::is_valid_client_id(&client_id) {
+        return invalid_client(used_basic);
+    }
+    let client = match crate::db::oidc_clients::fetch(db, &client_id).await {
+        Ok(Some(c)) if c.enabled && c.verify_secret(&client_secret) => c,
+        Ok(_) => return invalid_client(used_basic),
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch oidc client failed");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+
+    if params.get("grant_type") != Some("authorization_code") {
+        return token_error(
+            StatusCode::BAD_REQUEST,
+            "unsupported_grant_type",
+            "only authorization_code is supported",
+        );
+    }
+    let (Some(code), Some(redirect_uri), Some(verifier)) =
+        (params.get("code"), params.get("redirect_uri"), params.get("code_verifier"))
+    else {
+        return bad_request("code, redirect_uri and code_verifier are required");
+    };
+
+    // 2. Redeem — once.
+    let invalid_grant =
+        || token_error(StatusCode::BAD_REQUEST, "invalid_grant", "the authorization code is not valid");
+    let redeemed = match crate::db::oidc_codes::consume(db, code).await {
+        Ok(Some(r)) => r,
+        Ok(None) => return invalid_grant(),
+        Err(err) => {
+            tracing::error!(error = ?err, "redeem authorization code failed");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+    let grant = &redeemed.grant;
+
+    // 3. Bindings.
+    if grant.client_id != client.client_id
+        || grant.redirect_uri != redirect_uri
+        || !crate::oidc::pkce_matches(verifier, &grant.code_challenge)
+    {
+        tracing::warn!(client = %client.client_id, "authorization code presented with a wrong binding");
+        return invalid_grant();
+    }
+
+    // 4. The user, as they are NOW.
+    let user = match crate::db::users::fetch(db, &grant.username).await {
+        Ok(Some(u)) if u.id == grant.user_id && client.allows_groups(&u.groups) => u,
+        Ok(_) => return invalid_grant(),
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch user for token failed");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+
+    // 5. Sign.
+    let key = match crate::oidc::ensure_signing_key(db, &state.master_key).await {
+        Ok(k) => k,
+        Err(err) => {
+            tracing::error!(error = ?err, "OIDC signing key unavailable");
+            return token_error(StatusCode::SERVICE_UNAVAILABLE, "server_error", "signing key unavailable");
+        }
+    };
+    let now = chrono::Utc::now().timestamp();
+    let exp = now + TOKEN_TTL_SECS;
+
+    let mut id_claims = identity_claims(&user, &client, &grant.scope);
+    id_claims.insert("iss".into(), json!(issuer));
+    id_claims.insert("aud".into(), json!(client.client_id));
+    id_claims.insert("iat".into(), json!(now));
+    id_claims.insert("exp".into(), json!(exp));
+    // No `auth_time`: the session's creation time is not recorded, and
+    // the code's issue time is not when the user authenticated — a
+    // wrong value would be worse than none (ADR 0005).
+    if let Some(nonce) = grant.nonce.as_deref() {
+        id_claims.insert("nonce".into(), json!(nonce));
+    }
+    // The access token is for OUR userinfo endpoint only: audience is
+    // the issuer itself, and its `typ` differs from the ID token's, so
+    // neither can stand in for the other.
+    let access_claims = json!({
+        "iss": issuer,
+        "aud": issuer,
+        "sub": user.id,
+        "username": user.username,
+        "client_id": client.client_id,
+        "scope": grant.scope,
+        "iat": now,
+        "exp": exp,
+    });
+    let (id_token, access_token) = match (
+        crate::oidc::sign_jwt(&key, "JWT", &Value::Object(id_claims)),
+        crate::oidc::sign_jwt(&key, ACCESS_TOKEN_TYP, &access_claims),
+    ) {
+        (Ok(i), Ok(a)) => (i, a),
+        (Err(err), _) | (_, Err(err)) => {
+            tracing::error!(error = ?err, "sign tokens failed");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+
+    // One activity row per sign-in to an external system.
+    state.activity.record(crate::activity::ActivityEvent::sso_login(
+        user.username.clone(),
+        client.client_id.clone(),
+        uuid::Uuid::new_v4().to_string(),
+    ));
+
+    (
+        [(CACHE_CONTROL, "no-store"), (PRAGMA, "no-cache")],
+        Json(json!({
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": TOKEN_TTL_SECS,
+            "id_token": id_token,
+            "scope": grant.scope,
+        })),
+    )
+        .into_response()
+}
+
+// ── UserInfo endpoint ────────────────────────────────────────────
+
+/// JWT `typ` of the access tokens this provider mints (RFC 9068).
+const ACCESS_TOKEN_TYP: &str = "at+jwt";
+
+/// 401 for a missing or unusable access token (RFC 6750 §3).
+fn bearer_error() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        [
+            (WWW_AUTHENTICATE, "Bearer error=\"invalid_token\""),
+            (CACHE_CONTROL, "no-store"),
+        ],
+    )
+        .into_response()
+}
+
+/// `GET|POST /oauth/userinfo` — the identity claims of the access
+/// token's user, for the scopes that were granted.
+///
+/// The token is one of ours (signature), meant for this endpoint
+/// (`typ`, `aud`), from this issuer and not expired. The user and the
+/// client are then read from the database again: the answer reflects
+/// the account as it is now, and stops when the account, the client or
+/// the user's access to it is gone.
+async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let issuer = match provider(&state) {
+        Ok(issuer) => issuer,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let Some(db) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let Some(bearer) = auth_scheme_value(&headers, "Bearer") else {
+        return bearer_error();
+    };
+    let jwt = match crate::oidc::verify_jwt(db, bearer).await {
+        Ok(Some(jwt)) => jwt,
+        Ok(None) => return bearer_error(),
+        Err(err) => {
+            tracing::error!(error = ?err, "verify access token failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
+        }
+    };
+    let c = &jwt.claims;
+    let now = chrono::Utc::now().timestamp();
+    let acceptable = jwt.typ == ACCESS_TOKEN_TYP
+        && c["iss"] == issuer.as_str()
+        && c["aud"] == issuer.as_str()
+        && c["exp"].as_i64().is_some_and(|exp| exp > now);
+    let (true, Some(sub), Some(username), Some(client_id), Some(scope)) = (
+        acceptable,
+        c["sub"].as_str(),
+        c["username"].as_str(),
+        c["client_id"].as_str(),
+        c["scope"].as_str(),
+    ) else {
+        return bearer_error();
+    };
+
+    let client = match crate::db::oidc_clients::fetch(db, client_id).await {
+        Ok(Some(client)) if client.enabled => client,
+        Ok(_) => return bearer_error(),
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch oidc client failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
+        }
+    };
+    let user = match crate::db::users::fetch(db, username).await {
+        Ok(Some(u)) if u.id == sub && client.allows_groups(&u.groups) => u,
+        Ok(_) => return bearer_error(),
+        Err(err) => {
+            tracing::error!(error = ?err, "fetch user for userinfo failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
+        }
+    };
+    (
+        [(CACHE_CONTROL, "no-store")],
+        Json(Value::Object(identity_claims(&user, &client, scope))),
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,6 +881,39 @@ mod tests {
         let p = AuthParams::parse("state=&scope=openid%20email").unwrap();
         assert_eq!(p.get("state"), None, "empty reads as absent");
         assert_eq!(p.get("scope"), Some("openid email"));
+    }
+
+    #[test]
+    fn parameter_count_is_bounded() {
+        let ok: String = (0..MAX_PARAMS).map(|i| format!("k{i}=v&")).collect();
+        assert!(AuthParams::parse(&ok).is_some());
+        let too_many: String = (0..=MAX_PARAMS).map(|i| format!("k{i}=v&")).collect();
+        assert!(AuthParams::parse(&too_many).is_none());
+    }
+
+    #[test]
+    fn basic_credentials_are_form_decoded_and_scheme_is_case_insensitive() {
+        use base64::engine::general_purpose::STANDARD;
+        let with = |value: String| {
+            let mut h = HeaderMap::new();
+            h.insert(AUTHORIZATION, value.parse().unwrap());
+            h
+        };
+        let enc = |raw: &str| STANDARD.encode(raw);
+        for scheme in ["Basic", "basic", "BASIC"] {
+            let h = with(format!("{scheme} {}", enc("radar:s3cret")));
+            assert_eq!(basic_credentials(&h), Some(("radar".into(), "s3cret".into())));
+        }
+        // RFC 6749 §2.3.1: both halves are form-urlencoded.
+        let h = with(format!("Basic {}", enc("my%2Eclient:a%3Ab+c")));
+        assert_eq!(basic_credentials(&h), Some(("my.client".into(), "a:b c".into())));
+        // Only the FIRST colon separates id from secret.
+        let h = with(format!("Basic {}", enc("radar:a:b")));
+        assert_eq!(basic_credentials(&h), Some(("radar".into(), "a:b".into())));
+        // Unusable headers.
+        for bad in ["Basic !!!notbase64".to_string(), format!("Basic {}", enc("nocolon")), "Bearer abc".into()] {
+            assert_eq!(basic_credentials(&with(bad.clone())), None, "{bad}");
+        }
     }
 
     #[test]

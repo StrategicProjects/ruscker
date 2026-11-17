@@ -48,6 +48,9 @@ pub enum ActivityEventType {
     LoginSuccess,
     /// A new interactive app session was established.
     AppAccess,
+    /// A user signed in to an EXTERNAL system through the OIDC provider
+    /// (a token was issued to that system's client).
+    SsoLogin,
 }
 
 impl ActivityEventType {
@@ -55,6 +58,7 @@ impl ActivityEventType {
         match self {
             ActivityEventType::LoginSuccess => "login.success",
             ActivityEventType::AppAccess => "app.access",
+            ActivityEventType::SsoLogin => "sso.login",
         }
     }
 }
@@ -113,6 +117,25 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method: Some(auth_method),
             client_ip,
+            occurred_at: Utc::now(),
+        }
+    }
+
+    /// A sign-in to an external system through the OIDC provider. The
+    /// client id rides in `spec_id` (the "which system" column); `event_key`
+    /// must be unique per sign-in.
+    pub fn sso_login(
+        username: impl Into<String>,
+        client_id: impl Into<String>,
+        event_key: impl Into<String>,
+    ) -> Self {
+        Self {
+            event_type: ActivityEventType::SsoLogin,
+            username: Some(username.into()),
+            spec_id: Some(client_id.into()),
+            event_key: event_key.into(),
+            auth_method: None,
+            client_ip: None,
             occurred_at: Utc::now(),
         }
     }

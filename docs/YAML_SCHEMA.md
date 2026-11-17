@@ -124,11 +124,12 @@ old master key is restored or the rows of `oidc_keys` are deleted (a
 new key is then created on first use, and tokens signed by the old one
 stop verifying). Ruscker never replaces the key by itself.
 
-What exists today: the client registry (admin, Credentials → SSO
-clients), `{issuer}/.well-known/openid-configuration`,
-`{issuer}/oauth/jwks` and the authorization endpoint
-`{issuer}/oauth/authorize`. The token endpoint is not shipped yet, so a
-client can send a user through sign-in but cannot complete it.
+Clients are registered in the admin (Credentials → SSO clients). The
+endpoints are `{issuer}/.well-known/openid-configuration`,
+`{issuer}/oauth/jwks`, `{issuer}/oauth/authorize`, `{issuer}/oauth/token`
+and `{issuer}/oauth/userinfo`. Only the authorization-code flow with
+PKCE (`S256`) and confidential clients are supported; see the ADR for
+the full profile and the admin guide for how to connect a system.
 
 ### `server.context-path` — subpath mounting
 

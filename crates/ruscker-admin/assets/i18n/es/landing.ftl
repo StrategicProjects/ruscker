@@ -1227,6 +1227,7 @@ admin-activity-event = Evento
 admin-activity-event-all = Todos los eventos
 admin-activity-event-login = Inicio de sesión
 admin-activity-event-access = Acceso a app
+admin-activity-event-sso = Inicio de sesión SSO
 admin-activity-user = Usuario
 admin-activity-user-all = Todos los usuarios
 admin-activity-app = Aplicación

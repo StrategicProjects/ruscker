@@ -131,7 +131,15 @@ struct Reply {
 }
 
 async fn get(state: &AppState, uri: &str, cookie: &str) -> Reply {
+    get_from(state, uri, cookie, None).await
+}
+
+/// GET as a browser would send it, with `Sec-Fetch-Site` set to `site`.
+async fn get_from(state: &AppState, uri: &str, cookie: &str, site: Option<&str>) -> Reply {
     let mut req = Request::builder().method("GET").uri(uri);
+    if let Some(site) = site {
+        req = req.header("sec-fetch-site", site);
+    }
     if !cookie.is_empty() {
         req = req.header(header::COOKIE, cookie);
     }
@@ -232,7 +240,20 @@ async fn nothing_is_redirected_before_client_and_redirect_uri_check_out() {
     let prefix = request("", &["redirect_uri"]) + "&redirect_uri=https%3A%2F%2Fradar.example%2F";
     // Two redirect_uri values: the good one first, then the evil one.
     let twice = request("&redirect_uri=https%3A%2F%2Fevil.example%2Fcb", &[]);
+    // A client_id that could never be registered (NUL, wrong shape)
+    // gets the same answer, without a database error.
+    let nul = request("", &["client_id"]) + "&client_id=%00";
+    let shape = request("", &["client_id"]) + "&client_id=Radar%2F..";
+    // A backslash or an oversized query would not survive the login
+    // round trip; refused up front.
+    let backslash = request("&x=a\\b", &[]);
+    let huge = request(&format!("&x={}", "y".repeat(5000)), &[]);
+    let mut seen = std::collections::BTreeSet::new();
     for uri in [
+        nul,
+        shape,
+        backslash,
+        huge,
         unknown,
         evil,
         suffix,
@@ -246,8 +267,13 @@ async fn nothing_is_redirected_before_client_and_redirect_uri_check_out() {
             assert_eq!(r.status, StatusCode::BAD_REQUEST, "{uri}");
             assert_eq!(r.location, "", "no redirect for {uri}");
             assert!(!r.body.contains("evil.example"), "the bad URI is not echoed");
+            seen.insert(r.body);
         }
     }
+    // Unknown client, wrong URI and impossible id are indistinguishable;
+    // the other messages are about the request's form, not the registry.
+    assert!(seen.contains("unknown client or redirect_uri"));
+    assert!(!seen.iter().any(|m| m.contains("not registered") || m == "unknown client"));
 
     // A disabled client reads exactly like an unknown one.
     let mut off = ClientSettings {
@@ -284,7 +310,14 @@ async fn protocol_errors_return_to_the_client_without_a_code() {
         (request("", &["code_challenge_method"]), "invalid_request"),
         (request("", &["code_challenge"]) + "&code_challenge=short", "invalid_request"),
         (request("&request=eyJhbGciOiJub25lIn0..", &[]), "request_not_supported"),
-        (request("&request_uri=https%3A%2F%2Fevil.example%2Fr", &[]), "request_not_supported"),
+        (request("&request_uri=https%3A%2F%2Fevil.example%2Fr", &[]), "request_uri_not_supported"),
+        // The code is returned in the query only.
+        (request("&response_mode=form_post", &[]), "invalid_request"),
+        (request("&response_mode=fragment", &[]), "invalid_request"),
+        // `none` cannot be combined with another prompt value.
+        (request("&prompt=none+login", &[]), "invalid_request"),
+        // A nonce that is not printable ASCII is not stored.
+        (request("", &["nonce"]) + "&nonce=a%00b", "invalid_request"),
     ];
     for (uri, error) in cases {
         let r = get(&state, &uri, &ana).await;
@@ -293,9 +326,13 @@ async fn protocol_errors_return_to_the_client_without_a_code() {
         let p = params(&r.location);
         assert_eq!(p.get("error").map(String::as_str), Some(error), "{uri}");
         assert_eq!(p.get("state").map(String::as_str), Some("st-123"));
+        assert_eq!(p.get("iss").map(String::as_str), Some("https://portal.example"), "errors carry iss too");
         assert!(!p.contains_key("code"));
     }
-    assert_eq!(stored_codes(&db).await, 0);
+    // An explicit `response_mode=query` is the default and is fine.
+    let r = get(&state, &request("&response_mode=query", &[]), &ana).await;
+    assert!(params(&r.location).contains_key("code"), "{}", r.location);
+    assert_eq!(stored_codes(&db).await, 1);
 }
 
 #[tokio::test]
@@ -309,16 +346,109 @@ async fn an_anonymous_browser_is_sent_to_login_and_comes_back() {
     let next = params(&format!("x?{query}")).remove("next").unwrap();
     assert_eq!(next, uri, "the login returns to this exact request");
 
-    // The login page keeps that destination (it is on its allowlist)…
+    // The login page keeps that destination (it is on its allowlist) —
+    // the WHOLE of it, not just up to the first `&`.
     let login = get(&state, &r.location, "").await;
     assert_eq!(login.status, StatusCode::OK);
-    assert!(login.body.contains("/oauth/authorize?"), "next survives into the login form");
+    let field = login.body.split("name=\"next\" value=\"").nth(1).expect("hidden next field");
+    let field = field.split('"').next().unwrap().replace("&#38;", "&").replace("&amp;", "&");
+    assert_eq!(field, uri, "next survives into the login form intact");
+
+    // And a real password login lands back on this exact request, where
+    // the new session gets its code.
+    let body: String = url::form_urlencoded::Serializer::new(String::new())
+        .append_pair("username", "ana")
+        .append_pair("password", PASSWORD)
+        .append_pair("next", &uri)
+        .finish();
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/login")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(resp.headers()[header::LOCATION].to_str().unwrap(), uri, "login returns to the request");
+    let cookie = resp.headers()[header::SET_COOKIE].to_str().unwrap().split(';').next().unwrap().to_string();
+    let back = get(&state, &uri, &cookie).await;
+    assert_eq!(back.status, StatusCode::FOUND);
+    assert!(params(&back.location).contains_key("code"), "{}", back.location);
+    assert_eq!(stored_codes(&db).await, 1);
 
     // …and a client that asked for no UI gets an error instead.
     let silent = get(&state, &request("&prompt=none", &[]), "").await;
     assert_eq!(silent.status, StatusCode::FOUND);
     assert_eq!(params(&silent.location).get("error").map(String::as_str), Some("login_required"));
-    assert_eq!(stored_codes(&db).await, 0);
+    assert_eq!(stored_codes(&db).await, 1, "the refusals stored nothing more");
+}
+
+/// The session cookie is SameSite=Strict, so a browser coming from a
+/// client on another site sends none. Such an arrival is bounced through
+/// a page of ours; the follow-up (same-origin) request is the one that
+/// decides. Without this, a signed-in user would be sent to the login
+/// form on every sign-in.
+#[tokio::test]
+async fn a_cross_site_arrival_is_bounced_before_being_judged() {
+    let (state, db) = setup(ON, false).await;
+    let uri = request("", &[]);
+
+    // Cross-site, no cookie: neither a login redirect nor an error.
+    for extra in ["", "&prompt=none"] {
+        let uri = request(extra, &[]);
+        let r = get_from(&state, &uri, "", Some("cross-site")).await;
+        assert_eq!(r.status, StatusCode::OK, "{extra}");
+        assert_eq!(r.location, "");
+        assert_eq!(r.cache, "no-store");
+        // It points back at this very request, HTML-escaped.
+        let target = r.body.split("url=").nth(1).unwrap().split('"').next().unwrap().replace("&amp;", "&");
+        assert_eq!(target, uri);
+        assert!(!r.body.contains("<script"), "works under the admin CSP");
+    }
+
+    // The follow-up is same-origin and now carries the cookie: a code.
+    let (_, ana) = session(&state, Role::Viewer, Some("ana")).await;
+    let r = get_from(&state, &uri, &ana, Some("same-origin")).await;
+    assert!(params(&r.location).contains_key("code"), "{}", r.location);
+
+    // Same-origin WITHOUT a session is really signed-out: login, no loop.
+    let r = get_from(&state, &uri, "", Some("same-origin")).await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    assert!(r.location.starts_with("/admin/login?next="));
+    // A browser that sends no Fetch Metadata skips the bounce.
+    let r = get(&state, &uri, "").await;
+    assert_eq!(r.status, StatusCode::SEE_OTHER);
+    // A cross-site arrival that DOES carry a session (a browser that
+    // does not enforce Strict) is simply served.
+    let r = get_from(&state, &uri, &ana, Some("cross-site")).await;
+    assert!(params(&r.location).contains_key("code"));
+    // Checks that need no session still come first: a bad client is a
+    // 400 even cross-site, never a bounce to somewhere.
+    let bad = request("", &["client_id"]) + "&client_id=nope";
+    assert_eq!(get_from(&state, &bad, "", Some("cross-site")).await.status, StatusCode::BAD_REQUEST);
+    assert_eq!(stored_codes(&db).await, 2);
+}
+
+/// Under a base path the bounce keeps the prefix.
+#[tokio::test]
+async fn the_bounce_and_the_password_detour_keep_their_way_back() {
+    let db = open_db().await;
+    seed(&db, false).await;
+    let mut state = app_state(db.clone(), ON_BOX, Some(KEY)).await;
+    state.base_path = Arc::from("/box");
+    let uri = request("", &[]);
+    let r = get_from(&state, &format!("/box{uri}"), "", Some("cross-site")).await;
+    assert_eq!(r.status, StatusCode::OK);
+    let target = r.body.split("url=").nth(1).unwrap().split('"').next().unwrap().replace("&amp;", "&");
+    assert_eq!(target, format!("/box{uri}"));
+
+    // Without a master key the endpoint is unavailable, like the rest.
+    let no_key = app_state(open_db().await, ON, None).await;
+    assert_eq!(get(&no_key, &uri, "").await.status, StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]

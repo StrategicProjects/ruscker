@@ -34,8 +34,9 @@ pub struct Grant {
     pub scope: String,
 }
 
-/// A redeemed code: the grant plus when it was issued (the user's
-/// authentication is at least that recent from the client's viewpoint).
+/// A redeemed code: the grant plus when the code was issued. That is
+/// NOT when the user authenticated — the session behind it may be many
+/// hours old — so it must not be reported to clients as `auth_time`.
 #[derive(Debug, Clone)]
 pub struct Redeemed {
     pub grant: Grant,
@@ -51,9 +52,10 @@ fn hash(code: &str) -> String {
 /// Issue a fresh code for `grant` and return it. The cleartext exists
 /// only in the return value (and then in the redirect to the client).
 ///
-/// Also deletes codes that expired more than a day ago, so the table
-/// cannot grow without bound; recent ones are kept so a late replay is
-/// still recognised as a replay rather than as an unknown code.
+/// Also deletes codes that expired more than ten minutes ago, so the
+/// table stays small however often a signed-in user comes through. The
+/// short grace only covers clock skew between HA nodes; a spent or
+/// expired code is refused whether or not its row still exists.
 pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
     let rng = ring_rand::SystemRandom::new();
     let mut raw = [0u8; 32];
@@ -63,7 +65,7 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
     let code_hash = hash(&code);
     let now = Utc::now();
     let expires = now + Duration::seconds(CODE_TTL_SECS);
-    let stale = now - Duration::days(1);
+    let stale = now - Duration::minutes(10);
 
     match db {
         ConfigDb::Sqlite(pool) => {
@@ -295,12 +297,12 @@ mod tests {
         issue(&db, &grant()).await.unwrap();
         issue(&db, &grant()).await.unwrap();
         let ConfigDb::Sqlite(pool) = &db else { unreachable!() };
-        // One expired two days ago, one a minute ago.
+        // One expired an hour ago, one a minute ago.
         sqlx::query(
             "UPDATE oidc_auth_codes SET expires_at = ?
               WHERE code_hash = (SELECT MIN(code_hash) FROM oidc_auth_codes)",
         )
-        .bind(Utc::now() - Duration::days(2))
+        .bind(Utc::now() - Duration::hours(1))
         .execute(pool)
         .await
         .unwrap();
@@ -313,7 +315,7 @@ mod tests {
         .await
         .unwrap();
         issue(&db, &grant()).await.unwrap();
-        assert_eq!(rows(&db).await, 2, "the two-day-old row is gone, the recent one stays");
+        assert_eq!(rows(&db).await, 2, "the hour-old row is gone, the recent one stays");
     }
 
     #[cfg(feature = "postgres-it")]

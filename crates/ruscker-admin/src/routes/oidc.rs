@@ -25,9 +25,9 @@ use axum::{
     extract::{RawQuery, State},
     http::{
         header::{CACHE_CONTROL, LOCATION, REFERRER_POLICY},
-        HeaderValue, StatusCode,
+        HeaderMap, HeaderValue, StatusCode,
     },
-    response::{IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
     Json, Router,
 };
@@ -123,6 +123,11 @@ const SCOPES: [&str; 4] = ["openid", "profile", "email", "groups"];
 /// client, small enough that a hostile one cannot use us as storage.
 const MAX_STATE_LEN: usize = 1024;
 const MAX_NONCE_LEN: usize = 255;
+/// The whole query. It is carried, percent-encoded (up to three times
+/// its size), in the `next` of the login redirect — past this it would
+/// not fit a reverse proxy's request line and the return trip would be
+/// lost. Real requests are a few hundred bytes.
+const MAX_QUERY_LEN: usize = 4096;
 
 /// The query of an authorization request, parsed once.
 ///
@@ -201,6 +206,48 @@ fn back_to_client(redirect_uri: &str, state: Option<&str>, pairs: &[(&str, &str)
         .into_response()
 }
 
+/// The same-site bounce: a minimal page that immediately re-requests
+/// the same authorization URL.
+///
+/// Why it exists: the session cookie is `SameSite=Strict`, so a browser
+/// arriving here straight from a client on ANOTHER site does not send
+/// it — the user would look signed-out and be asked for the password on
+/// every single sign-in (and for MFA again, since that proof is bound to
+/// the session). A navigation that starts from one of our own pages,
+/// however, is same-site and does carry the cookie. So instead of
+/// weakening the cookie, a cross-site arrival without a session gets
+/// this page first; the browser follows it and the second request is
+/// evaluated with the real session state.
+///
+/// No loop: the follow-up request is same-origin, and only a
+/// cross-site one is ever bounced. A browser that sends no
+/// `Sec-Fetch-Site` simply skips this and goes to the login page.
+///
+/// A `<meta refresh>` rather than script: the admin's CSP forbids
+/// inline script, and this needs none.
+fn same_site_bounce(base: &str, raw_query: &str) -> Response {
+    let url = format!("{base}/oauth/authorize?{raw_query}");
+    // The query came from the request: escape it for an HTML attribute.
+    let url = url
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;");
+    let page = format!(
+        "<!doctype html><meta charset=\"utf-8\">\
+         <meta http-equiv=\"refresh\" content=\"0;url={url}\">\
+         <title>…</title><a href=\"{url}\">Continue</a>"
+    );
+    (
+        [
+            (CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            (REFERRER_POLICY, HeaderValue::from_static("no-referrer")),
+        ],
+        Html(page),
+    )
+        .into_response()
+}
+
 /// `GET /oauth/authorize` — the OIDC authorization endpoint.
 ///
 /// The order of the checks is the security property:
@@ -215,7 +262,9 @@ fn back_to_client(redirect_uri: &str, state: Option<&str>, pairs: &[(&str, &str)
 ///    redirect URI, as the protocol specifies.
 /// 4. **Who is the user?** No session ⇒ off to the login page, which
 ///    returns here afterwards (`next`). The login page only accepts
-///    this exact path as a destination.
+///    this exact path as a destination. A cross-site arrival is first
+///    bounced through one of our own pages so an EXISTING session is
+///    actually seen (see [`same_site_bounce`]).
 /// 5. **May this user use this client?** The client's group gate, read
 ///    from the database on every request (group changes do not revoke
 ///    sessions, so a session's cached view could be stale).
@@ -230,6 +279,7 @@ async fn authorize(
     State(state): State<AppState>,
     session: MaybeSession,
     cookies: Cookies,
+    headers: HeaderMap,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
     // 1. Provider.
@@ -241,6 +291,13 @@ async fn authorize(
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
     let raw_query = raw_query.unwrap_or_default();
+    // The raw query travels on in the `next` of our own redirects, where
+    // a backslash is refused (open-redirect guard) and length is bounded
+    // by the reverse proxy. Refuse both here, visibly, rather than lose
+    // the user's way back after they log in.
+    if raw_query.len() > MAX_QUERY_LEN || raw_query.contains('\\') {
+        return refuse("malformed authorization request");
+    }
     let Some(params) = AuthParams::parse(&raw_query) else {
         return refuse("a request parameter is repeated");
     };
@@ -249,10 +306,18 @@ async fn authorize(
     let Some(client_id) = params.get("client_id") else {
         return refuse("client_id is required");
     };
+    // One message for every way this step fails — unknown id, disabled
+    // client, unregistered URI — so the page tells a prober nothing.
+    const NOT_REGISTERED: &str = "unknown client or redirect_uri";
+    // Shape first: an id that could never have been registered does not
+    // reach the database (Postgres, for one, errors on a NUL byte, which
+    // would turn a bad request into a logged 500).
+    if !crate::db::oidc_clients::is_valid_client_id(client_id) {
+        return refuse(NOT_REGISTERED);
+    }
     let client = match crate::db::oidc_clients::fetch(db, client_id).await {
         Ok(Some(c)) if c.enabled => c,
-        // Unknown and disabled read the same: nothing to probe.
-        Ok(_) => return refuse("unknown client"),
+        Ok(_) => return refuse(NOT_REGISTERED),
         Err(err) => {
             tracing::error!(error = ?err, "fetch oidc client failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
@@ -264,7 +329,7 @@ async fn authorize(
         return refuse("redirect_uri is required");
     };
     if !client.redirect_uri_registered(redirect_uri) {
-        return refuse("redirect_uri is not registered for this client");
+        return refuse(NOT_REGISTERED);
     }
 
     // 3. From here, errors are reported to the client.
@@ -276,8 +341,17 @@ async fn authorize(
     let fail = |error: &str| {
         back_to_client(redirect_uri, client_state, &[("error", error), ("iss", &issuer)])
     };
-    if params.get("request").is_some() || params.get("request_uri").is_some() {
+    if params.get("request").is_some() {
         return fail("request_not_supported");
+    }
+    if params.get("request_uri").is_some() {
+        return fail("request_uri_not_supported");
+    }
+    // The code is only ever returned in the query, as discovery says.
+    // Honouring the request while ignoring a different `response_mode`
+    // would hand the code over in a way the client did not ask for.
+    if params.get("response_mode").is_some_and(|m| m != "query") {
+        return fail("invalid_request");
     }
     if params.get("response_type") != Some("code") {
         return fail("unsupported_response_type");
@@ -299,12 +373,19 @@ async fn authorize(
         _ => return fail("invalid_request"),
     };
     let nonce = params.get("nonce");
-    if nonce.is_some_and(|n| n.len() > MAX_NONCE_LEN) {
+    // Stored and later copied into the ID token: bounded, printable.
+    if nonce.is_some_and(|n| n.len() > MAX_NONCE_LEN || !n.bytes().all(|b| b.is_ascii_graphic())) {
         return fail("invalid_request");
     }
     // `prompt=none`: the client wants an answer without any UI. Every
     // step below that would show a page reports an error instead.
-    let silent = params.get("prompt").is_some_and(|p| p.split(' ').any(|v| v == "none"));
+    // `none` together with another value is a contradiction (OIDC Core
+    // §3.1.2.1) and is refused.
+    let prompt: Vec<&str> = params.get("prompt").map(|p| p.split(' ').collect()).unwrap_or_default();
+    let silent = prompt.contains(&"none");
+    if silent && prompt.len() > 1 {
+        return fail("invalid_request");
+    }
 
     // Where the login / password / MFA pages send the browser back to:
     // this very request. Base-less, as those pages expect.
@@ -316,6 +397,16 @@ async fn authorize(
 
     // 4. Who is the user?
     let Some(session) = session.0 else {
+        // Arrived from another site: the Strict session cookie was not
+        // sent, so "no session" may be false. Ask again from our own
+        // origin before concluding anything (also for `prompt=none`).
+        let cross_site = headers
+            .get("sec-fetch-site")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|site| site == "cross-site");
+        if cross_site {
+            return same_site_bounce(&state.base_path, &raw_query);
+        }
         return if silent { fail("login_required") } else { detour("/admin/login") };
     };
     // A break-glass token session is an operator, not a person: it has

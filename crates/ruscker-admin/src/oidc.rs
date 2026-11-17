@@ -247,6 +247,8 @@ pub fn discovery(issuer: &str) -> Value {
         "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
         "code_challenge_methods_supported": ["S256"],
         "authorization_response_iss_parameter_supported": true,
+        "request_parameter_supported": false,
+        "request_uri_parameter_supported": false,
         "scopes_supported": ["openid", "profile", "email", "groups"],
         "claims_supported": [
             "sub", "iss", "aud", "exp", "iat", "nonce",

@@ -108,6 +108,17 @@ it themselves.
    - `prompt=none` is honoured (errors instead of pages); `prompt=login`
      and `max_age` are ignored, as is anything else not listed here.
    - The response carries `iss` (RFC 9207).
+   - The session cookie stays `SameSite=Strict`. A browser arriving
+     from a client on another site therefore sends no cookie; such a
+     request is answered with a tiny page that re-requests the same URL
+     from our own origin, so an existing session is recognised instead
+     of asking for the password on every sign-in. Browsers that do not
+     send `Sec-Fetch-Site` skip this and go to the login page.
+   - `auth_time` is not emitted: the session's creation time is not
+     recorded, and the code's issue time is not when the user
+     authenticated.
+   - What the client must do for its part: bind `state` and the PKCE
+     verifier to its own browser session, check `iss`, verify `nonce`.
    - Codes live 60 seconds, are stored as a SHA-256 and are claimed by
      one conditional `UPDATE`.
 4. `/oauth/token` and `/oauth/userinfo`.

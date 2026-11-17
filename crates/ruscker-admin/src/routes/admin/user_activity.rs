@@ -172,6 +172,9 @@ impl ActivityPage<'_> {
             Some("no-account") => self.t("admin-activity-detail-no-account"),
             Some("account-missing") => self.t("admin-activity-detail-account-missing"),
             Some("access-revoked") => self.t("admin-activity-detail-access-revoked"),
+            // On an `audit.suppressed` marker the detail names the class.
+            Some("login.failed") => self.t("admin-activity-detail-suppressed-login"),
+            Some("sso.denied") => self.t("admin-activity-detail-suppressed-sso"),
             Some(other) => other.to_string(),
             None => String::new(),
         }
@@ -185,6 +188,7 @@ impl ActivityPage<'_> {
             "sso.login" => self.t("admin-activity-event-sso"),
             "sso.denied" => self.t("admin-activity-event-sso-denied"),
             "login.failed" => self.t("admin-activity-event-login-failed"),
+            "audit.suppressed" => self.t("admin-activity-event-suppressed"),
             other => other.to_string(),
         }
     }
@@ -194,6 +198,7 @@ impl ActivityPage<'_> {
             "app.access" => "ti-app-window",
             "sso.login" => "ti-key",
             "sso.denied" | "login.failed" => "ti-alert-circle",
+            "audit.suppressed" => "ti-alert-triangle",
             _ => "ti-history",
         }
     }
@@ -202,7 +207,7 @@ impl ActivityPage<'_> {
             "login.success" => "tone-update",
             "app.access" => "tone-create",
             "sso.login" => "tone-update",
-            "sso.denied" | "login.failed" => "tone-delete",
+            "sso.denied" | "login.failed" | "audit.suppressed" => "tone-delete",
             _ => "tone-other",
         }
     }

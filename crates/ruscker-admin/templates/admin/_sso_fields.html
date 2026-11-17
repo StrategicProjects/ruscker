@@ -22,6 +22,19 @@
   <div class="spec-form-help">{{ self.t("admin-sso-groups-help") }}</div>
 </div>
 
+{# The system's logo on the sign-in page (#1080). A plain select of
+   Media-library files: no script needed, nothing free-form. #}
+<div class="spec-form-field">
+  <label class="spec-form-label" for="sso-logo">{{ self.t("admin-sso-logo") }}</label>
+  <select id="sso-logo" name="logo" class="spec-form-input">
+    <option value="" {% if form.logo.is_empty() %}selected{% endif %}>{{ self.t("admin-sso-logo-none") }}</option>
+    {% for f in logos %}
+      <option value="{{ f }}" {% if form.logo == *f %}selected{% endif %}>{{ f }}</option>
+    {% endfor %}
+  </select>
+  <div class="spec-form-help">{{ self.t("admin-sso-logo-help") }}</div>
+</div>
+
 <label class="toggle-row">
   <div>
     <div class="toggle-row__label">{{ self.t("admin-sso-require-mfa") }}</div>

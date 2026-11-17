@@ -1530,6 +1530,15 @@ input[type="range"]::-moz-range-thumb {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 8px;
 }
+/* "You are signing in to <system>" note on the sign-in page (#1080). */
+.admin-login-sso {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 0.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  font-size: 13px;
+}
 .admin-login-field {
   display: flex; flex-direction: column; gap: 4px;
   margin-top: 4px;

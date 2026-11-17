@@ -435,6 +435,7 @@ async fn authorize(
             client.client_id
         );
         state.activity.record_limited(
+            "sso.denied",
             &key,
             1,
             crate::activity::ActivityEvent::sso_denied(username, client.client_id.clone(), reason)
@@ -748,6 +749,7 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
             // a refused sign-in, and the audit should show it.
             let key = format!("sso.denied|{}|{}|access-revoked", grant.username, client.client_id);
             state.activity.record_limited(
+                "sso.denied",
                 &key,
                 1,
                 crate::activity::ActivityEvent::sso_denied(

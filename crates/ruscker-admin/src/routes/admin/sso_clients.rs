@@ -64,6 +64,8 @@ struct ClientsPage<'a> {
     /// Sticky create-form values, so a validation error doesn't wipe
     /// what the admin typed.
     form: ClientForm,
+    /// Media-library filenames offered as the system's logo.
+    logos: Vec<String>,
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
     flash_error: Option<String>,
@@ -100,6 +102,7 @@ struct ClientEditPage<'a> {
     /// a re-submitted rotation a no-op.
     secret_version: i64,
     form: ClientForm,
+    logos: Vec<String>,
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
     flash_error: Option<String>,
@@ -129,6 +132,9 @@ pub struct ClientForm {
     pub require_mfa: Option<String>,
     #[serde(default)]
     pub enabled: Option<String>,
+    /// Media-library filename of the system's logo; empty = none.
+    #[serde(default)]
+    pub logo: String,
 }
 
 impl ClientForm {
@@ -140,6 +146,7 @@ impl ClientForm {
             access_groups: c.access_groups.join(", "),
             require_mfa: c.require_mfa.then(|| "on".to_string()),
             enabled: c.enabled.then(|| "on".to_string()),
+            logo: c.logo.clone().unwrap_or_default(),
         }
     }
 
@@ -170,12 +177,19 @@ impl ClientForm {
                 });
             }
         }
+        // A bare Media-library filename: it ends up in an image URL on
+        // the sign-in page, so no path separators and no leading dot.
+        let logo = self.logo.trim();
+        if logo.starts_with('.') || logo.contains(['/', '\\']) || logo.chars().count() > 200 {
+            return Err("admin-sso-error-logo");
+        }
         Ok(ClientSettings {
             name: name.to_string(),
             redirect_uris,
             access_groups: db::users::parse_groups(&self.access_groups),
             require_mfa: self.require_mfa.is_some(),
             enabled,
+            logo: (!logo.is_empty()).then(|| logo.to_string()),
         })
     }
 }
@@ -185,6 +199,17 @@ fn no_store(mut resp: Response) -> Response {
     resp.headers_mut()
         .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
     resp
+}
+
+/// Media-library filenames for the logo select; empty without a DB.
+async fn media_filenames(state: &AppState) -> Vec<String> {
+    match state.db.as_ref() {
+        Some(pool) => db::images::list_all(pool)
+            .await
+            .map(|imgs| imgs.into_iter().map(|i| i.filename).collect())
+            .unwrap_or_default(),
+        None => Vec::new(),
+    }
 }
 
 fn no_db() -> Response {
@@ -242,6 +267,7 @@ async fn render_index(
         role: Role::Admin,
         clients,
         form,
+        logos: media_filenames(state).await,
         new_secret,
         flash_ok,
         flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
@@ -323,6 +349,7 @@ async fn render_edit(
         client_id: client.client_id.clone(),
         secret_version: client.secret_version,
         form,
+        logos: media_filenames(state).await,
         new_secret,
         flash_ok: flash_ok.map(|k| state.locales.t(loc, k, None)),
         flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
@@ -484,6 +511,18 @@ mod tests {
         let mut f = form("https://ok.example/cb");
         f.name = "  ".into();
         assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-name");
+    }
+
+    #[test]
+    fn logo_must_be_a_bare_media_filename() {
+        let mut f = form("https://ok.example/cb");
+        assert_eq!(f.settings(true).unwrap().logo, None);
+        f.logo = " radar logo.svg ".into();
+        assert_eq!(f.settings(true).unwrap().logo.as_deref(), Some("radar logo.svg"));
+        for bad in ["../secret", "a/b.svg", "a\\b.svg", ".hidden"] {
+            f.logo = bad.into();
+            assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-logo", "{bad}");
+        }
     }
 
     #[test]

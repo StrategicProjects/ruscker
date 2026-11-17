@@ -44,6 +44,9 @@ pub struct OidcClient {
     pub access_groups: Vec<String>,
     pub require_mfa: bool,
     pub enabled: bool,
+    /// Media-library filename shown on the sign-in page when a user
+    /// arrives from this system.
+    pub logo: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -79,6 +82,8 @@ pub struct ClientSettings {
     pub access_groups: Vec<String>,
     pub require_mfa: bool,
     pub enabled: bool,
+    /// Media-library filename, or `None`.
+    pub logo: Option<String>,
 }
 
 /// A client id is safe iff it is 3–64 chars of lowercase letters, digits,
@@ -195,6 +200,7 @@ type Row = (
     String,
     bool,
     bool,
+    Option<String>,
     DateTime<Utc>,
     DateTime<Utc>,
 );
@@ -205,7 +211,7 @@ macro_rules! select {
     ($tail:literal) => {
         concat!(
             "SELECT client_id, name, secret_hash, secret_version, redirect_uris, access_groups,
-                    require_mfa, enabled, created_at, updated_at
+                    require_mfa, enabled, logo, created_at, updated_at
                FROM oidc_clients ",
             $tail
         )
@@ -222,8 +228,9 @@ fn from_row(r: Row) -> OidcClient {
         access_groups: parse_groups(&r.5),
         require_mfa: r.6,
         enabled: r.7,
-        created_at: r.8,
-        updated_at: r.9,
+        logo: r.8,
+        created_at: r.9,
+        updated_at: r.10,
     }
 }
 
@@ -235,6 +242,7 @@ fn audit_diff(s: &ClientSettings) -> Result<String> {
         "access_groups": s.access_groups,
         "require_mfa": s.require_mfa,
         "enabled": s.enabled,
+        "logo": s.logo,
     }))?)
 }
 
@@ -262,8 +270,8 @@ pub async fn create(
             let n = sqlx::query(
                 "INSERT INTO oidc_clients
                    (client_id, name, secret_hash, redirect_uris, access_groups,
-                    require_mfa, enabled, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    require_mfa, enabled, logo, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(client_id) DO NOTHING",
             )
             .bind(client_id)
@@ -273,6 +281,7 @@ pub async fn create(
             .bind(&groups)
             .bind(settings.require_mfa)
             .bind(settings.enabled)
+            .bind(&settings.logo)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
@@ -300,8 +309,8 @@ pub async fn create(
             let n = sqlx::query(
                 "INSERT INTO oidc_clients
                    (client_id, name, secret_hash, redirect_uris, access_groups,
-                    require_mfa, enabled, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                    require_mfa, enabled, logo, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                  ON CONFLICT(client_id) DO NOTHING",
             )
             .bind(client_id)
@@ -311,6 +320,7 @@ pub async fn create(
             .bind(&groups)
             .bind(settings.require_mfa)
             .bind(settings.enabled)
+            .bind(&settings.logo)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
@@ -357,7 +367,7 @@ pub async fn update(
             let n = sqlx::query(
                 "UPDATE oidc_clients
                     SET name = ?, redirect_uris = ?, access_groups = ?,
-                        require_mfa = ?, enabled = ?, updated_at = ?
+                        require_mfa = ?, enabled = ?, logo = ?, updated_at = ?
                   WHERE client_id = ?",
             )
             .bind(&settings.name)
@@ -365,6 +375,7 @@ pub async fn update(
             .bind(&groups)
             .bind(settings.require_mfa)
             .bind(settings.enabled)
+            .bind(&settings.logo)
             .bind(now)
             .bind(client_id)
             .execute(&mut *tx)
@@ -392,14 +403,15 @@ pub async fn update(
             let n = sqlx::query(
                 "UPDATE oidc_clients
                     SET name = $1, redirect_uris = $2, access_groups = $3,
-                        require_mfa = $4, enabled = $5, updated_at = $6
-                  WHERE client_id = $7",
+                        require_mfa = $4, enabled = $5, logo = $6, updated_at = $7
+                  WHERE client_id = $8",
             )
             .bind(&settings.name)
             .bind(&uris)
             .bind(&groups)
             .bind(settings.require_mfa)
             .bind(settings.enabled)
+            .bind(&settings.logo)
             .bind(now)
             .bind(client_id)
             .execute(&mut *tx)
@@ -761,6 +773,7 @@ mod tests {
             access_groups: groups.iter().map(|g| g.to_string()).collect(),
             require_mfa: false,
             enabled: true,
+            logo: None,
         }
     }
 
@@ -933,6 +946,7 @@ mod tests {
             access_groups: vec![],
             require_mfa: false,
             enabled: true,
+            logo: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

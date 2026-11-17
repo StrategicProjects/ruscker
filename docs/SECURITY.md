@@ -100,10 +100,14 @@ Status: living document. Tracks the Phase 5 security audit
     trustworthy with a single reverse proxy in front that sets or
     appends the header, which is the documented deployment;
   - events an outsider can cause at will are **budgeted**: refused
-    sign-ins to ten rows a minute per address, SSO refusals to one a
-    minute per user, system and reason, and all of them together to 240
-    a minute — so they can neither fill the table nor push real events
-    out of the queue;
+    sign-ins to ten rows a minute per address (per /64 for IPv6), SSO
+    refusals to one a minute per user, system and reason, and each of
+    the two classes to 240 a minute overall — so they can neither fill
+    the table nor push real events out of the queue. The classes have
+    separate ceilings, so anonymous traffic against the login cannot
+    silence the record of SSO refusals; and when a ceiling is reached a
+    marker row ("recording limit reached") is written for that minute,
+    so the gap is visible rather than looking like nothing happened;
   - a refused sign-in keeps the typed username **only if it names an
     existing account**; anything else (people type passwords in the wrong
     field) is not stored;

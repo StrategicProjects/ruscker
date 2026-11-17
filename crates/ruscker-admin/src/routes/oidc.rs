@@ -27,7 +27,7 @@
 //! leaves the provider off (`oidc::active_issuer`).
 
 use axum::{
-    extract::{RawQuery, State},
+    extract::{DefaultBodyLimit, RawQuery, State},
     http::{
         header::{
             AUTHORIZATION, CACHE_CONTROL, CONTENT_TYPE, LOCATION, PRAGMA, REFERRER_POLICY,
@@ -55,7 +55,11 @@ pub fn routes() -> Router<AppState> {
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/oauth/jwks", get(jwks))
         .route("/oauth/authorize", get(authorize))
-        .route("/oauth/token", post(token))
+        // A token request is a few hundred bytes. The cap is enforced
+        // while the body is READ, so an oversized one is rejected before
+        // any of it is parsed — this endpoint is reachable without
+        // credentials.
+        .route("/oauth/token", post(token).layer(DefaultBodyLimit::max(MAX_QUERY_LEN)))
         .route("/oauth/userinfo", get(userinfo).post(userinfo))
 }
 
@@ -151,10 +155,18 @@ const MAX_QUERY_LEN: usize = 4096;
 /// refuses duplicates up front, so every later `get` is unambiguous.
 struct AuthParams(Vec<(String, String)>);
 
+/// No legitimate request comes near this many parameters. The bound
+/// also keeps the duplicate check below (a scan per parameter) cheap
+/// whatever the caller sends.
+const MAX_PARAMS: usize = 32;
+
 impl AuthParams {
     fn parse(query: &str) -> Option<Self> {
         let mut out: Vec<(String, String)> = Vec::new();
         for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+            if out.len() == MAX_PARAMS {
+                return None;
+            }
             if out.iter().any(|(seen, _)| seen == &*k) {
                 return None;
             }
@@ -313,7 +325,7 @@ async fn authorize(
         return refuse("malformed authorization request");
     }
     let Some(params) = AuthParams::parse(&raw_query) else {
-        return refuse("a request parameter is repeated");
+        return refuse("a request parameter is repeated, or there are too many");
     };
 
     // 2. Client and redirect URI — no redirect before these pass.
@@ -524,12 +536,19 @@ fn invalid_client(used_basic: bool) -> Response {
     resp
 }
 
+/// The value after an `Authorization` scheme name, matched without
+/// regard to case as RFC 7235 requires (`Basic`, `basic`, `BASIC`…).
+fn auth_scheme_value<'a>(headers: &'a HeaderMap, scheme: &str) -> Option<&'a str> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let (name, rest) = value.split_once(' ')?;
+    name.eq_ignore_ascii_case(scheme).then_some(rest.trim())
+}
+
 /// Credentials from an `Authorization: Basic` header. Per RFC 6749
 /// §2.3.1 both halves are form-urlencoded before being joined with `:`
 /// and base64-encoded, so they are decoded the same way here.
 fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
-    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
-    let encoded = value.strip_prefix("Basic ").or_else(|| value.strip_prefix("basic "))?;
+    let encoded = auth_scheme_value(headers, "Basic")?;
     let raw = base64::engine::general_purpose::STANDARD.decode(encoded.trim()).ok()?;
     let raw = String::from_utf8(raw).ok()?;
     let (id, secret) = raw.split_once(':')?;
@@ -613,12 +632,18 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
         return bad_request("the body must be application/x-www-form-urlencoded");
     }
     let Some(params) = AuthParams::parse(&body) else {
-        return bad_request("a request parameter is repeated");
+        return bad_request("a request parameter is repeated, or there are too many");
     };
 
     // 1. Client authentication.
     let basic = basic_credentials(&headers);
     let used_basic = headers.contains_key(AUTHORIZATION);
+    // An `Authorization` header we cannot read as Basic is a failed
+    // authentication — it must not quietly fall through to credentials
+    // in the body ("one method, never both").
+    if used_basic && basic.is_none() {
+        return invalid_client(true);
+    }
     let (client_id, client_secret) = match (basic, params.get("client_secret")) {
         (Some(_), Some(_)) => return bad_request("use one client authentication method"),
         (Some((id, secret)), None) => {
@@ -634,6 +659,12 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
         },
         (None, None) => return invalid_client(used_basic),
     };
+    // Shape first, as in `authorize`: an id that could never have been
+    // registered does not reach the database (where, on Postgres, a NUL
+    // byte would turn a bad request into a logged 500).
+    if !crate::db::oidc_clients::is_valid_client_id(&client_id) {
+        return invalid_client(used_basic);
+    }
     let client = match crate::db::oidc_clients::fetch(db, &client_id).await {
         Ok(Some(c)) if c.enabled && c.verify_secret(&client_secret) => c,
         Ok(_) => return invalid_client(used_basic),
@@ -787,14 +818,10 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
     let Some(db) = state.db.as_ref() else {
         return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
     };
-    let Some(bearer) = headers
-        .get(AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
-    else {
+    let Some(bearer) = auth_scheme_value(&headers, "Bearer") else {
         return bearer_error();
     };
-    let jwt = match crate::oidc::verify_jwt(db, bearer.trim()).await {
+    let jwt = match crate::oidc::verify_jwt(db, bearer).await {
         Ok(Some(jwt)) => jwt,
         Ok(None) => return bearer_error(),
         Err(err) => {
@@ -854,6 +881,39 @@ mod tests {
         let p = AuthParams::parse("state=&scope=openid%20email").unwrap();
         assert_eq!(p.get("state"), None, "empty reads as absent");
         assert_eq!(p.get("scope"), Some("openid email"));
+    }
+
+    #[test]
+    fn parameter_count_is_bounded() {
+        let ok: String = (0..MAX_PARAMS).map(|i| format!("k{i}=v&")).collect();
+        assert!(AuthParams::parse(&ok).is_some());
+        let too_many: String = (0..=MAX_PARAMS).map(|i| format!("k{i}=v&")).collect();
+        assert!(AuthParams::parse(&too_many).is_none());
+    }
+
+    #[test]
+    fn basic_credentials_are_form_decoded_and_scheme_is_case_insensitive() {
+        use base64::engine::general_purpose::STANDARD;
+        let with = |value: String| {
+            let mut h = HeaderMap::new();
+            h.insert(AUTHORIZATION, value.parse().unwrap());
+            h
+        };
+        let enc = |raw: &str| STANDARD.encode(raw);
+        for scheme in ["Basic", "basic", "BASIC"] {
+            let h = with(format!("{scheme} {}", enc("radar:s3cret")));
+            assert_eq!(basic_credentials(&h), Some(("radar".into(), "s3cret".into())));
+        }
+        // RFC 6749 §2.3.1: both halves are form-urlencoded.
+        let h = with(format!("Basic {}", enc("my%2Eclient:a%3Ab+c")));
+        assert_eq!(basic_credentials(&h), Some(("my.client".into(), "a:b c".into())));
+        // Only the FIRST colon separates id from secret.
+        let h = with(format!("Basic {}", enc("radar:a:b")));
+        assert_eq!(basic_credentials(&h), Some(("radar".into(), "a:b".into())));
+        // Unusable headers.
+        for bad in ["Basic !!!notbase64".to_string(), format!("Basic {}", enc("nocolon")), "Bearer abc".into()] {
+            assert_eq!(basic_credentials(&with(bad.clone())), None, "{bad}");
+        }
     }
 
     #[test]

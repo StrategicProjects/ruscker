@@ -124,7 +124,10 @@ it themselves.
 4. `/oauth/token` and `/oauth/userinfo`. *(implemented)* Decisions
    taken here:
    - The client authenticates first (HTTP Basic or form body, never
-     both); only then is the code redeemed. A failed client
+     both — an `Authorization` header that is not readable Basic fails
+     outright rather than falling back to the body); only then is the
+     code redeemed. The request body is capped at 4 KiB and 32
+     parameters, since this is reachable without credentials. A failed client
      authentication does not spend the code.
    - After redemption the code is spent whatever happens; every failed
      binding (other client, different redirect URI, PKCE mismatch, user

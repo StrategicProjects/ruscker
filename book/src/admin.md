@@ -392,6 +392,28 @@ do inside the system stays that system's decision. It should keep its
 own session after the exchange: revoking access here takes effect at
 that system's next sign-in.
 
+What the system's developers must do — the provider cannot do it for
+them:
+
+- validate the ID token: signature (keys from the JWKS), `iss`, `aud`
+  equal to their own client ID, `exp`, and the `nonce` they sent. The
+  `aud` check is what stops a token issued to another system from being
+  replayed at theirs;
+- bind `state` and the PKCE verifier to the user's browser session;
+- never treat a bearer token received from elsewhere as proof of
+  identity by calling `/oauth/userinfo` with it: that answer says who
+  the token belongs to, not which system it was issued to;
+- identify the person by `sub`. `email` is not verified and not unique;
+  there is no `email_verified` claim;
+- not send `max_age` or rely on `auth_time`: neither is supported, and a
+  library told to require `auth_time` will reject the token.
+
+Some reverse proxies need PKCE switched on explicitly (for example
+`--code-challenge-method=S256` in oauth2-proxy, `OIDCPKCEMethod S256`
+in mod_auth_openidc), and oauth2-proxy expects an `email` claim by
+default — accounts without an e-mail will fail there unless it is
+configured otherwise.
+
 A static site with no server of its own cannot be a client directly;
 put an OpenID Connect-aware reverse proxy in front of it and register
 that proxy as the client.

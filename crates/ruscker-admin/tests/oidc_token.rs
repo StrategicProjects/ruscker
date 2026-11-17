@@ -524,6 +524,165 @@ async fn userinfo_accepts_only_a_live_access_token_of_ours() {
     refused(&userinfo(&f, &access).await);
 }
 
+/// Reachable without credentials, so what an anonymous caller can make
+/// the endpoint DO is bounded: an oversized body is refused before it is
+/// parsed, and an impossible client id never reaches the database.
+#[tokio::test]
+async fn anonymous_abuse_is_bounded() {
+    let f = fixture(ON).await;
+    let post = |body: String, auth: Option<String>| {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if let Some(a) = auth {
+            req = req.header(header::AUTHORIZATION, a);
+        }
+        req.body(Body::from(body)).unwrap()
+    };
+    // ~1 MB of distinct keys: refused by the body cap (413), not parsed.
+    let huge: String = (0..150_000).map(|i| format!("k{i}=v&")).collect();
+    let r = send(&f.state, post(huge, None)).await;
+    assert_eq!(r.status, StatusCode::PAYLOAD_TOO_LARGE);
+    // Within the size cap but with too many parameters.
+    let many: String = (0..200).map(|i| format!("k{i}=v&")).collect();
+    let r = send(&f.state, post(many, None)).await;
+    assert_eq!(r.status, StatusCode::BAD_REQUEST);
+    assert_eq!(r.json["error"], "invalid_request");
+
+    // Client ids that could never be registered: plain invalid_client,
+    // via the body and via Basic (where they are percent-decoded).
+    let body = "grant_type=authorization_code&code=x&redirect_uri=x&code_verifier=x";
+    for id in ["%00abc", "Radar%2F..", &"a".repeat(300)] {
+        let r = send(&f.state, post(format!("{body}&client_id={id}&client_secret=x"), None)).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{id}");
+        assert_eq!(r.json["error"], "invalid_client");
+        let basic = format!("Basic {}", STANDARD.encode(format!("{id}:x")));
+        let r = send(&f.state, post(body.to_string(), Some(basic))).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{id} (basic)");
+    }
+}
+
+/// "One method, never both" — including an Authorization header that is
+/// not readable Basic: it fails, it does not fall back to the body.
+#[tokio::test]
+async fn an_unreadable_authorization_header_is_not_ignored() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid").await;
+    let pairs = exchange(&code);
+    let pairs: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let body = format!("{}&client_id=radar&client_secret={}", form(&pairs), f.radar);
+    for auth in ["Bearer something", "Basic !!!not-base64", "Negotiate abc"] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/oauth/token")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+            .header(header::AUTHORIZATION, auth)
+            .body(Body::from(body.clone()))
+            .unwrap();
+        let r = send(&f.state, req).await;
+        assert_eq!(r.status, StatusCode::UNAUTHORIZED, "{auth}");
+        assert_eq!(r.json["error"], "invalid_client");
+    }
+    // A body client_id that disagrees with the Basic header.
+    let mut with_other = exchange(&code);
+    with_other.push(("client_id", "norma".into()));
+    assert_eq!(token_basic(&f, "radar", &f.radar, &with_other).await.status, StatusCode::UNAUTHORIZED);
+    // The scheme name is case-insensitive, and none of the above spent
+    // the code.
+    let req = Request::builder()
+        .method("POST")
+        .uri("/oauth/token")
+        .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+        .header(header::AUTHORIZATION, format!("BASIC {}", STANDARD.encode(format!("radar:{}", f.radar))))
+        .body(Body::from(form(&pairs)))
+        .unwrap();
+    assert_eq!(send(&f.state, req).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_expired_code_is_refused() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid").await;
+    let ConfigDb::Sqlite(pool) = &f.db else { unreachable!() };
+    sqlx::query("UPDATE oidc_auth_codes SET expires_at = ?")
+        .bind(chrono::Utc::now() - chrono::Duration::seconds(1))
+        .execute(pool)
+        .await
+        .unwrap();
+    assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+}
+
+/// Userinfo trusts nothing but OUR signature: the same header and
+/// claims with a signature that does not verify — tampered, or made by
+/// another installation's key — are refused. (This is the test that
+/// fails if signature verification is skipped.)
+#[tokio::test]
+async fn userinfo_refuses_a_token_we_did_not_sign() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid profile").await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    let access = r.json["access_token"].as_str().unwrap().to_string();
+    assert_eq!(userinfo(&f, &access).await.status, StatusCode::OK);
+
+    // Same header and signature, claims swapped for another subject.
+    let p: Vec<&str> = access.split('.').collect();
+    let (_, mut claims) = jwt_parts(&access);
+    claims["username"] = json!("root");
+    let forged = format!("{}.{}.{}", p[0], URL_SAFE_NO_PAD.encode(claims.to_string()), p[2]);
+    assert_eq!(userinfo(&f, &forged).await.status, StatusCode::UNAUTHORIZED);
+
+    // A structurally perfect token signed by ANOTHER installation (same
+    // claims, its own key) — and one with our kid but their signature.
+    let other = fixture(ON).await;
+    let their_key = ruscker_admin::oidc::ensure_signing_key(&other.db, &other.state.master_key).await.unwrap();
+    let (header, claims) = jwt_parts(&access);
+    let theirs = ruscker_admin::oidc::sign_jwt(&their_key, "at+jwt", &claims).unwrap();
+    assert_eq!(userinfo(&f, &theirs).await.status, StatusCode::UNAUTHORIZED);
+    let t: Vec<&str> = theirs.split('.').collect();
+    let our_kid_their_sig = format!("{}.{}.{}", URL_SAFE_NO_PAD.encode(header.to_string()), t[1], t[2]);
+    assert_eq!(userinfo(&f, &our_kid_their_sig).await.status, StatusCode::UNAUTHORIZED);
+}
+
+/// Userinfo reflects the present: a disabled client or a deleted user
+/// ends it, and POST works like GET. A cross-site browser POST is
+/// stopped by the CSRF guard.
+#[tokio::test]
+async fn userinfo_follows_revocation_and_accepts_post() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid").await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    let access = r.json["access_token"].as_str().unwrap().to_string();
+    let post = |site: Option<&str>| {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/oauth/userinfo")
+            .header(header::AUTHORIZATION, format!("bearer {access}"));
+        if let Some(site) = site {
+            req = req.header("sec-fetch-site", site);
+        }
+        req.body(Body::empty()).unwrap()
+    };
+    assert_eq!(send(&f.state, post(None)).await.status, StatusCode::OK, "server-to-server POST");
+    assert_eq!(send(&f.state, post(Some("cross-site"))).await.status, StatusCode::FORBIDDEN);
+
+    let off = ClientSettings {
+        name: "C".into(),
+        redirect_uris: vec![CB.into()],
+        access_groups: vec!["fiscal".into()],
+        require_mfa: false,
+        enabled: false,
+    };
+    ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
+    assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "client disabled");
+    let on = ClientSettings { enabled: true, ..off };
+    ruscker_admin::db::oidc_clients::update(&f.db, "radar", &on, None).await.unwrap();
+    assert_eq!(userinfo(&f, &access).await.status, StatusCode::OK);
+
+    ruscker_admin::db::users::delete(&f.db, "ana", None).await.unwrap();
+    assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "user deleted");
+}
+
 #[tokio::test]
 async fn the_endpoints_do_not_exist_when_the_provider_is_off() {
     let f = fixture(OFF).await;

@@ -110,16 +110,16 @@ qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 pretty_assertions = "1.4"
 insta = { version = "1.47", features = ["yaml"] }
 
-# The SQLite bundled by `libsqlite3-sys` 0.37 (3.51.3) is affected by
-# RUSTSEC-2026-0459 / CVE-2026-119375. The fix ships in `libsqlite3-sys`
-# 0.39+, but `sqlx-sqlite` 0.9.0 — the latest release — requires
-# `<0.38`, so a plain upgrade is impossible. Until sqlx allows it, the
-# crate is replaced by a vendored copy of 0.37.0 whose bundled SQLite
-# sources are those of 0.39.1 (SQLite 3.54.1). See
-# `vendor/libsqlite3-sys/VENDORED.md`; remove this section and that
-# directory once `cargo update -p libsqlite3-sys` can reach >= 0.39.
+# `sqlx-sqlite` 0.9.0 (the latest sqlx) caps `libsqlite3-sys` at `<0.38`,
+# which shuts out every release that bundles a SQLite with the fix for
+# RUSTSEC-2026-0459 (0.39 and later). Until sqlx lifts the cap, the
+# driver is replaced by a copy of 0.9.0 whose ONLY change is that version
+# bound, so the real, checksummed `libsqlite3-sys` from crates.io is
+# used and `Cargo.lock` states the fixed version. See
+# `vendor/sqlx-sqlite/VENDORED.md`; remove this section and that
+# directory when a sqlx release accepts `libsqlite3-sys >= 0.39`.
 [patch.crates-io]
-libsqlite3-sys = { path = "vendor/libsqlite3-sys" }
+sqlx-sqlite = { path = "vendor/sqlx-sqlite" }
 
 [profile.release]
 opt-level = 3

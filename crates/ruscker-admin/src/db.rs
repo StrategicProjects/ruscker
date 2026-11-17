@@ -184,10 +184,11 @@ pub mod users;
 mod bundled_sqlite {
     /// The SQLite actually linked into this binary must be 3.54.0 or
     /// newer: earlier versions are affected by CVE-2026-119375
-    /// (RUSTSEC-2026-0459). The fix comes from the vendored
-    /// `libsqlite3-sys` (`vendor/libsqlite3-sys/VENDORED.md`); this test
-    /// asks the library itself, so it also fails if the `[patch]` in the
-    /// workspace `Cargo.toml` stops applying or is removed too early.
+    /// (RUSTSEC-2026-0459). The fix comes from `libsqlite3-sys` >= 0.39,
+    /// which sqlx 0.9.0 only accepts through the one-line change in
+    /// `vendor/sqlx-sqlite` (see its VENDORED.md); this test asks the
+    /// library itself, so it also fails if the `[patch]` in the workspace
+    /// `Cargo.toml` stops applying or is removed too early.
     #[tokio::test]
     async fn bundled_sqlite_is_patched() {
         let pool = super::open_memory().await.expect("open in-memory");

@@ -1,23 +1,7 @@
 # cargo-audit configuration (read by `cargo audit` in CI and locally).
-
+#
+# No advisory is ignored. Keep it that way: an entry here hides a finding
+# from everyone, so it needs a written reason and a test that would fail
+# if the reason stopped being true.
 [advisories]
-# RUSTSEC-2026-0459 (CVE-2026-119375, SQLite < 3.54.0 bundled by
-# `libsqlite3-sys` < 0.39) — FALSE POSITIVE for this workspace, not an
-# accepted risk.
-#
-# cargo-audit matches crates by name and version, and `Cargo.lock` still
-# says `libsqlite3-sys 0.37.0`. But that entry is the vendored copy in
-# `vendor/libsqlite3-sys` (see its VENDORED.md and the `[patch.crates-io]`
-# section of the workspace Cargo.toml), which bundles the FIXED SQLite
-# 3.54.1. The version number cannot be raised: `sqlx-sqlite` 0.9.0
-# requires `<0.38`.
-#
-# What keeps this honest: the test `db::bundled_sqlite::
-# bundled_sqlite_is_patched` asks the linked library for its version and
-# fails the gate if it is older than 3.54.0 — so this entry cannot hide a
-# real regression (for example the patch being removed while the old
-# crate comes back).
-#
-# Remove this entry together with the vendored crate, once sqlx accepts
-# `libsqlite3-sys >= 0.39`.
-ignore = ["RUSTSEC-2026-0459"]
+ignore = []

@@ -1,4 +1,4 @@
-//! Admin > Credentials > SSO clients.
+//! Admin > SSO > Clients.
 //!
 //! The registry of systems allowed to "Sign in with Ruscker" (OIDC
 //! provider, slice 1 — `docs/adr/0005-oidc-provider.md`). Admin-only.
@@ -238,7 +238,7 @@ async fn render_index(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
-        nav_section: "credentials",
+        nav_section: "sso",
         role: Role::Admin,
         clients,
         form,
@@ -318,7 +318,7 @@ async fn render_edit(
         locales: &state.locales,
         locales_all: &Locale::ALL,
         base: state.base_path.clone(),
-        nav_section: "credentials",
+        nav_section: "sso",
         role: Role::Admin,
         client_id: client.client_id.clone(),
         secret_version: client.secret_version,

@@ -1,13 +1,13 @@
-{# Sub-nav: registry credentials ⇄ SSO clients. Both live under the
-   Credentials nav section. Needs `sso_tab: bool`-like context via the
-   including template setting `{% let sso_active = … %}`. #}
+{# Sub-nav of the SSO section (#1079): client registry ⇄ access log.
+   The including template sets `{% let sso_access = … %}` — `true` on
+   the Access tab, `false` on the Clients pages. #}
 <div class="flex gap-1 mb-4">
-  <a href="{{ base }}/admin/credentials" class="admin-nav-link {% if !sso_active %}is-active{% endif %}" style="width:auto">
-    <i class="ti ti-key" aria-hidden="true"></i>
-    <span>{{ self.t("admin-sso-tab-registry") }}</span>
-  </a>
-  <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if sso_active %}is-active{% endif %}" style="width:auto">
+  <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if !sso_access %}is-active{% endif %}" style="width:auto">
     <i class="ti ti-login" aria-hidden="true"></i>
     <span>{{ self.t("admin-sso-tab-clients") }}</span>
+  </a>
+  <a href="{{ base }}/admin/sso-access" class="admin-nav-link {% if sso_access %}is-active{% endif %}" style="width:auto">
+    <i class="ti ti-history" aria-hidden="true"></i>
+    <span>{{ self.t("admin-sso-tab-access") }}</span>
   </a>
 </div>

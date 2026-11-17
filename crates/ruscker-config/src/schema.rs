@@ -103,6 +103,13 @@ pub struct Server {
     /// endpoints exist. See `docs/adr/0005-oidc-provider.md`.
     #[serde(rename = "oidc-provider")]
     pub oidc_provider: Option<OidcProvider>,
+
+    /// How many days of user activity (sign-ins, app accesses, SSO
+    /// sign-ins and refusals) to keep. Older rows are deleted
+    /// automatically: they hold personal data — who signed in, from
+    /// which address and browser. Absent ⇒ 180; `0` keeps everything.
+    #[serde(rename = "activity-retention-days")]
+    pub activity_retention_days: Option<u32>,
 }
 
 /// `server.oidc-provider` — a Ruscker extension, not a ShinyProxy key.
@@ -213,7 +220,16 @@ pub fn issuer_path(issuer: &str) -> &str {
     }
 }
 
+/// Default for `server.activity-retention-days`.
+pub const DEFAULT_ACTIVITY_RETENTION_DAYS: u32 = 180;
+
 impl Server {
+    /// Days of user activity to keep; `0` means no automatic purge.
+    pub fn effective_activity_retention_days(&self) -> u32 {
+        self.activity_retention_days
+            .unwrap_or(DEFAULT_ACTIVITY_RETENTION_DAYS)
+    }
+
     /// The issuer URL of the OIDC provider when it is enabled AND has a
     /// usable issuer; `None` otherwise. Callers treat `None` as "the
     /// provider does not exist" — an enabled provider with a broken
@@ -2231,6 +2247,16 @@ mod tests {
         };
         assert_eq!(both.effective_base_path(), "/a");
         assert_eq!(Server::default().effective_base_path(), "");
+    }
+
+    /// Activity retention: 180 days unless set, and `0` turns the purge off.
+    #[test]
+    fn activity_retention_defaults_to_180_days_and_zero_disables() {
+        assert_eq!(Server::default().effective_activity_retention_days(), 180);
+        let cfg = Config::from_yaml("server:\n  activity-retention-days: 30\nproxy:\n  specs: []\n").unwrap();
+        assert_eq!(cfg.server.effective_activity_retention_days(), 30);
+        let cfg = Config::from_yaml("server:\n  activity-retention-days: 0\nproxy:\n  specs: []\n").unwrap();
+        assert_eq!(cfg.server.effective_activity_retention_days(), 0);
     }
 
     /// The OIDC provider is on only with the switch AND a usable issuer;

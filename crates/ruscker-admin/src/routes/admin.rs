@@ -300,8 +300,11 @@ async fn login_submit(
     loc: Locale,
     theme: Theme,
     headers: HeaderMap,
+    peer: crate::routes::proxy::MaybePeer,
     Form(form): Form<LoginForm>,
 ) -> Response {
+    // Where this attempt came from — recorded with the outcome (#1079).
+    let client = crate::activity::ClientInfo::from_request(&state, &headers, peer.0.as_ref());
     if !state.admin_auth.is_configured() {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -335,6 +338,18 @@ async fn login_submit(
         Ok(Some(u)) => u,
         Ok(None) => {
             state.login_limiter.record_failure();
+            // Audit the refusal. The typed name is kept only when it is
+            // a real account — people do type passwords into the wrong
+            // field, and those must not land in a table.
+            let known = db::users::fetch(pool, &form.username)
+                .await
+                .ok()
+                .flatten()
+                .map(|u| u.username);
+            let reason = if known.is_some() { "wrong-password" } else { "unknown-account" };
+            state.activity.record(
+                crate::activity::ActivityEvent::login_failed(known, reason).with_client(client),
+            );
             return login_error(
                 &state,
                 loc,
@@ -359,12 +374,15 @@ async fn login_submit(
     // the session id is the dedup key so the same login isn't double-counted
     // across HA instances. (Break-glass token logins are operator emergency
     // access and intentionally not surfaced as user activity.)
-    state.activity.record(crate::activity::ActivityEvent::login_success(
-        user.username.clone(),
-        crate::activity::AuthMethod::Password,
-        session_id.clone(),
-        None,
-    ));
+    state.activity.record(
+        crate::activity::ActivityEvent::login_success(
+            user.username.clone(),
+            crate::activity::AuthMethod::Password,
+            session_id.clone(),
+            None,
+        )
+        .with_client(client),
+    );
     issue_session_cookie(&state, &cookies, &headers, session_id);
 
     // First login with an admin-assigned password ⇒ ask whether to
@@ -790,8 +808,10 @@ fn section_for_admin_path(path: &str) -> &'static str {
         "specs"
     } else if path.starts_with("/admin/media") {
         "images"
-    } else if path.starts_with("/admin/credentials") || path.starts_with("/admin/sso-clients") {
-        // SSO clients are a tab of the Credentials section.
+    } else if path.starts_with("/admin/sso-") {
+        // SSO section: client registry + access log (#1079).
+        "sso"
+    } else if path.starts_with("/admin/credentials") {
         "credentials"
     } else if path.starts_with("/admin/landing") {
         "landing"

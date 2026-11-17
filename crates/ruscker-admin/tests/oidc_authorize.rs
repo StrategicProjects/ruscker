@@ -523,6 +523,25 @@ async fn the_group_gate_is_read_live_and_has_no_admin_bypass() {
     denied(&get(&state, &request("", &[]), &ghost).await);
     assert_eq!(stored_codes(&db).await, 0);
 
+    // Each refusal left an audit event naming the system, the reason and
+    // — only when there is a real account — the user.
+    let mut rx = state.activity.take_receiver().expect("receiver");
+    let mut seen = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        assert_eq!(ev.event_type.as_str(), "sso.denied");
+        assert_eq!(ev.spec_id.as_deref(), Some("radar"));
+        seen.push((ev.username.clone(), ev.detail.clone().unwrap()));
+    }
+    assert_eq!(
+        seen,
+        vec![
+            (Some("bia".to_string()), "not-in-group".to_string()),
+            (Some("root".to_string()), "not-in-group".to_string()),
+            (None, "no-account".to_string()),
+            (None, "account-missing".to_string()),
+        ]
+    );
+
     // Membership is read per request: the SAME session works once the
     // user joins the group, and stops working when they leave.
     ruscker_admin::db::users::set_groups(&db, "bia", &["fiscal".to_string()], None).await.unwrap();

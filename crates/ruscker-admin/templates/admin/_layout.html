@@ -76,6 +76,13 @@
       <span>{{ self.t("admin-nav-credentials") }}</span>
     </a>
     {% endif %}
+    {# SSO (#1079): client systems and who signed in to them. #}
+    {% if role.can_access_section("sso") %}
+    <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if nav_section == "sso" %}is-active{% endif %}">
+      <i class="ti ti-login" aria-hidden="true"></i>
+      <span>{{ self.t("admin-nav-sso") }}</span>
+    </a>
+    {% endif %}
     {% if role.can_access_section("landing") %}
     <a href="{{ base }}/admin/landing" class="admin-nav-link {% if nav_section == "landing" %}is-active{% endif %}">
       <i class="ti ti-layout" aria-hidden="true"></i>

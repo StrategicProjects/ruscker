@@ -32,6 +32,11 @@ pub struct Grant {
     pub nonce: Option<String>,
     /// Granted scopes, space-separated.
     pub scope: String,
+    /// The USER's address and browser, seen when the code was issued.
+    /// The redemption comes from the client system's server, so this is
+    /// the only place the audit row can learn them from.
+    pub client_ip: Option<String>,
+    pub user_agent: Option<String>,
 }
 
 /// A redeemed code: the grant plus when the code was issued. That is
@@ -77,8 +82,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             sqlx::query(
                 "INSERT INTO oidc_auth_codes
                    (code_hash, client_id, user_id, username, redirect_uri,
-                    code_challenge, nonce, scope, created_at, expires_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    code_challenge, nonce, scope, client_ip, user_agent, created_at, expires_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&code_hash)
             .bind(&grant.client_id)
@@ -88,6 +93,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             .bind(&grant.code_challenge)
             .bind(&grant.nonce)
             .bind(&grant.scope)
+            .bind(&grant.client_ip)
+            .bind(&grant.user_agent)
             .bind(now)
             .bind(expires)
             .execute(pool)
@@ -103,8 +110,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             sqlx::query(
                 "INSERT INTO oidc_auth_codes
                    (code_hash, client_id, user_id, username, redirect_uri,
-                    code_challenge, nonce, scope, created_at, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                    code_challenge, nonce, scope, client_ip, user_agent, created_at, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             )
             .bind(&code_hash)
             .bind(&grant.client_id)
@@ -114,6 +121,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             .bind(&grant.code_challenge)
             .bind(&grant.nonce)
             .bind(&grant.scope)
+            .bind(&grant.client_ip)
+            .bind(&grant.user_agent)
             .bind(now)
             .bind(expires)
             .execute(pool)
@@ -132,6 +141,8 @@ type Row = (
     String,
     Option<String>,
     String,
+    Option<String>,
+    Option<String>,
     DateTime<Utc>,
     DateTime<Utc>,
 );
@@ -153,7 +164,8 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
                 "UPDATE oidc_auth_codes SET consumed_at = ?
                   WHERE code_hash = ? AND consumed_at IS NULL
               RETURNING client_id, user_id, username, redirect_uri,
-                        code_challenge, nonce, scope, created_at, expires_at",
+                        code_challenge, nonce, scope, client_ip, user_agent,
+                        created_at, expires_at",
             )
             .bind(now)
             .bind(&code_hash)
@@ -165,7 +177,8 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
                 "UPDATE oidc_auth_codes SET consumed_at = $1
                   WHERE code_hash = $2 AND consumed_at IS NULL
               RETURNING client_id, user_id, username, redirect_uri,
-                        code_challenge, nonce, scope, created_at, expires_at",
+                        code_challenge, nonce, scope, client_ip, user_agent,
+                        created_at, expires_at",
             )
             .bind(now)
             .bind(&code_hash)
@@ -181,7 +194,7 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
     // Compared here rather than in SQL: the two dialects store the
     // instant differently (TEXT vs TIMESTAMPTZ), chrono compares it the
     // same way on both.
-    if r.8 <= now {
+    if r.10 <= now {
         return Ok(None);
     }
     Ok(Some(Redeemed {
@@ -193,8 +206,10 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
             code_challenge: r.4,
             nonce: r.5,
             scope: r.6,
+            client_ip: r.7,
+            user_agent: r.8,
         },
-        issued_at: r.7,
+        issued_at: r.9,
     }))
 }
 
@@ -215,6 +230,8 @@ mod tests {
             code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM".into(),
             nonce: Some("n-1".into()),
             scope: "openid email".into(),
+            client_ip: Some("203.0.113.9".into()),
+            user_agent: Some("Mozilla/5.0 test".into()),
         }
     }
 

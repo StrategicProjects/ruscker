@@ -28,6 +28,7 @@ server:
   # ShinyProxy's nested form is also accepted:
   servlet.context-path: /apps
   timezone: America/Recife             # Zone the SCHEDULER uses (see below)
+  activity-retention-days: 180         # Days of user activity kept (default 180; 0 = forever)
   oidc-provider:                       # "Sign in with Ruscker" (see below); off when absent
     enabled: true
     issuer: https://portal.example.org
@@ -96,6 +97,18 @@ viewer's own browser timezone — they're records of past events with a
 human looking at them, whereas the scheduler has no viewer, which is
 why it needs a configured zone.
 
+### `server.activity-retention-days` — how long sign-ins are kept
+
+The user-activity log (sign-ins, refused sign-ins, app accesses, SSO
+sign-ins and refusals) records who did what, from which address and
+with which browser. That is personal data, so rows are **deleted
+automatically** once older than this many days — checked at startup and
+every six hours. Absent ⇒ **180**. `0` disables the purge and keeps
+everything.
+
+The administrative audit log (who changed which app, user or setting)
+is a different table and is not affected.
+
 ### `server.oidc-provider` — sign-in for external systems
 
 Turns Ruscker into an OpenID Connect provider for systems that live
@@ -124,7 +137,7 @@ old master key is restored or the rows of `oidc_keys` are deleted (a
 new key is then created on first use, and tokens signed by the old one
 stop verifying). Ruscker never replaces the key by itself.
 
-Clients are registered in the admin (Credentials → SSO clients). The
+Clients are registered in the admin (SSO → Clients). The
 endpoints are `{issuer}/.well-known/openid-configuration`,
 `{issuer}/oauth/jwks`, `{issuer}/oauth/authorize`, `{issuer}/oauth/token`
 and `{issuer}/oauth/userinfo`. Only the authorization-code flow with

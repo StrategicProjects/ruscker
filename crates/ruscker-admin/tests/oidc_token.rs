@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use tower::ServiceExt;
 
-const ON: &str = "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://portal.example\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
+const ON: &str = "server:\n  useForwardHeaders: true\n  oidc-provider:\n    enabled: true\n    issuer: https://portal.example\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
 const OFF: &str = "proxy:\n  title: T\n  port: 8088\n  specs: []\n";
 const ISSUER: &str = "https://portal.example";
 const KEY: &str = "00000000000000000000000000000000000000000000000000000000000000aa";
@@ -138,6 +138,9 @@ async fn authorize(f: &Fixture, client_id: &str, scope: &str) -> String {
             Request::builder()
                 .uri(format!("/oauth/authorize?{}", q.finish()))
                 .header(header::COOKIE, format!("{COOKIE_NAME}={sid}"))
+                // The user's browser, as seen by the provider.
+                .header(header::USER_AGENT, "TestBrowser/1.0")
+                .header("x-forwarded-for", "203.0.113.9")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -196,6 +199,9 @@ async fn token_basic(f: &Fixture, id: &str, secret: &str, body: &[(&str, String)
         .uri("/oauth/token")
         .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
         .header(header::AUTHORIZATION, format!("Basic {}", STANDARD.encode(format!("{id}:{secret}"))))
+        // The client system's SERVER — not the user.
+        .header(header::USER_AGENT, "system-backend/2.0")
+        .header("x-forwarded-for", "192.0.2.50")
         .body(Body::from(form(&pairs)))
         .unwrap();
     send(&f.state, req).await
@@ -285,6 +291,10 @@ async fn full_sign_in_yields_a_verifiable_id_token_and_userinfo() {
     assert_eq!(ev.event_type.as_str(), "sso.login");
     assert_eq!(ev.username.as_deref(), Some("ana"));
     assert_eq!(ev.spec_id.as_deref(), Some("radar"));
+    // The row is written when the system's server redeems the code, but
+    // the address and browser are the USER's, carried by the code.
+    assert_eq!(ev.client_ip.as_deref(), Some("203.0.113.9"));
+    assert_eq!(ev.user_agent.as_deref(), Some("TestBrowser/1.0"));
     assert!(rx.try_recv().is_err(), "exactly one");
 }
 

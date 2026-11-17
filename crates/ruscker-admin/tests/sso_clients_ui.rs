@@ -396,3 +396,71 @@ async fn groups_page_rename_and_delete_reach_the_client_gate() {
     assert!(!c.enabled, "disabled, not opened");
     assert_eq!(c.access_groups, vec!["fazenda".to_string()], "gate kept");
 }
+
+/// SSO section → Access (#1079): only SSO events, with who, which
+/// system, from where and — for a refusal — why. Admin only. The
+/// general Activity page keeps showing everything.
+#[tokio::test]
+async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
+    use ruscker_admin::activity::{ActivityEvent, AuthMethod, ClientInfo};
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    let from = |ip: &str, ua: &str| ClientInfo { ip: Some(ip.into()), user_agent: Some(ua.into()) };
+    let firefox = "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0";
+    ruscker_admin::db::user_activity::insert_batch(
+        &db,
+        &[
+            ActivityEvent::sso_login("ana", "radar-fiscal", "k1").with_client(from("203.0.113.9", firefox)),
+            ActivityEvent::sso_denied(Some("bia".into()), "norma", "not-in-group").with_client(from("203.0.113.77", firefox)),
+            ActivityEvent::login_success("carla", AuthMethod::Password, "k2", None),
+            ActivityEvent::app_access(Some("carla".into()), "painel-interno", "k3", None, None),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let (status, html) = get(state.clone(), "/admin/sso-access", &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    // Both SSO rows, with system, address, a readable browser and the
+    // raw User-Agent as the tooltip.
+    for needle in ["radar-fiscal", "norma", "203.0.113.9", "203.0.113.77", "Firefox · Linux", "rv:152.0"] {
+        assert!(html.contains(needle), "missing {needle}");
+    }
+    // The refusal says why, in words (whichever locale the harness
+    // negotiates), not as the raw machine code.
+    assert!(
+        html.contains("not in the system") || html.contains("fora dos grupos permitidos"),
+        "refusal reason shown"
+    );
+    assert!(!html.contains(">not-in-group<"));
+    // Nothing that is not SSO: the app access row is absent.
+    assert!(!html.contains("painel-interno"));
+    // It is the Access tab of the SSO section, and its own links stay on it.
+    assert!(html.contains(r#"href="/admin/sso-clients""#));
+    assert!(html.contains(r#"action="/admin/sso-access""#));
+    assert!(!html.contains(r#"action="/admin/activity""#));
+
+    // Filtering to refusals drops the sign-in row.
+    let (_, html) = get(state.clone(), "/admin/sso-access?event=sso.denied", &cookie).await;
+    assert!(html.contains("203.0.113.77") && !html.contains("203.0.113.9<"));
+    // A non-SSO event name is not a way to widen the tab.
+    let (_, html) = get(state.clone(), "/admin/sso-access?event=app.access", &cookie).await;
+    assert!(!html.contains("painel-interno"));
+
+    // The general Activity page still shows everything, refusals included.
+    let (_, html) = get(state.clone(), "/admin/activity", &cookie).await;
+    assert!(html.contains("painel-interno") && html.contains("norma"));
+
+    // The SSO section has its own nav entry; Credentials no longer hosts it.
+    let (_, creds) = get(state.clone(), "/admin/credentials", &cookie).await;
+    assert_eq!(creds.matches(r#"href="/admin/sso-clients""#).count(), 1, "only the top nav links there");
+
+    // Admin only.
+    let sid = state.admin_sessions.create(Role::Editor, Some("ed".into())).await;
+    let (status, html) = get(state.clone(), "/admin/sso-access", &format!("{COOKIE_NAME}={sid}")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!html.contains("203.0.113.9"));
+    let (status, _) = get(state, "/admin/sso-access", "").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+}

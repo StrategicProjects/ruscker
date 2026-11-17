@@ -87,10 +87,22 @@ Status: living document. Tracks the Phase 5 security audit
 - **[implemented]** User activity is recorded (#1021) — a `user_activity`
   table logs successful password logins and new interactive app sessions
   (username or "anonymous", app id, timestamp) for the Admin-only Activity
-  page. It is **data minimizing by default**: the client IP is not stored,
-  API calls are not logged per-request (only the aggregate counter), and the
-  table has no foreign keys so deleting a user or app is not blocked by it.
-  Read access is Admin-only.
+  page. Since #1079 it also records **refused** password sign-ins, SSO
+  sign-ins and SSO refusals, each with the **client address** and the
+  browser's **`User-Agent`** (sanitized, at most 256 characters) and, for
+  a refusal, the reason. Rules that keep this an audit and not a liability:
+  - the address follows the forwarded-header trust rule of the rate
+    limiter (right-most `X-Forwarded-For` only when the operator opted in,
+    the TCP peer otherwise) — never a value the client can invent;
+  - a refused sign-in keeps the typed username **only if it names an
+    existing account**; anything else (people type passwords in the wrong
+    field) is not stored;
+  - no device fingerprinting — only what the request itself states;
+  - rows are **purged after `server.activity-retention-days`** (default
+    180) because address and browser are personal data;
+  - API calls are not logged per-request (only the aggregate counter), the
+    table has no foreign keys so deleting a user or app is not blocked by
+    it, and read access is Admin-only.
 - **[implemented]** HA admin-session cache is bounded (#738) — the
   Postgres-backed session store caches a negative entry per looked-up
   session id (anti-hammer); an amortized sweep now evicts expired

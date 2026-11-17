@@ -51,6 +51,11 @@ pub enum ActivityEventType {
     /// A user signed in to an EXTERNAL system through the OIDC provider
     /// (a token was issued to that system's client).
     SsoLogin,
+    /// A password sign-in that was refused.
+    LoginFailed,
+    /// An SSO sign-in the provider refused after identifying the client
+    /// (the user is not in its groups, or the session has no account).
+    SsoDenied,
 }
 
 impl ActivityEventType {
@@ -59,6 +64,8 @@ impl ActivityEventType {
             ActivityEventType::LoginSuccess => "login.success",
             ActivityEventType::AppAccess => "app.access",
             ActivityEventType::SsoLogin => "sso.login",
+            ActivityEventType::LoginFailed => "login.failed",
+            ActivityEventType::SsoDenied => "sso.denied",
         }
     }
 }
@@ -97,12 +104,100 @@ pub struct ActivityEvent {
     /// Client IP if the deployment chooses to record it. Personal data —
     /// admin-only, retention TBD (kept optional and unset by default).
     pub client_ip: Option<String>,
+    /// The browser's `User-Agent`, sanitized and truncated. Personal data,
+    /// same handling as `client_ip`.
+    pub user_agent: Option<String>,
+    /// Machine-readable reason for a failure or refusal
+    /// (`wrong-password`, `not-in-group`, …). `None` otherwise.
+    pub detail: Option<String>,
     /// When the event happened (stamped at emit, not at insert, so a
     /// drained-late batch keeps accurate timestamps).
     pub occurred_at: DateTime<Utc>,
 }
 
+/// Where a request came from: the client address and browser, as far as
+/// the request tells. Both are optional and both are personal data.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientInfo {
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+/// Longest `User-Agent` kept. Real ones are 100–200 characters; the cap
+/// stops a hostile client from using the audit table as storage.
+const MAX_USER_AGENT_LEN: usize = 256;
+
+impl ClientInfo {
+    /// Read the client address and browser from a request.
+    ///
+    /// The address follows the same trust rule as rate limiting: the
+    /// right-most `X-Forwarded-For` entry when the operator opted into
+    /// forwarded headers (Ruscker behind its reverse proxy), the TCP
+    /// peer otherwise — never a value the client can simply invent.
+    pub fn from_request(
+        state: &crate::AppState,
+        headers: &axum::http::HeaderMap,
+        peer: Option<&std::net::SocketAddr>,
+    ) -> Self {
+        let user_agent = headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|ua| {
+                ua.chars()
+                    .filter(|c| !c.is_control())
+                    .take(MAX_USER_AGENT_LEN)
+                    .collect::<String>()
+            })
+            .filter(|ua| !ua.trim().is_empty());
+        Self {
+            ip: crate::routes::proxy::client_ip(state, headers, peer),
+            user_agent,
+        }
+    }
+}
+
 impl ActivityEvent {
+    /// Attach where the request came from.
+    pub fn with_client(mut self, client: ClientInfo) -> Self {
+        self.client_ip = client.ip;
+        self.user_agent = client.user_agent;
+        self
+    }
+
+    /// A refused password sign-in. `username` is set ONLY when it names
+    /// an existing account: an unknown name is not stored, because people
+    /// do type passwords into the wrong field, and an audit table must
+    /// not end up holding them.
+    pub fn login_failed(username: Option<String>, reason: &str) -> Self {
+        Self {
+            event_type: ActivityEventType::LoginFailed,
+            username,
+            spec_id: None,
+            // Every attempt is its own event; nothing to deduplicate.
+            event_key: uuid::Uuid::new_v4().to_string(),
+            auth_method: Some(AuthMethod::Password),
+            client_ip: None,
+            user_agent: None,
+            detail: Some(reason.to_string()),
+            occurred_at: Utc::now(),
+        }
+    }
+
+    /// An SSO sign-in refused for `client_id`, with the reason.
+    pub fn sso_denied(username: Option<String>, client_id: impl Into<String>, reason: &str) -> Self {
+        Self {
+            event_type: ActivityEventType::SsoDenied,
+            username,
+            spec_id: Some(client_id.into()),
+            event_key: uuid::Uuid::new_v4().to_string(),
+            auth_method: None,
+            client_ip: None,
+            user_agent: None,
+            detail: Some(reason.to_string()),
+            occurred_at: Utc::now(),
+        }
+    }
+
     /// A successful login.
     pub fn login_success(
         username: impl Into<String>,
@@ -117,6 +212,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method: Some(auth_method),
             client_ip,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -136,6 +233,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method: None,
             client_ip: None,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -156,6 +255,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method,
             client_ip,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -238,6 +339,33 @@ pub fn spawn(sink: &ActivitySink, db: ConfigDb) -> Option<tokio::task::JoinHandl
                 }
             }
             buf.clear();
+        }
+    }))
+}
+
+/// How often the retention task looks for rows to purge.
+const RETENTION_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Start the retention task: delete `user_activity` rows older than
+/// `retention_days`, once at startup and then every six hours. Returns
+/// `None` (no task) when retention is disabled with `0`.
+///
+/// The rows hold personal data (who signed in, from which address and
+/// browser); keeping them forever is neither needed for an audit nor
+/// defensible. Every node may run this — the delete is idempotent.
+pub fn spawn_retention(db: ConfigDb, retention_days: u32) -> Option<tokio::task::JoinHandle<()>> {
+    if retention_days == 0 {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        loop {
+            let cutoff = Utc::now() - chrono::Duration::days(i64::from(retention_days));
+            match db::user_activity::purge_older_than(&db, cutoff).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(rows = n, retention_days, "purged old user activity"),
+                Err(e) => tracing::warn!(error = ?e, "user activity retention purge failed"),
+            }
+            tokio::time::sleep(RETENTION_INTERVAL).await;
         }
     }))
 }

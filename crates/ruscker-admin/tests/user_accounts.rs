@@ -119,10 +119,17 @@ async fn password_login_succeeds_and_wrong_fails() {
     assert_eq!(bad_status, StatusCode::UNAUTHORIZED);
 }
 
+/// Every password sign-in attempt is audited with where it came from
+/// (#1079): the success, the wrong password, and the unknown account —
+/// whose typed name is NOT kept, because people type passwords there.
 #[tokio::test]
-async fn successful_login_records_activity_but_failed_does_not() {
+async fn login_outcomes_are_recorded_with_where_they_came_from() {
     use ruscker_admin::activity::{ActivityEventType, AuthMethod};
-    let (state, pool) = state_with_db().await;
+    let (mut state, pool) = state_with_db().await;
+    // Behind a reverse proxy: the address is the right-most forwarded hop.
+    state.config = Arc::new(
+        Config::from_yaml("server:\n  useForwardHeaders: true\nproxy:\n  title: T\n  specs: []\n").unwrap(),
+    );
     ruscker_admin::db::users::create(
         &ruscker_admin::db::ConfigDb::Sqlite(pool.clone()),
         "alice",
@@ -134,42 +141,68 @@ async fn successful_login_records_activity_but_failed_does_not() {
     )
     .await
     .unwrap();
+    const UA: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0";
+    let login = |state: AppState, body: &'static str, ua: String| async move {
+        router(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/login")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("user-agent", ua)
+                    // Left-most is whatever the client claims; ours is the right-most.
+                    .header("x-forwarded-for", "198.51.100.7, 203.0.113.9")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    };
+    // The drain task isn't started in this harness, so the receiver holds
+    // exactly what the capture sites enqueued (deterministic, no timing).
+    let mut rx = state.activity.take_receiver().expect("activity receiver available");
 
-    // A correct password login enqueues exactly one `login.success`.
-    let (ok, _) = post(
-        state.clone(),
-        "/admin/login",
-        "username=alice&password=alicepass1",
-        None,
-    )
-    .await;
-    assert_eq!(ok, StatusCode::SEE_OTHER);
-
-    // The drain task isn't started in this harness, so the receiver still
-    // holds what the capture site enqueued (deterministic, no timing).
-    let mut rx = state
-        .activity
-        .take_receiver()
-        .expect("activity receiver available");
+    assert_eq!(login(state.clone(), "username=alice&password=alicepass1", UA.into()).await, StatusCode::SEE_OTHER);
     let ev = rx.try_recv().expect("a login.success was recorded");
     assert_eq!(ev.event_type, ActivityEventType::LoginSuccess);
     assert_eq!(ev.username.as_deref(), Some("alice"));
     assert_eq!(ev.auth_method, Some(AuthMethod::Password));
-    assert!(ev.spec_id.is_none(), "a login is not tied to a spec");
+    assert!(ev.spec_id.is_none() && ev.detail.is_none());
+    assert_eq!(ev.client_ip.as_deref(), Some("203.0.113.9"), "the trusted hop, not the client's claim");
+    assert_eq!(ev.user_agent.as_deref(), Some(UA));
 
-    // A wrong password records nothing.
-    let (bad, _) = post(
-        state.clone(),
-        "/admin/login",
-        "username=alice&password=WRONG",
-        None,
-    )
-    .await;
-    assert_eq!(bad, StatusCode::UNAUTHORIZED);
-    assert!(
-        rx.try_recv().is_err(),
-        "a failed login must not record activity"
+    // Wrong password for a real account: named, with the reason.
+    assert_eq!(login(state.clone(), "username=alice&password=WRONG", UA.into()).await, StatusCode::UNAUTHORIZED);
+    let ev = rx.try_recv().expect("a login.failed was recorded");
+    assert_eq!(ev.event_type, ActivityEventType::LoginFailed);
+    assert_eq!(ev.username.as_deref(), Some("alice"));
+    assert_eq!(ev.detail.as_deref(), Some("wrong-password"));
+    assert_eq!(ev.client_ip.as_deref(), Some("203.0.113.9"));
+
+    // Unknown account: the typed text is kept NOWHERE in the event.
+    assert_eq!(
+        login(state.clone(), "username=MyS3cretPassw0rd&password=x", UA.into()).await,
+        StatusCode::UNAUTHORIZED
     );
+    let ev = rx.try_recv().expect("a login.failed was recorded");
+    assert_eq!(ev.username, None);
+    assert_eq!(ev.detail.as_deref(), Some("unknown-account"));
+    assert!(!format!("{ev:?}").contains("MyS3cretPassw0rd"));
+
+    // A hostile User-Agent is cut down to size.
+    let long = "x".repeat(5000);
+    assert_eq!(login(state.clone(), "username=alice&password=WRONG", long).await, StatusCode::UNAUTHORIZED);
+    let ev = rx.try_recv().unwrap();
+    assert_eq!(ev.user_agent.as_deref().map(str::len), Some(256));
+    assert!(rx.try_recv().is_err(), "one event per attempt");
+
+    // Without the forwarded-headers opt-in the header is not believed
+    // (and there is no TCP peer under `oneshot`): no address is recorded.
+    let (direct, _pool) = state_with_db().await;
+    let mut rx = direct.activity.take_receiver().unwrap();
+    assert_eq!(login(direct, "username=nobody&password=x", UA.into()).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(rx.try_recv().unwrap().client_ip, None);
 }
 
 #[tokio::test]

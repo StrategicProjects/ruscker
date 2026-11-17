@@ -1,19 +1,24 @@
 {% extends "admin/_layout.html" %}
 
-{% block title %}{{ self.t("admin-activity-title") }} · Ruscker{% endblock %}
+{% block title %}{{ self.t(self.title_key()) }} · Ruscker{% endblock %}
 
 {% block content %}
 
 <div class="flex items-end justify-between mb-4">
   <div>
-    <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-activity-title") }}</h1>
-    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-activity-subtitle") }}</p>
+    <h1 class="text-xl font-medium tracking-tight">{{ self.t(self.title_key()) }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t(self.subtitle_key()) }}</p>
   </div>
 </div>
 
 <div id="activity-kpis" data-live-sync>{% include "admin/_kpi_band.html" %}</div>
 
-{# ── Sub-nav: users activity ⇄ administrative audit ──────────── #}
+{# ── Sub-nav. As the SSO section's "Access" tab (#1079) this page
+     sits beside the client registry; otherwise beside the audit log. #}
+{% if sso %}
+{% let sso_access = true %}
+{% include "admin/_sso_subnav.html" %}
+{% else %}
 <div class="flex gap-1 mb-4">
   <a href="{{ base }}/admin/activity" class="admin-nav-link is-active" style="width:auto">
     <i class="ti ti-users" aria-hidden="true"></i>
@@ -24,16 +29,22 @@
     <span>{{ self.t("admin-activity-tab-admin") }}</span>
   </a>
 </div>
+{% endif %}
 
 {# ── Filter bar ───────────────────────────────────────────── #}
 {# Live region (#1057): filters and the pager swap `#live-activity` in place. #}
-<form method="get" action="{{ base }}/admin/activity" class="audit-filter-bar" data-live="#live-activity">
+<form method="get" action="{{ base }}{{ self.path() }}" class="audit-filter-bar" data-live="#live-activity">
   <div class="select-wrap{% if !event.is_empty() %} is-active{% endif %}">
     <select name="event" class="theme-select" onchange="this.form.submit()"
             aria-label="{{ self.t("admin-activity-event") }}">
       <option value=""              {% if event.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-event-all") }}</option>
+      {% if !sso %}
       <option value="login.success" {% if event == "login.success" %}selected{% endif %}>{{ self.t("admin-activity-event-login") }}</option>
+      <option value="login.failed"  {% if event == "login.failed" %}selected{% endif %}>{{ self.t("admin-activity-event-login-failed") }}</option>
       <option value="app.access"     {% if event == "app.access" %}selected{% endif %}>{{ self.t("admin-activity-event-access") }}</option>
+      {% endif %}
+      <option value="sso.login"      {% if event == "sso.login" %}selected{% endif %}>{{ self.t("admin-activity-event-sso") }}</option>
+      <option value="sso.denied"     {% if event == "sso.denied" %}selected{% endif %}>{{ self.t("admin-activity-event-sso-denied") }}</option>
     </select>
     <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
   </div>
@@ -54,8 +65,8 @@
   {% if !apps.is_empty() %}
     <div class="select-wrap{% if !app.is_empty() %} is-active{% endif %}">
       <select name="app" class="theme-select" onchange="this.form.submit()"
-              aria-label="{{ self.t("admin-activity-app") }}">
-        <option value="" {% if app.is_empty() %}selected{% endif %}>{{ self.t("admin-activity-app-all") }}</option>
+              aria-label="{% if sso %}{{ self.t("admin-sso-access-client") }}{% else %}{{ self.t("admin-activity-app") }}{% endif %}">
+        <option value="" {% if app.is_empty() %}selected{% endif %}>{% if sso %}{{ self.t("admin-sso-access-client-all") }}{% else %}{{ self.t("admin-activity-app-all") }}{% endif %}</option>
         {% for a in apps %}
           <option value="{{ a }}" {% if app == *a %}selected{% endif %}>{{ a }}</option>
         {% endfor %}
@@ -82,7 +93,7 @@
 
   <span id="activity-filter-clear" data-live-sync>
   {% if self.filtered() %}
-    <a href="{{ base }}/admin/activity" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
+    <a href="{{ base }}{{ self.path() }}" class="text-[11px] text-[color:var(--text-faint)] underline hover:text-[color:var(--text)] ml-1">
       {{ self.t("filter-clear") }}
     </a>
   {% endif %}
@@ -102,8 +113,9 @@
         <th style="width:160px">{{ self.t("admin-activity-col-when") }}</th>
         <th style="width:200px">{{ self.t("admin-activity-col-user") }}</th>
         <th style="width:170px">{{ self.t("admin-activity-col-event") }}</th>
-        <th>{{ self.t("admin-activity-col-app") }}</th>
+        <th>{% if sso %}{{ self.t("admin-sso-access-client") }}{% else %}{{ self.t("admin-activity-col-app") }}{% endif %}</th>
         <th style="width:130px">{{ self.t("admin-activity-col-ip") }}</th>
+        <th style="width:170px">{{ self.t("admin-activity-col-browser") }}</th>
       </tr>
     </thead>
     <tbody>
@@ -121,9 +133,13 @@
             <i class="ti {{ self.event_icon(r.event_type.as_str()) }} audit-row-icon" aria-hidden="true"></i>
             <span class="audit-row-action">{{ self.event_label(r.event_type.as_str()) }}</span>
           </span>
+          {# Why a sign-in was refused, under the event. #}
+          {% if r.detail.is_some() %}<div class="text-[11px] text-[color:var(--text-faint)] mt-1">{{ self.detail_label(r.detail) }}</div>{% endif %}
         </td>
         <td class="dash-mono text-[color:var(--text-muted)]">{% match r.spec_id %}{% when Some with (s) %}{{ s }}{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
         <td class="dash-mono text-[color:var(--text-faint)]">{% match r.client_ip %}{% when Some with (ip) %}{{ ip }}{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
+        {# Short "browser · system"; the full User-Agent is the tooltip. #}
+        <td class="text-[color:var(--text-muted)]">{% match r.user_agent %}{% when Some with (ua) %}<span title="{{ ua }}">{{ crate::routes::admin::user_activity::browser_summary(ua) }}</span>{% when None %}<span class="opacity-50">—</span>{% endmatch %}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -133,14 +149,14 @@
   <div class="flex items-center gap-3 mt-3 text-xs text-[color:var(--text-muted)]" style="flex-wrap:wrap">
     {% if page > 1 %}
       <a class="admin-nav-link" style="width:auto"
-         href="{{ base }}/admin/activity?page={{ page - 1 }}{{ self.query_suffix() }}">
+         href="{{ base }}{{ self.path() }}?page={{ page - 1 }}{{ self.query_suffix() }}">
         <i class="ti ti-chevron-left" aria-hidden="true"></i> {{ self.t("admin-users-prev") }}
       </a>
     {% endif %}
     <span aria-live="polite" aria-atomic="true">{{ self.pager_status() }}</span>
     {% if page < pages %}
       <a class="admin-nav-link" style="width:auto"
-         href="{{ base }}/admin/activity?page={{ page + 1 }}{{ self.query_suffix() }}">
+         href="{{ base }}{{ self.path() }}?page={{ page + 1 }}{{ self.query_suffix() }}">
         {{ self.t("admin-users-next") }} <i class="ti ti-chevron-right" aria-hidden="true"></i>
       </a>
     {% endif %}

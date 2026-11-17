@@ -1,9 +1,9 @@
 # ADR 0005 — Ruscker as an OpenID Connect provider ("Sign in with Ruscker")
 
-Status: proposed (slices 1–3 are implemented: the client registry, the
-signing key, the public metadata endpoints and the authorization
-endpoint; the token endpoint is not — a client can obtain a code but
-cannot redeem it yet)
+Status: accepted — slices 1–4 are implemented: the client registry, the
+signing key and metadata endpoints, the authorization endpoint, and
+the token and userinfo endpoints. A registered client can complete a
+sign-in. Off by default.
 
 ## Context
 
@@ -121,7 +121,27 @@ it themselves.
      verifier to its own browser session, check `iss`, verify `nonce`.
    - Codes live 60 seconds, are stored as a SHA-256 and are claimed by
      one conditional `UPDATE`.
-4. `/oauth/token` and `/oauth/userinfo`.
+4. `/oauth/token` and `/oauth/userinfo`. *(implemented)* Decisions
+   taken here:
+   - The client authenticates first (HTTP Basic or form body, never
+     both); only then is the code redeemed. A failed client
+     authentication does not spend the code.
+   - After redemption the code is spent whatever happens; every failed
+     binding (other client, different redirect URI, PKCE mismatch, user
+     gone or no longer in the client's groups) is the same
+     `invalid_grant`.
+   - The user is re-read at redemption and matched by account id, not
+     name: a deleted and recreated username is a different person.
+   - `sub` is the account's immutable id.
+   - `groups` carries only the groups that grant access to the client
+     when it is restricted, all of the user's groups when it is open.
+   - The access token is a signed JWT (`typ: at+jwt`, audience = the
+     issuer) accepted only by `/oauth/userinfo`; the ID token has
+     `typ: JWT` and audience = the client, so neither can stand in for
+     the other. Both live five minutes. Userinfo re-reads the user and
+     the client, so it stops answering when access is revoked.
+   - Each successful exchange is recorded in the user activity log as
+     `sso.login`, with the client id.
 5. Integration recipes and a first real client.
 
 Later, separately decided: RP-initiated logout, refresh tokens,

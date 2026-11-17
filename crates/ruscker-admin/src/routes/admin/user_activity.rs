@@ -59,6 +59,7 @@ impl ActivityQuery {
         match self.event.as_deref() {
             Some("login.success") => "login.success".into(),
             Some("app.access") => "app.access".into(),
+            Some("sso.login") => "sso.login".into(),
             _ => String::new(),
         }
     }
@@ -131,6 +132,7 @@ impl ActivityPage<'_> {
         match event_type {
             "login.success" => self.t("admin-activity-event-login"),
             "app.access" => self.t("admin-activity-event-access"),
+            "sso.login" => self.t("admin-activity-event-sso"),
             other => other.to_string(),
         }
     }
@@ -138,6 +140,7 @@ impl ActivityPage<'_> {
         match event_type {
             "login.success" => "ti-login",
             "app.access" => "ti-app-window",
+            "sso.login" => "ti-key",
             _ => "ti-history",
         }
     }
@@ -145,6 +148,7 @@ impl ActivityPage<'_> {
         match event_type {
             "login.success" => "tone-update",
             "app.access" => "tone-create",
+            "sso.login" => "tone-update",
             _ => "tone-other",
         }
     }

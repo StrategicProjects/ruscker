@@ -61,8 +61,8 @@ server:
   # `issuer` is this portal's PUBLIC base URL, including the subpath if
   # you mount it under one; https only (http is accepted for localhost).
   # Needs RUSCKER_MASTER_KEY: the signing key is stored encrypted in the
-  # database. Work in progress — the token endpoint is not shipped yet;
-  # see docs/adr/0005-oidc-provider.md.
+  # database. Clients are registered in the admin (Credentials → SSO
+  # clients); see docs/adr/0005-oidc-provider.md.
   #oidc-provider:
   #  enabled: true
   #  issuer: https://portal.example.org

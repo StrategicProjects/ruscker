@@ -1205,6 +1205,7 @@ admin-activity-event = Event
 admin-activity-event-all = All events
 admin-activity-event-login = Login
 admin-activity-event-access = App access
+admin-activity-event-sso = SSO sign-in
 admin-activity-user = User
 admin-activity-user-all = All users
 admin-activity-app = App

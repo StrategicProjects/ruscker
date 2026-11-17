@@ -354,13 +354,12 @@ There is no need to inline registry passwords in a spec.
 
 #### SSO clients
 
-The **SSO clients** tab registers external systems that will be allowed
-to sign users in through the portal (OpenID Connect; see
+The **SSO clients** tab registers external systems that are allowed to
+sign users in through the portal, using OpenID Connect — the protocol
+behind "Sign in with Google" (design in
 [ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md)).
-The registry is in place and, when `server.oidc-provider` is enabled,
-so are the public discovery and key documents and the authorization
-endpoint; the token endpoint is not shipped yet, so a registered client
-cannot complete a sign-in for now.
+It only works when `server.oidc-provider` is enabled in the service
+configuration.
 
 Each client has an ID, a display name, its exact redirect URIs (HTTPS,
 or loopback HTTP for development; no wildcards), an optional list of
@@ -372,6 +371,33 @@ allowed group disables that client instead of opening it to everyone.
 (A group that simply runs out of members is not "deleted": the client
 keeps its name, nobody can sign in, and members later added to a group
 of that name regain access.)
+
+**Connecting a system.** Register it here, then give its developers:
+the issuer URL (they read everything else from
+`{issuer}/.well-known/openid-configuration`), the client ID, and the
+client secret. Any standard OpenID Connect client library works, with
+these settings:
+
+- flow: authorization code with PKCE (`S256`); the client is
+  confidential, so the code exchange happens on its **server**, never in
+  the browser;
+- scopes: `openid`, plus `profile` (username), `email` and `groups` as
+  needed;
+- the redirect URI must be exactly one of those registered here.
+
+The system receives an ID token whose `sub` is the account's permanent
+id (use it, not the username, as the key for the person) and, with the
+`groups` scope, the groups that give access to it. What the person may
+do inside the system stays that system's decision. It should keep its
+own session after the exchange: revoking access here takes effect at
+that system's next sign-in.
+
+A static site with no server of its own cannot be a client directly;
+put an OpenID Connect-aware reverse proxy in front of it and register
+that proxy as the client.
+
+Sign-ins to external systems appear in **Activity** as "SSO sign-in",
+with the client ID in the app column.
 
 ### Appearance
 Customise the public landing without a custom template. Every control

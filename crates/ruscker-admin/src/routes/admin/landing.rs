@@ -134,6 +134,15 @@ pub struct LandingForm {
     pub intro_en: String,
     pub intro_es: String,
     pub intro_fr: String,
+    // Intro presentation (#1065): style `text`|`banner`|`card`, align
+    // `left`|`center` (blank ⇒ the style's default), and the banner's
+    // optional Media-library background filename.
+    #[serde(default)]
+    pub intro_style: String,
+    #[serde(default)]
+    pub intro_align: String,
+    #[serde(default)]
+    pub intro_image: String,
     pub seo_title: String,
     pub seo_description: String,
     pub og_image: String,
@@ -192,6 +201,9 @@ impl LandingForm {
             intro_en: g("en"),
             intro_es: g("es"),
             intro_fr: g("fr"),
+            intro_style: lc.intro_style.clone().unwrap_or_default(),
+            intro_align: lc.intro_align.clone().unwrap_or_default(),
+            intro_image: lc.intro_image.clone().unwrap_or_default(),
             seo_title: lc.seo_title.clone().unwrap_or_default(),
             seo_description: lc.seo_description.clone().unwrap_or_default(),
             og_image: lc.og_image.clone().unwrap_or_default(),
@@ -272,6 +284,19 @@ impl LandingForm {
             header_fg_dark: empty_to_none(self.header_fg_dark),
             intro: empty_to_none(self.intro),
             intro_locales,
+            // Closed sets: `text` (the default) and anything unknown are
+            // stored as NULL, like an unset key.
+            intro_style: match self.intro_style.trim() {
+                "banner" => Some("banner".into()),
+                "card" => Some("card".into()),
+                _ => None,
+            },
+            intro_align: match self.intro_align.trim() {
+                "left" => Some("left".into()),
+                "center" => Some("center".into()),
+                _ => None,
+            },
+            intro_image: intro_image_filename(&self.intro_image),
             seo_title: empty_to_none(self.seo_title),
             seo_description: empty_to_none(self.seo_description),
             og_image: empty_to_none(self.og_image),
@@ -295,6 +320,20 @@ impl LandingForm {
 fn empty_to_none(s: String) -> Option<String> {
     let t = s.trim();
     if t.is_empty() { None } else { Some(t.to_string()) }
+}
+
+/// Normalize the banner background (#1065) to a bare Media-library
+/// filename. The picker hands back `/assets/img/<name>`, so that prefix
+/// is stripped; anything that still looks like a path (a `/` or `\`,
+/// or a leading dot) is refused — the value only ever names a file in
+/// the library, never a URL or a traversal.
+pub(crate) fn intro_image_filename(raw: &str) -> Option<String> {
+    let t = raw.trim();
+    let name = t.strip_prefix("/assets/img/").unwrap_or(t);
+    if name.is_empty() || name.starts_with('.') || name.contains(['/', '\\']) {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// Parse + sanitize the editor's logos JSON: drop entries without a URL,
@@ -364,7 +403,8 @@ async fn save(
 /// `POST /admin/landing/appearance/reset` — restore the portal's
 /// default look (#783). Resets the STYLE knobs only: header preset/
 /// background/text colour, per-theme palettes, default theme, card
-/// cover style + default cover, catalog layout/density/sections-by, and the logo
+/// cover style + default cover, catalog layout/density/sections-by, the
+/// intro style/alignment/banner image (#1065), and the logo
 /// mode/size/margin. Content and identity survive: title/subtitle/
 /// footer, the logos list, intro texts, SEO/analytics, custom CSS and
 /// HTML blocks are untouched. Confirmed client-side via `data-confirm`;
@@ -398,6 +438,9 @@ async fn reset_appearance(
     lc.catalog_layout = None;
     lc.catalog_density = None;
     lc.catalog_sections_by = None;
+    lc.intro_style = None;
+    lc.intro_align = None;
+    lc.intro_image = None;
     lc.logo_mode = None;
     lc.logo_size = None;
     lc.logo_margin = None;
@@ -506,6 +549,19 @@ mod logo_tests {
         assert_eq!(out[0].height, Some(40));
         assert_eq!(out[1].slot, "header", "unknown slot → header");
         assert_eq!(out[1].align, "left", "unknown align → left");
+    }
+
+    #[test]
+    fn intro_image_filename_keeps_only_library_names() {
+        use super::intro_image_filename as f;
+        assert_eq!(f("/assets/img/hero.webp").as_deref(), Some("hero.webp"));
+        assert_eq!(f("  hero banner.png ").as_deref(), Some("hero banner.png"));
+        assert_eq!(f(""), None);
+        assert_eq!(f("/assets/img/"), None);
+        assert_eq!(f("https://evil.example/x.png"), None);
+        assert_eq!(f("../secret.png"), None);
+        assert_eq!(f(".hidden"), None);
+        assert_eq!(f("a\\b.png"), None);
     }
 
     #[test]

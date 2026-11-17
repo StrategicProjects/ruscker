@@ -2418,6 +2418,60 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 .landing-intro a { color: var(--color-teal-600); text-decoration: underline; }
 .landing-intro a:hover { color: var(--color-teal-400); }
 
+/* Intro styles (#1065) — native replacements for the hand-built hero
+   banners operators used to fake with custom HTML/CSS blocks. Every
+   colour comes from the theme tokens (--surface/--bg/--text/--border and
+   the brand accent --color-teal-600, which the per-theme palette
+   overrides), so both styles follow light/dark — and the client-side
+   data-theme toggle — with no per-theme setting. Widths are never fixed:
+   the block fills the content column and padding scales with clamp(),
+   so 360/390/640px phones get ~18-32px gutters and no horizontal scroll;
+   long words/URLs still wrap via the base overflow-wrap. */
+.landing-intro--card {
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+  padding: clamp(14px, 3vw, 20px) clamp(16px, 4vw, 24px);
+}
+.landing-intro--banner {
+  position: relative;
+  isolation: isolate; /* scopes the ::before overlay below the text */
+  color: var(--text);
+  font-size: clamp(1rem, 0.92rem + 0.55vw, 1.25rem);
+  line-height: 1.55;
+  font-weight: 500;
+  text-align: center;
+  hyphens: manual;
+  padding: clamp(28px, 7vw, 64px) clamp(18px, 5vw, 56px);
+  margin-bottom: 24px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--color-teal-600) 22%, var(--border));
+  /* Colour and decorative glow as SEPARATE longhands: an inline
+     background-image (the optional photo) then replaces only the glow,
+     never the base colour (the v0.2.3 shorthand trap). */
+  background-color: color-mix(in srgb, var(--color-teal-600) 9%, var(--surface));
+  background-image:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--color-teal-600) 20%, transparent) 0%, transparent 60%),
+    radial-gradient(120% 140% at 100% 100%, color-mix(in srgb, var(--color-teal-600) 14%, transparent) 0%, transparent 55%);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+/* With a photo: a wash of the page background over it, so the theme's
+   text colour stays readable — light wash in light, dark in dark. */
+.landing-intro--banner.has-image::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
+}
+.landing-intro--center { text-align: center; hyphens: manual; }
+.landing-intro--banner.landing-intro--left { text-align: left; }
+
 /* ── Landing editor: modern section-card layout (#482 polish) ────── */
 /* Sticky action bar so Save / Open portal stay reachable on a long form. */
 .editor-topbar {
@@ -2734,6 +2788,44 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   line-height: 1.4;
   color: var(--text-muted);
   margin: 0;
+}
+/* Preview of the intro styles (#1065), scaled to the mock. Same recipe
+   as .landing-intro--banner/--card, with the preview frame's tokens
+   (--pv-accent stands in for the portal's --color-teal-600). */
+.landing-preview-intro.is-card {
+  color: var(--text);
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.landing-preview-intro.is-center { text-align: center; }
+.landing-preview-intro.is-banner {
+  position: relative;
+  isolation: isolate;
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-align: center;
+  padding: 14px 10px;
+  border-radius: 7px;
+  border: 0.5px solid color-mix(in srgb, var(--pv-accent, #0f6e56) 22%, var(--border));
+  background-color: color-mix(in srgb, var(--pv-accent, #0f6e56) 9%, var(--surface));
+  background-image:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--pv-accent, #0f6e56) 20%, transparent) 0%, transparent 60%),
+    radial-gradient(120% 140% at 100% 100%, color-mix(in srgb, var(--pv-accent, #0f6e56) 14%, transparent) 0%, transparent 55%);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.landing-preview-intro.is-banner.is-left { text-align: left; }
+.landing-preview-intro.is-banner.has-image::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 74%, transparent);
 }
 /* Preview search pill + accent-tinted mock cards (design handoff #623):
  * makes the live portal preview read like the real catalogue instead of

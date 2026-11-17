@@ -72,6 +72,18 @@ struct LandingPage<'a> {
     /// `crate::markdown`). Empty string when no intro is configured;
     /// emitted with `|safe`.
     intro: String,
+    /// Modifier classes appended to `.landing-intro` (#1065), each with a
+    /// leading space — e.g. ` landing-intro--banner has-image`. EMPTY for
+    /// the default `text` style, so that markup stays byte-identical to
+    /// the pre-#1065 paragraph. See [`intro_classes`].
+    intro_class: String,
+    /// Banner background image URL (#1065), mount-prefixed and with the
+    /// filename percent-encoded so it cannot break out of the inline
+    /// `url('…')`. Empty unless the style is `banner` AND an image is set.
+    /// The only intro styling that goes inline: theme-dependent colours
+    /// (the overlay included) live in the stylesheet, where they follow
+    /// the client-side `data-theme` toggle.
+    intro_bg_url: String,
     /// Header title — `landing-customization.title` override, else
     /// `proxy.title`, else the localized `landing-title` (#468).
     header_title: String,
@@ -468,6 +480,25 @@ async fn index(
         .or_else(|| lc.intro.clone())
         .unwrap_or_default();
 
+    // Intro presentation (#1065). The image only applies to the banner,
+    // and only when it is a bare library filename (`intro_image_filename`
+    // already refuses paths on save; YAML-imported values are re-checked
+    // here).
+    let intro_style = lc.effective_intro_style();
+    let intro_bg_url = if intro_style == "banner" {
+        lc.effective_intro_image()
+            .filter(|f| !f.starts_with('.') && !f.contains(['/', '\\']))
+            .map(|f| format!("{}/assets/img/{}", state.base_path, urlencoding::encode(f)))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let intro_class = intro_classes(
+        intro_style,
+        lc.effective_intro_align(),
+        !intro_bg_url.is_empty(),
+    );
+
     // SEO: explicit overrides win; otherwise sensible fallbacks
     // (title → localized `landing-title`, description → intro).
     let not_blank = |s: &Option<String>| {
@@ -645,6 +676,8 @@ async fn index(
         type_chips,
         subjects,
         intro: crate::markdown::render_inline(&intro),
+        intro_class,
+        intro_bg_url,
         header_title,
         header_subtitle,
         // Footer override (blank ⇒ the default version+wordmark lockup).
@@ -708,6 +741,39 @@ async fn index(
         }
     }
     resp
+}
+
+/// Modifier classes for the landing intro (#1065), appended to the base
+/// `.landing-intro` class (each with a leading space).
+///
+/// - `text` ⇒ nothing at all: the paragraph renders exactly as before
+///   #1065, whatever `intro-align` says (its justified flow IS the
+///   "left" of this style).
+/// - `card` ⇒ `--card`, plus `--center` when centred.
+/// - `banner` ⇒ `--banner` (centred by default in CSS), plus `--left`
+///   when left-aligned and `has-image` when a background image is set
+///   (which switches on the readability overlay).
+fn intro_classes(style: &str, align: &str, has_image: bool) -> String {
+    let mut c = String::new();
+    match style {
+        "banner" => {
+            c.push_str(" landing-intro--banner");
+            if align == "left" {
+                c.push_str(" landing-intro--left");
+            }
+            if has_image {
+                c.push_str(" has-image");
+            }
+        }
+        "card" => {
+            c.push_str(" landing-intro--card");
+            if align == "center" {
+                c.push_str(" landing-intro--center");
+            }
+        }
+        _ => {}
+    }
+    c
 }
 
 /// Centralized `askama::Template` → axum `Response`. Replaces the

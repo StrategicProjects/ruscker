@@ -585,3 +585,73 @@ async fn sections_by_subject_is_ignored_outside_the_sections_layout() {
     assert_eq!(body.matches("catalog-group__head").count(), 0);
     assert!(!body.contains("data-section="), "grid cards carry no section key");
 }
+
+/// Config for the #1065 intro-style tests: one app, an intro, and the
+/// given extra `landing-customization` lines (indented 4 spaces).
+fn intro_yaml(extra: &str) -> String {
+    format!(
+        "proxy:\n  title: Intro Test\n  landing-customization:\n    intro: \"Bem-vindo ao **portal**\"\n{extra}  specs:\n    - id: a\n      display-name: A\n      container-image: img:1\n"
+    )
+}
+
+#[tokio::test]
+async fn intro_text_style_is_byte_identical_to_the_plain_paragraph() {
+    // The exact markup the landing emitted before #1065.
+    let legacy = "<p class=\"landing-intro\">\n      Bem-vindo ao <strong>portal</strong>\n    </p>";
+    let absent = render_yaml(&intro_yaml("")).await;
+    assert!(absent.contains(legacy), "default intro markup changed");
+    // `text` — even with stale banner extras around — renders the SAME
+    // page byte for byte, and an unknown style falls back to it.
+    let explicit = render_yaml(&intro_yaml(
+        "    intro-style: text\n    intro-align: center\n    intro-image: hero.webp\n",
+    ))
+    .await;
+    assert_eq!(absent, explicit);
+    let bogus = render_yaml(&intro_yaml("    intro-style: hero\n")).await;
+    assert_eq!(absent, bogus);
+    assert!(!absent.contains("landing-intro--"));
+}
+
+#[tokio::test]
+async fn intro_banner_and_card_emit_their_classes() {
+    let banner = render_yaml(&intro_yaml("    intro-style: banner\n")).await;
+    assert!(
+        banner.contains("<p class=\"landing-intro landing-intro--banner\">"),
+        "banner class, centred by default, no image"
+    );
+    assert!(!banner.contains("background-image:url("), "no image unless set");
+
+    let left = render_yaml(&intro_yaml("    intro-style: banner\n    intro-align: left\n")).await;
+    assert!(left.contains("<p class=\"landing-intro landing-intro--banner landing-intro--left\">"));
+
+    let card = render_yaml(&intro_yaml("    intro-style: card\n")).await;
+    assert!(card.contains("<p class=\"landing-intro landing-intro--card\">"));
+    let card_c = render_yaml(&intro_yaml("    intro-style: card\n    intro-align: center\n")).await;
+    assert!(card_c.contains("<p class=\"landing-intro landing-intro--card landing-intro--center\">"));
+    // The card never carries the banner image.
+    let card_img = render_yaml(&intro_yaml("    intro-style: card\n    intro-image: hero.webp\n")).await;
+    assert!(!card_img.contains("background-image:url("));
+}
+
+#[tokio::test]
+async fn intro_banner_image_is_inline_encoded_and_only_when_set() {
+    let body = render_yaml(&intro_yaml(
+        "    intro-style: banner\n    intro-image: \"my hero's.webp\"\n",
+    ))
+    .await;
+    // Percent-encoded filename: neither the space nor the apostrophe can
+    // break out of `url('…')`; `has-image` switches on the CSS overlay.
+    assert!(
+        body.contains(
+            "<p class=\"landing-intro landing-intro--banner has-image\" style=\"background-image:url('/assets/img/my%20hero%27s.webp')\">"
+        ),
+        "banner image markup missing or unencoded"
+    );
+    // A path-looking value is refused — no image, no overlay.
+    let evil = render_yaml(&intro_yaml(
+        "    intro-style: banner\n    intro-image: ../../etc/passwd\n",
+    ))
+    .await;
+    assert!(!evil.contains("background-image:url("));
+    assert!(!evil.contains("has-image"));
+}

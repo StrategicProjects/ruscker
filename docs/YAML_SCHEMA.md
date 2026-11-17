@@ -261,6 +261,9 @@ proxy:
       en: "Welcome to the portal."
       es: "Bienvenido al portal."
       fr: "Bienvenue sur le portail."
+    intro-style: banner                # `text` (default) | `banner` | `card`
+    intro-align: center                # `left` | `center` — banner/card only
+    intro-image: hero.webp             # Media-library filename — banner only
 
     # SEO / social-share meta tags injected into the landing `<head>`
     seo-title: "Portal — Org Name"     # overrides `proxy.title` for <title>
@@ -312,6 +315,9 @@ Field reference:
 | `catalog-sections-by` | enum | `type` | What `sections` groups by: `type` (one section per app type) or `subject` (one section per distinct `template-properties.subject`, alphabetical ignoring case, then a final localized "Other" section for apps without a subject). Ignored by `grid`/`list`; unknown values render `type`. |
 | `intro` | string | none | Single-language fallback. Inline Markdown only — `**bold**`, `*italic*`, `[links](https://…)`; no HTML. |
 | `intro-locales` | map | `{}` | Locale code → intro string (same inline Markdown). Wins over `intro` for matching locales. |
+| `intro-style` | enum | `text` | How the intro renders: `text` (plain justified paragraph), `banner` (a hero band in the content column — larger type, generous padding, a background tinted from the portal accent that follows the light/dark theme) or `card` (inside a bordered surface). Unknown values render `text`. |
+| `intro-align` | enum | style default | `left` or `center`, for `banner` and `card`. Unset ⇒ `center` for `banner`, `left` for `card`. The `text` style ignores it. |
+| `intro-image` | filename | none | Optional `banner` background: a Media-library filename (e.g. `hero.webp`, served from `/assets/img/`). A theme-aware overlay keeps the text readable. Paths and URLs are refused; ignored by the other styles. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |
 | `seo-description` | string | resolved intro | `<meta name="description">` + `og:description`. |
 | `og-image` | path / URL | none | `og:image` for social-share. |

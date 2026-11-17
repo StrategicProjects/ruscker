@@ -102,8 +102,12 @@
        at max-w-3xl and rag right, wasting the row. The class is also
        the operator's CSS hook. #}
     {# Pre-rendered by the inline-Markdown subset (#812) — escape-first
-       in crate::markdown, so |safe never sees raw operator HTML. #}
-    <p class="landing-intro">
+       in crate::markdown, so |safe never sees raw operator HTML.
+       Style modifiers (#1065): `intro_class` is empty for the default
+       `text` style (byte-identical markup), else `--banner`/`--card` +
+       alignment. Only the banner image URL is inline (percent-encoded);
+       every theme colour, the image overlay included, is in input.css. #}
+    <p class="landing-intro{{ intro_class }}"{% if !intro_bg_url.is_empty() %} style="background-image:url('{{ intro_bg_url }}')"{% endif %}>
       {{ intro|safe }}
     </p>
   {% endif %}

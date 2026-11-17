@@ -220,6 +220,10 @@ async fn render_index(
             refs.push_str(&logo.url);
             refs.push('\n');
         }
+        // The intro banner background (#1065) stores a bare filename.
+        if let Some(f) = lc.effective_intro_image() {
+            refs.push_str(&format!("/assets/img/{f}\n"));
+        }
     }
     let kpi_files = images.len() as i64;
     let kpi_in_use = images
@@ -545,6 +549,11 @@ async fn rename(
                     touched = true;
                 }
             }
+            // Intro banner background (#1065): a bare filename, exact match.
+            if lc.effective_intro_image() == Some(old.as_str()) {
+                lc.intro_image = Some(new.clone());
+                touched = true;
+            }
             touched.then_some(lc)
         }
         Err(err) => {
@@ -647,6 +656,11 @@ async fn delete(
                     logo.url = String::new();
                     touched = true;
                 }
+            }
+            // Intro banner background (#1065): drop it with the image.
+            if lc.effective_intro_image() == Some(filename.as_str()) {
+                lc.intro_image = None;
+                touched = true;
             }
             touched.then_some(lc)
         }

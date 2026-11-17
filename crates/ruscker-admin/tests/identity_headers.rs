@@ -202,7 +202,13 @@ async fn send(
             .header("X-SP-UserGroups", "attackers")
             .header("X-Ruscker-User-Email", "mallory@example.test")
             .header("X-Ruscker-User-Setor", "Attackers")
-            .header("X-Ruscker-User-Roles", "ops:admin");
+            .header("X-Ruscker-User-Roles", "ops:admin")
+            // Underscore spellings: a different header on the wire, the
+            // same variable inside a Shiny/WSGI/Rack app.
+            .header("X_SP_UserId", "mallory")
+            .header("X_SP_UserGroups", "attackers")
+            .header("X_Ruscker_User_Email", "mallory@example.test")
+            .header("X-Ruscker_User_Roles", "ops:admin");
     }
     let response = router(state)
         .oneshot(request.body(Body::empty()).unwrap())
@@ -265,6 +271,9 @@ async fn enabled_app_gets_authoritative_user_and_db_groups() {
         Some("alice"),
         "captured headers: {headers:?}"
     );
+    // A signed-in user cannot ride a forged underscore header past the
+    // authoritative one either (it would win inside the app).
+    assert_no_underscore_identity(&headers);
     assert_eq!(
         headers.get("x-sp-usergroups").map(String::as_str),
         Some("analysts,ops")
@@ -321,6 +330,19 @@ async fn anonymous_api_request_cannot_forge_reserved_identity() {
     assert!(!headers.contains_key("x-sp-userid"));
     assert!(!headers.contains_key("x-sp-usergroups"));
     assert!(!headers.contains_key("x-ruscker-user-email"));
+    assert_no_underscore_identity(&headers);
+}
+
+/// No spelling that an app server would fold onto an identity variable
+/// (`_` for `-`) may reach the upstream.
+fn assert_no_underscore_identity<V>(headers: &std::collections::HashMap<String, V>) {
+    for name in headers.keys() {
+        let folded = name.replace('_', "-");
+        assert!(
+            name == &folded || !(folded.starts_with("x-sp-") || folded.starts_with("x-ruscker-user-")),
+            "forged identity header reached the app: {name}"
+        );
+    }
 }
 
 #[tokio::test]

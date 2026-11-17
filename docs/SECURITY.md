@@ -540,7 +540,10 @@ actually flows, and why it is **deliberately not TLS**:
   `X-Ruscker-User-Email` / `X-Ruscker-User-Setor` / `X-Ruscker-User-Roles`
   claims only on opted-in specs and only for signed-in users. The same stripping and injection rules
   apply to HTTP and WebSocket handshakes; a selected claim with no value is
-  omitted. Ruscker cannot protect a separate network path around the proxy.
+  omitted. Stripping reads `_` as `-`: `X_SP_UserId` is a different header
+  on the wire but the same variable (`HTTP_X_SP_USERID`) inside a
+  Shiny, WSGI or Rack app, where it could otherwise override the injected
+  one. Ruscker cannot protect a separate network path around the proxy.
   E-mail and department/unit values are PII; operators should enable each
   claim only for apps that need and are trusted to process it. Group roles
   (#1067) are minimized per app: a spec restricted by `access-groups`

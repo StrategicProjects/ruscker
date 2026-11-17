@@ -28,7 +28,7 @@ use crate::auth::{RequireAdmin, Role};
 use crate::db;
 use crate::db::oidc_clients::{
     is_valid_client_id, parse_redirect_uris, validate_redirect_uri, ClientSettings, OidcClient,
-    RedirectUriError, MAX_REDIRECT_URIS,
+    RedirectUriError, RotateOutcome, MAX_REDIRECT_URIS,
 };
 use crate::i18n::{Locale, Locales};
 use crate::theme::Theme;
@@ -96,6 +96,9 @@ struct ClientEditPage<'a> {
     nav_section: &'static str,
     role: Role,
     client_id: String,
+    /// Carried by the rotate form: the compare-and-set token that makes
+    /// a re-submitted rotation a no-op.
+    secret_version: i64,
     form: ClientForm,
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
@@ -163,6 +166,7 @@ impl ClientForm {
                     RedirectUriError::HasFragment => "admin-sso-error-uri-fragment",
                     RedirectUriError::HasUserinfo => "admin-sso-error-uri-userinfo",
                     RedirectUriError::HasWildcard => "admin-sso-error-uri-wildcard",
+                    RedirectUriError::InvalidCharacters => "admin-sso-error-uri-chars",
                 });
             }
         }
@@ -297,7 +301,7 @@ async fn render_edit(
     state: &AppState,
     loc: Locale,
     theme: Theme,
-    client_id: String,
+    client: &OidcClient,
     form: ClientForm,
     notice: EditNotice,
 ) -> Response {
@@ -316,7 +320,8 @@ async fn render_edit(
         base: state.base_path.clone(),
         nav_section: "credentials",
         role: Role::Admin,
-        client_id,
+        client_id: client.client_id.clone(),
+        secret_version: client.secret_version,
         form,
         new_secret,
         flash_ok: flash_ok.map(|k| state.locales.t(loc, k, None)),
@@ -330,6 +335,21 @@ async fn render_edit(
     }
 }
 
+/// Load the client a per-client route is about, or the response to
+/// return instead (404 when it does not exist). Every such handler
+/// starts here so an unknown id is a 404 on ALL of them, whatever the
+/// rest of the request looks like.
+async fn load(state: &AppState, id: &str) -> Result<OidcClient, Response> {
+    let Some(pool) = state.db.as_ref() else {
+        return Err(no_db());
+    };
+    match db::oidc_clients::fetch(pool, id).await {
+        Ok(Some(c)) => Ok(c),
+        Ok(None) => Err(StatusCode::NOT_FOUND.into_response()),
+        Err(err) => Err(db_error(err, "fetch oidc client")),
+    }
+}
+
 async fn edit_form(
     _: RequireAdmin,
     State(state): State<AppState>,
@@ -337,17 +357,12 @@ async fn edit_form(
     theme: Theme,
     Path(id): Path<String>,
 ) -> Response {
-    let Some(pool) = state.db.as_ref() else {
-        return no_db();
+    let client = match load(&state, &id).await {
+        Ok(c) => c,
+        Err(resp) => return resp,
     };
-    match db::oidc_clients::fetch(pool, &id).await {
-        Ok(Some(c)) => {
-            let form = ClientForm::from_client(&c);
-            render_edit(&state, loc, theme, c.client_id, form, EditNotice::None).await
-        }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(err) => db_error(err, "fetch oidc client"),
-    }
+    let form = ClientForm::from_client(&client);
+    render_edit(&state, loc, theme, &client, form, EditNotice::None).await
 }
 
 async fn edit_submit(
@@ -358,21 +373,35 @@ async fn edit_submit(
     Path(id): Path<String>,
     Form(form): Form<ClientForm>,
 ) -> Response {
+    // Existence first: a validation error must not render an edit page
+    // (with its rotate/delete forms) for a client that does not exist.
+    let client = match load(&state, &id).await {
+        Ok(c) => c,
+        Err(resp) => return resp,
+    };
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
     let settings = match form.settings(form.enabled.is_some()) {
         Ok(s) => s,
-        Err(key) => return render_edit(&state, loc, theme, id, form, EditNotice::Error(key)).await,
+        Err(key) => {
+            return render_edit(&state, loc, theme, &client, form, EditNotice::Error(key)).await
+        }
     };
     match db::oidc_clients::update(pool, &id, &settings, Some(admin.actor())).await {
         Ok(true) => {
             let saved = EditNotice::Ok("admin-sso-flash-saved");
-            render_edit(&state, loc, theme, id, form, saved).await
+            render_edit(&state, loc, theme, &client, form, saved).await
         }
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(err) => db_error(err, "update oidc client"),
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct RotateForm {
+    /// The `secret_version` the edit page was rendered with.
+    secret_version: i64,
 }
 
 async fn rotate(
@@ -381,27 +410,34 @@ async fn rotate(
     loc: Locale,
     theme: Theme,
     Path(id): Path<String>,
+    Form(f): Form<RotateForm>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    let secret = match db::oidc_clients::rotate_secret(pool, &id, Some(admin.actor())).await {
-        Ok(Some(s)) => s,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(err) => return db_error(err, "rotate oidc client secret"),
+    let outcome =
+        match db::oidc_clients::rotate_secret(pool, &id, f.secret_version, Some(admin.actor())).await {
+            Ok(o) => o,
+            Err(err) => return db_error(err, "rotate oidc client secret"),
+        };
+    // Re-read AFTER the rotation so the page (and its rotate form)
+    // carries the new version.
+    let client = match load(&state, &id).await {
+        Ok(c) => c,
+        Err(resp) => return resp,
     };
-    match db::oidc_clients::fetch(pool, &id).await {
-        Ok(Some(c)) => {
-            let form = ClientForm::from_client(&c);
-            let shown = NewSecret {
-                client_id: c.client_id.clone(),
-                secret,
-            };
-            render_edit(&state, loc, theme, c.client_id, form, EditNotice::Secret(shown)).await
-        }
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
-        Err(err) => db_error(err, "fetch oidc client"),
-    }
+    let form = ClientForm::from_client(&client);
+    let notice = match outcome {
+        RotateOutcome::Rotated(secret) => EditNotice::Secret(NewSecret {
+            client_id: client.client_id.clone(),
+            secret,
+        }),
+        // A replayed request (F5 on the result page, a second tab):
+        // nothing was rotated, and the admin is told why.
+        RotateOutcome::Stale => EditNotice::Error("admin-sso-error-rotate-stale"),
+        RotateOutcome::Missing => return StatusCode::NOT_FOUND.into_response(),
+    };
+    render_edit(&state, loc, theme, &client, form, notice).await
 }
 
 async fn delete(

@@ -34,6 +34,9 @@ pub struct OidcClient {
     pub client_id: String,
     pub name: String,
     secret_hash: String,
+    /// Bumped on every rotation — the compare-and-set token of
+    /// [`rotate_secret`].
+    pub secret_version: i64,
     pub redirect_uris: Vec<String>,
     /// Empty = any signed-in user. Otherwise the user must belong to at
     /// least one of these groups (same matching as a spec's
@@ -105,12 +108,27 @@ pub enum RedirectUriError {
     HasUserinfo,
     /// `*` anywhere: wildcards are not supported, matching is exact.
     HasWildcard,
+    /// Whitespace, a control character, a backslash or a non-ASCII
+    /// character. URL parsers silently "repair" these, each in its own
+    /// way, and a URI two parsers read differently is how a code ends
+    /// up at the wrong host.
+    InvalidCharacters,
 }
 
 /// Validate one redirect URI. Returns it unchanged on success — the URI
 /// is stored and later compared BYTE FOR BYTE with what the client sends,
 /// so we must not normalize it here.
 pub fn validate_redirect_uri(raw: &str) -> Result<&str, RedirectUriError> {
+    // First, the raw bytes — BEFORE any parser gets to repair them. The
+    // WHATWG parser behind `url` strips tabs and newlines, trims leading
+    // control characters and reads `\` as `/`; an RFC 3986 parser in a
+    // client library does none of that. Since the stored string is what
+    // later gets compared and sent back in a `Location` header, only
+    // printable ASCII without a backslash is accepted (an international
+    // host name must be registered in its punycode form).
+    if !raw.bytes().all(|b| b.is_ascii_graphic() && b != b'\\') {
+        return Err(RedirectUriError::InvalidCharacters);
+    }
     if raw.contains('*') {
         return Err(RedirectUriError::HasWildcard);
     }
@@ -121,7 +139,12 @@ pub fn validate_redirect_uri(raw: &str) -> Result<&str, RedirectUriError> {
     if !url.username().is_empty() || url.password().is_some() {
         return Err(RedirectUriError::HasUserinfo);
     }
+    // The parser also accepts `https:host`, `https:/host` and an
+    // upper-case scheme; require the canonical `scheme://` spelling so
+    // the stored string means the same thing to every reader.
+    let canonical = raw.starts_with("https://") || raw.starts_with("http://");
     match url.scheme() {
+        "https" | "http" if !canonical => Err(RedirectUriError::NotAbsolute),
         "https" => Ok(raw),
         "http" => {
             let loopback = match url.host() {
@@ -167,6 +190,7 @@ type Row = (
     String,
     String,
     String,
+    i64,
     String,
     String,
     bool,
@@ -180,7 +204,7 @@ type Row = (
 macro_rules! select {
     ($tail:literal) => {
         concat!(
-            "SELECT client_id, name, secret_hash, redirect_uris, access_groups,
+            "SELECT client_id, name, secret_hash, secret_version, redirect_uris, access_groups,
                     require_mfa, enabled, created_at, updated_at
                FROM oidc_clients ",
             $tail
@@ -193,12 +217,13 @@ fn from_row(r: Row) -> OidcClient {
         client_id: r.0,
         name: r.1,
         secret_hash: r.2,
-        redirect_uris: parse_redirect_uris(&r.3),
-        access_groups: parse_groups(&r.4),
-        require_mfa: r.5,
-        enabled: r.6,
-        created_at: r.7,
-        updated_at: r.8,
+        secret_version: r.3,
+        redirect_uris: parse_redirect_uris(&r.4),
+        access_groups: parse_groups(&r.5),
+        require_mfa: r.6,
+        enabled: r.7,
+        created_at: r.8,
+        updated_at: r.9,
     }
 }
 
@@ -401,14 +426,33 @@ pub async fn update(
     Ok(updated)
 }
 
+/// What [`rotate_secret`] did.
+#[derive(Debug)]
+pub enum RotateOutcome {
+    /// Rotated; carries the new secret (shown once).
+    Rotated(String),
+    /// The client exists but `expected_version` is no longer current:
+    /// the secret was already rotated since the form was rendered.
+    /// Nothing changed.
+    Stale,
+    /// No such client.
+    Missing,
+}
+
 /// Replace the client secret with a fresh one, invalidating the old one
-/// immediately. Returns the new secret (shown once), or `None` when the
-/// client does not exist.
+/// immediately.
+///
+/// Compare-and-set on `secret_version`: the caller passes the version
+/// the admin was looking at. A re-submitted request (F5 on the result
+/// page, a double click, two tabs) carries the OLD version and is
+/// refused as [`RotateOutcome::Stale`] — otherwise it would silently
+/// kill the secret the admin just copied into the client system.
 pub async fn rotate_secret(
     db: &ConfigDb,
     client_id: &str,
+    expected_version: i64,
     actor: Option<&str>,
-) -> Result<Option<String>> {
+) -> Result<RotateOutcome> {
     let secret = generate_secret()?;
     let secret_hash = crate::mfa::hash_device_token(&secret)?;
     let now = Utc::now();
@@ -418,11 +462,14 @@ pub async fn rotate_secret(
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin oidc client tx")?;
             let n = sqlx::query(
-                "UPDATE oidc_clients SET secret_hash = ?, updated_at = ? WHERE client_id = ?",
+                "UPDATE oidc_clients
+                    SET secret_hash = ?, secret_version = secret_version + 1, updated_at = ?
+                  WHERE client_id = ? AND secret_version = ?",
             )
             .bind(&secret_hash)
             .bind(now)
             .bind(client_id)
+            .bind(expected_version)
             .execute(&mut *tx)
             .await
             .with_context(|| format!("rotate oidc client secret {client_id}"))?
@@ -445,11 +492,14 @@ pub async fn rotate_secret(
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin oidc client tx")?;
             let n = sqlx::query(
-                "UPDATE oidc_clients SET secret_hash = $1, updated_at = $2 WHERE client_id = $3",
+                "UPDATE oidc_clients
+                    SET secret_hash = $1, secret_version = secret_version + 1, updated_at = $2
+                  WHERE client_id = $3 AND secret_version = $4",
             )
             .bind(&secret_hash)
             .bind(now)
             .bind(client_id)
+            .bind(expected_version)
             .execute(&mut *tx)
             .await
             .with_context(|| format!("rotate oidc client secret {client_id}"))?
@@ -470,7 +520,14 @@ pub async fn rotate_secret(
             n == 1
         }
     };
-    Ok(rotated.then_some(secret))
+    if rotated {
+        return Ok(RotateOutcome::Rotated(secret));
+    }
+    // Nothing matched: tell "wrong version" from "no such client".
+    Ok(match fetch(db, client_id).await? {
+        Some(_) => RotateOutcome::Stale,
+        None => RotateOutcome::Missing,
+    })
 }
 
 /// Remove a client. Returns `false` when it did not exist.
@@ -559,15 +616,103 @@ pub async fn fetch(db: &ConfigDb, client_id: &str) -> Result<Option<OidcClient>>
     Ok(row.map(from_row))
 }
 
+/// Write ONLY a client's group gate (and its enabled flag). Used by
+/// [`rewrite_group`], which must not touch the other columns: it works
+/// from a snapshot, and rewriting the whole row would silently revert
+/// an edit an admin saved in between (re-enabling a client they had
+/// just disabled, or restoring a redirect URI they had just removed).
+async fn set_gate(
+    db: &ConfigDb,
+    client_id: &str,
+    groups: &[String],
+    enabled: bool,
+    action: &str,
+    actor: Option<&str>,
+) -> Result<()> {
+    let now = Utc::now();
+    let joined = join_groups(groups);
+    let target = format!("oidc-client:{client_id}");
+    let diff = serde_json::to_string(&serde_json::json!({
+        "access_groups": groups,
+        "enabled": enabled,
+    }))?;
+    match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin oidc client tx")?;
+            sqlx::query(
+                "UPDATE oidc_clients SET access_groups = ?, enabled = ?, updated_at = ?
+                  WHERE client_id = ?",
+            )
+            .bind(&joined)
+            .bind(enabled)
+            .bind(now)
+            .bind(client_id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("rewrite oidc client gate {client_id}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit oidc client gate")?;
+            tx.commit().await.context("commit oidc client tx")?;
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin oidc client tx")?;
+            sqlx::query(
+                "UPDATE oidc_clients SET access_groups = $1, enabled = $2, updated_at = $3
+                  WHERE client_id = $4",
+            )
+            .bind(&joined)
+            .bind(enabled)
+            .bind(now)
+            .bind(client_id)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("rewrite oidc client gate {client_id}"))?;
+            sqlx::query(
+                "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(actor)
+            .bind(action)
+            .bind(&target)
+            .bind(&diff)
+            .bind(now)
+            .execute(&mut *tx)
+            .await
+            .context("audit oidc client gate")?;
+            tx.commit().await.context("commit oidc client tx")?;
+        }
+    }
+    Ok(())
+}
+
 /// Follow a group rename (`new = Some`) or delete (`new = None`) across
 /// every client's `access_groups`, mirroring what the Groups page does
 /// for users and specs.
 ///
 /// One deliberate difference from specs: when a delete would leave a
 /// restricted client with NO groups, the client is **disabled** and keeps
-/// the stale group name. Emptying the list would silently turn "only
-/// this team" into "everyone", which is the wrong direction to fail for a
-/// login gate. The admin re-enables it after choosing new groups.
+/// the stale group name (audited as `oidc-client.auto-disable`, so "why
+/// is this client off?" has an answer). Emptying the list would silently
+/// turn "only this team" into "everyone", which is the wrong direction to
+/// fail for a login gate. The admin re-enables it after choosing new
+/// groups.
+///
+/// Limit worth knowing: groups are derived from membership, so a group
+/// can also vanish WITHOUT passing through here (its last member is
+/// removed or deleted). The client then keeps the orphan name and stays
+/// enabled — nobody can sign in, which is safe — but anyone later put in
+/// a group of that same name regains access. Same as a spec's
+/// `access-groups` today.
 pub async fn rewrite_group(
     db: &ConfigDb,
     old: &str,
@@ -589,24 +734,14 @@ pub async fn rewrite_group(
                 groups.push(n.to_string());
             }
         }
-        let settings = if groups.is_empty() {
-            ClientSettings {
-                name: client.name,
-                redirect_uris: client.redirect_uris,
-                access_groups: client.access_groups,
-                require_mfa: client.require_mfa,
-                enabled: false,
-            }
+        if groups.is_empty() {
+            // Keep the gate, close the client.
+            let kept = &client.access_groups;
+            set_gate(db, &client.client_id, kept, false, "oidc-client.auto-disable", actor).await?;
         } else {
-            ClientSettings {
-                name: client.name,
-                redirect_uris: client.redirect_uris,
-                access_groups: groups,
-                require_mfa: client.require_mfa,
-                enabled: client.enabled,
-            }
-        };
-        update(db, &client.client_id, &settings, actor).await?;
+            let on = client.enabled;
+            set_gate(db, &client.client_id, &groups, on, "oidc-client.group-rewrite", actor).await?;
+        }
     }
     Ok(())
 }
@@ -664,6 +799,29 @@ mod tests {
         assert_eq!(validate_redirect_uri("https://*.example/cb"), Err(HasWildcard));
     }
 
+    /// Inputs a WHATWG parser "repairs" and would otherwise be stored
+    /// verbatim. Every one of them parses fine with `url`, so this test
+    /// fails if the raw-byte check is removed.
+    #[test]
+    fn redirect_uri_rejects_what_parsers_read_differently() {
+        use RedirectUriError::*;
+        for raw in [
+            "https://a.example/cb\tx",              // tab stripped by the parser
+            "https://a.example/cb\rSet-Cookie: x",  // bare CR: header injection shape
+            "\u{1}https://a.example/cb",            // leading control char
+            "https://a.example/c b",                // inner space
+            "https://good.example\\@evil.example/cb", // `\` read as `/` vs userinfo
+            "https://exämple.org/cb",               // raw IDN; register punycode
+        ] {
+            assert_eq!(validate_redirect_uri(raw), Err(InvalidCharacters), "{raw:?}");
+        }
+        for raw in ["https:a.example/cb", "https:/a.example/cb", "HTTPS://a.example/cb"] {
+            assert_eq!(validate_redirect_uri(raw), Err(NotAbsolute), "{raw:?}");
+        }
+        // Punycode and an explicit port are fine.
+        assert!(validate_redirect_uri("https://xn--exmple-cua.org:8443/cb").is_ok());
+    }
+
     #[test]
     fn redirect_uris_textarea_is_cleaned() {
         assert_eq!(
@@ -703,12 +861,42 @@ mod tests {
     async fn rotate_invalidates_the_old_secret() {
         let db = mem_db().await;
         let old = create(&db, "radar", &settings(&[]), None).await.unwrap().unwrap();
-        let new = rotate_secret(&db, "radar", Some("root")).await.unwrap().unwrap();
+        let v1 = fetch(&db, "radar").await.unwrap().unwrap().secret_version;
+        let RotateOutcome::Rotated(new) =
+            rotate_secret(&db, "radar", v1, Some("root")).await.unwrap()
+        else {
+            panic!("expected a rotation");
+        };
         assert_ne!(old, new);
         let c = fetch(&db, "radar").await.unwrap().unwrap();
         assert!(c.verify_secret(&new));
         assert!(!c.verify_secret(&old));
-        assert!(rotate_secret(&db, "nope", None).await.unwrap().is_none());
+        assert_eq!(c.secret_version, v1 + 1);
+        assert!(matches!(
+            rotate_secret(&db, "nope", 1, None).await.unwrap(),
+            RotateOutcome::Missing
+        ));
+    }
+
+    /// The F5 case: the same rotate request arriving twice must rotate
+    /// ONCE. The second one carries the version the form was rendered
+    /// with, which is no longer current.
+    #[tokio::test]
+    async fn replayed_rotation_is_refused_and_keeps_the_new_secret() {
+        let db = mem_db().await;
+        create(&db, "radar", &settings(&[]), None).await.unwrap();
+        let v1 = fetch(&db, "radar").await.unwrap().unwrap().secret_version;
+        let RotateOutcome::Rotated(new) = rotate_secret(&db, "radar", v1, None).await.unwrap()
+        else {
+            panic!("expected a rotation");
+        };
+        assert!(matches!(
+            rotate_secret(&db, "radar", v1, None).await.unwrap(),
+            RotateOutcome::Stale
+        ));
+        let c = fetch(&db, "radar").await.unwrap().unwrap();
+        assert!(c.verify_secret(&new), "the secret just handed out survives the replay");
+        assert_eq!(c.secret_version, v1 + 1);
     }
 
     #[tokio::test]
@@ -740,6 +928,7 @@ mod tests {
             client_id: "x".into(),
             name: "x".into(),
             secret_hash: String::new(),
+            secret_version: 1,
             redirect_uris: vec![],
             access_groups: vec![],
             require_mfa: false,
@@ -761,7 +950,7 @@ mod tests {
         create(&db, "one", &settings(&["a"]), None).await.unwrap();
         create(&db, "open", &settings(&[]), None).await.unwrap();
 
-        // Rename a → c, folding when the target is already present.
+        // Rename a → b, folding when the target is already present.
         rewrite_group(&db, "a", Some("b"), Some("root")).await.unwrap();
         assert_eq!(fetch(&db, "two").await.unwrap().unwrap().access_groups, vec!["b"]);
         assert_eq!(fetch(&db, "one").await.unwrap().unwrap().access_groups, vec!["b"]);
@@ -776,6 +965,31 @@ mod tests {
         }
         let open = fetch(&db, "open").await.unwrap().unwrap();
         assert!(open.enabled && open.access_groups.is_empty());
+
+        // The auto-disable is its own audit action.
+        let audits = crate::db::audit::list(&db, &crate::db::audit::AuditFilter::new())
+            .await
+            .unwrap();
+        assert_eq!(
+            audits.iter().filter(|e| e.action == "oidc-client.auto-disable").count(),
+            2
+        );
+    }
+
+    /// The rewrite writes the gate columns only (see [`set_gate`]); the
+    /// rest of the row comes out exactly as it went in.
+    #[tokio::test]
+    async fn group_rewrite_leaves_other_columns_alone() {
+        let db = mem_db().await;
+        create(&db, "radar", &settings(&["a"]), None).await.unwrap();
+        let secret_before = fetch(&db, "radar").await.unwrap().unwrap().secret_hash;
+        rewrite_group(&db, "a", Some("z"), None).await.unwrap();
+        let c = fetch(&db, "radar").await.unwrap().unwrap();
+        assert_eq!(c.access_groups, vec!["z"]);
+        assert_eq!(c.name, "Radar Fiscal");
+        assert_eq!(c.redirect_uris, vec!["https://radar.example/callback".to_string()]);
+        assert_eq!(c.secret_hash, secret_before);
+        assert!(c.enabled && !c.require_mfa);
     }
 
     #[tokio::test]
@@ -785,7 +999,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let rotated = rotate_secret(&db, "radar", Some("root")).await.unwrap().unwrap();
+        let RotateOutcome::Rotated(rotated) =
+            rotate_secret(&db, "radar", 1, Some("root")).await.unwrap()
+        else {
+            panic!("expected a rotation");
+        };
+        update(&db, "radar", &settings(&["a"]), Some("root")).await.unwrap();
+        rewrite_group(&db, "a", None, Some("root")).await.unwrap();
+        let hash = fetch(&db, "radar").await.unwrap().unwrap().secret_hash;
         let audits = crate::db::audit::list(&db, &crate::db::audit::AuditFilter::new())
             .await
             .unwrap();
@@ -793,10 +1014,11 @@ mod tests {
             .iter()
             .filter(|e| e.action.starts_with("oidc-client."))
             .collect();
-        assert_eq!(ours.len(), 2);
+        assert_eq!(ours.len(), 4, "create, rotate, update, auto-disable");
         for e in ours {
             let diff = format!("{:?}", e.diff);
             assert!(!diff.contains(&secret) && !diff.contains(&rotated));
+            assert!(!diff.contains(&hash), "not even the hash is audited");
         }
     }
 
@@ -822,8 +1044,18 @@ mod tests {
         assert!(update(&db, &id, &s, Some("root")).await.unwrap());
         let c = fetch(&db, &id).await.unwrap().unwrap();
         assert!(c.verify_secret(&secret) && c.require_mfa && c.enabled);
-        let new = rotate_secret(&db, &id, None).await.unwrap().unwrap();
+        let RotateOutcome::Rotated(new) =
+            rotate_secret(&db, &id, c.secret_version, None).await.unwrap()
+        else {
+            panic!("expected a rotation");
+        };
+        assert!(matches!(
+            rotate_secret(&db, &id, c.secret_version, None).await.unwrap(),
+            RotateOutcome::Stale
+        ));
         assert!(fetch(&db, &id).await.unwrap().unwrap().verify_secret(&new));
+        rewrite_group(&db, "a", None, None).await.unwrap();
+        assert_eq!(fetch(&db, &id).await.unwrap().unwrap().access_groups, vec!["b"]);
         assert!(list_all(&db).await.unwrap().iter().any(|c| c.client_id == id));
         assert!(delete(&db, &id, None).await.unwrap());
     }

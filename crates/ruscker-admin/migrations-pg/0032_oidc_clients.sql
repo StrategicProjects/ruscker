@@ -5,6 +5,7 @@ CREATE TABLE oidc_clients (
     client_id     TEXT        PRIMARY KEY NOT NULL,
     name          TEXT        NOT NULL,
     secret_hash   TEXT        NOT NULL,
+    secret_version BIGINT     NOT NULL DEFAULT 1,
     redirect_uris TEXT        NOT NULL,
     access_groups TEXT        NOT NULL DEFAULT '',
     require_mfa   BOOLEAN     NOT NULL DEFAULT FALSE,

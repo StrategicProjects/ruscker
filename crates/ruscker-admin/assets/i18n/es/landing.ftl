@@ -473,6 +473,8 @@ admin-sso-error-uri-scheme = Solo se aceptan URI de redirección HTTPS.
 admin-sso-error-uri-fragment = La URI de redirección no puede contener un fragmento.
 admin-sso-error-uri-userinfo = La URI de redirección no puede contener usuario ni contraseña.
 admin-sso-error-uri-wildcard = No se aceptan comodines en las URI de redirección.
+admin-sso-error-uri-chars = La URI de redirección no puede contener espacios, caracteres de control, barras invertidas ni caracteres fuera de ASCII (escriba los nombres de host internacionales en su forma punycode).
+admin-sso-error-rotate-stale = El secreto ya se había reemplazado desde que se cargó esta página, así que no se cambió nada. Si no acaba de copiar un secreto nuevo, genere otro.
 
 # Admin landing editor
 admin-landing-title = Apariencia del Portal

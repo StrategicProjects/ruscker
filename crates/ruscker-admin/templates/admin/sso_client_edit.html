@@ -59,6 +59,7 @@
   <div class="flex flex-wrap gap-2">
     <form method="post" action="{{ base }}/admin/sso-clients/{{ client_id }}/rotate"
           data-confirm="{{ self.t("admin-sso-rotate-confirm") }}" class="inline">
+      <input type="hidden" name="secret_version" value="{{ secret_version }}">
       <button type="submit" class="btn">
         <i class="ti ti-refresh" aria-hidden="true"></i>
         {{ self.t("admin-sso-rotate") }}

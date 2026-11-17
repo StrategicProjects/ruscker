@@ -365,8 +365,11 @@ or loopback HTTP for development; no wildcards), an optional list of
 **allowed groups** (empty means any signed-in user) and an optional
 **two-step verification** requirement. The client secret is shown once,
 on creation or when you generate a new one, and only a salted hash is
-stored. Deleting a group that is a client's last allowed group disables
-that client instead of opening it to everyone.
+stored. Deleting a group on the Groups page when it is a client's last
+allowed group disables that client instead of opening it to everyone.
+(A group that simply runs out of members is not "deleted": the client
+keeps its name, nobody can sign in, and members later added to a group
+of that name regain access.)
 
 ### Appearance
 Customise the public landing without a custom template. Every control

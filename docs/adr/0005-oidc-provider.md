@@ -61,11 +61,23 @@ opened. For a hosted app an empty list means "public", which is a
 visible, reversible state; for a login gate, silently widening "this
 team" to "everyone with an account" is the wrong way to fail.
 
+Groups are derived from membership, so a group can also disappear
+without being deleted (its last member leaves). The client then keeps
+the orphan name: nobody can sign in, which is safe, but members later
+added to a group of the same name regain access. Specs behave the same
+way; it is stated here because a login gate makes it matter more.
+
+The registry stores a client's `enabled` flag but `fetch` returns
+disabled clients too. The authorization and token endpoints must check
+it themselves.
+
 ## Slices
 
 1. **Client registry** — `oidc_clients` table, Admin-only UI under
    Credentials, secret shown once and stored as a salted hash, audit
-   rows. *(implemented)*
+   rows. The registry screen is always available to Admins; the config
+   flag gates the protocol endpoints, which do not exist yet.
+   *(implemented)*
 2. Signing key, `/.well-known/openid-configuration`, JWKS, the config
    flag.
 3. `/oauth/authorize`: session check or login, the client's group gate

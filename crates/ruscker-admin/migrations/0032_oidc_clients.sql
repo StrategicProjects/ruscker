@@ -15,6 +15,10 @@ CREATE TABLE oidc_clients (
     -- secret is random and high-entropy, shown ONCE at creation/rotation
     -- and never stored — a slow password hash would add nothing here.
     secret_hash   TEXT    NOT NULL,
+    -- Bumped on every rotation. The rotate form carries the version it
+    -- was rendered with, so a re-submitted POST (F5 on the result page)
+    -- is refused instead of silently killing the secret just deployed.
+    secret_version INTEGER NOT NULL DEFAULT 1,
     -- Exact-match redirect URIs, one per line. No wildcards, ever.
     redirect_uris TEXT    NOT NULL,
     -- Comma-separated group names, same canonical form as `users.groups`.

@@ -473,6 +473,8 @@ admin-sso-error-uri-scheme = Only HTTPS redirect URIs are supported.
 admin-sso-error-uri-fragment = A redirect URI cannot contain a fragment.
 admin-sso-error-uri-userinfo = A redirect URI cannot contain a user or password.
 admin-sso-error-uri-wildcard = Wildcards are not supported in redirect URIs.
+admin-sso-error-uri-chars = A redirect URI cannot contain spaces, control characters, backslashes or non-ASCII characters (write an international host name in its punycode form).
+admin-sso-error-rotate-stale = The secret had already been replaced since this page was loaded, so nothing was changed. If you did not just copy a new secret, generate one again.
 
 # Admin landing editor
 admin-landing-title = Portal Appearance

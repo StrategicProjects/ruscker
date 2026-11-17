@@ -265,14 +265,42 @@ async fn edit_rotate_and_delete() {
     assert!(!c.require_mfa && !c.enabled && c.access_groups.is_empty());
     assert!(c.verify_secret(&old), "saving settings never touches the secret");
 
-    // Rotate: new secret shown once, old one dead.
+    // Rotate: new secret shown once, old one dead. The form carries the
+    // version rendered on the edit page.
+    assert!(html.contains(r#"name="secret_version" value="1""#), "rotate form carries the version");
+    let rotate_body = "secret_version=1";
     let (status, cache, html) =
-        post_page(state.clone(), "/admin/sso-clients/radar-fiscal/rotate", "", &cookie).await;
+        post_page(state.clone(), "/admin/sso-clients/radar-fiscal/rotate", rotate_body, &cookie).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cache, "no-store");
     let new = shown_secret(&html).expect("rotated secret banner");
+    assert!(html.contains(r#"name="secret_version" value="2""#), "page now carries the new version");
     let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
     assert!(c.verify_secret(&new) && !c.verify_secret(&old));
+
+    // F5 on that result page re-sends the SAME request. It must not
+    // rotate again: the secret just copied stays valid, and the page
+    // says so instead of showing another secret.
+    let (status, _, html) =
+        post_page(state.clone(), "/admin/sso-clients/radar-fiscal/rotate", rotate_body, &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(shown_secret(&html).is_none(), "a replay shows no new secret");
+    assert!(html.contains("role=\"alert\""), "and explains itself");
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert!(c.verify_secret(&new), "the secret handed out survives the replay");
+
+    // An invalid edit re-renders the form with an error and saves nothing.
+    let (status, _, html) = post_page(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=http%3A%2F%2Fevil.example%2Fcb",
+        &cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(html.contains("role=\"alert\""));
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert!(!c.redirect_uri_registered("http://evil.example/cb"));
 
     // Delete.
     let (status, loc) = post(state.clone(), "/admin/sso-clients/radar-fiscal/delete", "", &cookie).await;
@@ -283,29 +311,88 @@ async fn edit_rotate_and_delete() {
     // Unknown ids are 404 on every per-client route.
     let (status, _) = get(state.clone(), "/admin/sso-clients/nope/edit", &cookie).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = post(state.clone(), "/admin/sso-clients/nope/rotate", "", &cookie).await;
+    let (status, _) =
+        post(state.clone(), "/admin/sso-clients/nope/rotate", "secret_version=1", &cookie).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    // …including an edit whose fields are INVALID: existence is checked
+    // before validation, so no edit page is rendered for a ghost.
+    for body in ["name=&redirect_uris=", "name=X&redirect_uris=https%3A%2F%2Fa.example%2Fcb"] {
+        let (status, _) = post(state.clone(), "/admin/sso-clients/nope/edit", body, &cookie).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    }
     let (status, _) = post(state, "/admin/sso-clients/nope/delete", "", &cookie).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+/// Every route, as an Editor, a Viewer and anonymously — against a
+/// client that EXISTS, so "nothing changed" is a real observation.
 #[tokio::test]
 async fn registry_is_admin_only() {
     let state = app_state(open_db().await).await;
-    let sid = state
-        .admin_sessions
-        .create(Role::Editor, Some("ed".into()))
-        .await;
-    let editor = format!("{COOKIE_NAME}={sid}");
-
-    let (status, _) = get(state.clone(), "/admin/sso-clients", &editor).await;
-    assert_ne!(status, StatusCode::OK, "an Editor must not see the registry");
-    let (status, _, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &editor).await;
-    assert_ne!(status, StatusCode::OK);
-    assert!(shown_secret(&html).is_none());
-    let (status, _) = get(state.clone(), "/admin/sso-clients", "").await;
-    assert_ne!(status, StatusCode::OK, "anonymous is refused too");
-
+    let admin = admin_cookie(&state).await;
     let db = state.db.clone().unwrap();
-    assert!(ruscker_admin::db::oidc_clients::list_all(&db).await.unwrap().is_empty());
+    let (_, _, html) = post_page(state.clone(), "/admin/sso-clients", CREATE, &admin).await;
+    let secret = shown_secret(&html).unwrap();
+
+    let mut cookies: Vec<(String, StatusCode)> = Vec::new();
+    for role in [Role::Editor, Role::Viewer] {
+        let sid = state.admin_sessions.create(role, Some("someone".into())).await;
+        cookies.push((format!("{COOKIE_NAME}={sid}"), StatusCode::FORBIDDEN));
+    }
+    // No session at all is sent to the login page.
+    cookies.push((String::new(), StatusCode::SEE_OTHER));
+
+    for (cookie, refusal) in &cookies {
+        for uri in ["/admin/sso-clients", "/admin/sso-clients/radar-fiscal/edit"] {
+            let (status, html) = get(state.clone(), uri, cookie).await;
+            assert_eq!(status, *refusal, "GET {uri}");
+            assert!(!html.contains("radar.example"), "GET {uri} leaks nothing");
+        }
+        for (uri, body) in [
+            ("/admin/sso-clients", "client_id=other&name=X&redirect_uris=https%3A%2F%2Fa.example%2Fcb"),
+            ("/admin/sso-clients/radar-fiscal/edit", "name=Hacked&redirect_uris=https%3A%2F%2Fevil.example%2Fcb"),
+            ("/admin/sso-clients/radar-fiscal/rotate", "secret_version=1"),
+            ("/admin/sso-clients/radar-fiscal/delete", ""),
+        ] {
+            let (status, _, html) = post_page(state.clone(), uri, body, cookie).await;
+            assert_eq!(status, *refusal, "POST {uri}");
+            assert!(shown_secret(&html).is_none(), "POST {uri} shows no secret");
+        }
+    }
+
+    // After all of that the registry is exactly as the Admin left it.
+    let all = ruscker_admin::db::oidc_clients::list_all(&db).await.unwrap();
+    assert_eq!(all.len(), 1);
+    assert_eq!(all[0].name, "Radar Fiscal");
+    assert!(all[0].verify_secret(&secret), "secret not rotated");
+    assert!(!all[0].redirect_uri_registered("https://evil.example/cb"));
+}
+
+/// The hook in the Groups page, end to end through its routes: a rename
+/// follows into the client gate, and deleting the last group disables
+/// the client. Removing the hook line in `groups.rs` fails this test.
+#[tokio::test]
+async fn groups_page_rename_and_delete_reach_the_client_gate() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    post_page(
+        state.clone(),
+        "/admin/sso-clients",
+        "client_id=radar&name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=fiscal",
+        &cookie,
+    )
+    .await;
+
+    let (status, _) = post(state.clone(), "/admin/groups/rename", "old=fiscal&new=fazenda", &cookie).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar").await.unwrap().unwrap();
+    assert_eq!(c.access_groups, vec!["fazenda".to_string()]);
+    assert!(c.enabled);
+
+    let (status, _) = post(state.clone(), "/admin/groups/delete", "name=fazenda", &cookie).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar").await.unwrap().unwrap();
+    assert!(!c.enabled, "disabled, not opened");
+    assert_eq!(c.access_groups, vec!["fazenda".to_string()], "gate kept");
 }

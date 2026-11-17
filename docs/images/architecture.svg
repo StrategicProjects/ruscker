@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="How Ruscker works: browsers and API clients hit a single Ruscker binary, which proxies to app containers it spawns on demand via the Docker daemon.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="How Ruscker works: browsers and API clients hit a single Ruscker binary, which proxies to app containers it spawns on demand via the Docker daemon, keeps accounts and groups in SQLite, and can sign users in for external systems over OpenID Connect.">
   <title>Ruscker — how it works</title>
 
   <defs>
@@ -14,7 +14,7 @@
 
   <!-- arrow 1 -->
   <line x1="360" y1="68" x2="360" y2="100" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>
-  <text x="372" y="89" font-size="12" fill="#5B6B66">HTTPS · /app/{spec} · /api/{spec}</text>
+  <text x="372" y="89" font-size="12" fill="#5B6B66">HTTPS · /app/{spec} · /api/{spec} · /oauth/*</text>
 
   <!-- ── Ruscker process ───────────────────────────────────── -->
   <rect x="40" y="104" width="640" height="300" rx="14" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
@@ -36,7 +36,7 @@
   <!-- (2) Admin -->
   <rect x="370" y="158" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
   <text x="515" y="186" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Admin · live dashboard</text>
-  <text x="515" y="205" text-anchor="middle" font-size="11" fill="#5B6B66">HTMX · SSE · image library · audit log</text>
+  <text x="515" y="205" text-anchor="middle" font-size="11" fill="#5B6B66">apps · users &amp; groups · 2FA · OIDC provider</text>
   <!-- (3) Proxy -->
   <rect x="60" y="232" width="290" height="64" rx="10" fill="#F4F8F7" stroke="#5DCAA5" stroke-width="1.5"/>
   <text x="205" y="260" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Reverse proxy</text>
@@ -48,7 +48,7 @@
   <!-- state -->
   <rect x="60" y="312" width="600" height="56" rx="10" fill="#E8F3EE" stroke="#1D9E75" stroke-width="1.5"/>
   <text x="360" y="338" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">SQLite — source of truth</text>
-  <text x="360" y="356" text-anchor="middle" font-size="11" fill="#5B6B66">specs · images · encrypted credentials · audit log</text>
+  <text x="360" y="356" text-anchor="middle" font-size="11" fill="#5B6B66">specs · accounts &amp; groups · credentials · signing key · audit log</text>
 
   <!-- arrow 2 -->
   <line x1="360" y1="404" x2="360" y2="436" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>

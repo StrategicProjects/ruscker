@@ -13,7 +13,8 @@ CREATE TABLE oidc_keys (
     pkcs8_enc  BLOB NOT NULL,
     nonce      BLOB NOT NULL,
     -- The public half as a JWK (JSON). Public by definition; kept in
-    -- the clear so the JWKS endpoint never has to decrypt anything.
+    -- the clear so the JWKS endpoint never has to decrypt anything
+    -- (and keeps serving if the private half becomes unreadable).
     public_jwk TEXT NOT NULL,
     -- RFC 3339 (UTC); TEXT in SQLite, TIMESTAMPTZ in Postgres.
     created_at TEXT NOT NULL

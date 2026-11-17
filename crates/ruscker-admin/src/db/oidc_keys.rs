@@ -35,17 +35,33 @@ fn from_row(r: Row) -> StoredKey {
     }
 }
 
-/// Insert a key unless one with the same `kid` exists. Audited (the
-/// audit row names the key id only). Returns whether a row was written.
-pub async fn insert(db: &ConfigDb, key: &StoredKey) -> Result<bool> {
+/// Advisory-lock key serializing first-key creation on Postgres. Any
+/// constant works; it only has to differ from the scaler leader lock.
+const PG_FIRST_KEY_LOCK: i64 = 0x5255_5343_4f49_4443; // "RUSCOIDC"
+
+/// Store `key` as the FIRST signing key — only if the table is empty.
+/// Returns whether a row was written.
+///
+/// "Check that none exists, then insert" must be one atomic step:
+/// otherwise N concurrent first requests (or N nodes of an HA
+/// deployment starting together) each create a key, and a caller that
+/// lost the race could go on to sign with a key its neighbours'
+/// already-served JWKS does not contain.
+///
+/// * SQLite has a single writer, so `INSERT … WHERE NOT EXISTS` is
+///   atomic by itself.
+/// * Postgres under READ COMMITTED would let two transactions both see
+///   an empty table, so a transaction-scoped advisory lock makes the
+///   loser wait for the winner's commit and then see its row.
+pub async fn insert_first(db: &ConfigDb, key: &StoredKey) -> Result<bool> {
     let target = format!("oidc-key:{}", key.kid);
     let inserted = match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin oidc key tx")?;
             let n = sqlx::query(
                 "INSERT INTO oidc_keys (kid, alg, pkcs8_enc, nonce, public_jwk, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(kid) DO NOTHING",
+                 SELECT ?, ?, ?, ?, ?, ?
+                  WHERE NOT EXISTS (SELECT 1 FROM oidc_keys)",
             )
             .bind(&key.kid)
             .bind(&key.alg)
@@ -73,10 +89,15 @@ pub async fn insert(db: &ConfigDb, key: &StoredKey) -> Result<bool> {
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin oidc key tx")?;
+            sqlx::query("SELECT pg_advisory_xact_lock($1)")
+                .bind(PG_FIRST_KEY_LOCK)
+                .execute(&mut *tx)
+                .await
+                .context("lock oidc key creation")?;
             let n = sqlx::query(
                 "INSERT INTO oidc_keys (kid, alg, pkcs8_enc, nonce, public_jwk, created_at)
-                 VALUES ($1, $2, $3, $4, $5, $6)
-                 ON CONFLICT(kid) DO NOTHING",
+                 SELECT $1, $2, $3, $4, $5, $6
+                  WHERE NOT EXISTS (SELECT 1 FROM oidc_keys)",
             )
             .bind(&key.kid)
             .bind(&key.alg)

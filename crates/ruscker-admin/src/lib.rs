@@ -805,6 +805,9 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
     // has the brotli/gzip variants ready, and the CompressionLayer never
     // re-encodes these immutable bytes per request (#593).
     routes::assets::warm_precompression();
+    // An enabled OIDC provider that cannot work is fail-closed at
+    // request time; say why once, here, where the base path is final.
+    oidc::warn_if_misconfigured(&state.config, &state.base_path, &state.master_key);
 
     // Ruscker's own surfaces (landing, admin, prefs, assets) get
     // security response headers. The proxy routes do NOT — those

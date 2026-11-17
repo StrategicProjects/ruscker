@@ -46,7 +46,7 @@ pub use error::{Error, Result};
 /// depending on `ordered-float` directly.
 pub use ordered_float::OrderedFloat;
 pub use schema::{
-    is_valid_memory_size, normalize_base_path, normalize_issuer, ApiSpec, Config, Host, HostTls, IdentityClaim,
+    is_valid_memory_size, issuer_path, normalize_base_path, normalize_issuer, ApiSpec, Config, Host, HostTls, IdentityClaim,
     LandingBlock, LandingCustomization, LandingLogo, Logging, OidcProvider, Placement, Proxy, RatePolicy,
     RoutingStrategy, Server, Spec, SpecKind, SpecKindOverride, TemplateProperties, ThemeColors,
     ThemePalette, DEFAULT_SCALE_DOWN_COOLDOWN_SECS, MAX_MFA_VALIDITY_DAYS,

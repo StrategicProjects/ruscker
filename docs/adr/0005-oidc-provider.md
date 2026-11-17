@@ -36,7 +36,7 @@ Ruscker gains an optional OIDC provider, **off by default**
 | Clients | Confidential, registered by an Admin. No dynamic registration, no public clients. |
 | Redirect URIs | Exact string match. HTTPS, or HTTP on loopback for development. No wildcards. |
 | Signing | ES256. The key is generated and used through `ring` (already a dependency), stored encrypted under `RUSCKER_MASTER_KEY` so HA nodes share it. |
-| Tokens | A short-lived ID token plus `/userinfo`. Clients keep their **own** session after the exchange. |
+| Tokens | A short-lived ID token plus `/oauth/userinfo`. Clients keep their **own** session after the exchange. |
 | Claims | `sub`, `preferred_username`, `name`, `email`, `groups`. Group roles join when they exist. |
 | Access | Per client: `access-groups` (empty = any signed-in user) and optional `require-mfa`. |
 | Consent screen | None. Every client is first-party and admin-registered. |
@@ -82,10 +82,16 @@ it themselves.
 2. Signing key, `/.well-known/openid-configuration`, JWKS, the config
    flag. The key is created on the first JWKS request, stored encrypted
    in `oidc_keys`, and identified by its RFC 7638 thumbprint. The
-   issuer is configured, never read from the request. *(implemented)*
+   issuer is configured, never read from the request, and its path must
+   be the portal's mount point. Exactly one first key is created, even
+   under concurrent first use. *(implemented)*
+
+   Key rotation is not built. When it is: clients cache the JWKS, so a
+   new key must be published for at least the cache lifetime before it
+   signs.
 3. `/oauth/authorize`: session check or login, the client's group gate
    and MFA requirement, one-use authorization codes bound to PKCE.
-4. `/oauth/token` and `/userinfo`.
+4. `/oauth/token` and `/oauth/userinfo`.
 5. Integration recipes and a first real client.
 
 Later, separately decided: RP-initiated logout, refresh tokens,

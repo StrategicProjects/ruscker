@@ -15,8 +15,10 @@ use std::sync::Arc;
 use tower::ServiceExt;
 
 const OFF: &str = "proxy:\n  title: T\n  port: 8088\n  specs: []\n";
-const ON: &str = "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://portal.example/box/\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
+const ON: &str = "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://portal.example/\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
 const BROKEN: &str = "server:\n  oidc-provider:\n    enabled: true\n    issuer: http://portal.example\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
+/// Same provider, mounted under `/box`.
+const ON_BOX: &str = "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://portal.example/box/\nproxy:\n  title: T\n  port: 8088\n  specs: []\n";
 const KEY: &str = "00000000000000000000000000000000000000000000000000000000000000aa";
 
 async fn open_db() -> ConfigDb {
@@ -116,9 +118,9 @@ async fn discovery_uses_the_configured_issuer_not_the_host_header() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(cache, "public, max-age=300");
     let d: serde_json::Value = serde_json::from_str(&body).expect("json");
-    // Trailing slash normalized away; subpath kept.
-    assert_eq!(d["issuer"], "https://portal.example/box");
-    assert_eq!(d["jwks_uri"], "https://portal.example/box/oauth/jwks");
+    // Trailing slash normalized away.
+    assert_eq!(d["issuer"], "https://portal.example");
+    assert_eq!(d["jwks_uri"], "https://portal.example/oauth/jwks");
     assert!(!body.contains("evil.example"), "the Host header must not leak into the document");
 }
 
@@ -158,6 +160,59 @@ async fn jwks_publishes_the_key_the_provider_signs_with() {
         .expect("verifies");
 }
 
+/// Under a base path the documents live at `{base}/…`, which is exactly
+/// `{issuer}/…` — and an issuer whose path is NOT the mount point turns
+/// the provider off instead of advertising URLs that do not exist.
+#[tokio::test]
+async fn issuer_path_must_be_the_mount_point() {
+    // Mounted at /box with a matching issuer: served under /box only.
+    let mut state = app_state(open_db().await, ON_BOX, Some(KEY)).await;
+    state.base_path = Arc::from("/box");
+    let (status, _, body) = get(state.clone(), "/box/.well-known/openid-configuration").await;
+    assert_eq!(status, StatusCode::OK);
+    let d: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(d["issuer"], "https://portal.example/box");
+    assert_eq!(d["jwks_uri"], "https://portal.example/box/oauth/jwks");
+    let (status, _, _) = get(state.clone(), "/box/oauth/jwks").await;
+    assert_eq!(status, StatusCode::OK, "the advertised jwks_uri path exists");
+    let (status, _, _) = get(state, DISCOVERY).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "not at the root");
+
+    // Mismatches, both directions: off.
+    let mut root_issuer_on_box = app_state(open_db().await, ON, Some(KEY)).await;
+    root_issuer_on_box.base_path = Arc::from("/box");
+    let box_issuer_on_root = app_state(open_db().await, ON_BOX, Some(KEY)).await;
+    for (state, prefix) in [(root_issuer_on_box, "/box"), (box_issuer_on_root, "")] {
+        let db = state.db.clone().unwrap();
+        for path in [DISCOVERY, JWKS] {
+            let (status, _, _) = get(state.clone(), &format!("{prefix}{path}")).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{prefix}{path}");
+        }
+        assert!(ruscker_admin::db::oidc_keys::list_newest_first(&db).await.unwrap().is_empty());
+    }
+}
+
+/// Once a key exists, the JWKS is served from the public column alone:
+/// it keeps answering even if the private half cannot be decrypted, and
+/// repeated anonymous requests never add keys.
+#[tokio::test]
+async fn jwks_reads_never_write_or_decrypt_once_a_key_exists() {
+    let db = open_db().await;
+    let state = app_state(db.clone(), ON, Some(KEY)).await;
+    let (_, _, first) = get(state, JWKS).await;
+
+    // Same database, a DIFFERENT master key: the private key is now
+    // unreadable, the public set is not.
+    let other = "00000000000000000000000000000000000000000000000000000000000000bb";
+    let state = app_state(db.clone(), ON, Some(other)).await;
+    for _ in 0..3 {
+        let (status, _, body) = get(state.clone(), JWKS).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, first);
+    }
+    assert_eq!(ruscker_admin::db::oidc_keys::list_newest_first(&db).await.unwrap().len(), 1);
+}
+
 #[tokio::test]
 async fn jwks_is_unavailable_without_a_master_key() {
     let state = app_state(open_db().await, ON, None).await;
@@ -166,7 +221,8 @@ async fn jwks_is_unavailable_without_a_master_key() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(!body.contains("keys"), "no empty key set is served");
     assert!(ruscker_admin::db::oidc_keys::list_newest_first(&db).await.unwrap().is_empty());
-    // Discovery itself needs no key and still works.
-    let (status, _, _) = get(state, DISCOVERY).await;
-    assert_eq!(status, StatusCode::OK);
+    // Discovery too: it would only advertise a jwks_uri that cannot work.
+    let (status, _, body) = get(state, DISCOVERY).await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(!body.contains("jwks_uri"));
 }

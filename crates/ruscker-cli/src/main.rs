@@ -1003,7 +1003,8 @@ fn format_warning(w: &Warning) -> String {
         Warning::OidcIssuerInvalid { value } => {
             format!(
                 "server.oidc-provider is enabled but its issuer `{value}` is missing or not \
-                 usable (expected an https:// URL, or http:// on a loopback host) — \
+                 usable (expected a lowercase https:// URL without query, fragment or \
+                 percent-encoding, or http:// on a loopback host) — \
                  the provider stays off"
             )
         }

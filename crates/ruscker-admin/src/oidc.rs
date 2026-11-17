@@ -135,10 +135,16 @@ fn load(stored: &StoredKey, master_key: &MasterKey) -> Result<SigningKey> {
 
 /// The current signing key, creating the first one if none exists.
 ///
-/// Safe under concurrency and across HA nodes: if two callers race to
-/// create the first key, both rows are kept (both are published in the
-/// JWKS) and everyone then agrees on the same "newest" one, because the
-/// choice is re-read from the database after the insert.
+/// Safe under concurrency and across HA nodes: creation is a single
+/// atomic "insert if the table is empty" ([`oidc_keys::insert_first`]),
+/// and the key to use is always re-read from the database afterwards,
+/// so a caller that lost the race ends up with the winner's key.
+///
+/// If the stored key cannot be decrypted (the master key changed) this
+/// fails and does NOT mint a replacement: silently switching keys would
+/// invalidate every token in flight and hide the misconfiguration.
+/// Recovery is an operator decision — restore the old master key, or
+/// delete the rows of `oidc_keys` to start over.
 pub async fn ensure_signing_key(db: &ConfigDb, master_key: &MasterKey) -> Result<SigningKey> {
     if !master_key.is_configured() {
         bail!("RUSCKER_MASTER_KEY is not set; the OIDC provider needs it to protect its signing key");
@@ -147,24 +153,76 @@ pub async fn ensure_signing_key(db: &ConfigDb, master_key: &MasterKey) -> Result
         return load(newest, master_key);
     }
     let fresh = generate(master_key)?;
-    oidc_keys::insert(db, &fresh).await?;
-    tracing::info!(kid = %fresh.kid, "generated the OIDC provider signing key");
+    if oidc_keys::insert_first(db, &fresh).await? {
+        tracing::info!(kid = %fresh.kid, "generated the OIDC provider signing key");
+    }
     let keys = oidc_keys::list_newest_first(db).await?;
     let newest = keys.first().ok_or_else(|| anyhow!("OIDC signing key vanished after insert"))?;
     load(newest, master_key)
 }
 
-/// The JSON Web Key Set: every stored public key. Clients fetch this to
-/// verify token signatures. Older keys stay published so tokens signed
-/// before a rotation remain verifiable.
-pub async fn jwks(db: &ConfigDb) -> Result<Value> {
-    let mut keys = Vec::new();
-    for k in oidc_keys::list_newest_first(db).await? {
+/// The JSON Web Key Set: every stored public key, read straight from
+/// the clear `public_jwk` column — nothing is decrypted, so this keeps
+/// working (and existing tokens stay verifiable) even while the private
+/// half is unreadable. Returns `None` when no key exists yet.
+///
+/// Note for a future rotation feature: clients cache this document
+/// (see the endpoint's `max-age`), so a new key must be PUBLISHED for at
+/// least that long before it starts signing.
+pub async fn published_jwks(db: &ConfigDb) -> Result<Option<Value>> {
+    let stored = oidc_keys::list_newest_first(db).await?;
+    if stored.is_empty() {
+        return Ok(None);
+    }
+    let mut keys = Vec::with_capacity(stored.len());
+    for k in stored {
         let jwk: Value = serde_json::from_str(&k.public_jwk)
             .with_context(|| format!("stored JWK for key {} is not JSON", k.kid))?;
         keys.push(jwk);
     }
-    Ok(json!({ "keys": keys }))
+    Ok(Some(json!({ "keys": keys })))
+}
+
+/// The issuer this process actually serves, or `None` when the provider
+/// is off. Two conditions beyond the config switch:
+///
+/// * the issuer's path must equal the portal's mount point. OIDC puts
+///   the discovery document at `{issuer}/.well-known/…`; an issuer of
+///   `https://example.org` on a portal mounted at `/box` would hand out
+///   a document full of URLs that do not exist.
+///
+/// The base path can come from `--base-path`, which config validation
+/// cannot see, so the check lives here (and [`warn_if_misconfigured`]
+/// says so once at boot).
+pub fn active_issuer(config: &ruscker_config::Config, base_path: &str) -> Option<String> {
+    let issuer = config.server.oidc_issuer()?;
+    (ruscker_config::issuer_path(&issuer) == base_path).then_some(issuer)
+}
+
+/// Boot-time warnings for an enabled provider that cannot work. Each of
+/// these states is fail-closed at request time (404 or 503); the
+/// warning is what makes it discoverable without a client trying.
+pub fn warn_if_misconfigured(
+    config: &ruscker_config::Config,
+    base_path: &str,
+    master_key: &MasterKey,
+) {
+    let Some(issuer) = config.server.oidc_issuer() else {
+        return;
+    };
+    if ruscker_config::issuer_path(&issuer) != base_path {
+        tracing::warn!(
+            issuer = %issuer,
+            base_path = %base_path,
+            "server.oidc-provider.issuer does not end with the portal's base path; \
+             the OIDC provider stays off"
+        );
+    } else if !master_key.is_configured() {
+        tracing::warn!(
+            "server.oidc-provider is enabled but RUSCKER_MASTER_KEY is not set; \
+             the OIDC provider answers 503 until it is"
+        );
+    }
 }
 
 /// The OpenID Provider Metadata document (OIDC Discovery 1.0 §3),
@@ -227,7 +285,7 @@ mod tests {
         let sig = key.sign(msg).unwrap();
         assert_eq!(sig.len(), 64, "raw r||s, the JWS ES256 encoding");
 
-        let set = jwks(&db).await.unwrap();
+        let set = published_jwks(&db).await.unwrap().expect("a key set");
         let keys = set["keys"].as_array().unwrap();
         assert_eq!(keys.len(), 1);
         let jwk = &keys[0];
@@ -254,7 +312,7 @@ mod tests {
         // The reloaded key is the same key: its signature verifies with
         // the JWK published for the first one.
         let sig = again.sign(b"x").unwrap();
-        let set = jwks(&db).await.unwrap();
+        let set = published_jwks(&db).await.unwrap().expect("a key set");
         UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point_from_jwk(&set["keys"][0]))
             .verify(b"x", &sig)
             .unwrap();
@@ -296,23 +354,81 @@ mod tests {
         let mut a = generate(&mk).unwrap();
         let b = generate(&mk).unwrap();
         a.kid = b.kid.clone();
-        oidc_keys::insert(&db, &a).await.unwrap();
+        assert!(oidc_keys::insert_first(&db, &a).await.unwrap());
         let err = ensure_signing_key(&db, &mk).await.unwrap_err();
         assert!(err.to_string().contains("does not match"), "{err}");
     }
 
+    /// Many first requests at once create exactly ONE key, and all of
+    /// them sign with it.
     #[tokio::test]
-    async fn two_first_keys_converge_on_one_signer() {
-        // Two nodes each generated a "first" key at the same time. Both
-        // are published; both nodes then pick the same one to sign with.
+    async fn concurrent_first_use_creates_a_single_key() {
         let db = mem_db().await;
         let mk = MasterKey::parse(KEY_A).unwrap();
-        oidc_keys::insert(&db, &generate(&mk).unwrap()).await.unwrap();
-        oidc_keys::insert(&db, &generate(&mk).unwrap()).await.unwrap();
-        let one = ensure_signing_key(&db, &mk).await.unwrap();
-        let two = ensure_signing_key(&db, &mk).await.unwrap();
-        assert_eq!(one.kid, two.kid);
-        assert_eq!(jwks(&db).await.unwrap()["keys"].as_array().unwrap().len(), 2);
+        let mut tasks = Vec::new();
+        for _ in 0..12 {
+            let (db, mk) = (db.clone(), mk.clone());
+            tasks.push(tokio::spawn(async move {
+                ensure_signing_key(&db, &mk).await.unwrap().kid
+            }));
+        }
+        let mut kids = Vec::new();
+        for t in tasks {
+            kids.push(t.await.unwrap());
+        }
+        kids.dedup();
+        assert_eq!(kids.len(), 1, "everyone signs with the same key");
+        assert_eq!(oidc_keys::list_newest_first(&db).await.unwrap().len(), 1);
+        // A second "first key" is refused outright.
+        assert!(!oidc_keys::insert_first(&db, &generate(&mk).unwrap()).await.unwrap());
+    }
+
+    /// The JWKS never needs the private key: with the wrong master key
+    /// signing fails, but the public set is still served, and no
+    /// replacement key is minted behind the operator's back.
+    #[tokio::test]
+    async fn jwks_survives_an_unreadable_private_key() {
+        let db = mem_db().await;
+        let kid = ensure_signing_key(&db, &MasterKey::parse(KEY_A).unwrap()).await.unwrap().kid;
+        let other = MasterKey::parse(KEY_B).unwrap();
+        assert!(ensure_signing_key(&db, &other).await.is_err());
+        let set = published_jwks(&db).await.unwrap().expect("still published");
+        let keys = set["keys"].as_array().unwrap();
+        assert_eq!(keys.len(), 1);
+        assert_eq!(keys[0]["kid"], kid.as_str());
+    }
+
+    #[tokio::test]
+    async fn key_creation_is_audited_by_id_only() {
+        let db = mem_db().await;
+        assert!(published_jwks(&db).await.unwrap().is_none(), "no keys yet");
+        let kid = ensure_signing_key(&db, &MasterKey::parse(KEY_A).unwrap()).await.unwrap().kid;
+        let audits = crate::db::audit::list(&db, &crate::db::audit::AuditFilter::new())
+            .await
+            .unwrap();
+        let ours: Vec<_> = audits.iter().filter(|e| e.action == "oidc-key.create").collect();
+        assert_eq!(ours.len(), 1);
+        assert_eq!(ours[0].target.as_deref(), Some(format!("oidc-key:{kid}").as_str()));
+        assert!(ours[0].actor.is_none() && ours[0].diff.is_none());
+    }
+
+    #[test]
+    fn active_issuer_requires_the_issuer_path_to_be_the_mount_point() {
+        let cfg = |issuer: &str| {
+            ruscker_config::Config::from_yaml(&format!(
+                "server:\n  oidc-provider:\n    enabled: true\n    issuer: {issuer}\nproxy:\n  specs: []\n"
+            ))
+            .unwrap()
+        };
+        assert_eq!(active_issuer(&cfg("https://p.example"), "").as_deref(), Some("https://p.example"));
+        assert_eq!(
+            active_issuer(&cfg("https://p.example/box/"), "/box").as_deref(),
+            Some("https://p.example/box")
+        );
+        // Mismatch in either direction ⇒ off.
+        assert_eq!(active_issuer(&cfg("https://p.example"), "/box"), None);
+        assert_eq!(active_issuer(&cfg("https://p.example/box"), ""), None);
+        assert_eq!(active_issuer(&cfg("https://p.example/other"), "/box"), None);
     }
 
     // Key storage against a real Postgres (BYTEA / TIMESTAMPTZ). Gated
@@ -332,11 +448,53 @@ mod tests {
         let again = ensure_signing_key(&db, &mk).await.unwrap();
         assert_eq!(first.kid, again.kid);
         let sig = again.sign(b"x").unwrap();
-        let set = jwks(&db).await.unwrap();
+        let set = published_jwks(&db).await.unwrap().expect("a key set");
         assert_eq!(set["keys"].as_array().unwrap().len(), 1);
         UnparsedPublicKey::new(&ECDSA_P256_SHA256_FIXED, point_from_jwk(&set["keys"][0]))
             .verify(b"x", &sig)
             .unwrap();
+        // The advisory-locked "first key only" insert, concurrently.
+        sqlx::query("DELETE FROM oidc_keys")
+            .execute(match &db {
+                ConfigDb::Postgres(p) => p,
+                ConfigDb::Sqlite(_) => unreachable!(),
+            })
+            .await
+            .unwrap();
+        let mut tasks = Vec::new();
+        for _ in 0..8 {
+            let (db, mk) = (db.clone(), mk.clone());
+            tasks.push(tokio::spawn(async move {
+                ensure_signing_key(&db, &mk).await.unwrap().kid
+            }));
+        }
+        let mut kids = Vec::new();
+        for t in tasks {
+            kids.push(t.await.unwrap());
+        }
+        kids.dedup();
+        assert_eq!(kids.len(), 1);
+        assert_eq!(oidc_keys::list_newest_first(&db).await.unwrap().len(), 1);
+    }
+
+    /// Known answer: the P-256 key of RFC 7515 Appendix A.3, whose RFC
+    /// 7638 thumbprint was computed independently (SHA-256 over the
+    /// canonical `{"crv","kty","x","y"}` JSON). Catches a wrong member
+    /// order, an extra member or padded base64 — none of which the
+    /// determinism check below would notice.
+    #[test]
+    fn kid_matches_a_known_rfc7638_thumbprint() {
+        let mut point = vec![0x04];
+        point.extend(
+            URL_SAFE_NO_PAD.decode("f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU").unwrap(),
+        );
+        point.extend(
+            URL_SAFE_NO_PAD.decode("x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0").unwrap(),
+        );
+        let (kid, jwk) = public_jwk(&point).unwrap();
+        assert_eq!(kid, "oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U");
+        assert_eq!(jwk["x"], "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU");
+        assert_eq!(jwk["y"], "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0");
     }
 
     #[test]

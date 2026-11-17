@@ -149,9 +149,11 @@ it themselves.
      scope `setor` → `setor`; scope `roles` → `group_roles`, an object
      of group → roles, filtered like `groups`. A system can derive its
      own profiles from group roles instead of keeping a user table.
-     There is no per-client scope allowlist: every registered client
-     may ask for any supported scope, consistent with clients being
-     first-party systems registered by an Admin. A failed claims
+     Each client has an allowlist of optional scopes, set by the
+     Admin; an unlisted scope is dropped at authorization and again at
+     the token and userinfo endpoints, so withdrawing one takes effect
+     at once. Clients registered before the allowlist are unrestricted
+     (NULL) until edited — nothing changed for them. A failed claims
      lookup is `server_error`, never an empty claim.
 5. Integration recipes and a first real client.
 

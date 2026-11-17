@@ -490,3 +490,51 @@ async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
     let (status, _) = get(state, "/admin/sso-access", "").await;
     assert_eq!(status, StatusCode::SEE_OTHER);
 }
+
+/// The scope checkboxes on the client form: ticked ones are saved; a
+/// post without them (a script, an old tab) leaves the scopes alone —
+/// it must never reopen a client an Admin had restricted.
+#[tokio::test]
+async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    post_page(state.clone(), "/admin/sso-clients", CREATE, &cookie).await;
+    let scopes = |db: &ConfigDb| {
+        let db = db.clone();
+        async move { ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap().allowed_scopes }
+    };
+    // Created by a form without the checkboxes: unrestricted, as before.
+    assert_eq!(scopes(&db).await, None);
+    // The edit page offers them, all ticked for an unrestricted client.
+    let (_, html) = get(state.clone(), "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
+    assert_eq!(html.matches(r#"name="scope_"#).count(), 5);
+    assert!(html.matches(r#"value="on" checked"#).count() >= 5);
+
+    let base = "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=&enabled=on";
+    let (st, _) = post(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        &format!("{base}&scopes_present=1&scope_profile=on&scope_roles=on"),
+        &cookie,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
+
+    // No checkboxes in the post: untouched.
+    let (st, _) = post(state.clone(), "/admin/sso-clients/radar-fiscal/edit", base, &cookie).await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
+
+    // Checkboxes present, none ticked: the id alone.
+    let (st, _) = post(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        &format!("{base}&scopes_present=1"),
+        &cookie,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    assert_eq!(scopes(&db).await, Some(vec![]));
+}

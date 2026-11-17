@@ -413,9 +413,11 @@ configuration.
 Each client has an ID, a display name, its exact redirect URIs (HTTPS,
 or loopback HTTP for development; no wildcards), an optional list of
 **allowed groups** (empty means any signed-in user), an optional
-**two-step verification** requirement and an optional **logo** from the
+**two-step verification** requirement, an optional **logo** from the
 Media library, shown on the sign-in page when a user arrives from that
-system. The client secret is shown once,
+system, and the **data it may receive** — name and username, e-mail,
+groups, roles in groups, department — each of which can be withheld
+(the person's permanent id is always sent). The client secret is shown once,
 on creation or when you generate a new one, and only a salted hash is
 stored. Deleting a group on the Groups page when it is a client's last
 allowed group disables that client instead of opening it to everyone.

@@ -97,6 +97,7 @@ async fn fixture(yaml: &str) -> Fixture {
         require_mfa: false,
         enabled: true,
         logo: None,
+        allowed_scopes: None,
     };
     let radar = ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&["fiscal"], CB), None)
         .await
@@ -402,6 +403,61 @@ async fn name_setor_and_group_roles_claims() {
     assert_eq!(claims_of(&r)["group_roles"], json!({}));
 }
 
+/// Per-client allowed scopes: a client gets only the optional scopes an
+/// Admin ticked for it, whatever it asks for; an untouched (older)
+/// client is unrestricted; and a scope withdrawn after a code or a token
+/// was issued stops flowing at once.
+#[tokio::test]
+async fn a_client_gets_only_the_scopes_it_is_allowed() {
+    use ruscker_admin::db::oidc_clients::{self, ClientSettings};
+    let f = fixture(ON).await;
+    let ask = "openid profile email setor groups roles";
+    let claims_of = |r: &Reply| jwt_parts(r.json["id_token"].as_str().unwrap()).1;
+    let settings = |scopes: Option<Vec<&str>>| ClientSettings {
+        name: "Norma".into(),
+        redirect_uris: vec![CB.into()],
+        access_groups: vec![],
+        require_mfa: false,
+        enabled: true,
+        logo: None,
+        allowed_scopes: scopes.map(|l| l.into_iter().map(String::from).collect()),
+    };
+
+    // Unrestricted (the state of every client registered before): all of it.
+    let code = authorize(&f, "norma", ask).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.json["scope"], "openid profile email groups roles setor");
+
+    // Allowed `profile` only: the rest is dropped though it was asked for.
+    oidc_clients::update(&f.db, "norma", &settings(Some(vec!["profile"])), None).await.unwrap();
+    let code = authorize(&f, "norma", ask).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["scope"], "openid profile");
+    let c = claims_of(&r);
+    assert_eq!(c["preferred_username"], "ana");
+    for absent in ["email", "groups", "group_roles", "setor"] {
+        assert!(c.get(absent).is_none(), "{absent} is not allowed for this client");
+    }
+
+    // A code issued while `profile` was allowed, redeemed after it was
+    // withdrawn: nothing but the id. The access token already issued
+    // above loses it too.
+    let code = authorize(&f, "norma", ask).await;
+    oidc_clients::update(&f.db, "norma", &settings(Some(vec![])), None).await.unwrap();
+    let late = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(late.json["scope"], "openid");
+    assert!(claims_of(&late).get("preferred_username").is_none());
+    let u = userinfo(&f, r.json["access_token"].as_str().unwrap()).await;
+    assert_eq!(u.status, StatusCode::OK);
+    assert!(u.json.get("preferred_username").is_none() && u.json.get("sub").is_some());
+
+    // `openid` alone is always possible.
+    let code = authorize(&f, "norma", ask).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.json["scope"], "openid");
+}
+
 #[tokio::test]
 async fn a_code_is_redeemed_once() {
     let f = fixture(ON).await;
@@ -452,6 +508,7 @@ async fn failed_client_authentication_does_not_burn_the_code() {
         require_mfa: false,
         enabled: false,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(token_basic(&f, "radar", &f.radar, &exchange(&code)).await.status, StatusCode::UNAUTHORIZED);
@@ -766,6 +823,7 @@ async fn userinfo_follows_revocation_and_accepts_post() {
         require_mfa: false,
         enabled: false,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "client disabled");

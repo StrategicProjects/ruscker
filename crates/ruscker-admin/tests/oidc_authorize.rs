@@ -198,6 +198,7 @@ async fn seed(db: &ConfigDb, require_mfa: bool) {
         require_mfa,
         enabled: true,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::create(db, "radar", &settings, None).await.unwrap().unwrap();
     for (name, groups) in [("ana", vec!["fiscal".to_string()]), ("bia", vec![])] {
@@ -284,6 +285,7 @@ async fn nothing_is_redirected_before_client_and_redirect_uri_check_out() {
         require_mfa: false,
         enabled: false,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&db, "radar", &off, None).await.unwrap();
     let r = get(&state, &request("", &[]), &ana).await;
@@ -694,6 +696,7 @@ async fn the_sign_in_page_carries_the_portal_brand_and_the_target_system() {
         require_mfa: false,
         enabled: true,
         logo: Some("logo radar.svg".into()),
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&db, "radar", &hostile, None).await.unwrap();
     let page = get(&state, &format!("/admin/login?next={next}"), "").await;

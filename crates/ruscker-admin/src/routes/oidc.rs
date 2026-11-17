@@ -439,9 +439,12 @@ async fn authorize(
     if !requested.contains(&"openid") {
         return fail("invalid_scope");
     }
+    // Granted = requested ∩ supported ∩ what this client may have. A
+    // scope the client is not allowed is dropped silently, as an unknown
+    // one is: the token response states what was granted.
     let scope = SCOPES
         .iter()
-        .filter(|s| requested.contains(s))
+        .filter(|s| requested.contains(s) && client.allows_scope(s))
         .copied()
         .collect::<Vec<_>>()
         .join(" ");
@@ -675,6 +678,15 @@ async fn claim_extras(
     Ok(extras)
 }
 
+/// `scope` (space-separated) reduced to what `client` may have today.
+fn still_allowed(client: &crate::db::oidc_clients::OidcClient, scope: &str) -> String {
+    scope
+        .split(' ')
+        .filter(|s| !s.is_empty() && client.allows_scope(s))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// The identity claims a client may see, by granted scope. Used for the
 /// ID token and for `/oauth/userinfo`, so the two can never disagree.
 ///
@@ -900,14 +912,17 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     let now = chrono::Utc::now().timestamp();
     let exp = now + TOKEN_TTL_SECS;
 
-    let extras = match claim_extras(db, &user, &grant.scope).await {
+    // Re-checked against the client as it is NOW: a scope an Admin
+    // withdrew after this code was issued is not granted.
+    let scope = still_allowed(&client, &grant.scope);
+    let extras = match claim_extras(db, &user, &scope).await {
         Ok(extras) => extras,
         Err(err) => {
             tracing::error!(error = ?err, "claims lookup failed at the token endpoint");
             return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
         }
     };
-    let mut id_claims = identity_claims(&user, &extras, &client.access_groups, &grant.scope);
+    let mut id_claims = identity_claims(&user, &extras, &client.access_groups, &scope);
     id_claims.insert("iss".into(), json!(issuer));
     id_claims.insert("aud".into(), json!(client.client_id));
     id_claims.insert("iat".into(), json!(now));
@@ -927,7 +942,7 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
         "sub": user.id,
         "username": user.username,
         "client_id": client.client_id,
-        "scope": grant.scope,
+        "scope": scope,
         "iat": now,
         "exp": exp,
     });
@@ -964,7 +979,7 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
             "token_type": "Bearer",
             "expires_in": TOKEN_TTL_SECS,
             "id_token": id_token,
-            "scope": grant.scope,
+            "scope": scope,
         })),
     )
         .into_response()
@@ -1046,6 +1061,7 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
         }
     };
+    let scope = &still_allowed(&client, scope);
     let extras = match claim_extras(db, &user, scope).await {
         Ok(extras) => extras,
         Err(err) => {

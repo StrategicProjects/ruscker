@@ -139,6 +139,25 @@ pub struct ClientForm {
     /// Media-library filename of the system's logo; empty = none.
     #[serde(default)]
     pub logo: String,
+    /// Present when the form carried the scope checkboxes. A form
+    /// without it (a script, a page loaded before the setting existed)
+    /// leaves the client's allowed scopes alone instead of clearing them.
+    #[serde(default)]
+    pub scopes_present: Option<String>,
+    #[serde(default)]
+    pub scope_profile: Option<String>,
+    #[serde(default)]
+    pub scope_email: Option<String>,
+    #[serde(default)]
+    pub scope_groups: Option<String>,
+    #[serde(default)]
+    pub scope_roles: Option<String>,
+    #[serde(default)]
+    pub scope_setor: Option<String>,
+}
+
+fn on(yes: bool) -> Option<String> {
+    yes.then(|| "on".to_string())
 }
 
 impl ClientForm {
@@ -151,7 +170,42 @@ impl ClientForm {
             require_mfa: c.require_mfa.then(|| "on".to_string()),
             enabled: c.enabled.then(|| "on".to_string()),
             logo: c.logo.clone().unwrap_or_default(),
+            scopes_present: Some("1".into()),
+            scope_profile: on(c.allows_scope("profile")),
+            scope_email: on(c.allows_scope("email")),
+            scope_groups: on(c.allows_scope("groups")),
+            scope_roles: on(c.allows_scope("roles")),
+            scope_setor: on(c.allows_scope("setor")),
         }
+    }
+
+    /// Whether the checkbox for `scope` is ticked. A blank form (new
+    /// client, nothing posted yet) starts with every scope allowed.
+    fn scope_checked(&self, scope: &str) -> bool {
+        if self.scopes_present.is_none() {
+            return true;
+        }
+        match scope {
+            "profile" => self.scope_profile.is_some(),
+            "email" => self.scope_email.is_some(),
+            "groups" => self.scope_groups.is_some(),
+            "roles" => self.scope_roles.is_some(),
+            "setor" => self.scope_setor.is_some(),
+            _ => false,
+        }
+    }
+
+    /// The scopes ticked on the form, or `None` when the form did not
+    /// carry the checkboxes at all.
+    fn allowed_scopes(&self) -> Option<Vec<String>> {
+        self.scopes_present.as_ref()?;
+        Some(
+            db::oidc_clients::OPTIONAL_SCOPES
+                .iter()
+                .filter(|s| self.scope_checked(s))
+                .map(|s| s.to_string())
+                .collect(),
+        )
     }
 
     /// Validate the editable fields. `Err` carries the i18n key of the
@@ -194,6 +248,7 @@ impl ClientForm {
             require_mfa: self.require_mfa.is_some(),
             enabled,
             logo: (!logo.is_empty()).then(|| logo.to_string()),
+            allowed_scopes: self.allowed_scopes(),
         })
     }
 }
@@ -416,12 +471,17 @@ async fn edit_submit(
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
-    let settings = match form.settings(form.enabled.is_some()) {
+    let mut settings = match form.settings(form.enabled.is_some()) {
         Ok(s) => s,
         Err(key) => {
             return render_edit(&state, loc, theme, &client, form, EditNotice::Error(key)).await
         }
     };
+    // A form without the scope checkboxes must not change the scopes —
+    // least of all reopen a client that had been restricted.
+    if form.scopes_present.is_none() {
+        settings.allowed_scopes = client.allowed_scopes.clone();
+    }
     match db::oidc_clients::update(pool, &id, &settings, Some(admin.actor())).await {
         Ok(true) => {
             let saved = EditNotice::Ok("admin-sso-flash-saved");
@@ -518,6 +578,31 @@ mod tests {
         let mut f = form("https://ok.example/cb");
         f.name = "  ".into();
         assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-name");
+    }
+
+    #[test]
+    fn scope_checkboxes_map_to_allowed_scopes() {
+        // A blank form shows every scope ticked, and a post without the
+        // checkboxes says nothing about scopes.
+        let blank = form("https://app.example/cb");
+        assert!(["profile", "email", "groups", "roles", "setor"].iter().all(|s| blank.scope_checked(s)));
+        assert_eq!(blank.settings(true).unwrap().allowed_scopes, None);
+
+        // With the checkboxes: exactly the ticked ones, in canonical order.
+        let mut f = form("https://app.example/cb");
+        f.scopes_present = Some("1".into());
+        f.scope_roles = Some("on".into());
+        f.scope_profile = Some("on".into());
+        assert_eq!(
+            f.settings(true).unwrap().allowed_scopes,
+            Some(vec!["profile".to_string(), "roles".to_string()])
+        );
+        assert!(!f.scope_checked("email"));
+
+        // None ticked: `openid` alone, not "everything".
+        let mut none = form("https://app.example/cb");
+        none.scopes_present = Some("1".into());
+        assert_eq!(none.settings(true).unwrap().allowed_scopes, Some(vec![]));
     }
 
     #[test]

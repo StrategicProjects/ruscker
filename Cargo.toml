@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.52"
+version = "0.2.53"
 edition = "2021"
 rust-version = "1.94.0"
 license = "Apache-2.0"
@@ -109,6 +109,17 @@ qrcode = { version = "0.14.1", default-features = false, features = ["svg"] }
 # Testing
 pretty_assertions = "1.4"
 insta = { version = "1.47", features = ["yaml"] }
+
+# The SQLite bundled by `libsqlite3-sys` 0.37 (3.51.3) is affected by
+# RUSTSEC-2026-0459 / CVE-2026-119375. The fix ships in `libsqlite3-sys`
+# 0.39+, but `sqlx-sqlite` 0.9.0 — the latest release — requires
+# `<0.38`, so a plain upgrade is impossible. Until sqlx allows it, the
+# crate is replaced by a vendored copy of 0.37.0 whose bundled SQLite
+# sources are those of 0.39.1 (SQLite 3.54.1). See
+# `vendor/libsqlite3-sys/VENDORED.md`; remove this section and that
+# directory once `cargo update -p libsqlite3-sys` can reach >= 0.39.
+[patch.crates-io]
+libsqlite3-sys = { path = "vendor/libsqlite3-sys" }
 
 [profile.release]
 opt-level = 3

@@ -9,6 +9,76 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.53 — 2026-11-17
+
+"Sign in with Ruscker" for systems outside the portal, and three
+requests from the operators. Every change was reviewed by an independent
+code reviewer before merging (#1065–#1068).
+
+- **Ruscker can be an OpenID Connect provider** (#1068). Systems that
+  live outside the portal — on other hosts and domains — can sign users
+  in with the accounts, groups and two-step verification the portal
+  already has, using the same protocol behind "Sign in with Google".
+  **Off by default**: enable `server.oidc-provider` with an `issuer` in
+  the service configuration, then register each system under
+  **Credentials → SSO clients**.
+  - A deliberately narrow profile: authorization code with PKCE (`S256`)
+    only, confidential clients registered by an Admin, exact-match
+    redirect URIs, ES256-signed ID tokens. No implicit flow, no dynamic
+    registration, no consent screen.
+  - Per client: **allowed groups** (empty means any signed-in user) and
+    an optional **two-step verification** requirement. The gate is read
+    from the database on every sign-in; an Admin account gets no bypass.
+  - The client secret is shown once and stored as a salted hash; the
+    signing key is generated on first use and stored encrypted under
+    `RUSCKER_MASTER_KEY`, so every node of an HA deployment shares it.
+  - The session cookie stays `SameSite=Strict`: a user arriving from a
+    system on another site is bounced through a page of the portal so an
+    existing session is recognised instead of asking for the password
+    every time.
+  - Ruscker authenticates; the client authorizes. The ID token says who
+    the user is (`sub` is the account's permanent id) and, on request,
+    which of the client's groups they belong to. What they may do inside
+    the client stays the client's decision.
+  - Sign-ins to external systems appear in **Activity** as "SSO sign-in".
+  - See the new [Authentication](./authentication.md) page for how to
+    connect a system and what it must verify.
+
+- **Roles inside groups** (#1067). Each group can define its own list of
+  roles (Admin), and members can be given one or more of them (Editors,
+  within their own groups — never for themselves). An app that opts in
+  with `identity-claims: [roles]` receives them in
+  `X-Ruscker-User-Roles` as `GROUP:ROLE` pairs, with the group name
+  percent-encoded; an app restricted to certain groups receives only
+  those groups' roles. A role never outlives what it depends on: leaving
+  the group, deleting the user, removing the role, renaming or deleting
+  the group are all handled in the same transaction.
+
+- **Sections by subject** (#1066). With the "Sections" catalog layout
+  you can now group the cards by **subject** instead of by app type: one
+  section per subject, alphabetical, with a final "Other" section for
+  apps that have none.
+
+- **Native intro styles** (#1065). The landing intro can be shown as
+  plain **text** (as before), as a **banner** — larger type on a band in
+  the portal's own colours, optionally over an image from the Media
+  library — or as a **card**. It follows the light and dark themes by
+  itself, so there is no need for custom HTML/CSS blocks to get a hero.
+
+- **Security updates.** `rustls` 0.23.46 and `rustls-webpki` 0.103.17
+  (five advisories, including certificate verification accepting
+  distrusted intermediates) and `ctutils` 0.4.4. The bundled SQLite is
+  now **3.54.1**, which fixes CVE-2026-119375 (uninitialized memory
+  returned when opening a database with a crafted `-wal` file); because
+  the database driver does not yet accept the crate release that ships
+  it, Ruscker carries a patched copy until it does.
+
+**Upgrading.** Four database migrations (0034–0037) apply automatically.
+Nothing changes for existing deployments until `server.oidc-provider` is
+enabled.
+
+---
+
 ## v0.2.52 — 2026-09-18
 
 Six admin-panel requests from the operators, each reviewed by an

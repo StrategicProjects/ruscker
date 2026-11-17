@@ -36,6 +36,7 @@ pub mod mfa;
 pub mod schedules_ui;
 pub mod spec_form;
 pub mod specs;
+pub mod sso_clients;
 pub mod system;
 pub mod users;
 
@@ -82,6 +83,7 @@ pub fn routes() -> Router<AppState> {
         .merge(spec_form::routes())
         .merge(images::routes())
         .merge(credentials::routes())
+        .merge(sso_clients::routes())
         .merge(landing::routes())
         .merge(blocks::routes())
         .merge(audit::routes())
@@ -765,7 +767,8 @@ fn section_for_admin_path(path: &str) -> &'static str {
         "specs"
     } else if path.starts_with("/admin/media") {
         "images"
-    } else if path.starts_with("/admin/credentials") {
+    } else if path.starts_with("/admin/credentials") || path.starts_with("/admin/sso-clients") {
+        // SSO clients are a tab of the Credentials section.
         "credentials"
     } else if path.starts_with("/admin/landing") {
         "landing"

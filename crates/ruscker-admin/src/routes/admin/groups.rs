@@ -320,7 +320,7 @@ async fn create(
 
 /// Rewrite group `old` everywhere it's referenced. `new = Some(n)` renames it
 /// (folding into `n` if a user/spec already has both); `new = None` deletes
-/// it. Touches both user memberships and spec `access-groups`.
+/// it. Touches user memberships, spec `access-groups` and SSO client gates.
 async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) {
     let Some(db) = state.db.as_ref() else { return };
 
@@ -366,6 +366,13 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
                 tracing::warn!(spec = %spec.id, error = ?e, "group rewrite (spec) failed");
             }
         }
+    }
+
+    // SSO clients gated by this group follow the rename; a delete that
+    // would empty a client's gate disables it instead of opening it
+    // (see `db::oidc_clients::rewrite_group`).
+    if let Err(e) = crate::db::oidc_clients::rewrite_group(db, old, new, Some(actor)).await {
+        tracing::warn!(error = ?e, "group rewrite (sso clients) failed");
     }
 }
 

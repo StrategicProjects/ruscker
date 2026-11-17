@@ -402,15 +402,15 @@ DOI, and the repository ships a [`CITATION.cff`](CITATION.cff) — GitHub's
 **"Cite this repository"** button (top of the repo page) generates APA
 and BibTeX from it.
 
-> Leite, A., Wasilew, M., Vasconcelos, H., Amorin, C., Bezerra, D., &
+> Leite, A., Wasiliew, M., Vasconcelos, H., Amorim, C., Bezerra, D., &
 > Nascimento Barreto, J. *Ruscker: a lightweight Rust portal and
 > orchestrator for containerized interactive web apps and HTTP APIs.*
 > Zenodo. https://doi.org/10.5281/zenodo.20849123
 
 ```bibtex
 @software{ruscker,
-  author  = {Leite, Andre and Wasilew, Marcos and Vasconcelos, Hugo and
-             Amorin, Carlos and Bezerra, Diogo and Nascimento Barreto, J\'ulia},
+  author  = {Leite, Andr\'e and Wasiliew, Marcos and Vasconcelos, Hugo and
+             Amorim, Carlos and Bezerra, Diogo and Nascimento Barreto, J\'ulia},
   title   = {Ruscker: a lightweight Rust portal and orchestrator for
              containerized interactive web apps and HTTP APIs},
   url     = {https://github.com/StrategicProjects/ruscker},

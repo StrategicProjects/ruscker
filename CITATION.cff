@@ -7,21 +7,22 @@ message: >-
   metadata from this file.
 type: software
 authors:
-  - given-names: Andre
+  - given-names: André
     family-names: Leite
     email: leite@castlab.org
     affiliation: Universidade Federal de Pernambuco
     orcid: 'https://orcid.org/0000-0002-4718-9766'
   - given-names: Marcos
-    family-names: Wasilew
-    email: marcos.wasilew@gmail.com
+    family-names: Wasiliew
+    email: marcos.wasiliew@gmail.com
+    orcid: 'https://orcid.org/0009-0004-4694-3159'
   - given-names: Hugo
     family-names: Vasconcelos
     email: hugo.vasconcelos@ufpe.br
     affiliation: Universidade Federal de Pernambuco
     orcid: 'https://orcid.org/0000-0001-6249-0920'
   - given-names: Carlos
-    family-names: Amorin
+    family-names: Amorim
     email: carlos.agaf@ufpe.br
     affiliation: Universidade Federal de Pernambuco
     orcid: 'https://orcid.org/0000-0001-6315-8305'
@@ -34,6 +35,7 @@ authors:
     family-names: Nascimento Barreto
     email: juliabarreto@gd.seplag.pe.gov.br
     affiliation: Secretaria de Planejamento e Gestão de Pernambuco
+    orcid: 'https://orcid.org/0009-0004-2851-7770'
 doi: 10.5281/zenodo.20849123
 identifiers:
   - type: doi

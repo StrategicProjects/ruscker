@@ -50,6 +50,17 @@ proxy:
       container-image: test/api
       add-default-http-headers: true
       identity-claims: [email, setor]
+    - id: roles-open
+      display-name: Group roles, open app
+      type: api
+      container-image: test/api
+      identity-claims: [roles]
+    - id: roles-restricted
+      display-name: Group roles, restricted app
+      type: api
+      container-image: test/api
+      access-groups: [ops]
+      identity-claims: [roles]
 "#;
 
 struct ReadyBackend;
@@ -190,7 +201,8 @@ async fn send(
             .header("X-SP-UserId", "mallory")
             .header("X-SP-UserGroups", "attackers")
             .header("X-Ruscker-User-Email", "mallory@example.test")
-            .header("X-Ruscker-User-Setor", "Attackers");
+            .header("X-Ruscker-User-Setor", "Attackers")
+            .header("X-Ruscker-User-Roles", "ops:admin");
     }
     let response = router(state)
         .oneshot(request.body(Body::empty()).unwrap())
@@ -526,5 +538,204 @@ async fn reserved_set_cookies_from_the_app_never_reach_the_client() {
             name.starts_with("ruscker_") || name.starts_with("__ruscker_")
         }),
         "reserved cookies must be stripped: {set_cookies:?}"
+    );
+}
+
+// ── Group roles (#1067): `identity-claims: [roles]` → X-Ruscker-User-Roles ──
+
+/// Give `alice` (groups `analysts`, `ops`) one role in each group.
+async fn alice_with_roles(state: &AppState) {
+    let db = state.db.as_ref().unwrap();
+    use ruscker_admin::db::group_roles;
+    group_roles::define(db, "analysts", "leitor", Some("admin")).await.unwrap();
+    group_roles::define(db, "ops", "plantao", Some("admin")).await.unwrap();
+    group_roles::assign(db, "alice", "analysts", "leitor", None).await.unwrap();
+    group_roles::assign(db, "alice", "ops", "plantao", None).await.unwrap();
+}
+
+#[tokio::test]
+async fn group_roles_need_the_opt_in() {
+    let (state, cookie, capture) = logged_in_state("identity-all").await;
+    alice_with_roles(&state).await;
+    send(state, "/api/identity-all/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+    assert!(headers.contains_key("x-ruscker-user-email"), "{headers:?}");
+    assert!(!headers.contains_key("x-ruscker-user-roles"), "{headers:?}");
+}
+
+#[tokio::test]
+async fn open_app_receives_every_group_role() {
+    let (state, cookie, capture) = logged_in_state("roles-open").await;
+    alice_with_roles(&state).await;
+    send(state, "/api/roles-open/data", Some(&cookie), true).await;
+    let headers = capture.await.unwrap();
+    assert_eq!(
+        headers.get("x-ruscker-user-roles").map(String::as_str),
+        Some("analysts:leitor,ops:plantao"),
+        "the forged inbound value must be replaced, not appended: {headers:?}"
+    );
+    // The claim is independent of the X-SP headers and of the account role.
+    assert!(!headers.contains_key("x-sp-userid"));
+}
+
+#[tokio::test]
+async fn restricted_app_receives_only_roles_of_its_access_groups() {
+    let (state, cookie, capture) = logged_in_state("roles-restricted").await;
+    alice_with_roles(&state).await;
+    send(state, "/api/roles-restricted/data", Some(&cookie), false).await;
+    let headers = capture.await.unwrap();
+    assert_eq!(
+        headers.get("x-ruscker-user-roles").map(String::as_str),
+        Some("ops:plantao"),
+        "`analysts` is not in access-groups: {headers:?}"
+    );
+}
+
+#[tokio::test]
+async fn header_is_omitted_when_the_user_holds_no_role() {
+    let (state, cookie, capture) = logged_in_state("roles-open").await;
+    // A spoofed inbound header must not survive the absence of real roles.
+    send(state, "/api/roles-open/data", Some(&cookie), true).await;
+    let headers = capture.await.unwrap();
+    assert!(!headers.contains_key("x-ruscker-user-roles"), "{headers:?}");
+}
+
+#[tokio::test]
+async fn anonymous_request_cannot_forge_group_roles() {
+    let db = open_db().await;
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "roles-open", upstream).await;
+    send(state, "/api/roles-open/data", None, true).await;
+    let headers = capture.await.unwrap();
+    assert!(!headers.contains_key("x-ruscker-user-roles"), "{headers:?}");
+}
+
+/// The worked example of the encoding, end to end: the group name carries
+/// `:`, spaces and an accent, so it is percent-encoded (UTF-8) and every
+/// entry still splits on its single `:`.
+#[tokio::test]
+async fn group_names_are_percent_encoded_in_the_roles_header() {
+    let db = open_db().await;
+    let group = "Fazenda: núcleo A".to_string();
+    ruscker_admin::db::users::create(&db, "joana", "joanapass1", Role::Viewer, false, std::slice::from_ref(&group), None)
+        .await
+        .unwrap();
+    use ruscker_admin::db::group_roles;
+    for role in ["gestor", "analista"] {
+        group_roles::define(&db, &group, role, None).await.unwrap();
+        group_roles::assign(&db, "joana", &group, role, None).await.unwrap();
+    }
+    let (upstream, capture) = echo_upstream().await;
+    let state = state(db, "roles-open", upstream).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("joana".into()))
+        .await;
+    send(state, "/api/roles-open/data", Some(&format!("{COOKIE_NAME}={sid}")), false).await;
+    let headers = capture.await.unwrap();
+    assert_eq!(
+        headers.get("x-ruscker-user-roles").map(String::as_str),
+        Some("Fazenda%3A%20n%C3%BAcleo%20A:analista,Fazenda%3A%20n%C3%BAcleo%20A:gestor")
+    );
+}
+
+/// Like [`echo_upstream`], but serves `n` sequential connections and
+/// returns every captured header map in order.
+async fn echo_upstream_n(
+    n: usize,
+) -> (
+    SocketAddr,
+    tokio::task::JoinHandle<Vec<HashMap<String, String>>>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let task = tokio::spawn(async move {
+        let mut all = Vec::new();
+        for _ in 0..n {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut raw = Vec::new();
+            let mut chunk = [0_u8; 4096];
+            loop {
+                let read = stream.read(&mut chunk).await.unwrap();
+                if read == 0 {
+                    break;
+                }
+                raw.extend_from_slice(&chunk[..read]);
+                if raw.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let mut headers = HashMap::new();
+            for line in String::from_utf8_lossy(&raw).split("\r\n").skip(1) {
+                if let Some((name, value)) = line.split_once(':') {
+                    headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
+                }
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+                .await
+                .unwrap();
+            all.push(headers);
+        }
+        all
+    });
+    (addr, task)
+}
+
+/// The proxy caches identity per user for 30 s. Assigning a role on the
+/// Groups page must reach the very next proxied request, not the next TTL.
+#[tokio::test]
+async fn assigning_a_role_reaches_the_next_request() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "alice",
+        "alicepass1",
+        Role::Viewer,
+        false,
+        &["analysts".into(), "ops".into()],
+        None,
+    )
+    .await
+    .unwrap();
+    use ruscker_admin::db::group_roles;
+    group_roles::define(&db, "analysts", "leitor", None).await.unwrap();
+    group_roles::define(&db, "ops", "plantao", None).await.unwrap();
+    group_roles::assign(&db, "alice", "analysts", "leitor", None).await.unwrap();
+
+    let (upstream, capture) = echo_upstream_n(2).await;
+    let state = state(db, "roles-open", upstream).await;
+    let alice = state.admin_sessions.create(Role::Viewer, Some("alice".into())).await;
+    let alice = format!("{COOKIE_NAME}={alice}");
+    let admin = state.admin_sessions.create(Role::Admin, Some("root".into())).await;
+    let admin = format!("{COOKIE_NAME}={admin}");
+
+    // First request fills the identity cache.
+    send(state.clone(), "/api/roles-open/data", Some(&alice), false).await;
+
+    let response = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/groups/roles/assign")
+                .header(header::COOKIE, &admin)
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .body(Body::from("group=ops&username=alice&role=plantao"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+
+    send(state, "/api/roles-open/data", Some(&alice), false).await;
+    let seen = capture.await.unwrap();
+    assert_eq!(
+        seen[0].get("x-ruscker-user-roles").map(String::as_str),
+        Some("analysts:leitor")
+    );
+    assert_eq!(
+        seen[1].get("x-ruscker-user-roles").map(String::as_str),
+        Some("analysts:leitor,ops:plantao"),
+        "the assignment must invalidate the cached identity"
     );
 }

@@ -190,6 +190,41 @@ fields as `X-Ruscker-User-Email` and `X-Ruscker-User-Setor`. A claim with
 no stored value is omitted. These headers are forwarded only for signed-in
 users and work on both HTTP requests and WebSocket handshakes.
 
+Add `roles` to the same list (`identity-claims: [roles]`, the **Group
+roles** checkbox in the app form) to send the user's [group
+roles](#group-roles) as `X-Ruscker-User-Roles`. The value is a
+comma-separated list of `GROUP:ROLE` entries; the group name is
+percent-encoded (UTF-8) so a `:`, `,`, space or accent in it can never
+break the split, and the role is sent as is (it is restricted to
+`A-Z a-z 0-9 _ . -`). A user in the group `Fazenda: núcleo A` holding
+`analista` and `gestor` produces:
+
+```text
+X-Ruscker-User-Roles: Fazenda%3A%20n%C3%BAcleo%20A:analista,Fazenda%3A%20n%C3%BAcleo%20A:gestor
+```
+
+When the app is restricted by `access-groups`, only the roles of those
+groups are sent; an app without `access-groups` receives all of the user's
+group roles. Only roles of groups the user currently belongs to are sent,
+and the header is omitted when there is nothing to send. Reading it:
+
+```r
+# Shiny: session$request$HTTP_X_RUSCKER_USER_ROLES
+# plumber2: request$get_header("X-Ruscker-User-Roles")
+parse_roles <- function(h) {
+  if (is.null(h) || !nzchar(h)) return(data.frame(group = character(), role = character()))
+  parts <- strsplit(strsplit(h, ",", fixed = TRUE)[[1]], ":", fixed = TRUE)
+  decode <- function(x) { x <- utils::URLdecode(x); Encoding(x) <- "UTF-8"; x }
+  data.frame(group = vapply(parts, function(p) decode(p[1]), ""),
+             role  = vapply(parts, `[`, "", 2))
+}
+```
+
+```python
+from urllib.parse import unquote
+roles = [(unquote(g), r) for g, r in (e.split(":") for e in h.split(","))] if h else []
+```
+
 Treat them as trusted identity only when the app is reachable exclusively
 through Ruscker. The proxy strips all client-supplied `X-SP-*` and
 `X-Ruscker-User-*` headers before inserting its authoritative values, which
@@ -475,9 +510,9 @@ Semantics worth knowing:
   webhook configured in the System tab (see below).
 
 ### Groups
-Groups (`/admin/groups`, admin-only) gate which apps a user sees. They're
+Groups (`/admin/groups`) gate which apps a user sees. They're
 **derived**, not a separate table: a group exists as long as a user belongs
-to it or an app lists it under `access-groups`. The page shows every group
+to it, an app lists it under `access-groups`, or it has group roles. The page shows every group
 with its members and the apps it gates, and lets you edit them in place:
 
 - **Rename** a group — the change propagates across every user membership
@@ -486,6 +521,39 @@ with its members and the apps it gates, and lets you edit them in place:
   becomes open to all).
 - **Add / remove members** inline, and **create** a group by adding its
   first member under a new name.
+
+Rename, delete and create are Admin-only. An Editor sees only the groups
+they belong to and may add or remove non-Admin members there; anything
+outside that scope answers *404 Not Found*.
+
+#### Group roles
+
+Each group card also has a **Group roles** area. A group role is a label
+such as `gestor` or `analista` that a hosted app reads (through the
+`X-Ruscker-User-Roles` header, see
+[Identity headers to apps](#identity-headers-to-apps)) to decide what the
+user may do *inside the app*. It is unrelated to the account role
+(Admin / Editor / Viewer) and grants nothing in Ruscker itself.
+
+- Roles are defined **per group** — `gestor` in two groups is two different
+  roles. A name is 1–40 characters of `A-Z a-z 0-9 _ . -` (no spaces or
+  accents, because it travels in a header).
+- **Defining or removing** a role is Admin-only, like renaming a group.
+  Removing a role takes it away from everyone who held it.
+- **Assigning** a role to a member (and taking it away) is open to an
+  Editor inside their own groups, with the same 404 rule as membership.
+  A user can hold several roles in a group, but only in groups they belong
+  to and only roles defined there.
+- Roles follow the group: renaming a group carries its roles and holders
+  along, deleting it drops them, and a user who leaves a group (from this
+  page, the user form, or account deletion) loses the roles they had in it.
+  Re-joining the group does not bring them back.
+
+Every change is recorded in the audit log (`group-role.*`) and reaches the
+next proxied request on the node that made it. In an active-active
+deployment the other nodes keep their cached view of a user for up to 30
+seconds, so allow that long for a removed role to stop being sent
+everywhere.
 
 Edits touch the database-managed users and apps. An app defined in the
 `serve --config` YAML stays read-only here (edit the file for those).

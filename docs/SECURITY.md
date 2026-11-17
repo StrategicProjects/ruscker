@@ -472,12 +472,16 @@ actually flows, and why it is **deliberately not TLS**:
   Exposing a container's published port lets a caller bypass the proxy and
   forge those headers directly. Ruscker strips inbound claims and injects
   authoritative `X-SP-UserId` / `X-SP-UserGroups` and explicitly selected
-  `X-Ruscker-User-Email` / `X-Ruscker-User-Setor` claims only on opted-in
-  specs and only for signed-in users. The same stripping and injection rules
+  `X-Ruscker-User-Email` / `X-Ruscker-User-Setor` / `X-Ruscker-User-Roles`
+  claims only on opted-in specs and only for signed-in users. The same stripping and injection rules
   apply to HTTP and WebSocket handshakes; a selected claim with no value is
   omitted. Ruscker cannot protect a separate network path around the proxy.
   E-mail and department/unit values are PII; operators should enable each
-  claim only for apps that need and are trusted to process it.
+  claim only for apps that need and are trusted to process it. Group roles
+  (#1067) are minimized per app: a spec restricted by `access-groups`
+  receives only the roles of those groups, and the group names are
+  percent-encoded so a crafted name cannot inject an extra `GROUP:ROLE`
+  entry into the header.
 
 ### Forwarded-header trust model
 

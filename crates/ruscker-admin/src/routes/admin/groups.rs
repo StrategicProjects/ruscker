@@ -38,6 +38,10 @@ pub fn routes() -> Router<AppState> {
         .route("/admin/groups/delete", post(delete))
         .route("/admin/groups/members/add", post(add_member))
         .route("/admin/groups/members/remove", post(remove_member))
+        .route("/admin/groups/roles/define", post(define_role))
+        .route("/admin/groups/roles/remove", post(remove_role))
+        .route("/admin/groups/roles/assign", post(assign_role))
+        .route("/admin/groups/roles/unassign", post(unassign_role))
 }
 
 /// One app reference inside a group — id, display name, plus the card
@@ -61,11 +65,24 @@ impl AppRef {
     }
 }
 
-/// A derived group with its members and the apps it gates.
+/// A derived group with its members, the apps it gates and its group
+/// roles (#1067).
 struct GroupView {
     name: String,
     members: Vec<String>,
     apps: Vec<AppRef>,
+    /// Roles defined in this group (sorted).
+    roles: Vec<String>,
+    /// Visible members that hold at least one role, with those roles.
+    /// Built only from members already on this card, so an Editor never
+    /// sees the roles of an account outside their scope.
+    holders: Vec<HolderView>,
+}
+
+/// One member of a group card and the group roles they hold there.
+struct HolderView {
+    username: String,
+    roles: Vec<String>,
 }
 
 #[derive(Template)]
@@ -91,12 +108,20 @@ struct GroupsPage<'a> {
     /// Eligible usernames for the "add member" picker. Editors never receive
     /// Admin targets; unscoped Admins receive every account.
     all_users: Vec<String>,
+    /// A scoped Editor's own (normalized) username: their row gets no
+    /// group-role assign/unassign controls (#1067). `None` for Admins.
+    self_target: Option<String>,
     flash: Option<String>,
 }
 
 impl GroupsPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// Whether `username` is the scoped Editor viewing the page.
+    fn is_self(&self, username: &str) -> bool {
+        self.self_target.as_deref() == Some(username)
     }
 
     fn kpis(&self) -> [KpiMetric; 3] {
@@ -188,10 +213,47 @@ async fn index(
         }
     }
 
+    // Group roles (#1067). A group that only has role definitions still
+    // exists for the Admin (who can delete it); an Editor only ever sees the
+    // groups already in their scope. A failed read renders no roles rather
+    // than failing the page — nothing here grants access.
+    let (mut definitions, assignments) = match state.db.as_ref() {
+        Some(db) => {
+            let defs = crate::db::group_roles::list_definitions(db).await;
+            let held = crate::db::group_roles::list_assignments(db).await;
+            if let Err(error) = defs.as_ref().and(held.as_ref()) {
+                tracing::warn!(error = ?error, "group role lookup failed; showing none");
+            }
+            (defs.unwrap_or_default(), held.unwrap_or_default())
+        }
+        None => Default::default(),
+    };
+    if scope.unscoped {
+        for group in definitions.keys() {
+            map.entry(group.clone()).or_default();
+        }
+    }
+
     let groups: Vec<GroupView> = map
         .into_iter()
-        .map(|(name, (members, app_ids))| GroupView {
+        .map(|(name, (members, app_ids))| {
+            let roles = definitions.remove(&name).unwrap_or_default();
+            let mut holders: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for a in assignments.iter().filter(|a| a.group == name) {
+                if members.contains(&a.username) && roles.contains(&a.role) {
+                    holders.entry(a.username.clone()).or_default().push(a.role.clone());
+                }
+            }
+            let holders: Vec<HolderView> = holders
+                .into_iter()
+                .map(|(username, roles)| HolderView { username, roles })
+                .collect();
+            (name, members, app_ids, roles, holders)
+        })
+        .map(|(name, members, app_ids, roles, holders)| GroupView {
             name,
+            roles,
+            holders,
             members: members.into_iter().collect(),
             apps: app_ids
                 .into_iter()
@@ -239,6 +301,9 @@ async fn index(
         kpi_apps,
         public_apps,
         all_users,
+        self_target: (!scope.unscoped)
+            .then(|| scope.actor.as_deref().map(crate::db::users::normalize_username))
+            .flatten(),
         flash: q.flash,
     };
     super::render(&page)
@@ -321,8 +386,25 @@ async fn create(
 /// Rewrite group `old` everywhere it's referenced. `new = Some(n)` renames it
 /// (folding into `n` if a user/spec already has both); `new = None` deletes
 /// it. Touches user memberships, spec `access-groups` and SSO client gates.
-async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) {
-    let Some(db) = state.db.as_ref() else { return };
+///
+/// Returns `false` — having changed NOTHING — when a rename could not
+/// move the group's roles first. Carrying on in that case would be
+/// destructive: each member's `set_groups` prunes the roles they held
+/// under the old name, so every holder would silently lose them while
+/// the page reported success.
+async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) -> bool {
+    let Some(db) = state.db.as_ref() else { return false };
+
+    // Group roles (#1067) move BEFORE the memberships: `set_groups` below
+    // prunes the assignments of every group a user leaves, so on a rename
+    // they must already live under the new name. On a delete the order is
+    // reversed (prune per member first, then drop the definitions, below).
+    if let Some(n) = new {
+        if let Err(e) = crate::db::group_roles::rename_group(db, old, n, Some(actor)).await {
+            tracing::error!(error = ?e, "group rename aborted: could not move its group roles");
+            return false;
+        }
+    }
 
     if let Ok(users) = crate::db::users::list_all(db).await {
         for u in users {
@@ -374,6 +456,15 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
     if let Err(e) = crate::db::oidc_clients::rewrite_group(db, old, new, Some(actor)).await {
         tracing::warn!(error = ?e, "group rewrite (sso clients) failed");
     }
+
+    if new.is_none() {
+        if let Err(e) = crate::db::group_roles::delete_group(db, old, Some(actor)).await {
+            tracing::warn!(error = ?e, "group rewrite (group roles) failed");
+        }
+    }
+    // Roles moved or vanished: the header must follow on the next request.
+    state.invalidate_identity_cache();
+    true
 }
 
 #[derive(Deserialize)]
@@ -389,8 +480,11 @@ async fn rename(admin: RequireAdmin, State(state): State<AppState>, Form(f): For
     if old == new {
         return redirect_flash("renamed");
     }
-    rewrite_group(&state, &old, Some(&new), admin.actor()).await;
-    redirect_flash("renamed")
+    if rewrite_group(&state, &old, Some(&new), admin.actor()).await {
+        redirect_flash("renamed")
+    } else {
+        redirect_flash("failed")
+    }
 }
 
 #[derive(Deserialize)]
@@ -402,7 +496,8 @@ async fn delete(admin: RequireAdmin, State(state): State<AppState>, Form(f): For
     let Some(name) = clean_group(&f.name) else {
         return redirect_flash("bad-input");
     };
-    rewrite_group(&state, &name, None, admin.actor()).await;
+    // A delete has no "move roles first" step, so it cannot abort.
+    let _ = rewrite_group(&state, &name, None, admin.actor()).await;
     redirect_flash("deleted")
 }
 
@@ -487,5 +582,215 @@ async fn remove_member(
             .await
         }
         _ => not_found(),
+    }
+}
+
+// ── Group roles (#1067) ─────────────────────────────────────────────────
+//
+// Defining/removing a role changes the group's vocabulary, like rename or
+// delete: Admin only. Assigning/unassigning is membership-level work, so an
+// Editor may do it inside their own groups, with the same 404-not-403 rule
+// as add/remove member. Every precondition is read from the authoritative
+// rows (`users::fetch`, the group-roles tables), never from the page's view
+// structs; `db::group_roles::assign` re-checks membership and definition in
+// its own transaction.
+
+#[derive(Deserialize)]
+struct RoleForm {
+    group: String,
+    role: String,
+}
+
+#[derive(Deserialize)]
+struct AssignForm {
+    group: String,
+    username: String,
+    role: String,
+}
+
+/// Whether a group currently exists in the derived model: some user
+/// belongs to it, some spec gates on it, or it already has roles. Fails
+/// closed (`false`) when a lookup errors.
+async fn group_exists(state: &AppState, group: &str) -> bool {
+    let Some(db) = state.db.as_ref() else {
+        return false;
+    };
+    match crate::db::group_roles::list_definitions(db).await {
+        Ok(defs) if defs.contains_key(group) => return true,
+        Ok(_) => {}
+        Err(_) => return false,
+    }
+    match crate::db::users::list_all(db).await {
+        Ok(users) if users.iter().any(|u| u.groups.iter().any(|g| g == group)) => return true,
+        Ok(_) => {}
+        Err(_) => return false,
+    }
+    crate::catalog::effective_specs_cached(state)
+        .await
+        .iter()
+        .any(|spec| {
+            spec.access_groups
+                .as_deref()
+                .is_some_and(|groups| groups.iter().any(|g| g == group))
+        })
+}
+
+async fn define_role(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Form(form): Form<RoleForm>,
+) -> Response {
+    let Some(group) = clean_group(&form.group) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(role) = crate::db::group_roles::clean_role(&form.role) else {
+        return redirect_flash("bad-role");
+    };
+    // Defining a role must not conjure a group out of a typo.
+    if !group_exists(&state, &group).await {
+        return not_found();
+    }
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::group_roles::define(db, &group, &role, Some(admin.actor())).await {
+        Ok(_) => redirect_flash("role-added"),
+        Err(error) => {
+            tracing::warn!(group = %group, error = ?error, "group role define failed");
+            redirect_flash("bad-input")
+        }
+    }
+}
+
+async fn remove_role(
+    admin: RequireAdmin,
+    State(state): State<AppState>,
+    Form(form): Form<RoleForm>,
+) -> Response {
+    let (Some(group), Some(role)) = (
+        clean_group(&form.group),
+        crate::db::group_roles::clean_role(&form.role),
+    ) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::group_roles::remove(db, &group, &role, Some(admin.actor())).await {
+        Ok(true) => {
+            // Holders lost the role: the next proxied request must not
+            // still carry it.
+            state.invalidate_identity_cache();
+            redirect_flash("role-removed")
+        }
+        Ok(false) => not_found(),
+        Err(error) => {
+            tracing::warn!(group = %group, error = ?error, "group role remove failed");
+            redirect_flash("bad-input")
+        }
+    }
+}
+
+/// Whether a scoped Editor is targeting their own account. Same rule as
+/// `users.rs::is_scoped_self_edit`, compared on the normalized username:
+/// group roles are authorization data inside the hosted apps, so an Editor
+/// granting their own would be self-escalation there (and, for symmetry,
+/// they cannot unassign their own either — though leaving the group, which
+/// only ever REDUCES what they hold, remains possible). An
+/// unscoped Admin is not restricted.
+fn is_scoped_self_target(scope: &EditorScope, username: &str) -> bool {
+    !scope.unscoped
+        && scope
+            .actor
+            .as_deref()
+            .is_some_and(|actor| crate::db::users::normalize_username(actor) == username)
+}
+
+/// Shared authorization for assign/unassign. Returns the authoritative
+/// user row only when the caller owns the group, may manage the user, is
+/// not a scoped Editor acting on themselves, and the user really belongs
+/// to the group; anything else is `None` → 404.
+async fn authorize_role_target(
+    scope: &EditorScope,
+    state: &AppState,
+    group: &str,
+    username: &str,
+) -> Option<UserRow> {
+    if !scope.may_touch_group(group) {
+        return None;
+    }
+    let db = state.db.as_ref()?;
+    let user = crate::db::users::fetch(db, username).await.ok()??;
+    if is_scoped_self_target(scope, &user.username) {
+        return None;
+    }
+    (scope.may_touch_user(&user) && user.groups.iter().any(|g| g == group)).then_some(user)
+}
+
+async fn assign_role(
+    scope: EditorScope,
+    State(state): State<AppState>,
+    Form(form): Form<AssignForm>,
+) -> Response {
+    let (Some(group), Some(role)) = (
+        clean_group(&form.group),
+        crate::db::group_roles::clean_role(&form.role),
+    ) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(user) = authorize_role_target(&scope, &state, &group, &form.username).await else {
+        return not_found();
+    };
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    use crate::db::group_roles::AssignOutcome;
+    match crate::db::group_roles::assign(db, &user.username, &group, &role, Some(scope.actor()))
+        .await
+    {
+        Ok(AssignOutcome::Assigned) => {
+            state.invalidate_identity_cache();
+            redirect_flash("role-assigned")
+        }
+        Ok(AssignOutcome::AlreadyHeld) => redirect_flash("role-assigned"),
+        // The role is not defined in this group (or membership changed in
+        // between): nothing to point at.
+        Ok(AssignOutcome::UnknownRole | AssignOutcome::NotMember) => not_found(),
+        Err(error) => {
+            tracing::warn!(user = %user.username, error = ?error, "group role assign failed");
+            redirect_flash("bad-input")
+        }
+    }
+}
+
+async fn unassign_role(
+    scope: EditorScope,
+    State(state): State<AppState>,
+    Form(form): Form<AssignForm>,
+) -> Response {
+    let (Some(group), Some(role)) = (
+        clean_group(&form.group),
+        crate::db::group_roles::clean_role(&form.role),
+    ) else {
+        return redirect_flash("bad-input");
+    };
+    let Some(user) = authorize_role_target(&scope, &state, &group, &form.username).await else {
+        return not_found();
+    };
+    let Some(db) = state.db.as_ref() else {
+        return redirect_flash("bad-input");
+    };
+    match crate::db::group_roles::unassign(db, &user.username, &group, &role, Some(scope.actor()))
+        .await
+    {
+        Ok(true) => {
+            state.invalidate_identity_cache();
+            redirect_flash("role-unassigned")
+        }
+        Ok(false) => not_found(),
+        Err(error) => {
+            tracing::warn!(user = %user.username, error = ?error, "group role unassign failed");
+            redirect_flash("bad-input")
+        }
     }
 }

@@ -83,13 +83,20 @@ struct Identity {
     groups: Arc<Vec<String>>,
     email: Option<String>,
     setor: Option<String>,
+    /// Every `(group, role)` the user holds (#1067), unfiltered.
+    group_roles: Arc<Vec<(String, String)>>,
 }
 
 impl Identity {
+    /// `spec_access_groups` is the spec's non-empty `access-groups`, if any:
+    /// it narrows the group roles disclosed to that app (data minimization,
+    /// #1067). `None` (open spec, or one restricted only by `access-users`)
+    /// discloses all of the user's group roles.
     fn header_pairs(
         &self,
         add_default_http_headers: bool,
         claims: &[IdentityClaim],
+        spec_access_groups: Option<&[String]>,
     ) -> Vec<(String, String)> {
         let mut headers = Vec::new();
         if add_default_http_headers {
@@ -98,15 +105,68 @@ impl Identity {
         }
         for claim in claims {
             let (name, value) = match claim {
-                IdentityClaim::Email => ("X-Ruscker-User-Email", self.email.as_deref()),
-                IdentityClaim::Setor => ("X-Ruscker-User-Setor", self.setor.as_deref()),
+                IdentityClaim::Email => ("X-Ruscker-User-Email", self.email.clone()),
+                IdentityClaim::Setor => ("X-Ruscker-User-Setor", self.setor.clone()),
+                IdentityClaim::Roles => (
+                    "X-Ruscker-User-Roles",
+                    encode_group_roles(&self.group_roles, &self.groups, spec_access_groups),
+                ),
             };
             if let Some(value) = value.filter(|value| !value.trim().is_empty()) {
-                headers.push((name.into(), value.to_string()));
+                headers.push((name.into(), value));
             }
         }
         headers
     }
+}
+
+/// Encode group roles for `X-Ruscker-User-Roles` (#1067).
+///
+/// Format: comma-separated `GROUP:ROLE` entries, where `GROUP` is the group
+/// name **percent-encoded as UTF-8** (every byte outside `A-Z a-z 0-9 - . _
+/// ~` becomes `%XX`, uppercase hex) and `ROLE` is the role name verbatim
+/// (already restricted to `[A-Za-z0-9_.-]`). So a group named
+/// `Fazenda: núcleo A` with roles `analista` and `gestor` gives
+///
+/// ```text
+/// Fazenda%3A%20n%C3%BAcleo%20A:analista,Fazenda%3A%20n%C3%BAcleo%20A:gestor
+/// ```
+///
+/// Why this shape: group names may contain almost anything (`:`, spaces,
+/// accents) and a header value must be visible ASCII. After encoding,
+/// neither part can contain `,` or `:`, so the value splits unambiguously
+/// — first on `,`, then each entry on its ONLY `:` — and no group name,
+/// however creative, can smuggle in an extra entry. Decoding is one call in
+/// R (`URLdecode`) or Python (`urllib.parse.unquote`).
+///
+/// Only roles of groups the user CURRENTLY belongs to are sent (defence in
+/// depth over the storage invariant), narrowed to `spec_access_groups` when
+/// given. `None` when nothing remains, so the header is omitted.
+fn encode_group_roles(
+    group_roles: &[(String, String)],
+    member_of: &[String],
+    spec_access_groups: Option<&[String]>,
+) -> Option<String> {
+    let entries: Vec<String> = group_roles
+        .iter()
+        .filter(|(group, _)| member_of.iter().any(|g| g == group))
+        .filter(|(group, _)| spec_access_groups.is_none_or(|allowed| allowed.iter().any(|g| g == group)))
+        .map(|(group, role)| format!("{}:{role}", percent_encode_group(group)))
+        .collect();
+    (!entries.is_empty()).then(|| entries.join(","))
+}
+
+/// RFC 3986 percent-encoding of everything but the unreserved set.
+fn percent_encode_group(group: &str) -> String {
+    let mut out = String::with_capacity(group.len());
+    for byte in group.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 impl<S: Send + Sync> FromRequestParts<S> for MaybePeer {
@@ -422,6 +482,7 @@ async fn forward(
                 groups: cached.groups.clone(),
                 email: cached.email.clone(),
                 setor: cached.setor.clone(),
+                group_roles: cached.group_roles.clone(),
             })
         }
         _ => None,
@@ -432,6 +493,7 @@ async fn forward(
             identity.header_pairs(
                 spec.effective_add_default_http_headers(),
                 &identity_claims,
+                spec.access_groups.as_deref().filter(|groups| !groups.is_empty()),
             )
         })
         .unwrap_or_default();
@@ -1299,11 +1361,29 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
     let generation = state.identity_cache.generation();
     let identity = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
-            Ok(Some(user)) => Arc::new(CachedIdentity {
-                groups: Arc::new(user.groups),
-                email: user.email,
-                setor: user.setor,
-            }),
+            Ok(Some(user)) => {
+                // Group roles (#1067). A failed read sends no roles (fail
+                // closed) and is NOT cached, so the next request retries
+                // instead of serving the gap for the whole TTL.
+                let group_roles = match crate::db::group_roles::roles_of_user(db, username).await {
+                    Ok(pairs) => pairs,
+                    Err(error) => {
+                        tracing::warn!(user = username, error = ?error, "group role lookup failed");
+                        return Arc::new(CachedIdentity {
+                            groups: Arc::new(user.groups),
+                            email: user.email,
+                            setor: user.setor,
+                            group_roles: Arc::default(),
+                        });
+                    }
+                };
+                Arc::new(CachedIdentity {
+                    groups: Arc::new(user.groups),
+                    email: user.email,
+                    setor: user.setor,
+                    group_roles: Arc::new(group_roles),
+                })
+            }
             Ok(None) => Arc::new(CachedIdentity::default()),
             Err(error) => {
                 tracing::warn!(user = username, error = ?error, "identity lookup failed");
@@ -2664,9 +2744,14 @@ mod tests {
             groups: Arc::new(vec!["staff".into()]),
             email: Some("alice@example.test".into()),
             setor: Some("  ".into()),
+            group_roles: Arc::default(),
         };
 
-        let headers = identity.header_pairs(false, &[IdentityClaim::Email, IdentityClaim::Setor]);
+        let headers = identity.header_pairs(
+            false,
+            &[IdentityClaim::Email, IdentityClaim::Setor, IdentityClaim::Roles],
+            None,
+        );
         assert_eq!(
             headers,
             vec![(
@@ -2675,7 +2760,7 @@ mod tests {
             )]
         );
 
-        let defaults_only = identity.header_pairs(true, &[]);
+        let defaults_only = identity.header_pairs(true, &[], None);
         assert_eq!(
             defaults_only,
             vec![
@@ -2683,6 +2768,61 @@ mod tests {
                 ("X-SP-UserGroups".to_string(), "staff".to_string()),
             ]
         );
+    }
+
+    /// The worked example of the `X-Ruscker-User-Roles` encoding (#1067):
+    /// a group whose name carries `:`, spaces and an accent.
+    #[test]
+    fn group_roles_header_percent_encodes_the_group_name() {
+        let group = "Fazenda: núcleo A".to_string();
+        let roles = vec![
+            (group.clone(), "analista".to_string()),
+            (group.clone(), "gestor".to_string()),
+        ];
+        assert_eq!(
+            encode_group_roles(&roles, std::slice::from_ref(&group), None).as_deref(),
+            Some("Fazenda%3A%20n%C3%BAcleo%20A:analista,Fazenda%3A%20n%C3%BAcleo%20A:gestor")
+        );
+        // Unreserved characters pass; separators and `%` itself are escaped.
+        assert_eq!(percent_encode_group("a-b.c_d~e"), "a-b.c_d~e");
+        assert_eq!(percent_encode_group("a,b:c%d"), "a%2Cb%3Ac%25d");
+    }
+
+    /// A creatively named group cannot forge another group's role: what
+    /// would be a separator in the name is escaped, so the value still
+    /// splits into exactly one entry per real role.
+    #[test]
+    fn group_roles_header_cannot_be_forged_by_a_group_name() {
+        let group = "x:admin,ops".to_string();
+        let roles = vec![(group.clone(), "leitor".to_string())];
+        let value = encode_group_roles(&roles, std::slice::from_ref(&group), None).unwrap();
+        assert_eq!(value, "x%3Aadmin%2Cops:leitor");
+        let entries: Vec<&str> = value.split(',').collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].matches(':').count(), 1);
+    }
+
+    #[test]
+    fn group_roles_header_keeps_current_members_and_the_spec_filter() {
+        let roles = vec![
+            ("ops".to_string(), "plantao".to_string()),
+            ("saude".to_string(), "medico".to_string()),
+            ("ex-time".to_string(), "lider".to_string()),
+        ];
+        let member_of = vec!["ops".to_string(), "saude".to_string()];
+        // A role of a group the user left never goes out.
+        assert_eq!(
+            encode_group_roles(&roles, &member_of, None).as_deref(),
+            Some("ops:plantao,saude:medico")
+        );
+        let only_ops = vec!["ops".to_string()];
+        assert_eq!(
+            encode_group_roles(&roles, &member_of, Some(&only_ops)).as_deref(),
+            Some("ops:plantao")
+        );
+        let unrelated = vec!["outro".to_string()];
+        assert_eq!(encode_group_roles(&roles, &member_of, Some(&unrelated)), None);
+        assert_eq!(encode_group_roles(&[], &member_of, None), None);
     }
 
     #[test]

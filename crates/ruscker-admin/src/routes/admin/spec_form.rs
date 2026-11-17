@@ -521,6 +521,8 @@ pub struct SpecForm {
     pub identity_claim_email: String,
     /// Checkbox ("on") ⇒ disclose the user's setor/department to this app.
     pub identity_claim_setor: String,
+    /// Checkbox ("on") ⇒ disclose the user's group roles (#1067).
+    pub identity_claim_roles: String,
 
     // ── Advanced · Resources (requests + body cap) ──────────────
     /// Soft CPU reservation in fractional cores (`container-cpu-request`).
@@ -676,6 +678,7 @@ impl SpecForm {
             add_default_http_headers: checkbox(spec.effective_add_default_http_headers()),
             identity_claim_email: checkbox(identity_claims.contains(&IdentityClaim::Email)),
             identity_claim_setor: checkbox(identity_claims.contains(&IdentityClaim::Setor)),
+            identity_claim_roles: checkbox(identity_claims.contains(&IdentityClaim::Roles)),
             container_cpu_request: spec
                 .container_cpu_request
                 .map(|n| n.to_string())
@@ -792,12 +795,12 @@ impl SpecForm {
         };
 
         // Preserve unknown/future claim names from the base spec while the
-        // two recognized checkboxes remain authoritative for email/setor.
+        // recognized checkboxes remain authoritative for email/setor/roles.
         let mut identity_claims: Vec<String> = base
             .and_then(|spec| spec.identity_claims.as_ref())
             .into_iter()
             .flatten()
-            .filter(|name| !matches!(name.trim(), "email" | "setor"))
+            .filter(|name| !matches!(name.trim(), "email" | "setor" | "roles"))
             .cloned()
             .collect();
         if !self.identity_claim_email.trim().is_empty() {
@@ -805,6 +808,9 @@ impl SpecForm {
         }
         if !self.identity_claim_setor.trim().is_empty() {
             identity_claims.push("setor".into());
+        }
+        if !self.identity_claim_roles.trim().is_empty() {
+            identity_claims.push("roles".into());
         }
         let identity_claims = (!identity_claims.is_empty()).then_some(identity_claims);
 
@@ -2234,7 +2240,7 @@ proxy:
       require-mfa: true
       mfa-validity-days: 12
       add-default-http-headers: true
-      identity-claims: [email, future-claim, setor]
+      identity-claims: [email, future-claim, setor, roles]
       placement: bin-pack
       anti-affinity: true
       routing-strategy: round-robin
@@ -2267,7 +2273,7 @@ proxy:
         assert!(merged.effective_add_default_http_headers());
         assert_eq!(
             merged.effective_identity_claims(),
-            vec![IdentityClaim::Email, IdentityClaim::Setor]
+            vec![IdentityClaim::Email, IdentityClaim::Setor, IdentityClaim::Roles]
         );
         assert!(merged
             .identity_claims

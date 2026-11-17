@@ -950,6 +950,9 @@ pub async fn update_account(
                     "update account {username}: no-op (not found, or would strip the last admin)"
                 );
             }
+            // Same transaction as the membership change (#1067).
+            crate::db::group_roles::prune_memberships_sqlite(&mut tx, &username, &groups, actor, now)
+                .await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, 'user.update', ?, ?, ?)",
@@ -992,6 +995,8 @@ pub async fn update_account(
                     "update account {username}: no-op (not found, or would strip the last admin)"
                 );
             }
+            crate::db::group_roles::prune_memberships_postgres(&mut tx, &username, &groups, actor, now)
+                .await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES ($1, 'user.update', $2, $3, $4)",
@@ -1099,6 +1104,10 @@ pub async fn set_groups(
             if res.rows_affected() == 0 {
                 anyhow::bail!("user {username} not found");
             }
+            // Leaving a group drops the group roles held there (#1067), in
+            // this same transaction — every membership writer passes here.
+            crate::db::group_roles::prune_memberships_sqlite(&mut tx, &username, &groups, actor, now)
+                .await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, 'user.groups', ?, ?, ?)",
@@ -1125,6 +1134,8 @@ pub async fn set_groups(
             if res.rows_affected() == 0 {
                 anyhow::bail!("user {username} not found");
             }
+            crate::db::group_roles::prune_memberships_postgres(&mut tx, &username, &groups, actor, now)
+                .await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES ($1, 'user.groups', $2, $3, $4)",
@@ -1279,6 +1290,14 @@ pub async fn delete(db: &ConfigDb, username: &str, actor: Option<&str>) -> Resul
             if res.rows_affected() == 0 {
                 anyhow::bail!("delete user {username}: no-op (not found, or would strip the last admin)");
             }
+            // The FK cascades group-role assignments (#1067); the explicit
+            // delete keeps that true even on a connection without
+            // `PRAGMA foreign_keys`.
+            sqlx::query("DELETE FROM user_group_roles WHERE username = ?")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("drop group roles of deleted user")?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES (?, 'user.delete', ?, NULL, ?)",
@@ -1310,6 +1329,11 @@ pub async fn delete(db: &ConfigDb, username: &str, actor: Option<&str>) -> Resul
             if res.rows_affected() == 0 {
                 anyhow::bail!("delete user {username}: no-op (not found, or would strip the last admin)");
             }
+            sqlx::query("DELETE FROM user_group_roles WHERE username = $1")
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("drop group roles of deleted user")?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
                  VALUES ($1, 'user.delete', $2, NULL, $3)",

@@ -35,6 +35,22 @@
   <div class="spec-form-help">{{ self.t("admin-sso-logo-help") }}</div>
 </div>
 
+{# What the system may learn about the person (#1068). `openid` — the
+   permanent id — is always given; each of these is optional. #}
+<div class="spec-form-field">
+  <span class="spec-form-label">{{ self.t("admin-sso-scopes") }}</span>
+  <input type="hidden" name="scopes_present" value="1">
+  <div style="display:flex;flex-wrap:wrap;gap:6px 18px">
+    {% for s in ["profile", "email", "groups", "roles", "setor"] %}
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px">
+      <input type="checkbox" name="scope_{{ s }}" value="on" {% if form.scope_checked(s) %}checked{% endif %}>
+      <span>{{ self.t(&format!("admin-sso-scope-{}", s)) }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  <div class="spec-form-help">{{ self.t("admin-sso-scopes-help") }}</div>
+</div>
+
 <label class="toggle-row">
   <div>
     <div class="toggle-row__label">{{ self.t("admin-sso-require-mfa") }}</div>

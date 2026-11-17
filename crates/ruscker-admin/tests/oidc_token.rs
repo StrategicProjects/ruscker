@@ -97,6 +97,7 @@ async fn fixture(yaml: &str) -> Fixture {
         require_mfa: false,
         enabled: true,
         logo: None,
+        allowed_scopes: None,
     };
     let radar = ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&["fiscal"], CB), None)
         .await
@@ -402,6 +403,70 @@ async fn name_setor_and_group_roles_claims() {
     assert_eq!(claims_of(&r)["group_roles"], json!({}));
 }
 
+/// Per-client allowed scopes: a client gets only the optional scopes an
+/// Admin ticked for it, whatever it asks for; an untouched (older)
+/// client is unrestricted; and a scope withdrawn after a code or a token
+/// was issued stops flowing at once.
+#[tokio::test]
+async fn a_client_gets_only_the_scopes_it_is_allowed() {
+    use ruscker_admin::db::oidc_clients::{self, ClientSettings};
+    let f = fixture(ON).await;
+    let ask = "openid profile email setor groups roles";
+    let claims_of = |r: &Reply| jwt_parts(r.json["id_token"].as_str().unwrap()).1;
+    let settings = |scopes: Option<Vec<&str>>| ClientSettings {
+        name: "Norma".into(),
+        redirect_uris: vec![CB.into()],
+        access_groups: vec![],
+        require_mfa: false,
+        enabled: true,
+        logo: None,
+        allowed_scopes: scopes.map(|l| l.into_iter().map(String::from).collect()),
+    };
+
+    // Unrestricted (the state of every client registered before): all of it.
+    let code = authorize(&f, "norma", ask).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.json["scope"], "openid profile email groups roles setor");
+
+    // Allowed `profile` only: the rest is dropped though it was asked for.
+    oidc_clients::update(&f.db, "norma", &settings(Some(vec!["profile"])), None).await.unwrap();
+    let code = authorize(&f, "norma", ask).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    assert_eq!(r.json["scope"], "openid profile");
+    let c = claims_of(&r);
+    assert_eq!(c["preferred_username"], "ana");
+    for absent in ["email", "groups", "group_roles", "setor"] {
+        assert!(c.get(absent).is_none(), "{absent} is not allowed for this client");
+    }
+
+    // A code issued while `profile` was allowed, redeemed after it was
+    // withdrawn: nothing but the id. The access token already issued
+    // above loses it too.
+    let code = authorize(&f, "norma", ask).await;
+    oidc_clients::update(&f.db, "norma", &settings(Some(vec![])), None).await.unwrap();
+    let late = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(late.json["scope"], "openid");
+    assert!(claims_of(&late).get("preferred_username").is_none());
+    let u = userinfo(&f, r.json["access_token"].as_str().unwrap()).await;
+    assert_eq!(u.status, StatusCode::OK);
+    assert!(u.json.get("preferred_username").is_none() && u.json.get("sub").is_some());
+
+    // `openid` alone is always possible — and then NOTHING names the
+    // person but the id: not the ID token, and not the access token,
+    // which the client can read too (signed, not encrypted).
+    let code = authorize(&f, "norma", ask).await;
+    assert_eq!(stored_scope(&f.db).await, "openid", "the grant itself is stored reduced");
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.json["scope"], "openid");
+    let (_, access) = jwt_parts(r.json["access_token"].as_str().unwrap());
+    assert_eq!(access["scope"], "openid");
+    for token in [&access, &claims_of(&r)] {
+        let text = token.to_string();
+        assert!(!text.contains("ana") && !text.contains("Ana"), "{text}");
+    }
+}
+
 #[tokio::test]
 async fn a_code_is_redeemed_once() {
     let f = fixture(ON).await;
@@ -452,6 +517,7 @@ async fn failed_client_authentication_does_not_burn_the_code() {
         require_mfa: false,
         enabled: false,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(token_basic(&f, "radar", &f.radar, &exchange(&code)).await.status, StatusCode::UNAUTHORIZED);
@@ -592,7 +658,7 @@ async fn userinfo_accepts_only_a_live_access_token_of_ours() {
     let now = chrono::Utc::now().timestamp();
     let claims = |patch: Value| {
         let mut c = json!({
-            "iss": ISSUER, "aud": ISSUER, "sub": user.id, "username": "ana",
+            "iss": ISSUER, "aud": ISSUER, "sub": user.id,
             "client_id": "radar", "scope": "openid profile", "iat": now, "exp": now + 60,
         });
         for (k, v) in patch.as_object().unwrap() {
@@ -721,7 +787,7 @@ async fn userinfo_refuses_a_token_we_did_not_sign() {
     // Same header and signature, claims swapped for another subject.
     let p: Vec<&str> = access.split('.').collect();
     let (_, mut claims) = jwt_parts(&access);
-    claims["username"] = json!("root");
+    claims["sub"] = json!("00000000-0000-0000-0000-000000000000");
     let forged = format!("{}.{}.{}", p[0], URL_SAFE_NO_PAD.encode(claims.to_string()), p[2]);
     assert_eq!(userinfo(&f, &forged).await.status, StatusCode::UNAUTHORIZED);
 
@@ -766,6 +832,7 @@ async fn userinfo_follows_revocation_and_accepts_post() {
         require_mfa: false,
         enabled: false,
         logo: None,
+        allowed_scopes: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "client disabled");
@@ -783,4 +850,13 @@ async fn the_endpoints_do_not_exist_when_the_provider_is_off() {
     let r = token_basic(&f, "radar", &f.radar, &exchange("x")).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     assert_eq!(userinfo(&f, "x").await.status, StatusCode::NOT_FOUND);
+}
+
+/// The scope stored with the most recent authorization code.
+async fn stored_scope(db: &ConfigDb) -> String {
+    let ConfigDb::Sqlite(pool) = db else { unreachable!() };
+    sqlx::query_scalar("SELECT scope FROM oidc_auth_codes ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }

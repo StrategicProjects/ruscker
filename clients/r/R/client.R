@@ -104,7 +104,7 @@ sso_start <- function(client) {
 #'
 #' 1. an `error` parameter -> `rusckersso_provider_error`;
 #' 2. `state` must equal `pending$state` -> `rusckersso_state_mismatch`;
-#' 3. `iss`, when present, must equal the issuer ->
+#' 3. `iss` must be present and equal the issuer ->
 #'    `rusckersso_issuer_mismatch`;
 #' 4. the code is exchanged at the token endpoint (client secret over HTTP
 #'    Basic, the `redirect_uri`, the `code_verifier`) ->
@@ -147,13 +147,13 @@ sso_finish <- function(client, query, pending) {
   }
 
   # 3. iss (RFC 9207) says which portal sent the person back.
-  if (!is.null(query[["iss"]])) {
-    iss <- single_param(query, "iss")
-    if (!identical(iss, client$issuer)) {
-      sso_abort("issuer_mismatch",
-                sprintf("The callback came from issuer `%s`, not `%s`.", iss, client$issuer),
-                actual = iss)
-    }
+  # The portal always sends it; requiring it means a callback from
+  # anywhere else cannot be mistaken for the portal's.
+  iss <- if (is.null(query[["iss"]])) NA_character_ else single_param(query, "iss")
+  if (!identical(iss, client$issuer)) {
+    sso_abort("issuer_mismatch",
+              sprintf("The callback came from issuer `%s`, not `%s`.", iss, client$issuer),
+              actual = iss)
   }
 
   # 4. and 5.

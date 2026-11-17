@@ -166,7 +166,7 @@ class RusckerSSO:
         *,
         http_client: httpx.Client | None = None,
         timeout: float = 10.0,
-        leeway: float = 30.0,
+        leeway: float = 60.0,
     ) -> None:
         self.issuer = issuer
         self.client_id = client_id
@@ -224,7 +224,7 @@ class RusckerSSO:
 
         1. an ``error`` parameter → :class:`ProviderError`;
         2. ``state`` differs from the stored one → :class:`StateMismatchError`;
-        3. ``iss``, when present, differs from the issuer → :class:`IssuerMismatchError`;
+        3. ``iss`` is absent or differs from the issuer → :class:`IssuerMismatchError`;
         4. the code exchange is refused → :class:`TokenExchangeError`;
         5. the ID token does not verify → :class:`InvalidIDTokenError`.
 
@@ -239,8 +239,10 @@ class RusckerSSO:
         if not _same(params.get("state", ""), pending.state):
             raise StateMismatchError("the callback's state is not the one this sign-in started with")
 
-        if "iss" in params and params["iss"] != self.issuer:
-            raise IssuerMismatchError(self.issuer, params["iss"], "the callback")
+        # The portal always says who it is (RFC 9207). Requiring it means a
+        # callback from anywhere else cannot be mistaken for the portal's.
+        if params.get("iss") != self.issuer:
+            raise IssuerMismatchError(self.issuer, str(params.get("iss")), "the callback")
 
         code = params.get("code")
         if not code:

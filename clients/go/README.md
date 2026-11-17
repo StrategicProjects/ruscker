@@ -169,7 +169,7 @@ Helpers: `HasGroup(g)`, `HasRole(group, role)`, `Roles(group)`.
 |---|---|---|
 | callback has `error=…` | `ErrProvider` | `*ProviderError` — `.Code` (`access_denied`, …), `.Description` |
 | `state` ≠ stored | `ErrStateMismatch` | — |
-| `iss` present and ≠ issuer | `ErrIssuerMismatch` | — |
+| `iss` absent or ≠ issuer | `ErrIssuerMismatch` | — |
 | no `code` | `ErrMissingCode` | — |
 | token endpoint refused / unreachable | `ErrTokenExchange` | `*TokenExchangeError` — `.Code` (`invalid_grant`, `invalid_client`), `.StatusCode` |
 | ID token invalid (signature, ES256, `iss`, `aud`, `exp`, `nonce`) | `ErrIDTokenInvalid` | `*IDTokenError` — `.Reason`, `.Err` |

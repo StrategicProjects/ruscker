@@ -124,6 +124,7 @@ Under **SSO → Clients** (Admin only), register each system:
 | **Allowed groups** | Only members of at least one of these groups can sign in to the system. Empty means any signed-in user. An Admin account gets no bypass. |
 | **Require two-step verification** | The user must have confirmed a second factor in this login session. |
 | **System logo** | A Media-library image. With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
+| **What the system may receive** | Which optional scopes it can be granted: `profile`, `email`, `groups`, `roles`, `setor`. A scope left unticked is never granted, even if the system asks for it; `openid` (the person's id) always is. Systems registered before this setting existed are unrestricted until edited. |
 
 The **client secret** is shown once, when the client is created or when
 you generate a new one; only a salted hash is stored. Generating a new
@@ -346,7 +347,7 @@ challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary \
 | `response_type` | yes | `code` |
 | `client_id` | yes | the registered client ID |
 | `redirect_uri` | yes | exactly one of the registered URIs |
-| `scope` | yes | space-separated; must contain `openid`. Also understood: `profile`, `email`, `setor`, `groups`, `roles`. Anything else is ignored. |
+| `scope` | yes | space-separated; must contain `openid`. Also understood: `profile`, `email`, `setor`, `groups`, `roles`. Anything else is ignored, and so is a scope the system is not allowed (see **What the system may receive**): the `scope` in the token response says what was granted. |
 | `code_challenge` | yes | the PKCE challenge (43 characters) |
 | `code_challenge_method` | yes | `S256` |
 | `state` | recommended | opaque value returned unchanged (up to 1024 characters) |

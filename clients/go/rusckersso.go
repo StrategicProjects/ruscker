@@ -70,6 +70,10 @@ func (c *Client) String() string {
 	return fmt.Sprintf("rusckersso.Client{Issuer: %q, ClientID: %q}", c.issuer, c.oauth.ClientID)
 }
 
+// ClockLeeway is how far the application's clock may run ahead of the
+// portal's before a token counts as expired. Every package uses 60 s.
+const ClockLeeway = 60 * time.Second
+
 // defaultHTTPClient is used when Config.HTTPClient is nil.
 func defaultHTTPClient() *http.Client {
 	return &http.Client{
@@ -125,7 +129,14 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 // it is never read from the token itself. go-oidc then checks the
 // signature (refreshing the JWKS once on an unknown key id), iss, aud and exp.
 func verifierConfig(clientID string) *oidc.Config {
-	return &oidc.Config{ClientID: clientID, SupportedSigningAlgs: []string{oidc.ES256}}
+	return &oidc.Config{
+		ClientID:             clientID,
+		SupportedSigningAlgs: []string{oidc.ES256},
+		// The same 60 seconds of clock tolerance as the other packages:
+		// go-oidc has no leeway setting, so "now" is read a minute early
+		// when it checks the expiry.
+		Now: func() time.Time { return time.Now().Add(-ClockLeeway) },
+	}
 }
 
 // newClient is split from New so unit tests can build a client without a
@@ -195,7 +206,7 @@ func randomToken() (string, error) {
 //
 //  1. an "error" parameter → *ProviderError
 //  2. state must equal pending.State → ErrStateMismatch
-//  3. iss, when present, must equal the issuer → ErrIssuerMismatch
+//  3. iss must be present and equal the issuer → ErrIssuerMismatch
 //  4. the code is exchanged (secret in Basic, redirect_uri, code_verifier)
 //     → *TokenExchangeError on refusal
 //  5. the ID token is verified (ES256, signature, iss, aud, exp, nonce)
@@ -230,7 +241,9 @@ func (c *Client) checkCallback(q url.Values, pending Pending) (string, error) {
 	if pending.State == "" || !equal(q.Get("state"), pending.State) {
 		return "", ErrStateMismatch
 	}
-	if q.Has("iss") && !equal(q.Get("iss"), c.issuer) {
+	// The portal always says who it is (RFC 9207). Requiring it means a
+	// callback from anywhere else cannot be mistaken for the portal's.
+	if !equal(q.Get("iss"), c.issuer) {
 		return "", ErrIssuerMismatch
 	}
 	code := q.Get("code")

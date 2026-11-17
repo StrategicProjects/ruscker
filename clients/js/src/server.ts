@@ -176,6 +176,8 @@ export class SignInClient {
         issuer: this.config.issuer,
         audience: this.config.clientId,
         requiredClaims: ["sub", "exp", "iat"],
+        // The same 60 seconds of clock tolerance as the other packages.
+        clockTolerance: 60,
       }));
     } catch (e) {
       if (e instanceof joseErrors.JOSEError) throw new IdTokenError(`${e.code}: ${e.message}`);

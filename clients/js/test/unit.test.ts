@@ -225,6 +225,8 @@ describe("server", () => {
       (e: unknown) => e instanceof ProviderError && e.error === "access_denied" && e.description === "not in group",
     );
     await assert.rejects(c.finishSignIn(`${REDIRECT}?code=x&state=S&iss=https%3A%2F%2Fother.example.org`, pending), IssuerMismatchError);
+    // Absent: the portal always sends it, so this is not the portal's.
+    await assert.rejects(c.finishSignIn(`${REDIRECT}?code=x&state=S`, pending), IssuerMismatchError);
     assert.deepEqual(portal.calls, []);
   });
 

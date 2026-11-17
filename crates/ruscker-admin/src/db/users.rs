@@ -650,6 +650,42 @@ pub async fn fetch(db: &ConfigDb, username: &str) -> Result<Option<UserRow>> {
     Ok(row.map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce)))
 }
 
+/// Fetch one user by the account's permanent id (the `sub` an SSO client
+/// holds), without the hash. Used where a token names the person: the
+/// id cannot change hands, a username can.
+pub async fn fetch_by_id(db: &ConfigDb, id: &str) -> Result<Option<UserRow>> {
+    type Row = (
+        String,
+        String,
+        String,
+        bool,
+        String,
+        DateTime<Utc>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    );
+    let row: Option<Row> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+               FROM users WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular
+               FROM users WHERE id = $1",
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await,
+    }
+    .context("fetch user by id")?;
+    Ok(row.map(|(id, u, r, m, g, c, by, se, em, ce)| row_from(id, u, r, m, g, c, by, se, em, ce)))
+}
+
 /// Verify a login. Returns the [`UserRow`] on a correct password,
 /// `None` on unknown username or wrong password (indistinguishable to
 /// the caller). Always runs an argon2 verify — even for an unknown

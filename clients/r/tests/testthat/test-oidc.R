@@ -71,7 +71,7 @@ test_that("an iss from another portal is refused", {
 })
 
 test_that("a callback without a code is refused", {
-  expect_error(sso_finish(fake_client(), "?state=s", list(state = "s")),
+  expect_error(sso_finish(fake_client(), paste0("?state=s&iss=", utils::URLencode(fake_issuer, reserved = TRUE)), list(state = "s")),
                class = "rusckersso_invalid_callback")
 })
 
@@ -109,7 +109,7 @@ test_that("missing optional claims become NULL / empty", {
     list(id_token = mint(fake_claims(email = NULL, setor = NULL, groups = NULL,
                                      group_roles = NULL, name = NULL)))
   })
-  id <- sso_finish(fake_client(), "?code=c&state=s", list(state = "s", nonce = "the-nonce"))
+  id <- sso_finish(fake_client(), paste0("?code=c&state=s&iss=", utils::URLencode(fake_issuer, reserved = TRUE)), list(state = "s", nonce = "the-nonce"))
   expect_null(id$email)
   expect_null(id$setor)
   expect_null(id$name)
@@ -122,7 +122,7 @@ test_that("a token endpoint refusal carries the provider's error code", {
   local_mocked_bindings(exchange_code = function(...) {
     rusckersso:::sso_abort("token_refused", "refused", error = "invalid_grant", status = 400L)
   })
-  err <- expect_error(sso_finish(fake_client(), "?code=c&state=s", list(state = "s")),
+  err <- expect_error(sso_finish(fake_client(), paste0("?code=c&state=s&iss=", utils::URLencode(fake_issuer, reserved = TRUE)), list(state = "s")),
                       class = "rusckersso_token_refused")
   expect_equal(err$error, "invalid_grant")
 })
@@ -148,4 +148,10 @@ test_that("empty values never match and encoded secrets are re-encoded", {
   expect_true(rusckersso:::constant_time_equal("x", "x"))
   # A value that already looks percent-encoded must still be encoded.
   expect_equal(utils::URLencode("a%41b", reserved = TRUE, repeated = TRUE), "a%2541b")
+})
+
+test_that("a callback without `iss` is refused", {
+  # The portal always sends it; without it the callback is not the portal's.
+  expect_error(sso_finish(fake_client(), "?code=c&state=s", list(state = "s", nonce = "n")),
+               class = "rusckersso_issuer_mismatch")
 })

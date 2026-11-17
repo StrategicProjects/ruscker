@@ -8,7 +8,7 @@ import hashlib
 import json
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
 import httpx
 import jwt
@@ -207,9 +207,9 @@ def test_full_sign_in(sso: RusckerSSO, provider: FakeProvider) -> None:
 
 def test_callback_as_string_or_url(sso: RusckerSSO, provider: FakeProvider) -> None:
     pending, _ = _start(sso, provider)
-    url = f"{REDIRECT}?code=the-code&state={pending.state}"
-    assert sso.finish_sign_in(url, pending).sub == "5966f47e"
-    assert sso.finish_sign_in(f"code=the-code&state={pending.state}", pending).sub == "5966f47e"
+    query = urlencode({"code": "the-code", "state": pending.state, "iss": ISSUER})
+    assert sso.finish_sign_in(f"{REDIRECT}?{query}", pending).sub == "5966f47e"
+    assert sso.finish_sign_in(query, pending).sub == "5966f47e"
 
 
 def test_error_callback(sso: RusckerSSO, provider: FakeProvider) -> None:
@@ -244,11 +244,15 @@ def test_issuer_mismatch_in_callback(sso: RusckerSSO, provider: FakeProvider) ->
     assert len(provider.requests) == before
 
 
-def test_iss_absent_is_accepted(sso: RusckerSSO, provider: FakeProvider) -> None:
+def test_iss_absent_is_refused(sso: RusckerSSO, provider: FakeProvider) -> None:
+    # The portal always sends `iss`; a callback without it is not the portal's.
     pending, _ = _start(sso, provider)
     cb = _callback(pending)
     del cb["iss"]
-    assert sso.finish_sign_in(cb, pending).username == "ana"
+    before = len(provider.requests)
+    with pytest.raises(IssuerMismatchError):
+        sso.finish_sign_in(cb, pending)
+    assert len(provider.requests) == before
 
 
 def test_repeated_parameter_is_refused(sso: RusckerSSO, provider: FakeProvider) -> None:

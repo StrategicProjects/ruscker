@@ -129,7 +129,9 @@ export function checkCallback(
   const state = params.get("state") ?? "";
   if (!pending.state || !equal(state, pending.state)) throw new StateMismatchError();
   const iss = params.get("iss");
-  if (iss !== null && iss !== issuer) throw new IssuerMismatchError(issuer, iss);
+  // The portal always says who it is (RFC 9207). Requiring it means a
+  // callback from anywhere else cannot be mistaken for the portal's.
+  if (iss !== issuer) throw new IssuerMismatchError(issuer, iss ?? "(absent)");
   const codes = params.getAll("code");
   if (codes.length !== 1 || !codes[0]) {
     throw new SignInError("the callback carries no authorization code");

@@ -167,6 +167,7 @@ pub mod landing_blocks;
 pub mod mfa;
 pub mod mfa_grants;
 pub mod oidc_clients;
+pub mod oidc_keys;
 pub mod ruscker_images;
 pub mod schedules;
 pub mod settings;

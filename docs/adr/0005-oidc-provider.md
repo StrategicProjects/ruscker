@@ -1,7 +1,8 @@
 # ADR 0005 — Ruscker as an OpenID Connect provider ("Sign in with Ruscker")
 
-Status: proposed (slice 1, the client registry, is implemented; the
-protocol endpoints are not — nothing here can issue a token yet)
+Status: proposed (slices 1 and 2 are implemented: the client registry,
+the signing key and the public metadata endpoints; the sign-in
+endpoints are not — nothing here can issue a token yet)
 
 ## Context
 
@@ -79,7 +80,9 @@ it themselves.
    flag gates the protocol endpoints, which do not exist yet.
    *(implemented)*
 2. Signing key, `/.well-known/openid-configuration`, JWKS, the config
-   flag.
+   flag. The key is created on the first JWKS request, stored encrypted
+   in `oidc_keys`, and identified by its RFC 7638 thumbprint. The
+   issuer is configured, never read from the request. *(implemented)*
 3. `/oauth/authorize`: session check or login, the client's group gate
    and MFA requirement, one-use authorization codes bound to PKCE.
 4. `/oauth/token` and `/userinfo`.

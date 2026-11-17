@@ -1000,6 +1000,13 @@ fn format_warning(w: &Warning) -> String {
                  (expected a size like `10m`, `1g`, or plain bytes) — no limit will be applied"
             )
         }
+        Warning::OidcIssuerInvalid { value } => {
+            format!(
+                "server.oidc-provider is enabled but its issuer `{value}` is missing or not \
+                 usable (expected an https:// URL, or http:// on a loopback host) — \
+                 the provider stays off"
+            )
+        }
         Warning::UnknownTimezone { value } => {
             format!(
                 "server.timezone `{value}` is not an IANA zone name \

@@ -5,6 +5,7 @@ pub mod assets;
 pub mod health;
 pub mod landing;
 pub mod metrics;
+pub mod oidc;
 pub mod prefs;
 pub mod proxy;
 pub mod rewrite;

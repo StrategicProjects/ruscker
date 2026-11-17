@@ -36,6 +36,7 @@ pub mod logbuf;
 pub mod markdown;
 pub mod metrics_cache;
 pub mod mfa;
+pub mod oidc;
 pub mod ratelimit;
 pub mod routes;
 pub mod admin_sessions_pg;
@@ -816,6 +817,7 @@ pub fn router_with_images(state: AppState, _images_dir: Option<&Path>) -> Router
         .merge(routes::assets::routes())
         .merge(routes::prefs::routes())
         .merge(routes::admin::routes())
+        .merge(routes::oidc::routes())
         .layer(axum::middleware::from_fn(security_headers))
         // CSRF defense for the chrome's mutations (#259). Layered on the
         // chrome only — NOT the proxy routes (apps legitimately take

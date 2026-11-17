@@ -357,8 +357,10 @@ There is no need to inline registry passwords in a spec.
 The **SSO clients** tab registers external systems that will be allowed
 to sign users in through the portal (OpenID Connect; see
 [ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md)).
-The registry is in place; the sign-in endpoints themselves are not
-shipped yet, so a registered client cannot log anyone in for now.
+The registry is in place and, when `server.oidc-provider` is enabled,
+so are the public discovery and key documents; the sign-in endpoints
+themselves are not shipped yet, so a registered client cannot log
+anyone in for now.
 
 Each client has an ID, a display name, its exact redirect URIs (HTTPS,
 or loopback HTTP for development; no wildcards), an optional list of

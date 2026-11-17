@@ -135,7 +135,7 @@ async fn jwks(State(state): State<AppState>) -> Response {
 /// select which claims the client will later receive. Anything else a
 /// client asks for is silently dropped (OAuth 2.0 §3.3 allows granting
 /// less than requested).
-const SCOPES: [&str; 4] = ["openid", "profile", "email", "groups"];
+const SCOPES: [&str; 6] = ["openid", "profile", "email", "groups", "roles", "setor"];
 
 /// Upper bounds on values we store or echo back. Generous for any real
 /// client, small enough that a hostile one cannot use us as storage.
@@ -603,37 +603,100 @@ fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
     Some((decode(id)?, decode(secret)?))
 }
 
+/// What the claims need beyond the account row, read only when the
+/// granted scope asks for it.
+#[derive(Default)]
+struct ClaimExtras {
+    /// The person's full name, when set.
+    full_name: Option<String>,
+    /// Every `(group, role)` the user holds.
+    group_roles: Vec<(String, String)>,
+}
+
+/// Load [`ClaimExtras`] for `scope`. A failed read degrades to "nothing
+/// extra" (the claim is simply absent) rather than failing the sign-in;
+/// it is logged.
+async fn claim_extras(db: &crate::db::ConfigDb, user: &UserRow, scope: &str) -> ClaimExtras {
+    let granted = |s: &str| scope.split(' ').any(|g| g == s);
+    let mut extras = ClaimExtras::default();
+    if granted("profile") {
+        match crate::db::users::full_name(db, &user.username).await {
+            Ok(name) => extras.full_name = name,
+            Err(err) => tracing::warn!(error = ?err, "full name lookup for claims failed"),
+        }
+    }
+    if granted("roles") {
+        match crate::db::group_roles::roles_of_user(db, &user.username).await {
+            Ok(roles) => extras.group_roles = roles,
+            Err(err) => tracing::warn!(error = ?err, "group roles lookup for claims failed"),
+        }
+    }
+    extras
+}
+
 /// The identity claims a client may see, by granted scope. Used for the
 /// ID token and for `/oauth/userinfo`, so the two can never disagree.
 ///
 /// * always: `sub` — the account's immutable id (a username can be
 ///   reused after an account is deleted; the id cannot);
-/// * `profile`: `preferred_username`, `name`;
+/// * `profile`: `preferred_username`, and `name` — the person's full
+///   name when the account has one, the username otherwise;
 /// * `email`: `email`, when the account has one;
-/// * `groups`: `groups` — only the groups that grant access to THIS
-///   client when it is restricted, all of the user's groups when it is
-///   open. A client learns what it needs to authorize, not the user's
-///   memberships in unrelated teams.
-fn identity_claims(user: &UserRow, client: &OidcClient, scope: &str) -> Map<String, Value> {
+/// * `setor`: `setor` (department), when the account has one;
+/// * `groups`: `groups`;
+/// * `roles`: `group_roles` — an object mapping each group to the roles
+///   the user holds in it.
+///
+/// `groups` and `group_roles` carry only the groups that grant access to
+/// THIS client when it is restricted, all of the user's groups when it
+/// is open: a client learns what it needs to authorize, not the user's
+/// memberships in unrelated teams. Roles of a group the user no longer
+/// belongs to are never sent.
+fn identity_claims(
+    user: &UserRow,
+    extras: &ClaimExtras,
+    client: &OidcClient,
+    scope: &str,
+) -> Map<String, Value> {
     let granted = |s: &str| scope.split(' ').any(|g| g == s);
+    // Which of the user's groups this client is allowed to learn about.
+    let visible = |g: &String| {
+        user.groups.contains(g) && (client.access_groups.is_empty() || client.access_groups.contains(g))
+    };
+    let non_blank = |v: &Option<String>| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(str::to_string);
+
     let mut claims = Map::new();
     claims.insert("sub".into(), json!(user.id));
     if granted("profile") {
         claims.insert("preferred_username".into(), json!(user.username));
-        claims.insert("name".into(), json!(user.username));
+        let name = non_blank(&extras.full_name).unwrap_or_else(|| user.username.clone());
+        claims.insert("name".into(), json!(name));
     }
     if granted("email") {
-        if let Some(email) = user.email.as_deref().map(str::trim).filter(|e| !e.is_empty()) {
+        if let Some(email) = non_blank(&user.email) {
             claims.insert("email".into(), json!(email));
         }
     }
+    if granted("setor") {
+        if let Some(setor) = non_blank(&user.setor) {
+            claims.insert("setor".into(), json!(setor));
+        }
+    }
     if granted("groups") {
-        let groups: Vec<&String> = user
-            .groups
-            .iter()
-            .filter(|g| client.access_groups.is_empty() || client.access_groups.contains(g))
-            .collect();
+        let groups: Vec<&String> = user.groups.iter().filter(|g| visible(g)).collect();
         claims.insert("groups".into(), json!(groups));
+    }
+    if granted("roles") {
+        // { "group": ["role", …] }, groups and roles in a stable order.
+        let mut by_group: std::collections::BTreeMap<&str, Vec<&str>> = std::collections::BTreeMap::new();
+        for (group, role) in extras.group_roles.iter().filter(|(g, _)| visible(g)) {
+            by_group.entry(group.as_str()).or_default().push(role.as_str());
+        }
+        for roles in by_group.values_mut() {
+            roles.sort_unstable();
+            roles.dedup();
+        }
+        claims.insert("group_roles".into(), json!(by_group));
     }
     claims
 }
@@ -794,7 +857,8 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     let now = chrono::Utc::now().timestamp();
     let exp = now + TOKEN_TTL_SECS;
 
-    let mut id_claims = identity_claims(&user, &client, &grant.scope);
+    let extras = claim_extras(db, &user, &grant.scope).await;
+    let mut id_claims = identity_claims(&user, &extras, &client, &grant.scope);
     id_claims.insert("iss".into(), json!(issuer));
     id_claims.insert("aud".into(), json!(client.client_id));
     id_claims.insert("iat".into(), json!(now));
@@ -933,9 +997,10 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
         }
     };
+    let extras = claim_extras(db, &user, scope).await;
     (
         [(CACHE_CONTROL, "no-store")],
-        Json(Value::Object(identity_claims(&user, &client, scope))),
+        Json(Value::Object(identity_claims(&user, &extras, &client, scope))),
     )
         .into_response()
 }

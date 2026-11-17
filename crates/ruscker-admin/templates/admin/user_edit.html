@@ -73,6 +73,12 @@
       </label>
 
       <label class="admin-login-field" style="margin:0">
+        <span class="admin-login-label">{{ self.t("admin-users-full-name") }}</span>
+        <input type="text" name="full_name" value="{{ full_name }}" maxlength="120"
+               autocomplete="off" placeholder="{{ self.t("admin-users-full-name-placeholder") }}">
+      </label>
+
+      <label class="admin-login-field" style="margin:0">
         <span class="admin-login-label">{{ self.t("admin-users-setor") }}</span>
         <input type="text" name="setor" value="{{ user.setor.clone().unwrap_or_default() }}"
                placeholder="{{ self.t("admin-users-setor-placeholder") }}">

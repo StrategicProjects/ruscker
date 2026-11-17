@@ -174,6 +174,8 @@ struct UserEditPage<'a> {
     nav_section: &'static str,
     role: Role,
     user: db::users::UserRow,
+    /// The person's full name (#1081); empty when unset.
+    full_name: String,
     me: String,
     /// Groups this caller may replace and the foreign memberships preserved
     /// read-only by `merge_preserving_out_of_scope`.
@@ -691,6 +693,11 @@ async fn edit(
         base: state.base_path.clone(),
         nav_section: "users",
         role: scope.role,
+        full_name: db::users::full_name(pool, &user.username)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_default(),
         user,
         me: scope.actor().to_string(),
         editable_groups,
@@ -703,6 +710,9 @@ async fn edit(
 
 #[derive(Debug, Deserialize)]
 struct EditForm {
+    /// The person's full name; blank clears it.
+    #[serde(default)]
+    full_name: String,
     #[serde(default)]
     role: String,
     #[serde(default)]
@@ -759,6 +769,15 @@ async fn save_edit(
     };
     match db::users::update_account(pool, &username, update, Some(scope.actor())).await {
         Ok(()) => {
+            // The full name is its own column and its own audited write
+            // (#1081). It follows the account update so a refused update
+            // (last admin, scope) never changes it.
+            if let Err(e) =
+                db::users::set_full_name(pool, &username, Some(&form.full_name), Some(scope.actor())).await
+            {
+                tracing::warn!(error = ?e, %username, "full name update failed");
+                return redirect_edit_flash(&username, "bad-input");
+            }
             if current.role != role {
                 // Role changes take effect immediately, including self-demotion.
                 state.admin_sessions.revoke_by_actor(&username).await;

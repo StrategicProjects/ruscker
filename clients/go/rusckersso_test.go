@@ -170,9 +170,10 @@ func TestCallbackChecks(t *testing.T) {
 	if _, err := c.FinishSignIn(context.Background(), url.Values{"code": {"c"}, "state": {""}}, Pending{}); !errors.Is(err, ErrStateMismatch) {
 		t.Errorf("empty pending: %v", err)
 	}
-	// iss absent is accepted (the check is "if present").
-	if code, err := c.checkCallback(url.Values{"code": {"c"}, "state": {"the-state"}}, p); err != nil || code != "c" {
-		t.Errorf("no iss: %q, %v", code, err)
+	// iss is required: the portal always sends it, so a callback
+	// without it did not come from the portal.
+	if _, err := c.checkCallback(url.Values{"code": {"c"}, "state": {"the-state"}}, p); !errors.Is(err, ErrIssuerMismatch) {
+		t.Errorf("no iss must be refused, got %v", err)
 	}
 }
 

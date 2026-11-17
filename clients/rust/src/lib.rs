@@ -451,9 +451,15 @@ impl Client {
             _ => return Err(Error::StateMismatch),
         }
         let issuer = &self.inner.config.issuer;
-        if let Some(iss) = params.get("iss") {
-            if iss != issuer {
-                return Err(Error::IssuerMismatch { expected: issuer.clone(), found: iss.clone() });
+        // The portal always says who it is (RFC 9207). Requiring it means a
+        // callback from anywhere else cannot be mistaken for the portal's.
+        match params.get("iss") {
+            Some(iss) if iss == issuer => {}
+            other => {
+                return Err(Error::IssuerMismatch {
+                    expected: issuer.clone(),
+                    found: other.cloned().unwrap_or_else(|| "(absent)".into()),
+                });
             }
         }
         params.get("code").filter(|c| !c.is_empty()).cloned().ok_or(Error::InvalidCallback("no code"))
@@ -510,6 +516,8 @@ impl Client {
         validation.set_issuer(&[config.issuer.as_str()]);
         validation.set_audience(&[config.client_id.as_str()]);
         validation.set_required_spec_claims(&["exp", "iss", "aud", "sub"]);
+        // Clock tolerance on `exp`: 60 seconds, the same in every package.
+        validation.leeway = 60;
         let data = jsonwebtoken::decode::<Map<String, Value>>(id_token, &key, &validation)
             .map_err(|e| bad(e.to_string()))?;
         let claims = data.claims;
@@ -704,24 +712,26 @@ mod tests {
     }
 
     #[test]
-    fn foreign_iss_is_refused_and_absent_iss_accepted() {
+    fn foreign_or_absent_iss_is_refused() {
         let client = offline_client();
         let (_, p) = client.start_sign_in();
         let q = format!("code=abc&state={}&iss=https%3A%2F%2Fevil.example.org", p.state);
         assert!(matches!(client.check_callback(&q, &p), Err(Error::IssuerMismatch { .. })));
         let q = format!("code=abc&state={}&iss=https%3A%2F%2Fportal.example.org", p.state);
         assert_eq!(client.check_callback(&q, &p).unwrap(), "abc");
+        // Absent: the portal always sends it, so this is not the portal's.
         let q = format!("code=abc&state={}", p.state);
-        assert_eq!(client.check_callback(&q, &p).unwrap(), "abc");
+        assert!(matches!(client.check_callback(&q, &p), Err(Error::IssuerMismatch { .. })));
     }
 
     #[test]
     fn full_callback_url_and_malformed_queries() {
         let client = offline_client();
         let (_, p) = client.start_sign_in();
-        let url = format!("https://app.example.org/auth/callback?code=xyz&state={}", p.state);
+        const ISS: &str = "iss=https%3A%2F%2Fportal.example.org";
+        let url = format!("https://app.example.org/auth/callback?code=xyz&state={}&{ISS}", p.state);
         assert_eq!(client.check_callback(&url, &p).unwrap(), "xyz");
-        let q = format!("state={}", p.state);
+        let q = format!("state={}&{ISS}", p.state);
         assert!(matches!(client.check_callback(&q, &p), Err(Error::InvalidCallback(_))));
         let q = format!("code=a&code=b&state={}", p.state);
         assert!(matches!(client.check_callback(&q, &p), Err(Error::InvalidCallback(_))));

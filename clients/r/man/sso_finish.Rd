@@ -25,7 +25,7 @@ Runs the checks in this order, stopping at the first failure:
 \enumerate{
 \item an \code{error} parameter -> \code{rusckersso_provider_error};
 \item \code{state} must equal \code{pending$state} -> \code{rusckersso_state_mismatch};
-\item \code{iss}, when present, must equal the issuer ->
+\item \code{iss} must be present and equal the issuer ->
 \code{rusckersso_issuer_mismatch};
 \item the code is exchanged at the token endpoint (client secret over HTTP
 Basic, the \code{redirect_uri}, the \code{code_verifier}) ->

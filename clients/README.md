@@ -55,12 +55,14 @@ Given the callback's query and the stored values:
 1. An `error` parameter is reported as a failed sign-in, with its code.
 2. `state` must equal the stored one (constant-time comparison where
    the language offers it).
-3. If `iss` is present it must equal the issuer.
+3. `iss` must be present and equal the issuer (the portal always
+   sends it).
 4. The code is exchanged at the token endpoint with the client secret
    (HTTP Basic), the `redirect_uri` and the `code_verifier`.
 5. The ID token is verified: signature against the provider's JWKS,
-   algorithm **ES256 only**, `iss`, `aud` = `client_id`, `exp`, and
-   `nonce` = the stored one. A key id not in the cached JWKS triggers
+   algorithm **ES256 only**, `iss`, `aud` = `client_id`, `exp` (with 60
+   seconds of clock tolerance, the same in every package), and `nonce`
+   = the stored one. A key id not in the cached JWKS triggers
    one refresh (the provider can rotate keys).
 6. The result is the **identity**.
 

@@ -9,6 +9,82 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.54 — 2026-11-17
+
+A security fix for hosted apps that read identity headers, and the
+second round of "Sign in with Ruscker": an audit of who signed in
+where, a sign-in page that looks like the portal, richer claims, and
+client packages. Every change was reviewed by an independent reviewer
+before merging (#1079–#1083, #1090–#1092).
+
+- **Security: forged identity headers** (#1090). The proxy removes
+  client-supplied `X-SP-*` and `X-Ruscker-User-*` headers so a hosted
+  app can trust the ones Ruscker injects, but it matched the names
+  literally. `X_SP_UserId` is a different header on the wire and the
+  **same variable** inside a Shiny, WSGI or Rack app
+  (`HTTP_X_SP_USERID`), where it could override the injected one — so a
+  client could choose the user, groups and roles such an app sees.
+  Underscores are now read as hyphens when stripping, for HTTP and
+  WebSocket alike.
+  - Affects only apps that opted in with `add-default-http-headers:
+    true` or `identity-claims`.
+  - A portal behind nginx was already covered by nginx's default of
+    dropping headers with underscores (`underscores_in_headers off`).
+    A portal exposed directly, or behind another front end, was not:
+    **upgrade**.
+- **SSO has its own section, with an audit** (#1079). **SSO** in the
+  admin navigation holds the clients and a new **Access** tab: every
+  sign-in through a client and every refusal (not in the allowed
+  groups, two-step verification missing, disabled client), with the
+  address and the browser.
+  - The activity log now stores the client address and the browser
+    (User-Agent) for sign-ins and app visits, **including anonymous
+    visitors of public apps**. Operators who must tell their users
+    should note it.
+  - Kept for **180 days** by default: `server.activity-retention-days`
+    (`0` keeps everything).
+  - Refused attempts are budgeted per event class so a flood cannot
+    fill the table; when a ceiling is reached a marker row says so, so
+    a gap never looks like silence.
+- **The sign-in page is the portal's** (#1080, #1083). It shows the
+  portal's title, logo and colours from Appearance, and — arriving from
+  an SSO client — "You are signing in to *system*", with the client's
+  registered name and optional logo. Appearance → **Sign-in page**
+  offers three layouts: card, split (the form beside a brand panel with
+  an optional image) and minimal. Presets only: the page takes no
+  free-form HTML or CSS, because it receives passwords.
+- **What a system learns about the person** (#1081).
+  - Accounts gain an optional **full name**; the `name` claim carries
+    it (the username when it is empty).
+  - New scopes: `setor` (department) and `roles` → `group_roles`, an
+    object of group → roles, filtered like `groups`. A system can derive
+    its own profiles from group roles instead of keeping a user table.
+  - **Per-client allowed scopes** (#1092): an Admin chooses which of
+    these a client may receive. Clients registered before are
+    unrestricted until edited. Withdrawing a scope takes effect at once.
+  - The access token no longer carries the username: it names the
+    person by `sub` only, so a client learns nothing from it that a
+    withheld scope would have hidden. (`/oauth/userinfo` is unchanged.)
+  - A failed claims lookup is now `server_error`, never an empty claim.
+- **"Sign in with …" button** (#1083). `GET /oauth/button.svg` serves a
+  self-contained image with the portal's title (`?theme=dark`,
+  `?lang=`); the SSO clients page shows it with the HTML to paste.
+- **Client packages** (#1082) for TypeScript, Python, Rust, Go and R
+  under [`clients/`](https://github.com/StrategicProjects/ruscker/tree/main/clients):
+  thin wrappers over each language's established OpenID Connect / JWT
+  library, one contract, tested end to end against a real portal. The
+  R package also reads the identity headers inside a hosted app. They
+  require `iss` on the callback and share one clock tolerance (60 s).
+  Not published to any registry yet — install from the repository.
+- **Dependencies.** The fix for RUSTSEC-2026-0459 (SQLite) no longer
+  needs an exception in `cargo audit`: the real `libsqlite3-sys` 0.40
+  from crates.io is used, through a copy of `sqlx-sqlite` whose only
+  change is one version bound (`vendor/sqlx-sqlite/VENDORED.md`).
+
+**Upgrade notes.** Migrations `0038`–`0042` run on start (both SQLite
+and Postgres). No configuration change is required; the provider stays
+off unless `server.oidc-provider` enables it.
+
 ## v0.2.53 — 2026-11-17
 
 "Sign in with Ruscker" for systems outside the portal, and three

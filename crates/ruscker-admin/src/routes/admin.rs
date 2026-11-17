@@ -157,6 +157,10 @@ struct AccountPasswordPage<'a> {
     role: Role,
     /// First-login prompt — shows the "keep current password" skip.
     first: bool,
+    /// The session is the break-glass token: there is no account, so no
+    /// password to change. The page says so and points at Users instead
+    /// of showing a form that could not work.
+    no_account: bool,
     /// "" | "wrong-current" | "mismatch" | "short".
     error: &'static str,
     /// Validated app destination carried through a mandatory first-login
@@ -632,9 +636,24 @@ async fn password_form(
     theme: Theme,
     Query(query): Query<PasswordQuery>,
 ) -> Response {
-    // Break-glass token sessions have no account to change.
+    // Break-glass token sessions have no account to change. Say so
+    // instead of bouncing to the dashboard: an operator who signed in
+    // with the token to recover a forgotten password clicks exactly
+    // this menu item, and a silent redirect looks like a broken page.
     let Some(actor) = session.actor.clone() else {
-        return Redirect::to("/admin/dashboard").into_response();
+        return render(&AccountPasswordPage {
+            locale: loc,
+            theme,
+            locales: &state.locales,
+            locales_all: &Locale::ALL,
+            base: state.base_path.clone(),
+            nav_section: "",
+            role: session.role,
+            first: false,
+            no_account: true,
+            error: "",
+            next: String::new(),
+        });
     };
     let first = match state.db.as_ref() {
         Some(pool) => db::users::fetch(pool, &actor)
@@ -655,6 +674,7 @@ async fn password_form(
         nav_section: "",
         role: session.role,
         first,
+        no_account: false,
         error: "",
         next,
     })
@@ -708,6 +728,7 @@ async fn password_submit(
             nav_section: "",
             role: session.role,
             first,
+            no_account: false,
             error,
             next: next.clone().unwrap_or_default(),
         })

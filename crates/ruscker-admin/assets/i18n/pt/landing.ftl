@@ -96,6 +96,7 @@ admin-setup-submit = Criar administrador
 # — Troca de senha / primeiro acesso
 admin-pw-title = Alterar senha
 admin-pw-help = Defina uma nova senha para a sua conta.
+admin-pw-no-account = Você entrou com o token de emergência do administrador, que não é uma conta; por isso não há senha para alterar aqui. Para definir uma nova senha de uma conta, abra Usuários, escolha Editar nessa conta e redefina a senha.
 admin-pw-first-prompt = Você está usando uma senha definida pelo administrador. Defina uma nova senha para continuar.
 admin-pw-current-label = Senha atual
 admin-pw-new-label = Nova senha

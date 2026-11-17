@@ -92,6 +92,7 @@ admin-setup-submit = Crear administrador
 # — Cambio de contraseña / primer acceso
 admin-pw-title = Cambiar contraseña
 admin-pw-help = Define una nueva contraseña para tu cuenta.
+admin-pw-no-account = Ha iniciado sesión con el token de emergencia del administrador, que no es una cuenta; por eso no hay contraseña que cambiar aquí. Para definir una nueva contraseña de una cuenta, abra Usuarios, elija Editar en esa cuenta y restablezca la contraseña.
 admin-pw-first-prompt = Estás usando una contraseña asignada por un administrador. Define una nueva contraseña para continuar.
 admin-pw-current-label = Contraseña actual
 admin-pw-new-label = Nueva contraseña

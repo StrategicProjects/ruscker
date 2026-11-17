@@ -92,6 +92,7 @@ admin-setup-submit = Créer l'administrateur
 # — Changement de mot de passe / première connexion
 admin-pw-title = Changer le mot de passe
 admin-pw-help = Définissez un nouveau mot de passe pour votre compte.
+admin-pw-no-account = Vous êtes connecté avec le jeton d’urgence de l’administrateur, qui n’est pas un compte ; il n’y a donc pas de mot de passe à modifier ici. Pour définir un nouveau mot de passe pour un compte, ouvrez Utilisateurs, choisissez Modifier sur ce compte et réinitialisez son mot de passe.
 admin-pw-first-prompt = Vous utilisez un mot de passe défini par un administrateur. Définissez un nouveau mot de passe pour continuer.
 admin-pw-current-label = Mot de passe actuel
 admin-pw-new-label = Nouveau mot de passe

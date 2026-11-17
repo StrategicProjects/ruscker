@@ -377,6 +377,57 @@ async fn app_next_survives_mandatory_password_rotation() {
 /// Count `<form ` opens, then verify none of them is nested inside
 /// another `<form>`. Cheap structural check that doesn't need an HTML
 /// parser. Returns `(open_count, max_depth)`.
+/// An operator who signed in with the break-glass token (to recover a
+/// forgotten password, say) and clicks "Change password" used to be
+/// bounced to the dashboard with no explanation. The token has no
+/// account: the page now says so and points at Users, and shows no form.
+#[tokio::test]
+async fn password_page_explains_itself_to_a_token_session() {
+    let (state, _pool) = state_with_db().await;
+    let sid = state.admin_sessions.create(Role::Admin, None).await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/account/password")
+                .header(axum::http::header::COOKIE, &cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "no silent redirect");
+    let body = String::from_utf8(axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert!(body.contains(r#"href="/admin/users""#), "points at Users");
+    assert!(!body.contains(r#"name="new_password""#), "no form that could not work");
+
+    // A real account still gets the form.
+    ruscker_admin::db::users::create(
+        state.db.as_ref().unwrap(),
+        "ana",
+        "CorrectPass9!",
+        Role::Viewer,
+        false,
+        &[],
+        None,
+    )
+    .await
+    .unwrap();
+    let sid = state.admin_sessions.create(Role::Viewer, Some("ana".into())).await;
+    let resp = router(state)
+        .oneshot(
+            Request::builder()
+                .uri("/admin/account/password")
+                .header(axum::http::header::COOKIE, format!("{COOKIE_NAME}={sid}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = String::from_utf8(axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert!(body.contains(r#"name="new_password""#));
+}
+
 fn form_nesting(body: &str) -> (usize, usize) {
     let mut depth: usize = 0;
     let mut max: usize = 0;

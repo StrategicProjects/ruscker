@@ -2579,18 +2579,38 @@ fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
 /// client forge any *other* identity-looking attribute an app might
 /// trust (e.g. `X-SP-UserEmail`). `HeaderName` is normalized to
 /// lowercase, so the comparisons are case-insensitive by construction.
+///
+/// **Underscores count as hyphens.** `X_SP_UserId` is a legal header
+/// name and a different one from `X-SP-UserId` — but the servers behind
+/// us do not keep them apart: httpuv (Shiny), WSGI, Rack and CGI all
+/// expose a header as `HTTP_` + upper-case + `-`→`_`, so both arrive at
+/// the app as `HTTP_X_SP_USERID`, and the forged one can win. A client
+/// could therefore choose the identity an app sees, even over the one
+/// we inject. The reserved namespaces are matched after folding `_` to
+/// `-`, which removes every spelling that collapses onto them.
 fn strip_reserved_identity_headers(headers: &mut HeaderMap) {
     let names: Vec<_> = headers
         .keys()
-        .filter(|name| {
-            let name = name.as_str();
-            name.starts_with("x-sp-") || name.starts_with("x-ruscker-user-")
-        })
+        .filter(|name| is_reserved_identity_header(name.as_str()))
         .cloned()
         .collect();
     for name in names {
         headers.remove(name);
     }
+}
+
+/// Whether a (lower-case) header name falls in a reserved identity
+/// namespace once `_` is read as `-`. See
+/// [`strip_reserved_identity_headers`].
+fn is_reserved_identity_header(name: &str) -> bool {
+    const RESERVED: [&str; 2] = ["x-sp-", "x-ruscker-user-"];
+    RESERVED.iter().any(|prefix| {
+        name.len() >= prefix.len()
+            && name
+                .bytes()
+                .zip(prefix.bytes())
+                .all(|(c, p)| c == p || (c == b'_' && p == b'-'))
+    })
 }
 
 #[cfg(test)]
@@ -2751,8 +2771,25 @@ mod tests {
             HeaderValue::from_static("mallory@example.test"),
         );
         headers.insert("x-app-header", HeaderValue::from_static("keep"));
+        // Underscore spellings collapse onto the same variable in the app
+        // (HTTP_X_SP_USERID), so they are reserved too — in any mix.
+        for forged in ["x_sp_userid", "x-sp_usergroups", "x_sp-anything", "x_ruscker_user_roles", "x-ruscker_user-email"] {
+            headers.insert(
+                header::HeaderName::from_bytes(forged.as_bytes()).unwrap(),
+                HeaderValue::from_static("mallory"),
+            );
+        }
+        // Near misses stay: not in the namespace.
+        headers.insert("x_spa_header", HeaderValue::from_static("keep"));
+        headers.insert("x-ruscker-users", HeaderValue::from_static("keep"));
 
         strip_reserved_identity_headers(&mut headers);
+
+        for forged in ["x_sp_userid", "x-sp_usergroups", "x_sp-anything", "x_ruscker_user_roles", "x-ruscker_user-email"] {
+            assert!(!headers.contains_key(forged), "{forged} must be stripped");
+        }
+        assert_eq!(headers.get("x_spa_header").unwrap(), "keep");
+        assert_eq!(headers.get("x-ruscker-users").unwrap(), "keep");
 
         assert!(!headers.contains_key("x-sp-userid"));
         assert!(!headers.contains_key("x-sp-usergroups"));

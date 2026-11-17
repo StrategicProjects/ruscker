@@ -383,7 +383,12 @@ const BUTTON_LABEL_MAX_CHARS: usize = 48;
 /// fitted to the space reserved for it and can never overflow the
 /// button. `label` is escaped here.
 pub fn sign_in_button_svg(label: &str, dark: bool) -> String {
-    let mut label: String = label.chars().filter(|c| !c.is_control()).collect();
+    // Control characters and the two code points XML 1.0 forbids: an
+    // SVG is parsed strictly, one of them would break the whole image.
+    let mut label: String = label
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '\u{FFFE}' | '\u{FFFF}'))
+        .collect();
     if label.chars().count() > BUTTON_LABEL_MAX_CHARS {
         label = label.chars().take(BUTTON_LABEL_MAX_CHARS - 1).collect::<String>() + "…";
     }
@@ -391,11 +396,22 @@ pub fn sign_in_button_svg(label: &str, dark: bool) -> String {
     let text_w: f32 = label
         .chars()
         .map(|c| match c {
+            // Combining marks sit on the previous glyph.
+            '\u{0300}'..='\u{036F}' => 0.0,
+            // East Asian wide glyphs and emoji (tested before the
+            // alphabetic arm, which would otherwise claim them).
+            '\u{1100}'..='\u{115F}'
+            | '\u{2E80}'..='\u{A4CF}'
+            | '\u{AC00}'..='\u{D7A3}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FE30}'..='\u{FE4F}'
+            | '\u{FF00}'..='\u{FF60}'
+            | '\u{1F300}'..='\u{1FAFF}' => 14.0,
             'i' | 'j' | 'l' | 't' | 'f' | 'r' | 'I' | ' ' | '.' | ',' | '\'' | '|' | '!' => 4.4,
             'm' | 'w' | 'M' | 'W' | '@' => 11.4,
             c if c.is_uppercase() => 9.4,
             c if c.is_ascii() || c.is_alphabetic() => 7.6,
-            _ => 14.0, // CJK, emoji and other wide glyphs
+            _ => 9.0,
         })
         .sum::<f32>()
         .ceil();
@@ -474,6 +490,11 @@ mod tests {
         assert!(width("Entrar com Portal de Dados") > width("Entrar"));
         let long = sign_in_button_svg(&"a".repeat(500), false);
         assert!(long.contains('…') && width(&"a".repeat(500)) < 500.0);
+        // Wide glyphs get wide slots; a combining mark adds nothing.
+        assert!(width("日本語ポータル") > width("abcdefg"));
+        assert_eq!(width("a\u{0303}o"), width("ao"));
+        // Code points XML forbids are dropped, so the image always parses.
+        assert!(!sign_in_button_svg("a\u{FFFE}b\u{FFFF}", false).contains(['\u{FFFE}', '\u{FFFF}']));
         // Control characters never reach the document.
         assert!(!sign_in_button_svg("a\u{0}b\nc", false).contains('\n'));
     }

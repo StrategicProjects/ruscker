@@ -1550,7 +1550,12 @@ input[type="range"]::-moz-range-thumb {
 .admin-login-aside {
   position: relative; flex: 1 1 0; min-width: 0; min-height: 100vh;
   display: flex; align-items: flex-end;
-  background: linear-gradient(150deg, var(--color-teal-800), var(--color-teal-500));
+  /* Built from --color-teal-600 alone: that is the one variable the
+     portal's accent colour (Appearance) overrides, so the panel follows
+     the portal's colour instead of staying teal beside a recoloured form. */
+  background: linear-gradient(150deg,
+    color-mix(in srgb, var(--color-teal-600) 62%, #000),
+    var(--color-teal-600));
   color: #fff; overflow: hidden;
 }
 .admin-login-aside-img {

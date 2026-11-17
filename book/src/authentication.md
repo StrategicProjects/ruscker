@@ -285,7 +285,7 @@ on its own sign-in screen. Self-contained (no external font or image).
 | Parameter | Values | Default |
 |---|---|---|
 | `theme` | `light`, `dark` | `light` |
-| `lang` | `pt`, `en`, `es`, `fr` | the portal's default language |
+| `lang` | `pt`, `en`, `es`, `fr` | `pt` |
 
 ```html
 <a href="/login">

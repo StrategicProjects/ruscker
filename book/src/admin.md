@@ -420,13 +420,14 @@ on creation or when you generate a new one, and only a salted hash is
 stored. Deleting a group on the Groups page when it is a client's last
 allowed group disables that client instead of opening it to everyone.
 
+(A group that simply runs out of members is not "deleted": the client
+keeps its name, nobody can sign in, and members later added to a group
+of that name regain access.)
+
 At the bottom of the page, the **sign-in button** kit shows an image
 the portal serves with its own title ("Sign in with …"), in a light and
 a dark version, and the HTML to paste into a client system's sign-in
 screen.
-(A group that simply runs out of members is not "deleted": the client
-keeps its name, nobody can sign in, and members later added to a group
-of that name regain access.)
 
 **Connecting a system.** Register it here, then give its developers:
 the issuer URL (they read everything else from

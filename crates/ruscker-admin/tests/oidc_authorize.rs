@@ -799,6 +799,11 @@ async fn sign_in_layouts_and_the_button_image() {
     assert_eq!(odd.status, StatusCode::OK);
     assert!(!odd.body.contains("script") && odd.body.contains("#ffffff"));
 
+    // Without the master key the provider cannot serve: 503, like its
+    // other documents.
+    let no_key = app_state(db.clone(), ON, None).await;
+    assert_eq!(get(&no_key, "/oauth/button.svg", "").await.status, StatusCode::SERVICE_UNAVAILABLE);
+
     // With the provider off the image does not exist.
     let (off, _) = setup(OFF, false).await;
     assert_eq!(get(&off, "/oauth/button.svg", "").await.status, StatusCode::NOT_FOUND);

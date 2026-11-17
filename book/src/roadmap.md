@@ -4,11 +4,13 @@ Phases 0 through 7 are done: the proxy is production-ready and
 horizontally scalable, a full bug / security / UX audit shipped as
 v0.2.5 (every finding fixed), and the v0.2.x series since then has been
 an **operator-driven polish loop** — short releases, each validated
-live on a real deployment before the next. Phase 8 (external auth) is
-the main optional, demand-driven work left. For what changed in each
+live on a real deployment before the next. Ruscker can now also be the
+**sign-in provider** for systems outside the portal (OpenID Connect).
+Phase 8 (signing in *with* an external identity provider) is the main
+optional, demand-driven work left. For what changed in each
 release, see the [release notes](./news.md).
 
-![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-phase releases add admin and portal UX, group-scoped Editor delegation, scheduled jobs, viewer-local admin timestamps, timezone-aware cron, and security + reliability fixes. Phase 8 contains only the planned, optional external identity-provider integrations.](images/roadmap.svg)
+![Roadmap timeline: phases 0–7 are done — 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence + admin CRUD, proxy + Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) across v0.1.1–v0.1.2; phase 7 (HA / multi-instance) in v0.1.1. Post-phase releases add admin and portal UX, group-scoped Editor delegation, scheduled jobs, viewer-local admin timestamps, timezone-aware cron, OpenID Connect provider for external systems, and security + reliability fixes. Phase 8 contains only the planned, optional sign-in through an external identity provider.](images/roadmap.svg)
 
 ## Shipped
 
@@ -239,10 +241,12 @@ Tracked in the GitHub issues; picked up as real usage asks for them:
   *(The post-drop scale-down cooldown that tamed the seats=1
   long-session flap has since shipped.)*
 
-### Phase 8 — External auth
-OIDC (Keycloak / Auth0 / Google), SAML, and LDAP. Per-app access lists
-and the Viewer / Editor / Admin model already ship, including
-group-scoped Editor delegation across Applications, Users, and Groups.
+### Phase 8 — External identity providers
+Signing in **to** Ruscker with OIDC (Keycloak / Auth0 / Google), SAML or
+LDAP. Per-app access lists and the Viewer / Editor / Admin model already
+ship, including group-scoped Editor delegation across Applications,
+Users, and Groups — and Ruscker can already act as the OpenID Connect
+provider *for* other systems (see [Authentication](./authentication.md)).
 This phase is only the federated-identity layer on top.
 
 ## Explicitly out of scope

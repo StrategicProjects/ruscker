@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="818.352907" height="534.120349" viewBox="0 0 818.352907 534.120349" font-family="sans-serif" font-size="14.666667" fill="none">
+<g id="s0">
+<rect x="15.39593" y="14.803779" width="786.376744" height="502.144186" rx="9.474419" fill="#ffffff" stroke="#ffffff" stroke-width="1.2"/>
+</g>
+<g id="s1">
+<rect x="34.344767" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
+</g>
+<g id="s2">
+<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="114.877326" y="64.728702" text-anchor="middle">External system</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="114.877326" y="79.203508" text-anchor="middle">its server</text>
+</g>
+<g id="s3">
+<rect x="328.051744" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
+</g>
+<g id="s4">
+<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="408.584302" y="64.728702" text-anchor="middle">Browser</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="408.584302" y="79.203508" text-anchor="middle">the user</text>
+</g>
+<g id="s5">
+<rect x="621.758721" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.866667"/>
+</g>
+<g id="s6">
+<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="702.291279" y="64.728702" text-anchor="middle">Ruscker</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="702.291279" y="79.203508" text-anchor="middle">OIDC provider</text>
+</g>
+<g id="s7">
+<line x1="114.877326" y1="91.072849" x2="114.877326" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
+</g>
+<g id="s8">
+<line x1="408.584302" y1="91.072849" x2="408.584302" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
+</g>
+<g id="s9">
+<line x1="702.291279" y1="91.072849" x2="702.291279" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
+</g>
+<g id="s10">
+<rect x="696.606628" y="181.079826" width="11.369302" height="279.495349" rx="5.684651" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
+</g>
+<g id="s11">
+<line x1="408.584302" y1="133.707733" x2="116.693579" y2="133.707733" stroke="#3d6b5f" stroke-width="1.2"/>
+<polygon stroke-width="0" points="124.351744,137.023779 114.877326,133.707733 124.351744,130.391686" fill="#3d6b5f"/>
+</g>
+<g id="s12">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="127.251298" text-anchor="middle">1  open the system</text>
+</g>
+<g id="s13">
+<line x1="114.877326" y1="181.079826" x2="406.768049" y2="181.079826" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
+<polygon stroke-width="0" points="399.109884,177.763779 408.584302,181.079826 399.109884,184.395872" fill="#3d6b5f"/>
+</g>
+<g id="s14">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="174.623391" text-anchor="middle">2  redirect to Ruscker</text>
+</g>
+<g id="s15">
+<line x1="408.584302" y1="181.079826" x2="694.790375" y2="181.079826" stroke="#3d6b5f" stroke-width="1.2"/>
+<polygon stroke-width="0" points="687.132209,177.763779 696.606628,181.079826 687.132209,184.395872" fill="#3d6b5f"/>
+</g>
+<g id="s16">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="174.623391" text-anchor="middle">/oauth/authorize + PKCE challenge</text>
+</g>
+<g id="s17">
+<line x1="696.606628" y1="237.926337" x2="410.400555" y2="237.926337" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
+<polygon stroke-width="0" points="418.058721,241.242384 408.584302,237.926337 418.058721,234.610291" fill="#3d6b5f"/>
+</g>
+<g id="s18">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="231.469903" text-anchor="middle">3  sign in · groups · MFA</text>
+</g>
+<g id="s19">
+<line x1="696.606628" y1="294.772849" x2="410.400555" y2="294.772849" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
+<polygon stroke-width="0" points="418.058721,298.088895 408.584302,294.772849 418.058721,291.456802" fill="#3d6b5f"/>
+</g>
+<g id="s20">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="288.316415" text-anchor="middle">4  redirect back with a one-use code</text>
+</g>
+<g id="s21">
+<line x1="408.584302" y1="294.772849" x2="116.693579" y2="294.772849" stroke="#3d6b5f" stroke-width="1.2"/>
+<polygon stroke-width="0" points="124.351744,298.088895 114.877326,294.772849 124.351744,291.456802" fill="#3d6b5f"/>
+</g>
+<g id="s22">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="288.316415" text-anchor="middle">code</text>
+</g>
+<g id="s23">
+<line x1="114.877326" y1="370.568198" x2="693.781345" y2="370.568198" stroke="#0f6e56" stroke-width="1.866667"/>
+<polygon stroke-width="0" points="687.132209,367.252151 696.606628,370.568198 687.132209,373.884244" fill="#0f6e56"/>
+</g>
+<g id="s24">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="260.309651" y="364.111764" text-anchor="middle">5  POST /oauth/token  ·  secret + code + verifier</text>
+</g>
+<g id="s25">
+<line x1="696.606628" y1="427.414709" x2="117.702608" y2="427.414709" stroke="#0f6e56" stroke-width="1.866667" stroke-dasharray="5.526744,3.947674"/>
+<polygon stroke-width="0" points="124.351744,430.730756 114.877326,427.414709 124.351744,424.098663" fill="#0f6e56"/>
+</g>
+<g id="s26">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="551.174302" y="420.958275" text-anchor="middle">6  ID token (ES256)</text>
+</g>
+<g id="s27">
+<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="37.011434" y="511.290948" text-anchor="start">the system keeps its own session</text>
+</g>
+<g id="s28">
+<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="780.157171" y="511.290948" text-anchor="end">Ruscker authenticates; the system authorizes</text>
+</g>
+</svg>

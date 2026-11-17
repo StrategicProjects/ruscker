@@ -329,6 +329,25 @@ SQLite or the HA Postgres catalog.
 - `DashMap` backs the replica/in-flight state and the short-TTL identity/spec
   caches (lock-free reads, sharded writes).
 
+## Identity: three consumers, one account base
+
+Accounts, groups and two-step verification live in Ruscker's database
+and serve three consumers: the portal and admin (session cookie), apps
+hosted behind the proxy (identity headers the proxy adds per request,
+opt-in per spec), and — when `server.oidc-provider` is enabled — systems
+outside the portal, which receive an ES256-signed ID token through the
+OpenID Connect authorization-code flow.
+
+![One account base in Ruscker. The user signs in once; a hosted app receives identity headers per request, an external system receives an ID token through OpenID Connect once per sign-in.](images/auth-overview.svg)
+
+The provider is a thin layer over what already existed: the login,
+group gate and MFA step are the portal's own; what it adds is a client
+registry (`oidc_clients`), a signing key (`oidc_keys`, encrypted under
+the master key) and single-use authorization codes (`oidc_auth_codes`).
+Route handlers are in `ruscker-admin/src/routes/oidc.rs`, key handling
+and JWT signing in `ruscker-admin/src/oidc.rs`. Design decisions:
+[ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md).
+
 ## Security boundary
 
 ### Trust levels

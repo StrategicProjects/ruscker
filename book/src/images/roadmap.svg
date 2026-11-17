@@ -76,8 +76,8 @@
   <g font-size="13">
     <!-- 8 -->
     <circle cx="60" cy="476" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
-    <text x="86" y="473" font-weight="700" fill="#5B6B66">Phase 8 · External auth</text>
-    <text x="86" y="489" font-size="11" fill="#90A39C">OIDC · SAML · LDAP (scoped RBAC + per-app ACLs already shipped)</text>
+    <text x="86" y="473" font-weight="700" fill="#5B6B66">Phase 8 · External identity providers</text>
+    <text x="86" y="489" font-size="11" fill="#90A39C">sign in via OIDC · SAML · LDAP (Ruscker as OIDC provider shipped)</text>
     <rect x="520" y="462" width="120" height="22" rx="11" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="1.5"/>
     <text x="580" y="477" text-anchor="middle" font-size="11" font-weight="600" fill="#5B6B66">planned · optional</text>
   </g>

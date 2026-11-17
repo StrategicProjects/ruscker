@@ -373,6 +373,43 @@ Status: living document. Tracks the Phase 5 security audit
   addresses (one IPv6 /64 is 2^64 of them) can't grow the map without
   bound.
 
+### 2.1 OpenID Connect provider (optional)
+
+When `server.oidc-provider` is enabled, Ruscker signs users in for
+systems outside the portal (design and decisions:
+[ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md)). Off by default; with it off,
+none of its endpoints exist.
+
+| Boundary | Rule |
+|---|---|
+| Who may be a client | Only what an Admin registered. No dynamic registration, no public clients. |
+| Where a user may be sent | A registered redirect URI, matched byte for byte. Until client and URI check out nothing is redirected — the user sees a 400. |
+| Which flow | Authorization code with PKCE `S256` only. A repeated request parameter is refused. |
+| Who gets a code | A signed-in **account** (never the break-glass token) that is in the client's allowed groups, read from the database on every request, with MFA proved in the same login session when the client requires it. No bypass for Admins. |
+| The code | 256 random bits, stored as a SHA-256, valid 60 seconds, redeemed by one conditional `UPDATE`. |
+| Who may redeem it | The same client, authenticated with its secret (stored as a salted hash), repeating the redirect URI and presenting the PKCE verifier. Client authentication comes first: a failed one does not spend the code. |
+| Tokens | ES256. ID token: audience = the client. Access token: audience = the issuer, a different `typ`, accepted only by `/oauth/userinfo`. Five minutes each. |
+| Signing key | Generated with `ring`, stored AES-256-GCM-encrypted under `RUSCKER_MASTER_KEY`, published by RFC 7638 thumbprint. Never replaced automatically. |
+| Issuer | Configured, never derived from the request's `Host`; its path must equal the mount point. |
+| Unauthenticated cost | The token request body is capped at 4 KiB and 32 parameters; client ids are shape-checked before any database read. |
+
+The session cookie stays `SameSite=Strict`. A browser arriving from a
+client on another site therefore sends none; that request is answered
+with a minimal page that re-requests the same URL from Ruscker's own
+origin, so an existing session is recognised without weakening the
+cookie.
+
+What a client must do for its part — validate signature, `iss`, `aud`,
+`exp` and `nonce`; bind `state` and the PKCE verifier to its browser
+session; identify people by `sub` — is spelled out in the
+authentication guide. The provider cannot enforce it.
+
+**Interaction with §6.1.** Hosted apps share the origin of the sign-in
+page. With the provider enabled that page yields tokens for other
+systems as well, so the same-origin caveat below weighs more: do not
+enable the provider on a portal that hosts code you do not control
+unless the apps are served from a separate origin.
+
 ### 6.1 Hosting untrusted apps (same-origin)
 
 Ruscker routes by **path** on a single origin: the portal at `/`, the

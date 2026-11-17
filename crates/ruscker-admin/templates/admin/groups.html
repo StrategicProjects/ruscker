@@ -23,10 +23,11 @@
    politely. Successes keep the toastable class. Matches images/
    credentials/landing. #}
 {% match flash %}{% when Some with (f) %}
-  {% if f == "bad-input" %}
+  {% if f == "bad-input" || f == "bad-role" %}
   <div class="admin-login-error mb-4" role="alert">
     <i class="ti ti-alert-circle" aria-hidden="true"></i>
-    {{ self.t("admin-groups-flash-bad-input") }}
+    {% if f == "bad-role" %}{{ self.t("admin-groups-flash-bad-role") }}
+    {% else %}{{ self.t("admin-groups-flash-bad-input") }}{% endif %}
   </div>
   {% else %}
   <div class="admin-flash-ok mb-4" role="status">
@@ -35,6 +36,10 @@
     {% else if f == "renamed" %}{{ self.t("admin-groups-flash-renamed") }}
     {% else if f == "deleted" %}{{ self.t("admin-groups-flash-deleted") }}
     {% else if f == "member-added" %}{{ self.t("admin-groups-flash-member-added") }}
+    {% else if f == "role-added" %}{{ self.t("admin-groups-flash-role-added") }}
+    {% else if f == "role-removed" %}{{ self.t("admin-groups-flash-role-removed") }}
+    {% else if f == "role-assigned" %}{{ self.t("admin-groups-flash-role-assigned") }}
+    {% else if f == "role-unassigned" %}{{ self.t("admin-groups-flash-role-unassigned") }}
     {% else %}{{ self.t("admin-groups-flash-member-removed") }}{% endif %}
   </div>
   {% endif %}
@@ -130,6 +135,91 @@
         </form>
         {% endif %}
       </div>
+      {# Group roles (#1067) — NOT the account role. The vocabulary (define /
+         remove) is Admin-only; assigning to a member is open to an Editor
+         in their own groups. Hidden for an Editor when the group has no
+         roles, so the card stays as compact as before. #}
+      {% if role == Role::Admin || !g.roles.is_empty() %}
+      <div class="group-col group-roles"{% if g.holders.len() > 6 %} x-data="{ open: false, clip: true }" x-init="clip = $refs.pills.scrollHeight > $refs.pills.clientHeight + 2; if (!clip) open = true"{% endif %}>
+        <div class="group-col-title" title="{{ self.t("admin-groups-roles-help") }}">{{ self.t("admin-groups-roles") }} · {{ g.roles.len() }}</div>
+        {% if g.roles.is_empty() %}
+          <span class="group-empty">{{ self.t("admin-groups-roles-empty") }}</span>
+        {% else %}
+          <div class="group-pills">
+            {% for r in g.roles %}
+            <span class="group-pill group-role-pill">
+              <i class="ti ti-tag" aria-hidden="true"></i> {{ r }}
+              {% if role == Role::Admin %}
+              <form method="post" action="{{ base }}/admin/groups/roles/remove" style="display:inline"
+                    data-confirm="{{ self.t("admin-groups-role-remove-confirm") }}">
+                <input type="hidden" name="group" value="{{ g.name }}">
+                <input type="hidden" name="role" value="{{ r }}">
+                <button type="submit" class="group-pill-x" title="{{ self.t("admin-groups-role-remove") }}">×</button>
+              </form>
+              {% endif %}
+            </span>
+            {% endfor %}
+          </div>
+        {% endif %}
+        {% if role == Role::Admin %}
+        <form method="post" action="{{ base }}/admin/groups/roles/define" class="group-add-member">
+          <input type="hidden" name="group" value="{{ g.name }}">
+          <input type="text" name="role" required maxlength="40" pattern="[A-Za-z0-9_.\-]{1,40}"
+                 placeholder="{{ self.t("admin-groups-role-new") }}" title="{{ self.t("admin-groups-role-pattern") }}"
+                 class="admin-table-search" style="flex:1;min-width:0">
+          <button type="submit" class="group-action" title="{{ self.t("admin-groups-role-add") }}"><i class="ti ti-plus" aria-hidden="true"></i></button>
+        </form>
+        {% endif %}
+        {% if !g.roles.is_empty() && !g.members.is_empty() %}
+          <div class="group-col-title group-holders-title">{{ self.t("admin-groups-role-holders") }}</div>
+          {% if g.holders.is_empty() %}
+            <span class="group-empty">{{ self.t("admin-groups-role-none-held") }}</span>
+          {% else %}
+          <ul class="group-holders{% if g.holders.len() > 6 %} is-collapsed{% endif %}"{% if g.holders.len() > 6 %} x-ref="pills" :class="{ 'is-collapsed': clip && !open }"{% endif %}>
+            {% for h in g.holders %}
+            <li class="group-holder">
+              <span class="group-holder__name"><i class="ti ti-user" aria-hidden="true"></i> {{ h.username }}</span>
+              {% for r in h.roles %}
+              <span class="group-pill group-role-pill">{{ r }}
+                {# A scoped Editor never gets controls on their own roles; the
+                   server refuses it anyway (404). #}
+                {% if !self.is_self(h.username.as_str()) %}
+                <form method="post" action="{{ base }}/admin/groups/roles/unassign" style="display:inline"
+                      data-confirm="{{ self.t("admin-groups-role-unassign-confirm") }}">
+                  <input type="hidden" name="group" value="{{ g.name }}">
+                  <input type="hidden" name="username" value="{{ h.username }}">
+                  <input type="hidden" name="role" value="{{ r }}">
+                  <button type="submit" class="group-pill-x" title="{{ self.t("admin-groups-role-unassign") }}">×</button>
+                </form>
+                {% endif %}
+              </span>
+              {% endfor %}
+            </li>
+            {% endfor %}
+          </ul>
+          {% if g.holders.len() > 6 %}
+          <button type="button" class="group-more" @click="open = !open" x-show="clip"
+                  aria-expanded="false" :aria-expanded="open ? 'true' : 'false'"
+                  data-more="{{ self.t("admin-groups-show-all") }} ({{ g.holders.len() }})"
+                  data-less="{{ self.t("admin-groups-show-less") }}"
+                  x-text="open ? $el.dataset.less : $el.dataset.more">{{ self.t("admin-groups-show-all") }} ({{ g.holders.len() }})</button>
+          {% endif %}
+          {% endif %}
+          <form method="post" action="{{ base }}/admin/groups/roles/assign" class="group-add-member group-assign-role">
+            <input type="hidden" name="group" value="{{ g.name }}">
+            <select name="username" required class="admin-table-select" aria-label="{{ self.t("admin-groups-pick-member") }}">
+              <option value="">{{ self.t("admin-groups-pick-member") }}</option>
+              {% for m in g.members %}{% if !self.is_self(m.as_str()) %}<option value="{{ m }}">{{ m }}</option>{% endif %}{% endfor %}
+            </select>
+            <select name="role" required class="admin-table-select" aria-label="{{ self.t("admin-groups-pick-role") }}">
+              <option value="">{{ self.t("admin-groups-pick-role") }}</option>
+              {% for r in g.roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="group-action" title="{{ self.t("admin-groups-role-assign") }}"><i class="ti ti-tag" aria-hidden="true"></i></button>
+          </form>
+        {% endif %}
+      </div>
+      {% endif %}
       <div class="group-col"{% if g.apps.len() > 8 %} x-data="{ open: false, clip: true }" x-init="clip = $refs.pills.scrollHeight > $refs.pills.clientHeight + 2; if (!clip) open = true"{% endif %}>
         <div class="group-col-title">{{ self.t("admin-groups-apps") }} · {{ g.apps.len() }}</div>
         {% if g.apps.is_empty() %}
@@ -199,6 +289,18 @@
   }
   .group-pill-x:hover { color: var(--color-lock); }
   .group-add-member { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  /* Group roles (#1067): two selects share the row and must shrink on a
+     phone instead of pushing the card wider than the viewport. */
+  .group-assign-role select { flex: 1 1 0; min-width: 0; }
+  .group-role-pill { font-family: var(--font-mono, ui-monospace, monospace); }
+  .group-holders-title { margin-top: 10px; }
+  .group-holders { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+  .group-holders.is-collapsed { max-height: 8.5rem; overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+            mask-image: linear-gradient(to bottom, #000 70%, transparent); }
+  .group-holder { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+  .group-holder__name { font-size: 12px; color: var(--text-muted); margin-right: 2px;
+    overflow-wrap: anywhere; }
 </style>
 
 {# Alpine drives the per-card "show all / show less" collapse. Deferred, so

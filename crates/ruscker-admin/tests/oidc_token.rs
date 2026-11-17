@@ -96,6 +96,7 @@ async fn fixture(yaml: &str) -> Fixture {
         access_groups: groups.iter().map(|g| g.to_string()).collect(),
         require_mfa: false,
         enabled: true,
+        logo: None,
     };
     let radar = ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&["fiscal"], CB), None)
         .await
@@ -379,6 +380,7 @@ async fn failed_client_authentication_does_not_burn_the_code() {
         access_groups: vec!["fiscal".into()],
         require_mfa: false,
         enabled: false,
+        logo: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(token_basic(&f, "radar", &f.radar, &exchange(&code)).await.status, StatusCode::UNAUTHORIZED);
@@ -692,6 +694,7 @@ async fn userinfo_follows_revocation_and_accepts_post() {
         access_groups: vec!["fiscal".into()],
         require_mfa: false,
         enabled: false,
+        logo: None,
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "client disabled");

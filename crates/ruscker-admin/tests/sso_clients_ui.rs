@@ -448,6 +448,27 @@ async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
     let (_, html) = get(state.clone(), "/admin/sso-access?event=app.access", &cookie).await;
     assert!(!html.contains("painel-interno"));
 
+    // When the SSO refusal budget is exceeded, the "recording limit
+    // reached" marker is an `sso.` event: visible on THIS tab, where an
+    // Admin looks at refusals, and selectable in its filter.
+    for i in 0..300 {
+        state.activity.record_limited(
+            "sso.denied",
+            &format!("sso.denied|u{i}|norma|not-in-group"),
+            1,
+            ActivityEvent::sso_denied(Some(format!("u{i}")), "norma", "not-in-group"),
+        );
+    }
+    let mut rx = state.activity.take_receiver().unwrap();
+    let mut batch = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        batch.push(ev);
+    }
+    assert!(batch.iter().any(|e| e.event_type.as_str() == "sso.suppressed"));
+    ruscker_admin::db::user_activity::insert_batch(&db, &batch).await.unwrap();
+    let (_, html) = get(state.clone(), "/admin/sso-access?event=sso.suppressed", &cookie).await;
+    assert_eq!(html.matches("ti-alert-triangle audit-row-icon").count(), 1, "one marker row");
+
     // The general Activity page still shows everything, refusals included.
     let (_, html) = get(state.clone(), "/admin/activity", &cookie).await;
     assert!(html.contains("painel-interno") && html.contains("norma"));

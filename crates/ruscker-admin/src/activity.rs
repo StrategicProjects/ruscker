@@ -56,6 +56,14 @@ pub enum ActivityEventType {
     /// An SSO sign-in the provider refused after identifying the client
     /// (the user is not in its groups, or the session has no account).
     SsoDenied,
+    /// A marker, not an action: the budget for a class of failure
+    /// events was reached, so further ones in that minute were not
+    /// recorded. Without it a gap in the audit would look like silence.
+    AuditSuppressed,
+    /// The same marker for SSO refusals. Its own type, in the `sso.`
+    /// family, so it shows up on the SSO "Access" tab — the place an
+    /// Admin looks at refusals.
+    SsoSuppressed,
 }
 
 impl ActivityEventType {
@@ -66,6 +74,8 @@ impl ActivityEventType {
             ActivityEventType::SsoLogin => "sso.login",
             ActivityEventType::LoginFailed => "login.failed",
             ActivityEventType::SsoDenied => "sso.denied",
+            ActivityEventType::AuditSuppressed => "audit.suppressed",
+            ActivityEventType::SsoSuppressed => "sso.suppressed",
         }
     }
 }
@@ -198,6 +208,26 @@ impl ActivityEvent {
         }
     }
 
+    /// "The budget for `class` was reached" — see
+    /// [`ActivityEventType::AuditSuppressed`].
+    fn audit_suppressed(class: &str) -> Self {
+        Self {
+            event_type: if class.starts_with("sso.") {
+                ActivityEventType::SsoSuppressed
+            } else {
+                ActivityEventType::AuditSuppressed
+            },
+            username: None,
+            spec_id: None,
+            event_key: uuid::Uuid::new_v4().to_string(),
+            auth_method: None,
+            client_ip: None,
+            user_agent: None,
+            detail: Some(class.to_string()),
+            occurred_at: Utc::now(),
+        }
+    }
+
     /// A successful login.
     pub fn login_success(
         username: impl Into<String>,
@@ -304,14 +334,20 @@ impl ActivitySink {
     /// fill the table nor crowd legitimate events out of the queue.
     ///
     /// At most `per_minute` events are kept per `key` in any one-minute
-    /// window, and at most [`FAILURE_BUDGET_PER_MINUTE`] across all keys.
-    /// The rest are counted ([`ActivitySink::suppressed`]) and dropped:
-    /// an audit needs to show THAT an address hammered the login, not
-    /// one row per attempt.
-    pub fn record_limited(&self, key: &str, per_minute: u32, event: ActivityEvent) {
+    /// window, and at most [`FAILURE_BUDGET_PER_MINUTE`] per `class`.
+    /// Each class has its OWN ceiling: anonymous traffic hammering the
+    /// login must not be able to silence the record of SSO refusals,
+    /// which need a session to produce. When a class reaches its
+    /// ceiling, ONE marker row (`audit.suppressed`) is written for that
+    /// minute, so the gap is visible in the audit instead of looking
+    /// like nothing happened; the count is in
+    /// [`ActivitySink::suppressed`].
+    pub fn record_limited(&self, class: &'static str, key: &str, per_minute: u32, event: ActivityEvent) {
         let now = std::time::Instant::now();
         let window = Duration::from_secs(60);
-        let admitted = {
+        let class_key = format!("\u{0}class|{class}");
+        let marker_key = format!("\u{0}marker|{class}");
+        let (admitted, mark) = {
             let mut budgets = self.budgets.lock().unwrap_or_else(PoisonError::into_inner);
             // Forget finished windows before the map can grow large.
             if budgets.len() > BUDGET_KEYS_MAX {
@@ -328,26 +364,38 @@ impl ActivitySink {
                 Some((start, used)) if now.duration_since(*start) < window => *used < limit,
                 _ => true,
             };
+            // Decide first (reads only), then write.
+            let class_has_room = room(&budgets, &class_key, FAILURE_BUDGET_PER_MINUTE);
             // Consume ONLY when both budgets have room: an event already
-            // refused by its own key must not use up the global budget
+            // refused by its own key must not use up the class budget
             // (one noisy address would otherwise silence everyone else).
-            let ok = room(&budgets, GLOBAL_BUDGET_KEY, FAILURE_BUDGET_PER_MINUTE)
-                && room(&budgets, key, per_minute);
-            if ok {
-                for k in [GLOBAL_BUDGET_KEY, key] {
-                    let slot = budgets.entry(k.to_string()).or_insert((now, 0));
-                    if now.duration_since(slot.0) >= window {
-                        *slot = (now, 0);
-                    }
-                    slot.1 += 1;
+            let ok = class_has_room && room(&budgets, key, per_minute);
+            // The class ceiling itself was hit: leave one marker a minute.
+            let mark = !class_has_room && room(&budgets, &marker_key, 1);
+            let mut consume = |k: &str| {
+                let slot = budgets.entry(k.to_string()).or_insert((now, 0));
+                if now.duration_since(slot.0) >= window {
+                    *slot = (now, 0);
                 }
+                slot.1 += 1;
+            };
+            if ok {
+                consume(&class_key);
+                consume(key);
             }
-            ok
+            if mark {
+                consume(&marker_key);
+            }
+            (ok, mark)
         };
         if admitted {
             self.record(event);
         } else {
             self.suppressed.fetch_add(1, Ordering::Relaxed);
+            if mark {
+                tracing::warn!(class, "audit budget reached; further events this minute are not recorded");
+                self.record(ActivityEvent::audit_suppressed(class));
+            }
         }
     }
 
@@ -407,11 +455,28 @@ pub fn spawn(sink: &ActivitySink, db: ConfigDb) -> Option<tokio::task::JoinHandl
     }))
 }
 
-/// Ceiling on failure-class events (refused sign-ins, refused SSO
-/// requests) recorded per minute across the whole process. Far above
-/// anything honest, far below the queue depth.
+/// Ceiling on each class of failure events (refused sign-ins; refused
+/// SSO requests) recorded per minute across the whole process. Far
+/// above anything honest, far below the queue depth.
 pub const FAILURE_BUDGET_PER_MINUTE: u32 = 240;
-const GLOBAL_BUDGET_KEY: &str = "\u{0}all";
+
+/// The budget bucket for a client address: the address itself for IPv4,
+/// the /64 for IPv6 — one subscriber owns a whole /64 and could
+/// otherwise present a fresh address per request.
+pub fn address_bucket(ip: Option<&str>) -> String {
+    // Canonical first: an IPv4 client seen as `::ffff:a.b.c.d` (a
+    // dual-stack listener, or a proxy that reports mapped addresses) is
+    // an IPv4 client — otherwise every one of them would share the single
+    // bucket `0:0:0:0::/64`.
+    match ip.and_then(|ip| ip.parse::<std::net::IpAddr>().ok()).map(|ip| ip.to_canonical()) {
+        Some(std::net::IpAddr::V6(v6)) => {
+            let s = v6.segments();
+            format!("{:x}:{:x}:{:x}:{:x}::/64", s[0], s[1], s[2], s[3])
+        }
+        Some(std::net::IpAddr::V4(v4)) => v4.to_string(),
+        None => "-".to_string(),
+    }
+}
 /// Budget map size at which finished windows are swept.
 const BUDGET_KEYS_MAX: usize = 4096;
 
@@ -458,35 +523,81 @@ async fn purge_expired(db: &ConfigDb, retention_days: u32) {
 mod tests {
     use super::*;
 
-    /// Whatever an outsider can trigger at will is budgeted: per key and
-    /// overall. Ordinary events are never subject to it.
+    /// Whatever an outsider can trigger at will is budgeted — per key
+    /// and per class — and a class reaching its ceiling leaves a marker
+    /// instead of a silent gap. One class cannot starve another.
     #[test]
-    fn failure_events_are_budgeted_per_key_and_overall() {
+    fn failure_events_are_budgeted_per_key_and_per_class() {
         let sink = ActivitySink::default();
         let mut rx = sink.take_receiver().unwrap();
         let fail = || ActivityEvent::login_failed(None, "unknown-account");
-        // One address hammering: only its per-minute budget gets through.
+        let drain = |rx: &mut mpsc::Receiver<ActivityEvent>| {
+            let mut kinds = Vec::new();
+            while let Ok(ev) = rx.try_recv() {
+                kinds.push(ev.event_type);
+            }
+            kinds
+        };
+
+        // One address hammering: only its per-minute budget gets through,
+        // and that is NOT the class ceiling, so no marker.
         for _ in 0..500 {
-            sink.record_limited("login.failed|203.0.113.9", 10, fail());
+            sink.record_limited("login.failed", "login.failed|203.0.113.9", 10, fail());
         }
-        let mut kept = 0;
-        while rx.try_recv().is_ok() {
-            kept += 1;
-        }
-        assert_eq!(kept, 10);
+        assert_eq!(drain(&mut rx), vec![ActivityEventType::LoginFailed; 10]);
         assert_eq!(sink.suppressed(), 490);
-        // Many addresses: the overall ceiling holds (10 were already used).
+
+        // Many addresses: the class ceiling holds (10 already used) and
+        // exactly one marker says the log has a gap.
         for i in 0..1000 {
-            sink.record_limited(&format!("login.failed|198.51.100.{i}"), 10, fail());
+            sink.record_limited("login.failed", &format!("login.failed|198.51.100.{i}"), 10, fail());
         }
-        let mut kept = 0;
-        while rx.try_recv().is_ok() {
-            kept += 1;
+        let kinds = drain(&mut rx);
+        let failed = kinds.iter().filter(|k| **k == ActivityEventType::LoginFailed).count() as u32;
+        let markers = kinds.iter().filter(|k| **k == ActivityEventType::AuditSuppressed).count();
+        assert_eq!(failed, FAILURE_BUDGET_PER_MINUTE - 10);
+        assert_eq!(markers, 1, "one marker per class per minute");
+
+        // The login class is spent; the SSO class is untouched by it.
+        sink.record_limited(
+            "sso.denied",
+            "sso.denied|bia|radar|not-in-group",
+            1,
+            ActivityEvent::sso_denied(Some("bia".into()), "radar", "not-in-group"),
+        );
+        assert_eq!(drain(&mut rx), vec![ActivityEventType::SsoDenied]);
+        // When the SSO class itself overflows, its marker is an `sso.`
+        // event (so the SSO tab shows it), again once.
+        for i in 0..400 {
+            sink.record_limited(
+                "sso.denied",
+                &format!("sso.denied|user{i}|radar|not-in-group"),
+                1,
+                ActivityEvent::sso_denied(Some(format!("user{i}")), "radar", "not-in-group"),
+            );
         }
-        assert_eq!(kept as u32, FAILURE_BUDGET_PER_MINUTE - 10);
+        let kinds = drain(&mut rx);
+        assert_eq!(kinds.iter().filter(|k| **k == ActivityEventType::SsoSuppressed).count(), 1);
+        assert_eq!(kinds.iter().filter(|k| **k == ActivityEventType::AuditSuppressed).count(), 0);
+
         // A real sign-in is not a failure-class event and still goes in.
         sink.record(ActivityEvent::login_success("alice", AuthMethod::Password, "k", None));
-        assert!(rx.try_recv().is_ok());
+        assert_eq!(drain(&mut rx), vec![ActivityEventType::LoginSuccess]);
+    }
+
+    #[test]
+    fn address_bucket_groups_ipv6_by_64() {
+        assert_eq!(address_bucket(Some("203.0.113.9")), "203.0.113.9");
+        assert_eq!(
+            address_bucket(Some("2001:db8:1:2:aaaa:bbbb:cccc:dddd")),
+            address_bucket(Some("2001:db8:1:2::1"))
+        );
+        assert_ne!(address_bucket(Some("2001:db8:1:2::1")), address_bucket(Some("2001:db8:1:3::1")));
+        // IPv4-mapped IPv6 is the IPv4 address, not a shared /64.
+        assert_eq!(address_bucket(Some("::ffff:203.0.113.9")), "203.0.113.9");
+        assert_ne!(address_bucket(Some("::ffff:203.0.113.9")), address_bucket(Some("::ffff:203.0.113.10")));
+        assert_eq!(address_bucket(None), "-");
+        assert_eq!(address_bucket(Some("not-an-ip")), "-");
     }
 
     #[tokio::test]

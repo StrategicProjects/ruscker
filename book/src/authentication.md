@@ -123,6 +123,7 @@ Under **SSO → Clients** (Admin only), register each system:
 | **Redirect URIs** | Where Ruscker may send the user back. Matched **exactly** — no wildcards, no prefixes. HTTPS, or loopback HTTP for development. |
 | **Allowed groups** | Only members of at least one of these groups can sign in to the system. Empty means any signed-in user. An Admin account gets no bypass. |
 | **Require two-step verification** | The user must have confirmed a second factor in this login session. |
+| **System logo** | A Media-library image. With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
 
 The **client secret** is shown once, when the client is created or when
 you generate a new one; only a salted hash is stored. Generating a new

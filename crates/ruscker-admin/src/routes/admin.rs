@@ -117,6 +117,54 @@ struct LoginPage<'a> {
     next: String,
     /// Percent-encoded twin used by the password/token login switch links.
     next_encoded: String,
+    /// The portal's own name, logo and colours (#1080) — the sign-in
+    /// page looks like the portal the person knows.
+    brand_title: String,
+    brand_logo: Option<String>,
+    theme_style: String,
+    /// Set when the person arrived from an SSO client: the system they
+    /// are signing in to, so the page can say so.
+    sso_client: Option<SsoClientBrand>,
+}
+
+/// Name and logo of the SSO client a sign-in is for.
+struct SsoClientBrand {
+    name: String,
+    logo_src: Option<String>,
+}
+
+/// The SSO client behind a post-login destination — but only for a
+/// request the authorization endpoint itself would accept.
+///
+/// `/oauth/authorize` deliberately answers the same way for an unknown
+/// client, a disabled one and an unregistered redirect URI, so that it
+/// tells a prober nothing. This page is reachable without signing in and
+/// with any `next`, so it must not undo that: naming a system for a bare
+/// `client_id` would let anyone list the registered clients and read
+/// the names of internal systems. Hence the same conditions as the
+/// endpoint: no repeated parameter, an enabled client, and a
+/// `redirect_uri` registered for it — at which point the endpoint would
+/// already have sent the browser here.
+///
+/// Only the client's REGISTERED name and logo are shown, never anything
+/// else from the query.
+async fn sso_client_brand(state: &AppState, next: &str) -> Option<SsoClientBrand> {
+    let query = next.strip_prefix("/oauth/authorize?")?;
+    let (client_id, redirect_uri) = super::oidc::client_and_redirect(query)?;
+    if !db::oidc_clients::is_valid_client_id(&client_id) {
+        return None;
+    }
+    let client = db::oidc_clients::fetch(state.db.as_ref()?, &client_id)
+        .await
+        .ok()
+        .flatten()
+        .filter(|c| c.enabled && c.redirect_uri_registered(&redirect_uri))?;
+    Some(SsoClientBrand {
+        name: client.name,
+        logo_src: client
+            .logo
+            .map(|f| format!("{}/assets/img/{}", state.base_path, urlencoding::encode(&f))),
+    })
 }
 
 impl LoginPage<'_> {
@@ -241,11 +289,11 @@ async fn login_form(
 ) -> Response {
     let bootstrap = show_token_form(&state, q.token.is_some()).await;
     let next = app_next_path(q.next.as_deref(), &state.base_path).unwrap_or_default();
-    let page = login_page(&state, loc, theme, "", bootstrap, next);
+    let page = login_page(&state, loc, theme, "", bootstrap, next).await;
     render(&page)
 }
 
-fn login_page<'a>(
+async fn login_page<'a>(
     state: &'a AppState,
     loc: Locale,
     theme: Theme,
@@ -254,7 +302,13 @@ fn login_page<'a>(
     next: String,
 ) -> LoginPage<'a> {
     let next_encoded = url::form_urlencoded::byte_serialize(next.as_bytes()).collect();
+    let brand = super::landing::portal_brand(state, loc).await;
+    let sso_client = sso_client_brand(state, &next).await;
     LoginPage {
+        brand_title: brand.title,
+        brand_logo: brand.logo_src,
+        theme_style: brand.theme_style,
+        sso_client,
         locale: loc,
         theme,
         locales: &state.locales,
@@ -267,7 +321,7 @@ fn login_page<'a>(
     }
 }
 
-fn login_error(
+async fn login_error(
     state: &AppState,
     loc: Locale,
     theme: Theme,
@@ -275,7 +329,7 @@ fn login_error(
     bootstrap: bool,
     next: String,
 ) -> Response {
-    let page = login_page(state, loc, theme, error, bootstrap, next);
+    let page = login_page(state, loc, theme, error, bootstrap, next).await;
     let body = match page.render() {
         Ok(s) => s,
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "render").into_response(),
@@ -335,7 +389,7 @@ async fn login_submit(
             "wrong-login",
             false,
             next.clone().unwrap_or_default(),
-        );
+        ).await;
     };
 
     let user = match db::users::verify_login(pool, &form.username, &form.password).await {
@@ -354,8 +408,12 @@ async fn login_submit(
             // Budgeted per address: this is reachable without an account
             // (and the login limiter is checked BEFORE the slow password
             // verification, so a parallel burst gets past it).
-            let key = format!("login.failed|{}", client.ip.as_deref().unwrap_or("-"));
+            let key = format!(
+                "login.failed|{}",
+                crate::activity::address_bucket(client.ip.as_deref())
+            );
             state.activity.record_limited(
+                "login.failed",
                 &key,
                 LOGIN_FAILED_ROWS_PER_MINUTE,
                 crate::activity::ActivityEvent::login_failed(known, reason).with_client(client),
@@ -367,7 +425,7 @@ async fn login_submit(
                 "wrong-login",
                 false,
                 next.clone().unwrap_or_default(),
-            );
+            ).await;
         }
         Err(e) => {
             tracing::error!(error = ?e, "login lookup failed");
@@ -524,7 +582,7 @@ async fn token_login(
             "wrong-token",
             true,
             next.clone().unwrap_or_default(),
-        );
+        ).await;
     }
 
     state.login_limiter.record_success();
@@ -1092,6 +1150,10 @@ mod tests {
             bootstrap: false,
             next: "/app/demo/?tab=1".to_string(),
             next_encoded: "%2Fapp%2Fdemo%2F%3Ftab%3D1".to_string(),
+            brand_title: "Ruscker".to_string(),
+            brand_logo: None,
+            theme_style: String::new(),
+            sso_client: None,
         }
         .render()
         .expect("render login");
@@ -1118,6 +1180,10 @@ mod tests {
             bootstrap: false,
             next: String::new(),
             next_encoded: String::new(),
+            brand_title: "Ruscker".to_string(),
+            brand_logo: None,
+            theme_style: String::new(),
+            sso_client: None,
         }
         .render()
         .expect("render login");
@@ -1166,6 +1232,10 @@ mod tests {
             bootstrap: false,
             next: String::new(),
             next_encoded: String::new(),
+            brand_title: "Ruscker".to_string(),
+            brand_logo: None,
+            theme_style: String::new(),
+            sso_client: None,
         }
         .render()
         .expect("render login");

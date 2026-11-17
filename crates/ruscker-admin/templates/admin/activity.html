@@ -45,6 +45,9 @@
       {% endif %}
       <option value="sso.login"      {% if event == "sso.login" %}selected{% endif %}>{{ self.t("admin-activity-event-sso") }}</option>
       <option value="sso.denied"     {% if event == "sso.denied" %}selected{% endif %}>{{ self.t("admin-activity-event-sso-denied") }}</option>
+      {# The "recording limit reached" markers, so a gap can be found. #}
+      {% if !sso %}<option value="audit.suppressed" {% if event == "audit.suppressed" %}selected{% endif %}>{{ self.t("admin-activity-event-suppressed") }} · login</option>{% endif %}
+      <option value="sso.suppressed" {% if event == "sso.suppressed" %}selected{% endif %}>{{ self.t("admin-activity-event-suppressed") }} · SSO</option>
     </select>
     <i class="ti ti-chevron-down select-chevron" aria-hidden="true"></i>
   </div>

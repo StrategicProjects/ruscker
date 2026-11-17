@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="theme-color" content="#0f6e56">
 <meta name="robots" content="noindex,nofollow">
-<title>{{ self.t("admin-login-title") }} · Ruscker</title>
+<title>{{ self.t("admin-login-title") }} · {{ brand_title }}</title>
 {% include "_favicons.html" %}
 <link rel="stylesheet" href="{{ base }}/assets/styles.css?v={{ crate::APP_VERSION }}">
 <link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+{# The portal's own palette (#1080), so the sign-in page matches the
+   portal. Sanitized by `build_theme_style`, same as on the landing. #}
+{% if !theme_style.is_empty() %}<style>{{ theme_style|safe }}</style>{% endif %}
 </head>
 <body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
 {% include "_perceived_speed.html" %}
@@ -25,14 +28,33 @@
 
   {% if next != "" %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
 
+  {# The portal's identity (#1080): its logo and name from Appearance.
+     Without a custom logo the built-in mark stays. No free-form HTML
+     here, on purpose — this page receives passwords. #}
   <div class="admin-login-brand">
+    {% match brand_logo %}{% when Some with (src) %}
+      <img src="{{ src }}" alt="" style="height:48px;max-width:160px;object-fit:contain">
+    {% when None %}
     <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
       <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
       <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
       <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
     </svg>
-    <div class="brand-wordmark text-base">ruscker</div>
+    {% endmatch %}
+    <div class="brand-wordmark text-base" style="min-width:0;overflow-wrap:anywhere">{{ brand_title }}</div>
   </div>
+
+  {# Arriving from an SSO client: say which system this sign-in is for.
+     Only the client's REGISTERED name and logo — nothing from the URL. #}
+  {% match sso_client %}{% when Some with (c) %}
+  <div class="admin-login-sso" role="note">
+    {% match c.logo_src %}{% when Some with (src) %}<img src="{{ src }}" alt="" style="height:28px;max-width:72px;object-fit:contain;flex:none">{% when None %}<i class="ti ti-login" aria-hidden="true"></i>{% endmatch %}
+    <div style="min-width:0">
+      <div class="text-[11px] text-[color:var(--text-muted)]">{{ self.t("admin-login-sso-for") }}</div>
+      <div class="font-medium" style="overflow-wrap:anywhere">{{ c.name }}</div>
+    </div>
+  </div>
+  {% when None %}{% endmatch %}
 
   <h1 class="text-lg font-medium tracking-tight">{{ self.t("admin-login-title") }}</h1>
   <p class="text-xs text-[color:var(--text-muted)]">

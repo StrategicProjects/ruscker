@@ -185,6 +185,19 @@ impl AuthParams {
     }
 }
 
+/// The `(client_id, redirect_uri)` pair of an authorization request's
+/// query, or `None` when either is missing or a parameter is repeated —
+/// exactly the cases in which [`authorize`] refuses before looking
+/// anything up. Used by the sign-in page to decide whether it may name
+/// the system a sign-in is for.
+pub(crate) fn client_and_redirect(query: &str) -> Option<(String, String)> {
+    if query.len() > MAX_QUERY_LEN {
+        return None;
+    }
+    let params = AuthParams::parse(query)?;
+    Some((params.get("client_id")?.to_string(), params.get("redirect_uri")?.to_string()))
+}
+
 /// A PKCE S256 challenge is base64url(SHA-256(verifier)) without
 /// padding: always exactly 43 characters of the URL-safe alphabet.
 fn is_s256_challenge(v: &str) -> bool {
@@ -435,6 +448,7 @@ async fn authorize(
             client.client_id
         );
         state.activity.record_limited(
+            "sso.denied",
             &key,
             1,
             crate::activity::ActivityEvent::sso_denied(username, client.client_id.clone(), reason)
@@ -748,6 +762,7 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
             // a refused sign-in, and the audit should show it.
             let key = format!("sso.denied|{}|{}|access-revoked", grant.username, client.client_id);
             state.activity.record_limited(
+                "sso.denied",
                 &key,
                 1,
                 crate::activity::ActivityEvent::sso_denied(

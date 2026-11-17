@@ -910,6 +910,62 @@ fn build_header_style(
     css
 }
 
+/// What identifies THIS portal to a visitor: its name, its logo and its
+/// colours, as set in the Appearance editor. The sign-in page uses it so
+/// a person entering a password sees the portal they know, not a generic
+/// product screen (#1080).
+pub(crate) struct PortalBrand {
+    /// Editor title → `proxy.title` → the localized default (the same
+    /// chain as the landing header).
+    pub title: String,
+    /// The first header-left logo, mount-prefixed; `None` ⇒ built-in mark.
+    pub logo_src: Option<String>,
+    /// CSS that recolours the theme variables (per-theme palette); may
+    /// be empty. Already sanitized by [`build_theme_style`].
+    pub theme_style: String,
+}
+
+/// Resolve the portal's brand from the database (or the YAML when there
+/// is none). Never fails: on any error it degrades to the defaults.
+pub(crate) async fn portal_brand(state: &AppState, loc: Locale) -> PortalBrand {
+    let lc = match state.db.as_ref() {
+        Some(db) => crate::db::landing::fetch(db)
+            .await
+            .unwrap_or_else(|_| state.config.proxy.landing_customization.clone()),
+        None => state.config.proxy.landing_customization.clone(),
+    };
+    let title = lc
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            let cfg = state.config.proxy.title.trim();
+            if cfg.is_empty() {
+                state.locales.t(loc, "landing-title", None)
+            } else {
+                cfg.to_string()
+            }
+        });
+    // Only a logo served by this portal (a root-absolute path, i.e. a
+    // Media-library file). An external URL would be blocked by the page's
+    // CSP anyway — a broken image next to a password field — and a
+    // relative one would resolve under `/admin/`. Anything else falls
+    // back to the built-in mark.
+    let logo_src = lc
+        .logos
+        .iter()
+        .find(|l| l.slot == "header" && l.align == "left")
+        .filter(|l| l.url.starts_with('/') && !l.url.starts_with("//"))
+        .map(|l| format!("{}{}", state.base_path, l.url));
+    PortalBrand {
+        title,
+        logo_src,
+        theme_style: build_theme_style(&lc.theme_colors),
+    }
+}
+
 fn build_theme_style(tc: &ruscker_config::ThemeColors) -> String {
     fn vars(p: &ruscker_config::ThemePalette) -> String {
         let mut s = String::new();

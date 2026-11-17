@@ -197,6 +197,7 @@ async fn seed(db: &ConfigDb, require_mfa: bool) {
         access_groups: vec!["fiscal".into()],
         require_mfa,
         enabled: true,
+        logo: None,
     };
     ruscker_admin::db::oidc_clients::create(db, "radar", &settings, None).await.unwrap().unwrap();
     for (name, groups) in [("ana", vec!["fiscal".to_string()]), ("bia", vec![])] {
@@ -282,6 +283,7 @@ async fn nothing_is_redirected_before_client_and_redirect_uri_check_out() {
         access_groups: vec!["fiscal".into()],
         require_mfa: false,
         enabled: false,
+        logo: None,
     };
     ruscker_admin::db::oidc_clients::update(&db, "radar", &off, None).await.unwrap();
     let r = get(&state, &request("", &[]), &ana).await;
@@ -661,4 +663,92 @@ async fn oversized_state_and_nonce_are_refused() {
     let r = get(&state, &(request("", &["nonce"]) + &format!("&nonce={big}")), &ana).await;
     assert_eq!(params(&r.location).get("error").map(String::as_str), Some("invalid_request"));
     assert_eq!(stored_codes(&db).await, 0);
+}
+
+/// The sign-in page is the portal's own (#1080): its name, not a fixed
+/// product name — and, arriving from an SSO client, it says which
+/// system the sign-in is for, using only what the Admin registered.
+#[tokio::test]
+async fn the_sign_in_page_carries_the_portal_brand_and_the_target_system() {
+    let (state, db) = setup(ON, false).await;
+
+    // Plain sign-in: the portal title from the configuration ("T").
+    let page = get(&state, "/admin/login", "").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("· T</title>"), "tab title names the portal");
+    assert!(page.body.contains(r#"overflow-wrap:anywhere">T</div>"#), "wordmark is the portal name");
+    assert!(!page.body.contains("admin-login-sso\""), "no SSO note on a plain sign-in");
+
+    // Arriving from the authorization endpoint for `radar`.
+    let next: String = url::form_urlencoded::byte_serialize(request("", &[]).as_bytes()).collect();
+    let page = get(&state, &format!("/admin/login?next={next}"), "").await;
+    assert!(page.body.contains("admin-login-sso\""));
+    assert!(page.body.contains(">Radar</div>"), "the registered name of the system");
+
+    // The name is the REGISTERED one, escaped — a hostile name cannot
+    // inject markup, and nothing else from the URL is echoed.
+    let hostile = ClientSettings {
+        name: "<script>alert(1)</script>".into(),
+        redirect_uris: vec![CB.into()],
+        access_groups: vec![],
+        require_mfa: false,
+        enabled: true,
+        logo: Some("logo radar.svg".into()),
+    };
+    ruscker_admin::db::oidc_clients::update(&db, "radar", &hostile, None).await.unwrap();
+    let page = get(&state, &format!("/admin/login?next={next}"), "").await;
+    assert!(!page.body.contains("<script>alert(1)"));
+    assert!(
+        page.body.contains("&#60;script&#62;alert(1)") || page.body.contains("&lt;script&gt;alert(1)"),
+        "the name is shown, escaped"
+    );
+
+    // Its logo comes from the Media library, percent-encoded.
+    assert!(page.body.contains(r#"src="/assets/img/logo%20radar.svg""#), "client logo");
+
+    // The page names a system only for a request the authorization
+    // endpoint itself would accept — it must not become a way to list
+    // registered clients. A bare client_id, an unregistered redirect
+    // URI, or a repeated parameter: no note, and no name anywhere.
+    let enc = |q: String| -> String { url::form_urlencoded::byte_serialize(q.as_bytes()).collect() };
+    let probes = [
+        "/oauth/authorize?client_id=radar".to_string(),
+        request("", &["redirect_uri"]),
+        request("", &["redirect_uri"]) + "&redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
+        request("&client_id=radar", &[]),
+        request("&redirect_uri=https%3A%2F%2Fradar.example%2Fcb", &[]),
+    ];
+    for probe in probes {
+        let page = get(&state, &format!("/admin/login?next={}", enc(probe.clone())), "").await;
+        assert_eq!(page.status, StatusCode::OK);
+        assert!(!page.body.contains("admin-login-sso\""), "no note for {probe}");
+        assert!(!page.body.contains("script&#62;alert") && !page.body.contains("logo%20radar"), "no name or logo for {probe}");
+    }
+
+    // No note for: an unknown client, a disabled one, or an app destination.
+    let unknown: String =
+        url::form_urlencoded::byte_serialize((request("", &["client_id"]) + "&client_id=nope").as_bytes()).collect();
+    let page = get(&state, &format!("/admin/login?next={unknown}"), "").await;
+    assert!(!page.body.contains("admin-login-sso\""));
+    let off = ClientSettings { enabled: false, ..hostile };
+    ruscker_admin::db::oidc_clients::update(&db, "radar", &off, None).await.unwrap();
+    let page = get(&state, &format!("/admin/login?next={next}"), "").await;
+    assert!(!page.body.contains("admin-login-sso\""));
+    let page = get(&state, "/admin/login?next=%2Fapp%2Fdemo%2F", "").await;
+    assert!(!page.body.contains("admin-login-sso\""));
+}
+
+/// Under a base path the note still appears (the destination arrives
+/// with the prefix and is stripped before it is inspected).
+#[tokio::test]
+async fn the_sign_in_note_works_under_a_base_path() {
+    let db = open_db().await;
+    seed(&db, false).await;
+    let mut state = app_state(db.clone(), ON_BOX, Some(KEY)).await;
+    state.base_path = Arc::from("/box");
+    let next: String =
+        url::form_urlencoded::byte_serialize(format!("/box{}", request("", &[])).as_bytes()).collect();
+    let page = get(&state, &format!("/box/admin/login?next={next}"), "").await;
+    assert_eq!(page.status, StatusCode::OK);
+    assert!(page.body.contains("admin-login-sso\"") && page.body.contains(">Radar</div>"));
 }

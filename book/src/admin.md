@@ -27,6 +27,13 @@ as a **break-glass** login (`/admin/login?token=1`) so you can never be
 locked out. Until a token is set, `/admin/*` returns `503` and only the
 public landing + proxy are served.
 
+The sign-in page carries the **portal's own identity**: the title, the
+header logo and the theme colours set under Appearance (with the
+built-in mark when there is no custom logo). When a person arrives from
+an [SSO client](#sso), it also says which system they are signing in
+to, using the name and logo registered for that client. There is no
+free-form HTML on this page, by design: it receives passwords.
+
 The top-right account cluster has the same **language** (pt-BR / en-US /
 es-ES / fr-FR) and **theme** (light / dark / auto) pickers as the public
 portal, plus your current **access level** and account actions.
@@ -398,8 +405,10 @@ configuration.
 
 Each client has an ID, a display name, its exact redirect URIs (HTTPS,
 or loopback HTTP for development; no wildcards), an optional list of
-**allowed groups** (empty means any signed-in user) and an optional
-**two-step verification** requirement. The client secret is shown once,
+**allowed groups** (empty means any signed-in user), an optional
+**two-step verification** requirement and an optional **logo** from the
+Media library, shown on the sign-in page when a user arrives from that
+system. The client secret is shown once,
 on creation or when you generate a new one, and only a salted hash is
 stored. Deleting a group on the Groups page when it is a client's last
 allowed group disables that client instead of opening it to everyone.

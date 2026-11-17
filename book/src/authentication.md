@@ -216,8 +216,8 @@ files. Two things to check in the proxy's own documentation:
 | `invalid_client` from the token endpoint | Wrong client secret, or the client is disabled. |
 | `invalid_grant` from the token endpoint | The code was already used, expired (60 seconds), or is being redeemed with a different redirect URI or PKCE verifier; or the user lost access meanwhile. |
 
-Each successful sign-in to an external system, and each refusal, is
-listed under **SSO → Access** (and in the general **Activity** page)
+Each successful sign-in to an external system, and each refusal of a
+person the portal could identify, is listed under **SSO → Access** (and in the general **Activity** page)
 with the user, the system, the address and browser the user came from
 and, for a refusal, the reason.
 

@@ -171,6 +171,7 @@ impl ActivityPage<'_> {
             Some("not-in-group") => self.t("admin-activity-detail-not-in-group"),
             Some("no-account") => self.t("admin-activity-detail-no-account"),
             Some("account-missing") => self.t("admin-activity-detail-account-missing"),
+            Some("access-revoked") => self.t("admin-activity-detail-access-revoked"),
             Some(other) => other.to_string(),
             None => String::new(),
         }
@@ -328,7 +329,12 @@ async fn render_activity(
         }
     };
 
-    let users = db::user_activity::distinct_usernames(db).await.unwrap_or_default();
+    let users = if sso {
+        db::user_activity::distinct_usernames_with_prefix(db, "sso.").await
+    } else {
+        db::user_activity::distinct_usernames(db).await
+    }
+    .unwrap_or_default();
     let apps = if sso {
         db::user_activity::distinct_specs_with_prefix(db, "sso.").await
     } else {
@@ -336,22 +342,27 @@ async fn render_activity(
     }
     .unwrap_or_default();
     let mut kpi_filter = filter.clone();
-    kpi_filter.event_type = Some("login.success".into());
-    let kpi_logins = match db::user_activity::count_filtered(db, &kpi_filter).await {
-        Ok(count) => count,
-        Err(e) => {
-            tracing::error!(error = ?e, "count login activity failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
-        }
-    };
-    kpi_filter.event_type = Some("app.access".into());
-    let kpi_app_accesses = match db::user_activity::count_filtered(db, &kpi_filter).await {
-        Ok(count) => count,
-        Err(e) => {
-            tracing::error!(error = ?e, "count app access activity failed");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
-        }
-    };
+    // The general page's cards. Skipped on the SSO tab, where the prefix
+    // makes both counts zero by construction.
+    let (mut kpi_logins, mut kpi_app_accesses) = (0, 0);
+    if !sso {
+        kpi_filter.event_type = Some("login.success".into());
+        kpi_logins = match db::user_activity::count_filtered(db, &kpi_filter).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::error!(error = ?e, "count login activity failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+            }
+        };
+        kpi_filter.event_type = Some("app.access".into());
+        kpi_app_accesses = match db::user_activity::count_filtered(db, &kpi_filter).await {
+            Ok(count) => count,
+            Err(e) => {
+                tracing::error!(error = ?e, "count app access activity failed");
+                return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+            }
+        };
+    }
     let kpi_users = users.len() as i64;
 
     // SSO cards: sign-ins and refusals under the active user / system /

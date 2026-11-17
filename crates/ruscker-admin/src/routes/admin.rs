@@ -293,6 +293,10 @@ pub struct LoginForm {
     pub next: Option<String>,
 }
 
+/// Refused sign-ins recorded per client address per minute. Enough to
+/// show that an address is guessing; more rows would say nothing new.
+const LOGIN_FAILED_ROWS_PER_MINUTE: u32 = 10;
+
 /// Primary login: username + password against the `users` table.
 async fn login_submit(
     State(state): State<AppState>,
@@ -347,7 +351,13 @@ async fn login_submit(
                 .flatten()
                 .map(|u| u.username);
             let reason = if known.is_some() { "wrong-password" } else { "unknown-account" };
-            state.activity.record(
+            // Budgeted per address: this is reachable without an account
+            // (and the login limiter is checked BEFORE the slow password
+            // verification, so a parallel burst gets past it).
+            let key = format!("login.failed|{}", client.ip.as_deref().unwrap_or("-"));
+            state.activity.record_limited(
+                &key,
+                LOGIN_FAILED_ROWS_PER_MINUTE,
                 crate::activity::ActivityEvent::login_failed(known, reason).with_client(client),
             );
             return login_error(

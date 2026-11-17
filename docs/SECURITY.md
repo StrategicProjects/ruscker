@@ -88,12 +88,22 @@ Status: living document. Tracks the Phase 5 security audit
   table logs successful password logins and new interactive app sessions
   (username or "anonymous", app id, timestamp) for the Admin-only Activity
   page. Since #1079 it also records **refused** password sign-ins, SSO
-  sign-ins and SSO refusals, each with the **client address** and the
-  browser's **`User-Agent`** (sanitized, at most 256 characters) and, for
-  a refusal, the reason. Rules that keep this an audit and not a liability:
+  sign-ins and SSO refusals, and every row — **app accesses included,
+  so also anonymous visitors of public apps** — carries the **client
+  address** and the browser's **`User-Agent`** (sanitized, at most 256
+  characters) and, for a refusal, the reason. Rules that keep this an
+  audit and not a liability:
   - the address follows the forwarded-header trust rule of the rate
-    limiter (right-most `X-Forwarded-For` only when the operator opted in,
-    the TCP peer otherwise) — never a value the client can invent;
+    limiter: when the operator opted into forwarded headers, the
+    right-most entry of the **last** `X-Forwarded-For` line (the one the
+    reverse proxy in front wrote); the TCP peer otherwise. This is
+    trustworthy with a single reverse proxy in front that sets or
+    appends the header, which is the documented deployment;
+  - events an outsider can cause at will are **budgeted**: refused
+    sign-ins to ten rows a minute per address, SSO refusals to one a
+    minute per user, system and reason, and all of them together to 240
+    a minute — so they can neither fill the table nor push real events
+    out of the queue;
   - a refused sign-in keeps the typed username **only if it names an
     existing account**; anything else (people type passwords in the wrong
     field) is not stored;

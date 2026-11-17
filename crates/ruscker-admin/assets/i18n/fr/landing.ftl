@@ -1245,6 +1245,7 @@ admin-activity-detail-unknown-account = compte inexistant
 admin-activity-detail-not-in-group = hors des groupes autorisés du système
 admin-activity-detail-no-account = session du jeton d’urgence, sans compte
 admin-activity-detail-account-missing = le compte de la session n’existe plus
+admin-activity-detail-access-revoked = a perdu l’accès avant la fin de la connexion
 admin-activity-col-browser = Navigateur
 admin-activity-user = Utilisateur
 admin-activity-user-all = Tous les utilisateurs

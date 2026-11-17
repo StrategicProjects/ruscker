@@ -197,6 +197,28 @@ async fn login_outcomes_are_recorded_with_where_they_came_from() {
     assert_eq!(ev.user_agent.as_deref().map(str::len), Some(256));
     assert!(rx.try_recv().is_err(), "one event per attempt");
 
+    // A proxy that adds its hop as a SEPARATE header line: the last line
+    // is ours; the first is whatever the client sent. A tab in the
+    // User-Agent (legal in a header value) is dropped.
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("user-agent", "Odd\tAgent/1.0")
+                .header("x-forwarded-for", "10.99.99.99")
+                .header("x-forwarded-for", "203.0.113.50")
+                .body(Body::from("username=nobody&password=x"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    let ev = rx.try_recv().unwrap();
+    assert_eq!(ev.client_ip.as_deref(), Some("203.0.113.50"));
+    assert_eq!(ev.user_agent.as_deref(), Some("OddAgent/1.0"));
+
     // Without the forwarded-headers opt-in the header is not believed
     // (and there is no TCP peer under `oneshot`): no address is recorded.
     let (direct, _pool) = state_with_db().await;
@@ -459,6 +481,46 @@ async fn password_page_explains_itself_to_a_token_session() {
         .unwrap();
     let body = String::from_utf8(axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
     assert!(body.contains(r#"name="new_password""#));
+}
+
+/// Refused sign-ins are reachable without an account, so their audit
+/// rows are budgeted: a burst from one address leaves a handful of rows,
+/// not one per attempt — and cannot push real events out of the queue.
+#[tokio::test]
+async fn a_burst_of_refused_logins_writes_a_bounded_number_of_rows() {
+    let (mut state, _pool) = state_with_db().await;
+    state.config = Arc::new(
+        Config::from_yaml("server:\n  useForwardHeaders: true\nproxy:\n  title: T\n  specs: []\n").unwrap(),
+    );
+    let mut rx = state.activity.take_receiver().unwrap();
+    let mut tasks = Vec::new();
+    for _ in 0..60 {
+        let state = state.clone();
+        tasks.push(tokio::spawn(async move {
+            router(state)
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/admin/login")
+                        .header("content-type", "application/x-www-form-urlencoded")
+                        .header("x-forwarded-for", "203.0.113.9")
+                        .body(Body::from("username=nobody&password=x"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap()
+                .status()
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+    let mut rows = 0;
+    while rx.try_recv().is_ok() {
+        rows += 1;
+    }
+    assert!((1..=10).contains(&rows), "{rows} rows for 60 attempts from one address");
+    assert!(state.activity.suppressed() > 0 || rows < 10);
 }
 
 fn form_nesting(body: &str) -> (usize, usize) {

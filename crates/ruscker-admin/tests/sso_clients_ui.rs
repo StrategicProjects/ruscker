@@ -461,6 +461,11 @@ async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
     let (status, html) = get(state.clone(), "/admin/sso-access", &format!("{COOKIE_NAME}={sid}")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(!html.contains("203.0.113.9"));
+    // The general Activity page shows the same rows, so it must be
+    // just as closed to an Editor.
+    let (status, html) = get(state.clone(), "/admin/activity", &format!("{COOKIE_NAME}={sid}")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(!html.contains("203.0.113.9"));
     let (status, _) = get(state, "/admin/sso-access", "").await;
     assert_eq!(status, StatusCode::SEE_OTHER);
 }

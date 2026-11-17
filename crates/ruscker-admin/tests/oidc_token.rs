@@ -429,6 +429,16 @@ async fn the_user_is_checked_again_at_redemption() {
     let code = authorize(&f, "radar", "openid").await;
     ruscker_admin::db::users::set_groups(&f.db, "ana", &["outro".to_string()], None).await.unwrap();
     assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+    // …and it is audited as a refusal, with the USER's address and
+    // browser (from the code), not the system server's.
+    let mut rx = f.state.activity.take_receiver().expect("receiver");
+    let ev = rx.try_recv().expect("a refusal row");
+    assert_eq!(ev.event_type.as_str(), "sso.denied");
+    assert_eq!(ev.detail.as_deref(), Some("access-revoked"));
+    assert_eq!(ev.username.as_deref(), Some("ana"));
+    assert_eq!(ev.spec_id.as_deref(), Some("radar"));
+    assert_eq!(ev.client_ip.as_deref(), Some("203.0.113.9"));
+    assert_eq!(ev.user_agent.as_deref(), Some("TestBrowser/1.0"));
     ruscker_admin::db::users::set_groups(&f.db, "ana", &["fiscal".to_string()], None).await.unwrap();
 
     // Same username, different account.

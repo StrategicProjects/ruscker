@@ -457,9 +457,15 @@ Sign-ins to external systems appear in **Activity** as "SSO sign-in",
 with the client ID in the app column.
 
 The **Access** tab is the audit of those sign-ins: every completed SSO
-sign-in and every refusal, newest first, with the user, the system, the
-address and browser the user came from, and — for a refusal — the
-reason (not in the system's allowed groups, a session with no account).
+sign-in and the refusals of people the portal could identify, newest
+first, with the user, the system, the address and browser the user came
+from, and — for a refusal — the reason (not in the system's allowed
+groups, a session with no account, access lost before the sign-in
+completed). Repeated refusals of the same person at the same system
+are recorded once a minute, not once per attempt. Requests that never
+reach that point — an unknown client, a wrong client secret, a code
+presented with the wrong data — are protocol errors, not refusals, and
+are not listed.
 Cards at the top count sign-ins, refusals and enabled systems; filter by
 event, user, system and period. The address and browser are the
 *user's*, captured when they passed through the portal, not those of the
@@ -674,10 +680,15 @@ a non-blocking enqueue plus a background writer that batches inserts — so
 activity logging never slows a request.
 
 Each row also shows the **address** and **browser** the request came from
-(the full `User-Agent` is the tooltip). Besides logins and app accesses,
-the list includes **refused sign-ins** (with the reason: wrong password,
-or no such account — in which case the typed name is not kept) and the
-**SSO sign-ins and refusals** that the SSO section shows on their own.
+(the full `User-Agent` is the tooltip) — for **app accesses too,
+including anonymous visitors of public apps**. Besides logins and app
+accesses, the list includes **refused sign-ins** (with the reason: wrong
+password, or no such account — in which case the typed name is not kept)
+and the **SSO sign-ins and refusals** that the SSO section shows on
+their own. Refused sign-ins are recorded up to ten a minute per address
+(and attempts made while the login is rate-limited are not recorded):
+enough to show that an address is guessing, without letting it fill the
+log.
 Address and browser are personal data: the page is Admin-only and rows
 older than `server.activity-retention-days` (180 by default) are deleted
 automatically.

@@ -425,8 +425,18 @@ async fn authorize(
     // From here on the request is about a known client, so refusals are
     // worth an audit row: who tried to enter which system, from where.
     let origin = crate::activity::ClientInfo::from_request(&state, &headers, peer.0.as_ref());
+    // One row per (user, system, reason) per minute: any page can send a
+    // signed-in user here, and a client that retries after a refusal
+    // loops — neither should write a row per request.
     let denied = |username: Option<String>, reason: &str| {
-        state.activity.record(
+        let key = format!(
+            "sso.denied|{}|{}|{reason}",
+            username.as_deref().unwrap_or("-"),
+            client.client_id
+        );
+        state.activity.record_limited(
+            &key,
+            1,
             crate::activity::ActivityEvent::sso_denied(username, client.client_id.clone(), reason)
                 .with_client(origin.clone()),
         );
@@ -732,7 +742,26 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     // 4. The user, as they are NOW.
     let user = match crate::db::users::fetch(db, &grant.username).await {
         Ok(Some(u)) if u.id == grant.user_id && client.allows_groups(&u.groups) => u,
-        Ok(_) => return invalid_grant(),
+        Ok(_) => {
+            // The user passed the gate a moment ago and no longer does
+            // (removed from the group, or the account is gone). That is
+            // a refused sign-in, and the audit should show it.
+            let key = format!("sso.denied|{}|{}|access-revoked", grant.username, client.client_id);
+            state.activity.record_limited(
+                &key,
+                1,
+                crate::activity::ActivityEvent::sso_denied(
+                    Some(grant.username.clone()),
+                    client.client_id.clone(),
+                    "access-revoked",
+                )
+                .with_client(crate::activity::ClientInfo {
+                    ip: grant.client_ip.clone(),
+                    user_agent: grant.user_agent.clone(),
+                }),
+            );
+            return invalid_grant();
+        }
         Err(err) => {
             tracing::error!(error = ?err, "fetch user for token failed");
             return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");

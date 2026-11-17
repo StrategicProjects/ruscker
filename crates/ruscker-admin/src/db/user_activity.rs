@@ -273,6 +273,33 @@ pub async fn purge_older_than(db: &ConfigDb, cutoff: DateTime<Utc>) -> Result<u6
     Ok(n)
 }
 
+/// Distinct usernames among events whose type starts with `prefix`.
+pub async fn distinct_usernames_with_prefix(db: &ConfigDb, prefix: &'static str) -> Result<Vec<String>> {
+    let like = format!("{prefix}%");
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT username FROM user_activity
+                  WHERE username IS NOT NULL AND event_type LIKE ? ORDER BY username ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT username FROM user_activity
+                  WHERE username IS NOT NULL AND event_type LIKE $1 ORDER BY username ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .context("distinct activity usernames by prefix")?;
+    Ok(rows.into_iter().map(|(u,)| u).collect())
+}
+
 /// Distinct `spec_id` values among events whose type starts with
 /// `prefix` — for the SSO access tab, the client ids that ever signed
 /// someone in (or refused to).

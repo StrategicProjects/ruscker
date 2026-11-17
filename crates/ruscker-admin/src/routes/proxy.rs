@@ -1229,8 +1229,14 @@ pub(crate) fn client_ip(
     peer: Option<&SocketAddr>,
 ) -> Option<String> {
     if forward_headers_trusted(&state.config.server) {
+        // The LAST header line, then its right-most entry. Some proxies
+        // append their hop as a separate `X-Forwarded-For` line instead
+        // of extending the existing one; reading only the first line
+        // would then return whatever the client itself sent.
         if let Some(ip) = headers
-            .get("x-forwarded-for")
+            .get_all("x-forwarded-for")
+            .iter()
+            .next_back()
             .and_then(|v| v.to_str().ok())
             .and_then(rightmost_forwarded_ip)
         {

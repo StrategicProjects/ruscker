@@ -1249,6 +1249,7 @@ admin-activity-detail-unknown-account = conta inexistente
 admin-activity-detail-not-in-group = fora dos grupos permitidos do sistema
 admin-activity-detail-no-account = sessão do token de emergência, sem conta
 admin-activity-detail-account-missing = a conta da sessão não existe mais
+admin-activity-detail-access-revoked = perdeu o acesso antes de concluir o login
 admin-activity-col-browser = Navegador
 admin-activity-user = Usuário
 admin-activity-user-all = Todos os usuários

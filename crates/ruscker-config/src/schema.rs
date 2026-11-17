@@ -225,9 +225,11 @@ pub const DEFAULT_ACTIVITY_RETENTION_DAYS: u32 = 180;
 
 impl Server {
     /// Days of user activity to keep; `0` means no automatic purge.
+    /// Capped at a century so a typo cannot overflow date arithmetic.
     pub fn effective_activity_retention_days(&self) -> u32 {
         self.activity_retention_days
             .unwrap_or(DEFAULT_ACTIVITY_RETENTION_DAYS)
+            .min(36_500)
     }
 
     /// The issuer URL of the OIDC provider when it is enabled AND has a

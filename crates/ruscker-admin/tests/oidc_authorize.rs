@@ -523,6 +523,12 @@ async fn the_group_gate_is_read_live_and_has_no_admin_bypass() {
     denied(&get(&state, &request("", &[]), &ghost).await);
     assert_eq!(stored_codes(&db).await, 0);
 
+    // A client that retries after a refusal (or a page that keeps
+    // sending the user here) does not add a row per request.
+    for _ in 0..5 {
+        denied(&get(&state, &request("", &[]), &bia).await);
+    }
+
     // Each refusal left an audit event naming the system, the reason and
     // — only when there is a real account — the user.
     let mut rx = state.activity.take_receiver().expect("receiver");

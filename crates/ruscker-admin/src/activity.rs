@@ -270,6 +270,10 @@ pub struct ActivitySink {
     tx: mpsc::Sender<ActivityEvent>,
     rx: Arc<Mutex<Option<mpsc::Receiver<ActivityEvent>>>>,
     dropped: Arc<AtomicU64>,
+    /// Per-key one-minute budgets for [`ActivitySink::record_limited`]:
+    /// key → (window start, events in the window).
+    budgets: Arc<Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
+    suppressed: Arc<AtomicU64>,
 }
 
 impl Default for ActivitySink {
@@ -279,6 +283,8 @@ impl Default for ActivitySink {
             tx,
             rx: Arc::new(Mutex::new(Some(rx))),
             dropped: Arc::new(AtomicU64::new(0)),
+            budgets: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -291,6 +297,64 @@ impl ActivitySink {
         if self.tx.try_send(event).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Record an event that an outsider can cause at will — a refused
+    /// sign-in, a refused SSO request — under a budget, so it can neither
+    /// fill the table nor crowd legitimate events out of the queue.
+    ///
+    /// At most `per_minute` events are kept per `key` in any one-minute
+    /// window, and at most [`FAILURE_BUDGET_PER_MINUTE`] across all keys.
+    /// The rest are counted ([`ActivitySink::suppressed`]) and dropped:
+    /// an audit needs to show THAT an address hammered the login, not
+    /// one row per attempt.
+    pub fn record_limited(&self, key: &str, per_minute: u32, event: ActivityEvent) {
+        let now = std::time::Instant::now();
+        let window = Duration::from_secs(60);
+        let admitted = {
+            let mut budgets = self.budgets.lock().unwrap_or_else(PoisonError::into_inner);
+            // Forget finished windows before the map can grow large.
+            if budgets.len() > BUDGET_KEYS_MAX {
+                budgets.retain(|_, (start, _)| now.duration_since(*start) < window);
+                if budgets.len() > BUDGET_KEYS_MAX {
+                    budgets.clear();
+                }
+            }
+            // Is there room under `limit` for `k` in the current window?
+            // (A finished window counts as empty.)
+            let room = |budgets: &std::collections::HashMap<String, (std::time::Instant, u32)>,
+                        k: &str,
+                        limit: u32| match budgets.get(k) {
+                Some((start, used)) if now.duration_since(*start) < window => *used < limit,
+                _ => true,
+            };
+            // Consume ONLY when both budgets have room: an event already
+            // refused by its own key must not use up the global budget
+            // (one noisy address would otherwise silence everyone else).
+            let ok = room(&budgets, GLOBAL_BUDGET_KEY, FAILURE_BUDGET_PER_MINUTE)
+                && room(&budgets, key, per_minute);
+            if ok {
+                for k in [GLOBAL_BUDGET_KEY, key] {
+                    let slot = budgets.entry(k.to_string()).or_insert((now, 0));
+                    if now.duration_since(slot.0) >= window {
+                        *slot = (now, 0);
+                    }
+                    slot.1 += 1;
+                }
+            }
+            ok
+        };
+        if admitted {
+            self.record(event);
+        } else {
+            self.suppressed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Failure-class events dropped by [`ActivitySink::record_limited`]
+    /// since boot.
+    pub fn suppressed(&self) -> u64 {
+        self.suppressed.load(Ordering::Relaxed)
     }
 
     /// Take the receiving half — called once by [`spawn`]. Returns `None`
@@ -343,6 +407,14 @@ pub fn spawn(sink: &ActivitySink, db: ConfigDb) -> Option<tokio::task::JoinHandl
     }))
 }
 
+/// Ceiling on failure-class events (refused sign-ins, refused SSO
+/// requests) recorded per minute across the whole process. Far above
+/// anything honest, far below the queue depth.
+pub const FAILURE_BUDGET_PER_MINUTE: u32 = 240;
+const GLOBAL_BUDGET_KEY: &str = "\u{0}all";
+/// Budget map size at which finished windows are swept.
+const BUDGET_KEYS_MAX: usize = 4096;
+
 /// How often the retention task looks for rows to purge.
 const RETENTION_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
@@ -359,20 +431,88 @@ pub fn spawn_retention(db: ConfigDb, retention_days: u32) -> Option<tokio::task:
     }
     Some(tokio::spawn(async move {
         loop {
-            let cutoff = Utc::now() - chrono::Duration::days(i64::from(retention_days));
-            match db::user_activity::purge_older_than(&db, cutoff).await {
-                Ok(0) => {}
-                Ok(n) => tracing::info!(rows = n, retention_days, "purged old user activity"),
-                Err(e) => tracing::warn!(error = ?e, "user activity retention purge failed"),
-            }
+            purge_expired(&db, retention_days).await;
             tokio::time::sleep(RETENTION_INTERVAL).await;
         }
     }))
 }
 
+/// One retention pass: delete what is older than `retention_days`.
+/// Never panics — an absurdly large value (a date before the calendar
+/// begins) simply purges nothing.
+async fn purge_expired(db: &ConfigDb, retention_days: u32) {
+    let Some(cutoff) = chrono::Duration::try_days(i64::from(retention_days))
+        .and_then(|age| Utc::now().checked_sub_signed(age))
+    else {
+        tracing::warn!(retention_days, "activity retention is out of range; nothing purged");
+        return;
+    };
+    match db::user_activity::purge_older_than(db, cutoff).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(rows = n, retention_days, "purged old user activity"),
+        Err(e) => tracing::warn!(error = ?e, "user activity retention purge failed"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever an outsider can trigger at will is budgeted: per key and
+    /// overall. Ordinary events are never subject to it.
+    #[test]
+    fn failure_events_are_budgeted_per_key_and_overall() {
+        let sink = ActivitySink::default();
+        let mut rx = sink.take_receiver().unwrap();
+        let fail = || ActivityEvent::login_failed(None, "unknown-account");
+        // One address hammering: only its per-minute budget gets through.
+        for _ in 0..500 {
+            sink.record_limited("login.failed|203.0.113.9", 10, fail());
+        }
+        let mut kept = 0;
+        while rx.try_recv().is_ok() {
+            kept += 1;
+        }
+        assert_eq!(kept, 10);
+        assert_eq!(sink.suppressed(), 490);
+        // Many addresses: the overall ceiling holds (10 were already used).
+        for i in 0..1000 {
+            sink.record_limited(&format!("login.failed|198.51.100.{i}"), 10, fail());
+        }
+        let mut kept = 0;
+        while rx.try_recv().is_ok() {
+            kept += 1;
+        }
+        assert_eq!(kept as u32, FAILURE_BUDGET_PER_MINUTE - 10);
+        // A real sign-in is not a failure-class event and still goes in.
+        sink.record(ActivityEvent::login_success("alice", AuthMethod::Password, "k", None));
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn retention_pass_purges_and_survives_absurd_values() {
+        let db = mem_db().await;
+        let mut old = ActivityEvent::login_success("alice", AuthMethod::Password, "old", None);
+        old.occurred_at = Utc::now() - chrono::Duration::days(400);
+        db::user_activity::insert_batch(
+            &db,
+            &[old, ActivityEvent::login_success("alice", AuthMethod::Password, "new", None)],
+        )
+        .await
+        .unwrap();
+        let count = || async {
+            db::user_activity::count_filtered(&db, &db::user_activity::ActivityFilter::default())
+                .await
+                .unwrap()
+        };
+        // Out of range: no panic, nothing deleted.
+        purge_expired(&db, u32::MAX).await;
+        assert_eq!(count().await, 2);
+        purge_expired(&db, 180).await;
+        assert_eq!(count().await, 1);
+        // `0` means "keep everything": no task at all.
+        assert!(spawn_retention(db.clone(), 0).is_none());
+    }
 
     async fn mem_db() -> ConfigDb {
         ConfigDb::Sqlite(crate::db::open_memory().await.expect("open in-memory"))

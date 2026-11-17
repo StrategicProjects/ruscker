@@ -402,6 +402,40 @@ async fn removing_a_member_on_the_groups_page_drops_their_roles() {
     assert!(!held(&snapshot(&db).await.1, "ana", "fazenda", "gestor"));
 }
 
+/// If the group's roles cannot be moved, the rename must change NOTHING.
+/// Going on to rewrite the memberships would prune every holder's roles
+/// under the old name — silently, behind a "renamed" message.
+#[tokio::test]
+async fn a_rename_that_cannot_move_the_roles_changes_nothing() {
+    let (state, db) = fixture().await;
+    let admin = cookie(&state, Role::Admin, "root").await;
+    let ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+    // Make the roles move fail the way a database error would.
+    sqlx::query(
+        "CREATE TRIGGER fail_role_move BEFORE INSERT ON group_roles
+         BEGIN SELECT RAISE(ABORT, 'simulated failure'); END",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    let before = snapshot(&db).await;
+    let groups_before = ruscker_admin::db::users::fetch(&db, "ana").await.unwrap().unwrap().groups;
+
+    let (st, loc) = post(&state, "/admin/groups/rename", "old=fazenda&new=tesouro", Some(&admin)).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(loc, "/admin/groups?flash=failed", "the page must not claim success");
+    assert_eq!(snapshot(&db).await, before, "roles and holders untouched");
+    let groups_after = ruscker_admin::db::users::fetch(&db, "ana").await.unwrap().unwrap().groups;
+    assert_eq!(groups_after, groups_before, "memberships untouched");
+    assert!(held(&snapshot(&db).await.1, "ana", "fazenda", "gestor"));
+
+    // With the fault gone the same rename goes through and keeps the role.
+    sqlx::query("DROP TRIGGER fail_role_move").execute(pool).await.unwrap();
+    let (_, loc) = post(&state, "/admin/groups/rename", "old=fazenda&new=tesouro", Some(&admin)).await;
+    assert_eq!(loc, "/admin/groups?flash=renamed");
+    assert!(held(&snapshot(&db).await.1, "ana", "tesouro", "gestor"));
+}
+
 #[tokio::test]
 async fn renaming_a_group_carries_its_roles_and_deleting_drops_them() {
     let (state, db) = fixture().await;

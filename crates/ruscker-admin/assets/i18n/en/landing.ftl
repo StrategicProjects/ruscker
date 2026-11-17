@@ -1045,6 +1045,7 @@ admin-groups-flash-role-removed = Role removed from the group.
 admin-groups-flash-role-assigned = Role assigned.
 admin-groups-flash-role-unassigned = Role taken away.
 admin-groups-flash-bad-role = Invalid role name: use 1 to 40 unaccented letters, digits, _ . or -.
+admin-groups-flash-failed = The group could not be renamed and nothing was changed. Try again.
 
 highlights-prev = Previous
 highlights-next = Next

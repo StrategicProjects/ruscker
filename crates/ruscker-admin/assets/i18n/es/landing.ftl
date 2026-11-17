@@ -1045,6 +1045,7 @@ admin-groups-flash-role-removed = Función quitada del grupo.
 admin-groups-flash-role-assigned = Función asignada.
 admin-groups-flash-role-unassigned = Función retirada.
 admin-groups-flash-bad-role = Nombre de función no válido: use de 1 a 40 letras sin tilde, dígitos, _ . o -.
+admin-groups-flash-failed = No se pudo renombrar el grupo y no se cambió nada. Inténtelo de nuevo.
 
 highlights-prev = Anteriores
 highlights-next = Siguientes

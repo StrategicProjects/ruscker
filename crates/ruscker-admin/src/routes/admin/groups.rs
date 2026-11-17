@@ -386,8 +386,14 @@ async fn create(
 /// Rewrite group `old` everywhere it's referenced. `new = Some(n)` renames it
 /// (folding into `n` if a user/spec already has both); `new = None` deletes
 /// it. Touches user memberships, spec `access-groups` and SSO client gates.
-async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) {
-    let Some(db) = state.db.as_ref() else { return };
+///
+/// Returns `false` — having changed NOTHING — when a rename could not
+/// move the group's roles first. Carrying on in that case would be
+/// destructive: each member's `set_groups` prunes the roles they held
+/// under the old name, so every holder would silently lose them while
+/// the page reported success.
+async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) -> bool {
+    let Some(db) = state.db.as_ref() else { return false };
 
     // Group roles (#1067) move BEFORE the memberships: `set_groups` below
     // prunes the assignments of every group a user leaves, so on a rename
@@ -395,7 +401,8 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
     // reversed (prune per member first, then drop the definitions, below).
     if let Some(n) = new {
         if let Err(e) = crate::db::group_roles::rename_group(db, old, n, Some(actor)).await {
-            tracing::warn!(error = ?e, "group rewrite (group roles) failed");
+            tracing::error!(error = ?e, "group rename aborted: could not move its group roles");
+            return false;
         }
     }
 
@@ -457,6 +464,7 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
     }
     // Roles moved or vanished: the header must follow on the next request.
     state.invalidate_identity_cache();
+    true
 }
 
 #[derive(Deserialize)]
@@ -472,8 +480,11 @@ async fn rename(admin: RequireAdmin, State(state): State<AppState>, Form(f): For
     if old == new {
         return redirect_flash("renamed");
     }
-    rewrite_group(&state, &old, Some(&new), admin.actor()).await;
-    redirect_flash("renamed")
+    if rewrite_group(&state, &old, Some(&new), admin.actor()).await {
+        redirect_flash("renamed")
+    } else {
+        redirect_flash("failed")
+    }
 }
 
 #[derive(Deserialize)]
@@ -485,7 +496,8 @@ async fn delete(admin: RequireAdmin, State(state): State<AppState>, Form(f): For
     let Some(name) = clean_group(&f.name) else {
         return redirect_flash("bad-input");
     };
-    rewrite_group(&state, &name, None, admin.actor()).await;
+    // A delete has no "move roles first" step, so it cannot abort.
+    let _ = rewrite_group(&state, &name, None, admin.actor()).await;
     redirect_flash("deleted")
 }
 
@@ -682,7 +694,9 @@ async fn remove_role(
 /// Whether a scoped Editor is targeting their own account. Same rule as
 /// `users.rs::is_scoped_self_edit`, compared on the normalized username:
 /// group roles are authorization data inside the hosted apps, so an Editor
-/// granting (or shedding) their own would be self-escalation there. An
+/// granting their own would be self-escalation there (and, for symmetry,
+/// they cannot unassign their own either — though leaving the group, which
+/// only ever REDUCES what they hold, remains possible). An
 /// unscoped Admin is not restricted.
 fn is_scoped_self_target(scope: &EditorScope, username: &str) -> bool {
     !scope.unscoped

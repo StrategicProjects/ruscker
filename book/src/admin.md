@@ -214,7 +214,8 @@ and the header is omitted when there is nothing to send. Reading it:
 parse_roles <- function(h) {
   if (is.null(h) || !nzchar(h)) return(data.frame(group = character(), role = character()))
   parts <- strsplit(strsplit(h, ",", fixed = TRUE)[[1]], ":", fixed = TRUE)
-  data.frame(group = vapply(parts, function(p) utils::URLdecode(p[1]), ""),
+  decode <- function(x) { x <- utils::URLdecode(x); Encoding(x) <- "UTF-8"; x }
+  data.frame(group = vapply(parts, function(p) decode(p[1]), ""),
              role  = vapply(parts, `[`, "", 2))
 }
 ```
@@ -549,7 +550,10 @@ user may do *inside the app*. It is unrelated to the account role
   Re-joining the group does not bring them back.
 
 Every change is recorded in the audit log (`group-role.*`) and reaches the
-next proxied request.
+next proxied request on the node that made it. In an active-active
+deployment the other nodes keep their cached view of a user for up to 30
+seconds, so allow that long for a removed role to stop being sent
+everywhere.
 
 Edits touch the database-managed users and apps. An app defined in the
 `serve --config` YAML stays read-only here (edit the file for those).

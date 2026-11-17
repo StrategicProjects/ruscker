@@ -67,6 +67,12 @@ Given the callback's query and the stored values:
 A code can be redeemed once; a failed exchange is never retried with
 the same code.
 
+Also, in every package: a callback that repeats `error`, `state`, `iss`
+or `code` is refused; an empty stored `state` or `nonce` never matches;
+HTTP requests give up after about ten seconds and do not follow
+redirects; the client secret and the pending values stay out of debug
+output.
+
 The `error` of step 1 arrives in a callback nobody has verified yet
 (anyone can craft such a link). Use its code to choose the
 application's own message; do not show its text to the person as is.

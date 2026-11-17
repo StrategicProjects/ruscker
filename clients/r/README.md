@@ -61,34 +61,47 @@ client <- sso_client(
   redirect_uri  = "https://app.example.org/"
 )
 
-# Sign-ins in progress, kept on the server and keyed by `state`.
+# Sign-ins in progress, kept on the server. Each is keyed by a random
+# value that lives in the browser tab that started it (sessionStorage),
+# NOT by `state`: a callback opened in any other browser finds nothing
+# here, so nobody can be signed in with someone else's callback link.
 pending_store <- new.env()
 
-ui <- fluidPage(uiOutput("body"))
+ui <- fluidPage(
+  tags$script(HTML("
+    $(document).on('shiny:connected', function () {
+      var k = sessionStorage.getItem('sso_key');
+      if (!k) { k = crypto.randomUUID(); sessionStorage.setItem('sso_key', k); }
+      Shiny.setInputValue('sso_key', k);
+    });")),
+  uiOutput("body")
+)
 
 server <- function(input, output, session) {
-  # Once, when the page has loaded (clientData is filled in by then).
-  observeEvent(session$clientData$url_search, once = TRUE, {
+  observeEvent(input$sso_key, once = TRUE, {
+    key <- input$sso_key
+    if (!grepl("^[0-9a-f-]{36}$", key)) return()
     query <- parseQueryString(session$clientData$url_search)
 
-    if (is.null(query$state)) {
+    if (is.null(query$code) && is.null(query$error)) {
       # No callback: offer to sign in.
       start <- sso_start(client)
-      assign(start$pending$state, start$pending, envir = pending_store)
+      start$pending$started <- Sys.time()
+      assign(key, start$pending, envir = pending_store)
       output$body <- renderUI(a(href = start$url, "Sign in"))
       return()
     }
 
-    # The callback: look the pending values up once, then forget them.
-    pending <- get0(query$state, envir = pending_store, inherits = FALSE)
-    if (is.null(pending)) pending <- list() else rm(list = query$state, envir = pending_store)
+    # The callback: take this browser's pending values, once.
+    pending <- get0(key, envir = pending_store, inherits = FALSE)
+    if (is.null(pending)) pending <- list() else rm(list = key, envir = pending_store)
     id <- tryCatch(
       sso_finish(client, session$clientData$url_search, pending),
       rusckersso_error = function(e) NULL
     )
     updateQueryString("?", mode = "replace") # drop code/state from the address bar
     if (is.null(id)) {
-      output$body <- renderUI(p("Sign-in failed."))
+      output$body <- renderUI(p("Sign-in failed. ", a(href = "?", "Try again")))
       return()
     }
     session$userData$identity <- id # the app's own session from here on
@@ -96,16 +109,22 @@ server <- function(input, output, session) {
   })
 }
 
+# Forget sign-ins nobody finished (run it from a reactiveTimer or similar).
+prune_pending <- function(max_age = 600) {
+  for (k in ls(pending_store)) {
+    if (difftime(Sys.time(), pending_store[[k]]$started, units = "secs") > max_age) {
+      rm(list = k, envir = pending_store)
+    }
+  }
+}
+
 shinyApp(ui, server)
 ```
 
-Keying the pending values by `state` is the simplest honest store, but it
-does not tie the sign-in to the browser that started it; binding it to a
-random `HttpOnly` cookie closes that gap at the cost of setting a cookie
-in front of Shiny (a reverse proxy or a plumber2 route). Pending values
-left behind by abandoned sign-ins should be pruned after a few minutes.
-A Shiny session ends on reload, so a long-lived login needs the app's own
-cookie as well.
+The pending values never leave the server; the browser only holds the
+random key that finds them. A Shiny session ends on reload, so a
+long-lived login needs the app's own cookie as well, set in front of
+Shiny (a reverse proxy or a plumber2 route).
 
 ## The identity
 

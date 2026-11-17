@@ -19,6 +19,10 @@ var (
 	ErrStateMismatch = errors.New("rusckersso: state does not match")
 	// ErrIssuerMismatch: the callback's iss names another provider.
 	ErrIssuerMismatch = errors.New("rusckersso: iss does not match the issuer")
+	// ErrRepeatedParameter: the callback carries error, state, iss or
+	// code more than once. Two readers could then disagree on which
+	// value counts, so it is refused outright.
+	ErrRepeatedParameter = errors.New("rusckersso: a callback parameter is repeated")
 	// ErrMissingCode: the callback has neither an error nor a code.
 	ErrMissingCode = errors.New("rusckersso: the callback has no code")
 	// ErrTokenExchange: the token endpoint refused the code or could not

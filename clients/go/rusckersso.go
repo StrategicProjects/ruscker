@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -51,8 +52,32 @@ type Config struct {
 	// Scopes defaults to DefaultScopes. "openid" is added if missing.
 	Scopes []string
 	// HTTPClient is used for discovery, keys and the token exchange.
-	// Optional; http.DefaultClient when nil.
+	// Optional. The default has a 10-second timeout and does not follow
+	// redirects: a stalled portal must not hang the application, and a
+	// redirect must not carry the code to another host.
 	HTTPClient *http.Client
+}
+
+// String keeps the client secret out of logs: fmt prints a Config with
+// this method, whatever the verb.
+func (c Config) String() string {
+	return fmt.Sprintf("rusckersso.Config{Issuer: %q, ClientID: %q, ClientSecret: [redacted], RedirectURI: %q, Scopes: %q}",
+		c.Issuer, c.ClientID, c.RedirectURI, c.Scopes)
+}
+
+// String keeps the client secret out of logs.
+func (c *Client) String() string {
+	return fmt.Sprintf("rusckersso.Client{Issuer: %q, ClientID: %q}", c.issuer, c.oauth.ClientID)
+}
+
+// defaultHTTPClient is used when Config.HTTPClient is nil.
+func defaultHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 10 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 }
 
 // Client is safe for concurrent use; create one at startup and share it.
@@ -83,7 +108,7 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	}
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = defaultHTTPClient()
 	}
 	// The provider object keeps the JWKS cache for the client's lifetime;
 	// it must not be bound to a request context that ends, hence
@@ -192,6 +217,11 @@ func (c *Client) FinishSignIn(ctx context.Context, callback url.Values, pending 
 
 // checkCallback runs steps 1–3: pure, no network.
 func (c *Client) checkCallback(q url.Values, pending Pending) (string, error) {
+	for _, name := range []string{"error", "state", "iss", "code"} {
+		if len(q[name]) > 1 {
+			return "", ErrRepeatedParameter
+		}
+	}
 	if code := q.Get("error"); code != "" {
 		return "", &ProviderError{Code: code, Description: q.Get("error_description")}
 	}

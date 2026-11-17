@@ -141,3 +141,11 @@ test_that("the secret is not printed", {
   out <- capture.output(print(fake_client()))
   expect_false(any(grepl("s3cret", out, fixed = TRUE)))
 })
+
+test_that("empty values never match and encoded secrets are re-encoded", {
+  expect_false(rusckersso:::constant_time_equal("", ""))
+  expect_false(rusckersso:::constant_time_equal("", "x"))
+  expect_true(rusckersso:::constant_time_equal("x", "x"))
+  # A value that already looks percent-encoded must still be encoded.
+  expect_equal(utils::URLencode("a%41b", reserved = TRUE, repeated = TRUE), "a%2541b")
+})

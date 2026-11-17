@@ -57,7 +57,9 @@ try {
   location.assign("/");
 } catch (e) {
   // ProviderError (e.error === "access_denied" …), StateMismatchError, IssuerMismatchError, NoPendingSignInError
-  showMessage(e instanceof SignInError ? e.message : "sign-in failed");
+  // Choose your own wording from the error's class or code. Do not show
+  // e.message: part of it comes from the callback URL, which anyone can craft.
+  showMessage(e.error === "access_denied" ? "You do not have access to this system." : "Sign-in failed.");
 }
 ```
 
@@ -84,14 +86,22 @@ app.use(express.json(), session({ secret: process.env.SESSION_SECRET, resave: fa
 app.post("/api/auth/exchange", async (req, res) => {
   try {
     const who = await sso.exchangeCode(req.body); // { code, codeVerifier, nonce }
-    req.session.user = { sub: who.sub, name: who.name, groups: who.groups, groupRoles: who.groupRoles };
-    res.sendStatus(204);
+    // A fresh session id for the signed-in person (no session fixation).
+    req.session.regenerate(() => {
+      req.session.user = { sub: who.sub, name: who.name, groups: who.groups, groupRoles: who.groupRoles };
+      res.sendStatus(204);
+    });
   } catch (e) {
     if (!(e instanceof SignInError)) throw e;
     res.status(401).json({ error: e.name });
   }
 });
 ```
+
+Keep this route JSON-only, as above. A browser cannot send
+`application/json` to another site without that site's CORS consent,
+which is what stops a third-party page from posting someone else's
+code here.
 
 ## All-backend flow
 
@@ -115,7 +125,10 @@ app.get("/callback", async (req, res) => {
       res.redirect("/");
     });
   } catch (e) {
-    res.status(401).send(`Sign-in failed: ${e.message}`);
+    // Never echo e.message into a page: part of it comes from the
+    // callback URL. Say it in your own words.
+    const denied = e instanceof ProviderError && e.error === "access_denied";
+    res.status(401).type("text/plain").send(denied ? "You do not have access to this system." : "Sign-in failed.");
   }
 });
 ```

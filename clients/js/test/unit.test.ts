@@ -3,6 +3,7 @@
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { inspect } from "node:util";
 import { SignJWT, exportJWK, generateKeyPair, type JWK } from "jose";
 
 import * as browser from "../src/browser.js";
@@ -294,6 +295,22 @@ describe("server", () => {
 
   test("missing configuration is refused up front", () => {
     assert.throws(() => new SignInClient({ issuer: ISSUER, clientId: "demo", clientSecret: "", redirectUri: REDIRECT }), TypeError);
+  });
+});
+
+describe("hardening", () => {
+  test("the secret is not reachable from the client object", () => {
+    const c = new SignInClient({ issuer: ISSUER, clientId: "demo", clientSecret: "s3cret-value", redirectUri: REDIRECT });
+    assert.equal("clientSecret" in c.config, false);
+    assert.equal(JSON.stringify(c).includes("s3cret"), false);
+    assert.equal(inspect(c, { depth: 5, showHidden: true }).includes("s3cret"), false);
+  });
+
+  test("the split-flow body must be three non-empty strings", async () => {
+    const c = new SignInClient({ issuer: ISSUER, clientId: "demo", clientSecret: "x", redirectUri: REDIRECT });
+    for (const body of [null, {}, { code: ["a"], codeVerifier: "v", nonce: "n" }, { code: "a", codeVerifier: "", nonce: "n" }]) {
+      await assert.rejects(c.exchangeCode(body as never), (e: unknown) => e instanceof TokenExchangeError && e.error === "invalid_request");
+    }
   });
 });
 

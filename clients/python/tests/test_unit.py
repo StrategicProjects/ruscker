@@ -369,3 +369,15 @@ def test_identity_refuses_odd_shapes() -> None:
         with pytest.raises(InvalidIDTokenError):
             Identity.from_claims(claims)
 
+
+
+def test_pending_values_stay_out_of_repr_and_empty_never_matches() -> None:
+    from ruscker_sso.client import PendingSignIn, _same
+
+    pending = PendingSignIn(state="st-secret", nonce="no-secret", code_verifier="ve-secret")
+    assert "secret" not in repr(pending)
+    # Still usable and serialisable.
+    assert PendingSignIn.from_json(pending.to_json()) == pending
+    assert not _same("", "")
+    assert not _same("", "x")
+    assert _same("x", "x")

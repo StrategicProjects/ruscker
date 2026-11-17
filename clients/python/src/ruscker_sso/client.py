@@ -22,7 +22,7 @@ import json
 import secrets
 import threading
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlencode
 
@@ -57,9 +57,11 @@ class PendingSignIn:
     could finish the sign-in.
     """
 
-    state: str
-    nonce: str
-    code_verifier: str
+    # repr=False: these are secrets for a few minutes and must not end up
+    # in a log line or a traceback.
+    state: str = field(repr=False)
+    nonce: str = field(repr=False)
+    code_verifier: str = field(repr=False)
 
     def to_json(self) -> str:
         """Serialise to a short JSON string, e.g. for a session or a signed cookie."""
@@ -106,6 +108,10 @@ def _code_challenge(verifier: str) -> str:
 def _same(a: str, b: str) -> bool:
     # Constant-time comparison, so the timing of a refusal says nothing about
     # how much of a guessed value was right.
+    # An empty value never matches: a lost or hand-built pending value must
+    # not "equal" an absent parameter.
+    if not a or not b:
+        return False
     return hmac.compare_digest(a.encode("utf-8"), b.encode("utf-8"))
 
 
@@ -115,6 +121,8 @@ def _parse_callback(query: str | Mapping[str, Any]) -> dict[str, str]:
     Accepts a raw query string (with or without ``?``), a full callback URL,
     or a mapping (a framework's query object, or ``parse_qs`` output). A
     parameter given twice is refused: there is no safe way to pick one.
+    Prefer passing the raw query string or URL: a framework's mapping has
+    usually collapsed repeated parameters already, so they cannot be seen.
     """
     if isinstance(query, str):
         text = query.split("?", 1)[1] if "?" in query else query

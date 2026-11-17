@@ -172,7 +172,8 @@ pub enum Error {
 /// Serializable so it fits a server-side session or a short-lived signed
 /// (or private) `HttpOnly` cookie. It is not secret in the way a password
 /// is, but it must not be readable or writable by other sites — never put
-/// it in the URL or in a plain, unsigned cookie.
+/// it in the URL. A cookie for it must be `HttpOnly`, `Secure` and
+/// `SameSite=Lax`; signed or private where the framework offers it.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pending {
     state: String,
@@ -218,7 +219,13 @@ fn pkce_challenge(verifier: &str) -> String {
 
 /// Compare two strings without leaking, through timing, how many leading
 /// characters matched.
+///
+/// An empty value never matches: a `Pending` that lost its state or nonce
+/// (a bug, a hand-built value) must not "equal" an absent parameter.
 fn same(a: &str, b: &str) -> bool {
+    if a.is_empty() || b.is_empty() {
+        return false;
+    }
     a.as_bytes().ct_eq(b.as_bytes()).into()
 }
 
@@ -680,6 +687,10 @@ mod tests {
         let (_, p) = client.start_sign_in();
         assert!(matches!(client.check_callback("code=abc&state=forged", &p), Err(Error::StateMismatch)));
         assert!(matches!(client.check_callback("code=abc", &p), Err(Error::StateMismatch)));
+        // Empty never matches, even against itself.
+        assert!(!same("", ""));
+        assert!(!same("", "x"));
+        assert!(same("x", "x"));
     }
 
     #[tokio::test]

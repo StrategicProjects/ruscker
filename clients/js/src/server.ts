@@ -59,7 +59,10 @@ interface Discovery {
  * the discovery document and the signing keys.
  */
 export class SignInClient {
-  readonly config: Readonly<SignInConfig>;
+  /** The configuration, without the secret (so logging the client is safe). */
+  readonly config: Readonly<Omit<SignInConfig, "clientSecret">>;
+  /** A true private field: not enumerable, not printed by `console.log`. */
+  readonly #clientSecret: string;
   private discovery?: Promise<Discovery>;
   private jwks?: ReturnType<typeof createRemoteJWKSet>;
 
@@ -67,7 +70,9 @@ export class SignInClient {
     for (const key of ["issuer", "clientId", "clientSecret", "redirectUri"] as const) {
       if (!config[key]) throw new TypeError(`ruscker-sso: \`${key}\` is required`);
     }
-    this.config = { ...config };
+    const { clientSecret, ...rest } = config;
+    this.#clientSecret = clientSecret;
+    this.config = rest;
   }
 
   /** The authorization endpoint, for a browser half that wants it from the backend. */
@@ -109,8 +114,12 @@ export class SignInClient {
    * A refused exchange is never retried: the code is spent.
    */
   async exchangeCode(input: { code: string; codeVerifier: string; nonce: string }): Promise<Identity> {
-    if (!input.code || !input.codeVerifier || !input.nonce) {
-      throw new SignInError("`code`, `codeVerifier` and `nonce` are all required");
+    // In the split flow these three come from a browser: refuse anything
+    // that is not a non-empty string before using it.
+    for (const key of ["code", "codeVerifier", "nonce"] as const) {
+      if (typeof input?.[key] !== "string" || input[key] === "") {
+        throw new TokenExchangeError(0, "invalid_request", `\`${key}\` must be a non-empty string`);
+      }
     }
     const d = await this.discover();
     const body = new URLSearchParams({
@@ -120,7 +129,7 @@ export class SignInClient {
       code_verifier: input.codeVerifier,
     });
     // client_secret_basic: id and secret are form-encoded before base64 (RFC 6749 §2.3.1).
-    const basic = btoa(`${encodeURIComponent(this.config.clientId)}:${encodeURIComponent(this.config.clientSecret)}`);
+    const basic = btoa(`${encodeURIComponent(this.config.clientId)}:${encodeURIComponent(this.#clientSecret)}`);
     let res: Response;
     try {
       res = await fetch(d.token_endpoint, {
@@ -131,6 +140,8 @@ export class SignInClient {
           accept: "application/json",
         },
         body,
+        // A redirect would re-send the code and verifier to another host.
+        redirect: "error",
         signal: AbortSignal.timeout(this.timeout()),
       });
     } catch (e) {
@@ -172,6 +183,10 @@ export class SignInClient {
     }
     if (typeof payload.nonce !== "string" || !constantTimeEqual(payload.nonce, nonce)) {
       throw new IdTokenError("nonce mismatch");
+    }
+    // `sub` is the key applications store: it must be a real string.
+    if (typeof payload.sub !== "string" || payload.sub === "") {
+      throw new IdTokenError("the token has no subject (sub)");
     }
     return new Identity(payload);
   }

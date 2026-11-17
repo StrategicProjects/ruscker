@@ -2,6 +2,7 @@ package rusckersso
 
 import (
 	"encoding/json"
+	"errors"
 	"slices"
 )
 
@@ -67,6 +68,11 @@ func identityFromClaims(claims map[string]any) (*Identity, error) {
 	id := &Identity{
 		Sub: c.Sub, Username: c.Username, Name: c.Name, Email: c.Email, Setor: c.Setor,
 		Groups: c.Groups, GroupRoles: c.GroupRoles, Claims: claims,
+	}
+	// `sub` is the key applications store; an identity without one is
+	// not an identity.
+	if id.Sub == "" {
+		return nil, errors.New("the token has no subject (sub)")
 	}
 	if id.Groups == nil {
 		id.Groups = []string{}

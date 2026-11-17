@@ -185,7 +185,9 @@ identity_from_claims <- function(claims) {
 exchange_code <- function(client, code, code_verifier) {
   conf <- get_discovery(client)
   # RFC 6749 section 2.3.1: id and secret are form-urlencoded before Basic.
-  enc <- function(x) utils::URLencode(x, reserved = TRUE)
+  # `repeated = TRUE`: without it URLencode() returns a value that already
+  # contains "%XX" untouched, and the portal would decode it to something else.
+  enc <- function(x) utils::URLencode(x, reserved = TRUE, repeated = TRUE)
   req <- httr2::request(conf$token_endpoint) |>
     httr2::req_auth_basic(enc(client$client_id), enc(client$client_secret)) |>
     httr2::req_body_form(
@@ -194,7 +196,8 @@ exchange_code <- function(client, code, code_verifier) {
       redirect_uri = client$redirect_uri,
       code_verifier = code_verifier
     ) |>
-    httr2::req_error(is_error = function(resp) FALSE)
+    httr2::req_error(is_error = function(resp) FALSE) |>
+    safe_request()
   resp <- tryCatch(
     httr2::req_perform(req),
     error = function(e) {
@@ -228,10 +231,24 @@ exchange_code <- function(client, code, code_verifier) {
 # tests can stand in for the network by mocking this function.
 http_get_json <- function(url) {
   resp <- tryCatch(
-    httr2::request(url) |> httr2::req_perform(),
+    httr2::request(url) |> safe_request() |> httr2::req_perform(),
     error = function(e) sso_abort("http_error", sprintf("Could not read %s.", url), parent = e)
   )
-  httr2::resp_body_json(resp, simplifyVector = FALSE)
+  # A non-JSON answer is the same failure for the caller: keep it inside
+  # the package's error class.
+  tryCatch(
+    httr2::resp_body_json(resp, simplifyVector = FALSE),
+    error = function(e) sso_abort("http_error", sprintf("%s did not answer with JSON.", url), parent = e)
+  )
+}
+
+# Every request: give up after 10 seconds (Shiny is one process — a
+# stalled portal would freeze the app for everyone) and do not follow
+# redirects (a redirect must not carry the code to another host).
+safe_request <- function(req) {
+  req |>
+    httr2::req_timeout(10) |>
+    httr2::req_options(followlocation = FALSE)
 }
 
 # The discovery document, read once. Its `issuer` must be the configured
@@ -282,6 +299,9 @@ pkce_challenge <- function(verifier) {
 # built-in for this; this is the usual XOR-accumulate.
 constant_time_equal <- function(a, b) {
   if (!is.character(a) || !is.character(b) || length(a) != 1 || length(b) != 1) return(FALSE)
+  # An empty value never matches: lost pending values must not "equal"
+  # an absent parameter.
+  if (is.na(a) || is.na(b) || !nzchar(a) || !nzchar(b)) return(FALSE)
   x <- charToRaw(enc2utf8(a))
   y <- charToRaw(enc2utf8(b))
   if (length(x) != length(y)) return(FALSE)

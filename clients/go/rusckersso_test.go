@@ -15,6 +15,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -310,5 +311,34 @@ func TestTokenExchangeErrorKeepsTheCode(t *testing.T) {
 	var te *TokenExchangeError
 	if !errors.Is(err, ErrTokenExchange) || !errors.As(err, &te) || te.Code != "invalid_grant" {
 		t.Errorf("err = %v", err)
+	}
+}
+
+func TestHardening(t *testing.T) {
+	// A repeated parameter is refused before anything else is read.
+	c := newClient(Config{Issuer: "https://portal.example.org", ClientID: "app", ClientSecret: "s3cret", RedirectURI: "https://app.example.org/cb"}, oauth2.Endpoint{}, nil, defaultHTTPClient())
+	p := Pending{State: "st", Nonce: "n", CodeVerifier: "v"}
+	for _, q := range []string{"code=a&state=st&state=other", "code=a&code=b&state=st", "error=x&error=y", "code=a&state=st&iss=1&iss=2"} {
+		v, _ := url.ParseQuery(q)
+		if _, err := c.checkCallback(v, p); !errors.Is(err, ErrRepeatedParameter) {
+			t.Errorf("%s: got %v, want ErrRepeatedParameter", q, err)
+		}
+	}
+	// An identity needs a subject.
+	if _, err := identityFromClaims(map[string]any{"preferred_username": "bob"}); err == nil {
+		t.Error("a token without sub must not become an identity")
+	}
+	// The secret never reaches a log line.
+	cfg := Config{Issuer: "https://portal.example.org", ClientID: "app", ClientSecret: "s3cret-value", RedirectURI: "https://app.example.org/cb"}
+	for _, out := range []string{fmt.Sprintf("%v", cfg), fmt.Sprintf("%+v", cfg), fmt.Sprintf("%v", c), fmt.Sprintf("%+v", c)} {
+		if strings.Contains(out, "s3cret") {
+			t.Errorf("secret leaked: %s", out)
+		}
+	}
+	// The default client gives up on a stalled portal and does not
+	// follow redirects.
+	d := defaultHTTPClient()
+	if d.Timeout == 0 || d.CheckRedirect == nil {
+		t.Error("default HTTP client must have a timeout and refuse redirects")
 	}
 }

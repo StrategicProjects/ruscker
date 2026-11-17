@@ -109,6 +109,10 @@ pub struct LandingForm {
     pub card_cover_default_dark: String,
     pub catalog_layout: String,
     pub catalog_density: String,
+    // Grouping of the `sections` layout (#1066): `type` | `subject`;
+    // blank ⇒ `type`.
+    #[serde(default)]
+    pub catalog_sections_by: String,
     pub analytics_provider: String,
     pub analytics_key: String,
     // Per-theme color overrides (#475); blank ⇒ keep the theme default.
@@ -170,6 +174,7 @@ impl LandingForm {
             card_cover_default_dark: lc.card_cover_default_dark.clone().unwrap_or_default(),
             catalog_layout: lc.catalog_layout.clone().unwrap_or_default(),
             catalog_density: lc.catalog_density.clone().unwrap_or_default(),
+            catalog_sections_by: lc.catalog_sections_by.clone().unwrap_or_default(),
             analytics_provider: lc.analytics_provider.clone().unwrap_or_default(),
             analytics_key: lc.analytics_key.clone().unwrap_or_default(),
             theme_light_bg: s(&tc.light.bg),
@@ -252,6 +257,12 @@ impl LandingForm {
             card_cover_default_dark: empty_to_none(self.card_cover_default_dark),
             catalog_layout: empty_to_none(self.catalog_layout),
             catalog_density: empty_to_none(self.catalog_density),
+            // Only the non-default value is stored; `type`/blank/unknown
+            // collapse to NULL (the effective default).
+            catalog_sections_by: match self.catalog_sections_by.trim() {
+                "subject" => Some("subject".into()),
+                _ => None,
+            },
             analytics_provider: empty_to_none(self.analytics_provider),
             analytics_key: empty_to_none(self.analytics_key),
             theme_colors,
@@ -353,7 +364,7 @@ async fn save(
 /// `POST /admin/landing/appearance/reset` — restore the portal's
 /// default look (#783). Resets the STYLE knobs only: header preset/
 /// background/text colour, per-theme palettes, default theme, card
-/// cover style + default cover, catalog layout/density, and the logo
+/// cover style + default cover, catalog layout/density/sections-by, and the logo
 /// mode/size/margin. Content and identity survive: title/subtitle/
 /// footer, the logos list, intro texts, SEO/analytics, custom CSS and
 /// HTML blocks are untouched. Confirmed client-side via `data-confirm`;
@@ -386,6 +397,7 @@ async fn reset_appearance(
     lc.card_cover_default_dark = None;
     lc.catalog_layout = None;
     lc.catalog_density = None;
+    lc.catalog_sections_by = None;
     lc.logo_mode = None;
     lc.logo_size = None;
     lc.logo_margin = None;

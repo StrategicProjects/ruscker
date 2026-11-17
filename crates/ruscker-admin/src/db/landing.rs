@@ -55,6 +55,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         card_cover_default_dark: Option<String>,
         catalog_layout: Option<String>,
         catalog_density: Option<String>,
+        catalog_sections_by: Option<String>,
         analytics_provider: Option<String>,
         analytics_key: Option<String>,
     }
@@ -66,7 +67,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 default_theme, show_search, show_filters, logo_mode,
                 logo_size, logo_margin, header_preset, card_cover,
                 card_cover_default, card_cover_default_dark,
-                catalog_layout, catalog_density,
+                catalog_layout, catalog_density, catalog_sections_by,
                 analytics_provider, analytics_key
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
@@ -130,6 +131,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 card_cover_default_dark: r.card_cover_default_dark,
                 catalog_layout: r.catalog_layout,
                 catalog_density: r.catalog_density,
+                catalog_sections_by: r.catalog_sections_by,
                 analytics_provider: r.analytics_provider,
                 analytics_key: r.analytics_key,
             })
@@ -206,7 +208,8 @@ pub(crate) async fn update_in_tx(
                 catalog_layout = ?, catalog_density = ?,
                 analytics_provider = ?, analytics_key = ?,
                 header_bg_dark = ?, header_fg_dark = ?,
-                card_cover_default_dark = ?, updated_at = ?
+                card_cover_default_dark = ?, catalog_sections_by = ?,
+                updated_at = ?
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -241,6 +244,7 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.header_bg_dark))
     .bind(none_if_empty(&lc.header_fg_dark))
     .bind(none_if_empty(&lc.card_cover_default_dark))
+    .bind(none_if_empty(&lc.catalog_sections_by))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -286,7 +290,8 @@ pub(crate) async fn update_in_tx_pg(
                 catalog_layout = $26, catalog_density = $27,
                 analytics_provider = $28, analytics_key = $29,
                 header_bg_dark = $30, header_fg_dark = $31,
-                card_cover_default_dark = $32, updated_at = $33
+                card_cover_default_dark = $32, catalog_sections_by = $33,
+                updated_at = $34
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -321,6 +326,7 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.header_bg_dark))
     .bind(none_if_empty(&lc.header_fg_dark))
     .bind(none_if_empty(&lc.card_cover_default_dark))
+    .bind(none_if_empty(&lc.catalog_sections_by))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -452,6 +458,7 @@ mod tests {
             card_cover: Some("gradient".into()),
             catalog_layout: Some("list".into()),
             catalog_density: Some("compact".into()),
+            catalog_sections_by: Some("subject".into()),
             analytics_provider: Some("plausible".into()),
             ..Default::default()
         };
@@ -466,6 +473,7 @@ mod tests {
         assert_eq!(got.card_cover.as_deref(), Some("gradient"));
         assert_eq!(got.catalog_layout.as_deref(), Some("list"));
         assert_eq!(got.catalog_density.as_deref(), Some("compact"));
+        assert_eq!(got.catalog_sections_by.as_deref(), Some("subject"));
         assert_eq!(got.analytics_provider.as_deref(), Some("plausible"));
     }
 
@@ -538,6 +546,7 @@ mod tests {
         lc.intro = Some("Bem-vindo".into());
         lc.seo_title = Some("Portal".into());
         lc.intro_locales.insert("pt".into(), "Olá".into());
+        lc.catalog_sections_by = Some("subject".into());
         update(&db, &lc, Some("admin")).await.unwrap();
 
         let got = fetch(&db).await.unwrap();
@@ -545,6 +554,7 @@ mod tests {
         assert_eq!(got.intro.as_deref(), Some("Bem-vindo"));
         assert_eq!(got.seo_title.as_deref(), Some("Portal"));
         assert_eq!(got.intro_locales.get("pt").map(String::as_str), Some("Olá"));
+        assert_eq!(got.catalog_sections_by.as_deref(), Some("subject"));
 
         // Whitespace-only collapses to NULL on write.
         let mut empty = LandingCustomization::default();

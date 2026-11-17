@@ -155,6 +155,9 @@ struct LandingPage<'a> {
     /// `comfortable` | `compact`.
     catalog_layout: String,
     catalog_density: String,
+    /// What the `sections` layout groups by (#1066): `type` | `subject`.
+    /// Ignored by `grid`/`list`.
+    catalog_sections_by: String,
 }
 
 /// A landing logo resolved for rendering: `src` already carries the mount
@@ -171,21 +174,30 @@ struct LogoView {
 /// One group of catalog cards for the landing's card area (#701).
 ///
 /// The template renders the card markup exactly once, inside a group;
-/// the two catalog layouts differ only in how many groups there are:
+/// the catalog layouts differ only in how many groups there are:
 ///   - `grid`/`list` ⇒ a single, unlabeled group with every card;
-///   - `sections`     ⇒ one labeled group per [`DisplayType`], in the
-///     canonical type order, with empty types omitted.
+///   - `sections` by type (default) ⇒ one labeled group per
+///     [`DisplayType`], in the canonical type order, empty types omitted;
+///   - `sections` by subject (#1066) ⇒ one labeled group per distinct
+///     `template-properties.subject`, alphabetical (case-insensitive),
+///     then a final localized "Other" group for apps without a subject.
 ///
-/// `key`/`label_key` are empty for the single grid/list group, which is
-/// how the template decides whether to draw a heading and the per-section
+/// `key`/`label` are empty for the single grid/list group, which is how
+/// the template decides whether to draw a heading and the per-section
 /// `x-show` count binding. Cards keep their original recent-first order
 /// within each group (the parent `cards` vec is already sorted).
 struct CatalogGroup<'r, 'a> {
-    /// Stable `DisplayType::key()` used by the Alpine per-section count
-    /// lookup (`sections['app']`). Empty ⇒ the single grid/list group.
-    key: &'static str,
-    /// Fluent key for the section heading. Empty ⇒ no heading rendered.
-    label_key: &'static str,
+    /// Key used by the Alpine per-section count lookup
+    /// (`sections['app']`) and stamped on each card as `data-section`.
+    /// By type it is `DisplayType::key()`; by subject it is a synthetic
+    /// ASCII id (`s0`, `s1`, … and `other`) — NEVER the subject text,
+    /// which is operator-authored and could carry an apostrophe into the
+    /// single-quoted Alpine expression. Empty ⇒ the single grid/list
+    /// group.
+    key: String,
+    /// Heading text, already localized (type labels, "Other") or taken
+    /// verbatim from the subject. Empty ⇒ no heading rendered.
+    label: String,
     cards: Vec<&'r CardCtx<'a>>,
 }
 
@@ -234,15 +246,19 @@ impl<'a> LandingPage<'a> {
     /// Group the cards for the catalog area (#701). See [`CatalogGroup`].
     /// In `grid`/`list` layout this is a single unlabeled group holding
     /// every card; in `sections` layout it's one labeled group per
-    /// [`DisplayType`] (canonical order, empty types dropped). The card
-    /// markup in the template is shared across both via this one seam.
+    /// [`DisplayType`] (canonical order, empty types dropped) or, with
+    /// `catalog-sections-by: subject`, one per subject (#1066). The card
+    /// markup in the template is shared across all of them via this seam.
     fn catalog_groups(&self) -> Vec<CatalogGroup<'_, 'a>> {
         if self.catalog_layout != "sections" {
             return vec![CatalogGroup {
-                key: "",
-                label_key: "",
+                key: String::new(),
+                label: String::new(),
                 cards: self.cards.iter().collect(),
             }];
+        }
+        if self.catalog_sections_by == "subject" {
+            return self.subject_groups();
         }
         // Same canonical order as the filter chips (`build_type_chips`)
         // so the sections read top-to-bottom in the same sequence the
@@ -260,12 +276,52 @@ impl<'a> LandingPage<'a> {
             let cards: Vec<&CardCtx<'a>> =
                 self.cards.iter().filter(|c| c.display_type == dt).collect();
             (!cards.is_empty()).then_some(CatalogGroup {
-                key: dt.key(),
-                label_key: dt.label_key(),
+                key: dt.key().to_string(),
+                label: self.t(dt.label_key()),
                 cards,
             })
         })
         .collect()
+    }
+
+    /// `sections` grouped by subject (#1066). A subject is the card's
+    /// `template-properties.subject` exactly as written — the same string
+    /// the subject filter matches on, so a section and the filter always
+    /// agree. A blank/whitespace-only subject counts as none. Sections
+    /// sort case-insensitively (`saúde` next to `Saúde`, not after every
+    /// capital), ties broken by the raw text so the order is total and
+    /// stable; the apps without a subject close the list under a
+    /// localized "Other" heading. Only non-empty groups are produced.
+    fn subject_groups(&self) -> Vec<CatalogGroup<'_, 'a>> {
+        let mut by_subject: std::collections::BTreeMap<(String, &str), Vec<&CardCtx<'a>>> =
+            std::collections::BTreeMap::new();
+        let mut other: Vec<&CardCtx<'a>> = Vec::new();
+        for card in &self.cards {
+            match card.subject.filter(|s| !s.trim().is_empty()) {
+                Some(subj) => by_subject
+                    .entry((subj.to_lowercase(), subj))
+                    .or_default()
+                    .push(card),
+                None => other.push(card),
+            }
+        }
+        let mut groups: Vec<CatalogGroup<'_, 'a>> = by_subject
+            .into_iter()
+            .enumerate()
+            .map(|(i, ((_, subj), cards))| CatalogGroup {
+                key: format!("s{i}"),
+                label: subj.to_string(),
+                cards,
+            })
+            .collect();
+        if !other.is_empty() {
+            groups.push(CatalogGroup {
+                key: "other".to_string(),
+                label: self.t("landing-section-other"),
+                cards: other,
+            });
+        }
+        groups
     }
 
     /// Resolve a logo's `<img src>`: an absolute/protocol-relative URL is
@@ -627,6 +683,7 @@ async fn index(
         card_cover: lc.effective_card_cover().to_string(),
         catalog_layout: lc.effective_catalog_layout().to_string(),
         catalog_density: lc.effective_catalog_density().to_string(),
+        catalog_sections_by: lc.effective_catalog_sections_by().to_string(),
     };
     let mut resp = render(&page);
     // The landing is personalized (cards are access-filtered per viewer)

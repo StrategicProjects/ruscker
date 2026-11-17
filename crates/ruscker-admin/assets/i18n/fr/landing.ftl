@@ -952,6 +952,11 @@ admin-landing-layout-list = Liste
 admin-landing-layout-sections = Sections
 admin-landing-density-comfortable = Confortable
 admin-landing-density-compact = Compact
+admin-landing-sections-by = Regrouper les sections par
+admin-landing-sections-by-type = Type
+admin-landing-sections-by-subject = Sujet
+admin-landing-sections-by-help = Par sujet : une section par sujet (ordre alphabétique), les apps sans sujet dans une dernière section « Autres ».
+landing-section-other = Autres
 
 
 

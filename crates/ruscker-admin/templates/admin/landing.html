@@ -709,6 +709,7 @@
         <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
         <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
         <input type="hidden" name="catalog_density" :value="form.catalog_density">
+        <input type="hidden" name="catalog_sections_by" :value="form.catalog_sections_by">
         <div class="spec-form-field">
           <div class="layout-tiles" role="group">
             <button type="button" class="layout-tile" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">
@@ -724,6 +725,17 @@
               <span>{{ self.t("admin-landing-layout-sections") }}</span>
             </button>
           </div>
+        </div>
+        {# Sections grouping (#1066) — only meaningful for the `sections`
+           layout, so it only shows there (the stored value survives a
+           switch to grid/list and back). #}
+        <div class="spec-form-field" x-show="form.catalog_layout === 'sections'" x-cloak>
+          <label class="spec-form-label">{{ self.t("admin-landing-sections-by") }}</label>
+          <div class="seg-control seg-control--full" role="group" aria-label="{{ self.t("admin-landing-sections-by") }}">
+            <button type="button" :class="{ 'is-active': form.catalog_sections_by !== 'subject' }" @click="form.catalog_sections_by = ''">{{ self.t("admin-landing-sections-by-type") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_sections_by === 'subject' }" @click="form.catalog_sections_by = 'subject'">{{ self.t("admin-landing-sections-by-subject") }}</button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-sections-by-help") }}</div>
         </div>
         <div class="spec-form-field">
           <div class="seg-control seg-control--full seg-control--contrast" role="group">
@@ -1008,7 +1020,9 @@
 
           {# Catalog mock: reacts to layout (grid/list/sections), density,
              accent and card-cover style. Sections renders two grouped
-             stacks with heading bars; grid/list is one grid. #}
+             stacks with heading bars; grid/list is one grid. By subject
+             (#1066) it adds a third, muted "Other" stack — the bucket for
+             apps without a subject always closes the list. #}
           <div class="landing-preview-catalog" :class="form.catalog_density === 'compact' ? 'is-compact' : ''">
             <template x-if="form.catalog_layout !== 'sections'">
               <div class="landing-preview-mockgrid" :class="form.catalog_layout === 'list' ? 'is-list' : ''">
@@ -1017,9 +1031,9 @@
             </template>
             <template x-if="form.catalog_layout === 'sections'">
               <div>
-                <template x-for="g in [1, 2]" :key="g">
+                <template x-for="g in (form.catalog_sections_by === 'subject' ? [1, 2, 3] : [1, 2])" :key="g">
                   <div class="lp-section">
-                    <div class="lp-section-head"></div>
+                    <div class="lp-section-head" :class="form.catalog_sections_by === 'subject' && g === 3 ? 'is-other' : ''"></div>
                     <div class="landing-preview-mockgrid">
                       <template x-for="i in [1, 2]" :key="i">{% call pv_card() %}{% endcall %}</template>
                     </div>

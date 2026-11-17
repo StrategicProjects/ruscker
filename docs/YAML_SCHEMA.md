@@ -250,6 +250,10 @@ proxy:
     header-bg-dark: "#10312b"          # dark-theme header bg (blank = inherit header-bg)
     header-fg-dark: "#f0f0f0"          # dark-theme header text (blank = inherit header-fg)
 
+    # Catalog layout
+    catalog-layout: sections           # `grid` (default) | `list` | `sections`
+    catalog-sections-by: subject       # `type` (default) | `subject` — sections only
+
     # Intro paragraph between header and filters
     intro: "Welcome to the portal."    # single-language fallback
     intro-locales:                     # per-language overrides; locale code → text
@@ -304,6 +308,8 @@ Field reference:
 | `header-fg-dark` | CSS color | none | Dark-theme header text. Unset inherits `header-fg`. |
 | `card-cover-default` | CSS value | none | Default cover (solid/gradient) painted behind catalog cards that have no per-app `cover`/`accent`. Unset keeps the per-kind tint. |
 | `card-cover-default-dark` | CSS value | none | Dark-theme default card cover. Unset inherits `card-cover-default`. |
+| `catalog-layout` | enum | `grid` | `grid`, `list`, or `sections` (cards grouped under headings). Unknown values render `grid`. |
+| `catalog-sections-by` | enum | `type` | What `sections` groups by: `type` (one section per app type) or `subject` (one section per distinct `template-properties.subject`, alphabetical ignoring case, then a final localized "Other" section for apps without a subject). Ignored by `grid`/`list`; unknown values render `type`. |
 | `intro` | string | none | Single-language fallback. Inline Markdown only — `**bold**`, `*italic*`, `[links](https://…)`; no HTML. |
 | `intro-locales` | map | `{}` | Locale code → intro string (same inline Markdown). Wins over `intro` for matching locales. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |

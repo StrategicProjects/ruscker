@@ -275,16 +275,19 @@
 
   {# ── Card area (#701): one or more groups. `grid`/`list` renders a
      single unlabeled group with every card; `sections` renders one
-     labeled group per app type, each heading hidden via x-show when the
-     live filters empty it (`sections[type]` count, kept by recount()).
-     The fixed-width card markup is emitted once inside the inner loop,
-     shared by every layout (see `LandingPage::catalog_groups`). #}
+     labeled group per app type — or per subject, #1066 — each heading
+     hidden via x-show when the live filters empty it (`sections[key]`
+     count, kept by recount() from each card's `data-section`). The key
+     is a synthetic ASCII id, never the subject text (it sits inside a
+     single-quoted Alpine expression). The fixed-width card markup is
+     emitted once inside the inner loop, shared by every layout (see
+     `LandingPage::catalog_groups`). #}
   <div class="catalog{% if catalog_layout == "sections" %} catalog--sections{% endif %}" x-ref="grid">
     {% for sec in self.catalog_groups() %}
     <section class="catalog-group"{% if !sec.key.is_empty() %} x-show="(sections['{{ sec.key }}'] || 0) > 0" x-cloak{% endif %}>
-      {% if !sec.label_key.is_empty() %}
+      {% if !sec.label.is_empty() %}
       <h2 class="catalog-group__head">
-        <span>{{ self.t(sec.label_key) }}</span>
+        <span>{{ sec.label }}</span>
         <span class="catalog-group__count" x-text="sections['{{ sec.key }}'] || 0"></span>
       </h2>
       {% endif %}
@@ -293,6 +296,7 @@
       <a class="rcard {% if !card.active %}inactive{% endif %}"
          {% if card.active %}href="{{ card.href }}"{% else %}aria-disabled="true"{% endif %}
          data-type="{{ card.display_type.key() }}"
+         {% if !sec.key.is_empty() %}data-section="{{ sec.key }}"{% endif %}
          data-spec="{{ card.id }}"
          {% if card.favorited %}data-fav="1"{% endif %}
          {% if card.featured %}data-featured="1"{% endif %}
@@ -417,8 +421,9 @@ window.ruscker.landing = () => ({
   sort: 'recent',
   visible: 0,
   counts: { all: 0 },
-  // Per-type count of cards passing ALL filters (incl. the type chip),
-  // keyed by DisplayType::key(). Drives the `sections` layout (#701):
+  // Per-section count of cards passing ALL filters (incl. the type
+  // chip), keyed by each card's `data-section` — the type key, or the
+  // synthetic subject id (#1066). Drives the `sections` layout (#701):
   // a section's heading hides via x-show when its count drops to 0.
   sections: {},
 
@@ -458,8 +463,8 @@ window.ruscker.landing = () => ({
       }
       if (passesType && passesRest) {
         visible += 1;
-        const t = el.dataset.type;
-        sections[t] = (sections[t] || 0) + 1;
+        const sec = el.dataset.section;
+        if (sec) sections[sec] = (sections[sec] || 0) + 1;
       }
     }
     this.counts = counts;

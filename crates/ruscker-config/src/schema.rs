@@ -583,6 +583,14 @@ pub struct LandingCustomization {
     #[serde(default, rename = "catalog-layout")]
     pub catalog_layout: Option<String>,
 
+    /// What the `sections` catalog layout groups by (#1066): `"type"`
+    /// (default — one section per app type) or `"subject"` (one section
+    /// per distinct `template-properties.subject`, alphabetical, with a
+    /// final "Other" section for apps without one). Ignored by the
+    /// `grid`/`list` layouts. Admin-managed.
+    #[serde(default, rename = "catalog-sections-by")]
+    pub catalog_sections_by: Option<String>,
+
     /// Catalog density: `"comfortable"` (default) or `"compact"`.
     #[serde(default, rename = "catalog-density")]
     pub catalog_density: Option<String>,
@@ -809,6 +817,14 @@ impl LandingCustomization {
             Some("list") => "list",
             Some("sections") => "sections",
             _ => "grid",
+        }
+    }
+    /// Grouping of the `sections` layout (#1066): `type` (default) |
+    /// `subject`. Unknown/absent ⇒ `type`, the pre-#1066 behaviour.
+    pub fn effective_catalog_sections_by(&self) -> &str {
+        match self.catalog_sections_by.as_deref() {
+            Some("subject") => "subject",
+            _ => "type",
         }
     }
     /// Catalog density: `comfortable` (default) | `compact`.
@@ -2358,6 +2374,33 @@ proxy:
         assert_eq!(lc.seo_title.as_deref(), Some("My Portal"));
         assert_eq!(lc.seo_description.as_deref(), Some("A short summary"));
         assert_eq!(lc.og_image.as_deref(), Some("/assets/img/og.png"));
+    }
+
+    // #1066: `catalog-sections-by` defaults to `type`; only the exact
+    // `subject` switches it, so a typo keeps the historical grouping.
+    #[test]
+    fn catalog_sections_by_defaults_and_unknowns() {
+        let lc = LandingCustomization::default();
+        assert_eq!(lc.effective_catalog_sections_by(), "type");
+        for (raw, want) in [("type", "type"), ("subject", "subject"), ("Subject", "type"), ("bogus", "type"), ("", "type")] {
+            let lc = LandingCustomization {
+                catalog_sections_by: Some(raw.into()),
+                ..Default::default()
+            };
+            assert_eq!(lc.effective_catalog_sections_by(), want, "raw {raw:?}");
+        }
+    }
+
+    #[test]
+    fn catalog_sections_by_yaml_round_trip() {
+        let yaml = "proxy:\n  landing-customization:\n    catalog-layout: sections\n    catalog-sections-by: subject\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let lc = &config.proxy.landing_customization;
+        assert_eq!(lc.catalog_sections_by.as_deref(), Some("subject"));
+        let out = serde_yaml_ng::to_string(lc).unwrap();
+        assert!(out.contains("catalog-sections-by: subject"), "{out}");
+        let back: LandingCustomization = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(back.effective_catalog_sections_by(), "subject");
     }
 
     #[test]

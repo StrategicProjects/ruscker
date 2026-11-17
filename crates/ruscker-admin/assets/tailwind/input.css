@@ -2764,6 +2764,9 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 .landing-preview-mockgrid.is-list .lp-card-cover { height: 100%; min-height: 18px; }
 .lp-section + .lp-section { margin-top: 6px; }
 .lp-section-head { height: 4px; width: 32%; border-radius: 2px; background: var(--border-strong); margin: 0 0 4px; }
+/* Sections by subject (#1066): the closing "Other" bucket reads as a
+   shorter, fainter heading in the mock. */
+.lp-section-head.is-other { width: 18%; opacity: 0.5; }
 .landing-preview-mockchips { display: flex; gap: 4px; }
 .lp-chip { height: 9px; width: 24px; border-radius: 999px; background: var(--surface); border: 0.5px solid var(--border); }
 /* Live preview: logos in the header/footer chrome + a faithful footer. */

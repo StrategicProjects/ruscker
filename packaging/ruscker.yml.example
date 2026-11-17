@@ -56,6 +56,11 @@ server:
   # viewer's own browser timezone.
   #timezone: America/Recife
 
+  # Days of user activity to keep (sign-ins, app accesses, SSO sign-ins
+  # and refusals — with the address and browser they came from). Older
+  # rows are deleted automatically. Default 180; 0 keeps everything.
+  #activity-retention-days: 180
+
   # OpenID Connect provider ("Sign in with Ruscker") for systems that
   # live outside this portal. Off unless enabled with an issuer.
   # `issuer` is this portal's PUBLIC base URL, including the subpath if

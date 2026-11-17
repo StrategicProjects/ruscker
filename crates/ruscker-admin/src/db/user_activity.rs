@@ -29,6 +29,9 @@ pub struct ActivityRow {
     pub spec_id: Option<String>,
     pub auth_method: Option<String>,
     pub client_ip: Option<String>,
+    pub user_agent: Option<String>,
+    /// Reason for a `login.failed` / `sso.denied` row.
+    pub detail: Option<String>,
     pub occurred_at: DateTime<Utc>,
 }
 
@@ -38,6 +41,9 @@ pub struct ActivityRow {
 #[derive(Debug, Clone)]
 pub struct ActivityFilter {
     pub event_type: Option<String>,
+    /// Restrict to a family of events by prefix (`"sso."`). A constant
+    /// chosen by the caller, never user input.
+    pub event_prefix: Option<&'static str>,
     pub username: Option<String>,
     pub spec_id: Option<String>,
     /// Inclusive lower bound on `occurred_at`.
@@ -52,6 +58,7 @@ impl Default for ActivityFilter {
     fn default() -> Self {
         Self {
             event_type: None,
+            event_prefix: None,
             username: None,
             spec_id: None,
             since: None,
@@ -66,6 +73,8 @@ impl Default for ActivityFilter {
 type ListRow = (
     i64,
     String,
+    Option<String>,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -86,6 +95,11 @@ where
         qb.push(" AND event_type = ");
         qb.push_bind(t.clone());
     }
+    if let Some(prefix) = filter.event_prefix {
+        // `prefix` is a caller constant with no LIKE wildcards in it.
+        qb.push(" AND event_type LIKE ");
+        qb.push_bind(format!("{prefix}%"));
+    }
     if let Some(u) = &filter.username {
         qb.push(" AND username = ");
         qb.push_bind(u.clone());
@@ -105,7 +119,7 @@ where
 }
 
 const LIST_SELECT: &str = "SELECT id, event_type, username, spec_id, auth_method, client_ip, \
-     occurred_at FROM user_activity WHERE 1=1";
+     user_agent, detail, occurred_at FROM user_activity WHERE 1=1";
 const COUNT_SELECT: &str = "SELECT COUNT(*) FROM user_activity WHERE 1=1";
 
 /// Insert a batch of events in one transaction, newest kept. The unique
@@ -123,8 +137,9 @@ pub async fn insert_batch(db: &ConfigDb, events: &[ActivityEvent]) -> Result<u64
             for e in events {
                 let res = sqlx::query(
                     "INSERT INTO user_activity
-                        (event_type, username, spec_id, event_key, auth_method, client_ip, occurred_at)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)
+                        (event_type, username, spec_id, event_key, auth_method, client_ip,
+                         user_agent, detail, occurred_at)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                      ON CONFLICT (event_type, event_key) DO NOTHING",
                 )
                 .bind(e.event_type.as_str())
@@ -133,6 +148,8 @@ pub async fn insert_batch(db: &ConfigDb, events: &[ActivityEvent]) -> Result<u64
                 .bind(&e.event_key)
                 .bind(e.auth_method.map(|m| m.as_str()))
                 .bind(e.client_ip.as_deref())
+                .bind(e.user_agent.as_deref())
+                .bind(e.detail.as_deref())
                 .bind(e.occurred_at)
                 .execute(&mut *tx)
                 .await
@@ -148,8 +165,9 @@ pub async fn insert_batch(db: &ConfigDb, events: &[ActivityEvent]) -> Result<u64
             for e in events {
                 let res = sqlx::query(
                     "INSERT INTO user_activity
-                        (event_type, username, spec_id, event_key, auth_method, client_ip, occurred_at)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        (event_type, username, spec_id, event_key, auth_method, client_ip,
+                         user_agent, detail, occurred_at)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                      ON CONFLICT (event_type, event_key) DO NOTHING",
                 )
                 .bind(e.event_type.as_str())
@@ -158,6 +176,8 @@ pub async fn insert_batch(db: &ConfigDb, events: &[ActivityEvent]) -> Result<u64
                 .bind(&e.event_key)
                 .bind(e.auth_method.map(|m| m.as_str()))
                 .bind(e.client_ip.as_deref())
+                .bind(e.user_agent.as_deref())
+                .bind(e.detail.as_deref())
                 .bind(e.occurred_at)
                 .execute(&mut *tx)
                 .await
@@ -199,7 +219,7 @@ pub async fn list_page(db: &ConfigDb, filter: &ActivityFilter) -> Result<Vec<Act
     Ok(rows
         .into_iter()
         .map(
-            |(id, event_type, username, spec_id, auth_method, client_ip, occurred_at)| {
+            |(id, event_type, username, spec_id, auth_method, client_ip, user_agent, detail, occurred_at)| {
                 ActivityRow {
                     id,
                     event_type,
@@ -207,6 +227,8 @@ pub async fn list_page(db: &ConfigDb, filter: &ActivityFilter) -> Result<Vec<Act
                     spec_id,
                     auth_method,
                     client_ip,
+                    user_agent,
+                    detail,
                     occurred_at,
                 }
             },
@@ -230,6 +252,81 @@ pub async fn count_filtered(db: &ConfigDb, filter: &ActivityFilter) -> Result<i6
     }
     .context("count user_activity")?;
     Ok(count)
+}
+
+/// Delete every row older than `cutoff` — the retention purge. Returns
+/// how many rows went.
+pub async fn purge_older_than(db: &ConfigDb, cutoff: DateTime<Utc>) -> Result<u64> {
+    let n = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query("DELETE FROM user_activity WHERE occurred_at < ?")
+            .bind(cutoff)
+            .execute(pool)
+            .await
+            .map(|r| r.rows_affected()),
+        ConfigDb::Postgres(pool) => sqlx::query("DELETE FROM user_activity WHERE occurred_at < $1")
+            .bind(cutoff)
+            .execute(pool)
+            .await
+            .map(|r| r.rows_affected()),
+    }
+    .context("purge old user_activity")?;
+    Ok(n)
+}
+
+/// Distinct usernames among events whose type starts with `prefix`.
+pub async fn distinct_usernames_with_prefix(db: &ConfigDb, prefix: &'static str) -> Result<Vec<String>> {
+    let like = format!("{prefix}%");
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT username FROM user_activity
+                  WHERE username IS NOT NULL AND event_type LIKE ? ORDER BY username ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT username FROM user_activity
+                  WHERE username IS NOT NULL AND event_type LIKE $1 ORDER BY username ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .context("distinct activity usernames by prefix")?;
+    Ok(rows.into_iter().map(|(u,)| u).collect())
+}
+
+/// Distinct `spec_id` values among events whose type starts with
+/// `prefix` — for the SSO access tab, the client ids that ever signed
+/// someone in (or refused to).
+pub async fn distinct_specs_with_prefix(db: &ConfigDb, prefix: &'static str) -> Result<Vec<String>> {
+    let like = format!("{prefix}%");
+    let rows: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT spec_id FROM user_activity
+                  WHERE spec_id IS NOT NULL AND event_type LIKE ? ORDER BY spec_id ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as(
+                "SELECT DISTINCT spec_id FROM user_activity
+                  WHERE spec_id IS NOT NULL AND event_type LIKE $1 ORDER BY spec_id ASC",
+            )
+            .bind(&like)
+            .fetch_all(pool)
+            .await
+        }
+    }
+    .context("distinct activity specs by prefix")?;
+    Ok(rows.into_iter().map(|(s,)| s).collect())
 }
 
 /// Distinct non-null usernames ever recorded — populates the user filter
@@ -290,6 +387,46 @@ mod tests {
                 .unwrap(),
             3
         );
+    }
+
+    /// Browser, address and reason are stored and read back; the prefix
+    /// filter selects a family of events; the retention purge deletes by
+    /// age and nothing else.
+    #[tokio::test]
+    async fn client_info_prefix_filter_and_retention_purge() {
+        use crate::activity::ClientInfo;
+        let db = ConfigDb::Sqlite(open_memory().await.unwrap());
+        let from = |ip: &str| ClientInfo { ip: Some(ip.into()), user_agent: Some("UA/1".into()) };
+        let mut old = ActivityEvent::sso_login("alice", "radar", "s-old").with_client(from("203.0.113.1"));
+        old.occurred_at = Utc::now() - chrono::Duration::days(200);
+        insert_batch(
+            &db,
+            &[
+                old,
+                ActivityEvent::sso_login("alice", "radar", "s-new").with_client(from("203.0.113.2")),
+                ActivityEvent::sso_denied(Some("bob".into()), "radar", "not-in-group").with_client(from("203.0.113.3")),
+                ActivityEvent::login_failed(None, "unknown-account").with_client(from("203.0.113.4")),
+                login("alice", "l1"),
+            ],
+        )
+        .await
+        .unwrap();
+
+        let sso = ActivityFilter { event_prefix: Some("sso."), ..Default::default() };
+        let rows = list_page(&db, &sso).await.unwrap();
+        assert_eq!(rows.len(), 3, "sso.login ×2 + sso.denied");
+        assert!(rows.iter().all(|r| r.event_type.starts_with("sso.")));
+        let denied = rows.iter().find(|r| r.event_type == "sso.denied").unwrap();
+        assert_eq!(denied.detail.as_deref(), Some("not-in-group"));
+        assert_eq!(denied.client_ip.as_deref(), Some("203.0.113.3"));
+        assert_eq!(denied.user_agent.as_deref(), Some("UA/1"));
+        assert_eq!(distinct_specs_with_prefix(&db, "sso.").await.unwrap(), vec!["radar"]);
+
+        // 180-day retention: only the 200-day-old row goes.
+        let purged = purge_older_than(&db, Utc::now() - chrono::Duration::days(180)).await.unwrap();
+        assert_eq!(purged, 1);
+        assert_eq!(count_filtered(&db, &ActivityFilter::default()).await.unwrap(), 4);
+        assert_eq!(purge_older_than(&db, Utc::now() - chrono::Duration::days(180)).await.unwrap(), 0);
     }
 
     #[tokio::test]
@@ -494,5 +631,30 @@ mod tests {
             distinct_specs(&db).await.unwrap(),
             vec!["public".to_string(), "sales".to_string()]
         );
+
+        // New columns, the prefix filter and the retention purge (#1079).
+        use crate::activity::ClientInfo;
+        let from = ClientInfo { ip: Some("203.0.113.9".into()), user_agent: Some("UA/1".into()) };
+        let mut old = ActivityEvent::sso_login("alice", "radar", "pg-old").with_client(from.clone());
+        old.occurred_at = Utc::now() - chrono::Duration::days(200);
+        insert_batch(
+            &db,
+            &[
+                old,
+                ActivityEvent::sso_denied(Some("bob".into()), "radar", "not-in-group").with_client(from),
+            ],
+        )
+        .await
+        .unwrap();
+        let sso = ActivityFilter { event_prefix: Some("sso."), ..Default::default() };
+        let rows = list_page(&db, &sso).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        let denied = rows.iter().find(|r| r.event_type == "sso.denied").unwrap();
+        assert_eq!(denied.detail.as_deref(), Some("not-in-group"));
+        assert_eq!(denied.client_ip.as_deref(), Some("203.0.113.9"));
+        assert_eq!(denied.user_agent.as_deref(), Some("UA/1"));
+        assert_eq!(distinct_specs_with_prefix(&db, "sso.").await.unwrap(), vec!["radar"]);
+        assert_eq!(purge_older_than(&db, Utc::now() - chrono::Duration::days(180)).await.unwrap(), 1);
+        assert_eq!(list_page(&db, &sso).await.unwrap().len(), 1);
     }
 }

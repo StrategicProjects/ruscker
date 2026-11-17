@@ -645,7 +645,12 @@ impl AdminServer {
         // queue (bounded — no leak).
         if let Some(db) = self.state.db.clone() {
             #[allow(clippy::let_underscore_future)]
-            let _ = activity::spawn(&self.state.activity, db);
+            let _ = activity::spawn(&self.state.activity, db.clone());
+            // Retention (#1079): activity rows carry personal data and are
+            // purged after `server.activity-retention-days` (default 180).
+            let days = self.state.config.server.effective_activity_retention_days();
+            #[allow(clippy::let_underscore_future)]
+            let _ = activity::spawn_retention(db, days);
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

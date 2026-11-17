@@ -306,6 +306,7 @@ async fn authorize(
     session: MaybeSession,
     cookies: Cookies,
     headers: HeaderMap,
+    peer: crate::routes::proxy::MaybePeer,
     RawQuery(raw_query): RawQuery,
 ) -> Response {
     // 1. Provider.
@@ -421,6 +422,26 @@ async fn authorize(
         Redirect::to(&super::with_next_query(&path, &here)).into_response()
     };
 
+    // From here on the request is about a known client, so refusals are
+    // worth an audit row: who tried to enter which system, from where.
+    let origin = crate::activity::ClientInfo::from_request(&state, &headers, peer.0.as_ref());
+    // One row per (user, system, reason) per minute: any page can send a
+    // signed-in user here, and a client that retries after a refusal
+    // loops — neither should write a row per request.
+    let denied = |username: Option<String>, reason: &str| {
+        let key = format!(
+            "sso.denied|{}|{}|{reason}",
+            username.as_deref().unwrap_or("-"),
+            client.client_id
+        );
+        state.activity.record_limited(
+            &key,
+            1,
+            crate::activity::ActivityEvent::sso_denied(username, client.client_id.clone(), reason)
+                .with_client(origin.clone()),
+        );
+    };
+
     // 4. Who is the user?
     let Some(session) = session.0 else {
         // Arrived from another site: the Strict session cookie was not
@@ -438,12 +459,16 @@ async fn authorize(
     // A break-glass token session is an operator, not a person: it has
     // no account, so there is no identity to hand to a client.
     let Some(username) = session.actor.as_deref() else {
+        denied(None, "no-account");
         return fail("access_denied");
     };
     let user = match crate::db::users::fetch(db, username).await {
         Ok(Some(u)) => u,
         // The session outlived its account.
-        Ok(None) => return fail("access_denied"),
+        Ok(None) => {
+            denied(None, "account-missing");
+            return fail("access_denied");
+        }
         Err(err) => {
             tracing::error!(error = ?err, "fetch user for authorization failed");
             return fail("server_error");
@@ -463,6 +488,7 @@ async fn authorize(
     //    audience is whoever is in its groups, nothing more.
     if !client.allows_groups(&user.groups) {
         tracing::info!(client = %client.client_id, user = %user.username, "SSO refused: not in the client's groups");
+        denied(Some(user.username.clone()), "not-in-group");
         return fail("access_denied");
     }
 
@@ -495,6 +521,10 @@ async fn authorize(
         code_challenge: challenge.to_string(),
         nonce: nonce.map(str::to_string),
         scope,
+        // The user's side of the sign-in, for the audit row written
+        // when the client's server redeems the code.
+        client_ip: origin.ip.clone(),
+        user_agent: origin.user_agent.clone(),
     };
     match crate::db::oidc_codes::issue(db, &grant).await {
         // `iss` (RFC 9207) lets a client that talks to several providers
@@ -712,7 +742,26 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     // 4. The user, as they are NOW.
     let user = match crate::db::users::fetch(db, &grant.username).await {
         Ok(Some(u)) if u.id == grant.user_id && client.allows_groups(&u.groups) => u,
-        Ok(_) => return invalid_grant(),
+        Ok(_) => {
+            // The user passed the gate a moment ago and no longer does
+            // (removed from the group, or the account is gone). That is
+            // a refused sign-in, and the audit should show it.
+            let key = format!("sso.denied|{}|{}|access-revoked", grant.username, client.client_id);
+            state.activity.record_limited(
+                &key,
+                1,
+                crate::activity::ActivityEvent::sso_denied(
+                    Some(grant.username.clone()),
+                    client.client_id.clone(),
+                    "access-revoked",
+                )
+                .with_client(crate::activity::ClientInfo {
+                    ip: grant.client_ip.clone(),
+                    user_agent: grant.user_agent.clone(),
+                }),
+            );
+            return invalid_grant();
+        }
         Err(err) => {
             tracing::error!(error = ?err, "fetch user for token failed");
             return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
@@ -766,11 +815,19 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     };
 
     // One activity row per sign-in to an external system.
-    state.activity.record(crate::activity::ActivityEvent::sso_login(
-        user.username.clone(),
-        client.client_id.clone(),
-        uuid::Uuid::new_v4().to_string(),
-    ));
+    // Address and browser are the USER's (carried by the code), not
+    // those of the client system's server making this very request.
+    state.activity.record(
+        crate::activity::ActivityEvent::sso_login(
+            user.username.clone(),
+            client.client_id.clone(),
+            uuid::Uuid::new_v4().to_string(),
+        )
+        .with_client(crate::activity::ClientInfo {
+            ip: grant.client_ip.clone(),
+            user_agent: grant.user_agent.clone(),
+        }),
+    );
 
     (
         [(CACHE_CONTROL, "no-store"), (PRAGMA, "no-cache")],

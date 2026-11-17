@@ -51,6 +51,11 @@ pub enum ActivityEventType {
     /// A user signed in to an EXTERNAL system through the OIDC provider
     /// (a token was issued to that system's client).
     SsoLogin,
+    /// A password sign-in that was refused.
+    LoginFailed,
+    /// An SSO sign-in the provider refused after identifying the client
+    /// (the user is not in its groups, or the session has no account).
+    SsoDenied,
 }
 
 impl ActivityEventType {
@@ -59,6 +64,8 @@ impl ActivityEventType {
             ActivityEventType::LoginSuccess => "login.success",
             ActivityEventType::AppAccess => "app.access",
             ActivityEventType::SsoLogin => "sso.login",
+            ActivityEventType::LoginFailed => "login.failed",
+            ActivityEventType::SsoDenied => "sso.denied",
         }
     }
 }
@@ -97,12 +104,100 @@ pub struct ActivityEvent {
     /// Client IP if the deployment chooses to record it. Personal data —
     /// admin-only, retention TBD (kept optional and unset by default).
     pub client_ip: Option<String>,
+    /// The browser's `User-Agent`, sanitized and truncated. Personal data,
+    /// same handling as `client_ip`.
+    pub user_agent: Option<String>,
+    /// Machine-readable reason for a failure or refusal
+    /// (`wrong-password`, `not-in-group`, …). `None` otherwise.
+    pub detail: Option<String>,
     /// When the event happened (stamped at emit, not at insert, so a
     /// drained-late batch keeps accurate timestamps).
     pub occurred_at: DateTime<Utc>,
 }
 
+/// Where a request came from: the client address and browser, as far as
+/// the request tells. Both are optional and both are personal data.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ClientInfo {
+    pub ip: Option<String>,
+    pub user_agent: Option<String>,
+}
+
+/// Longest `User-Agent` kept. Real ones are 100–200 characters; the cap
+/// stops a hostile client from using the audit table as storage.
+const MAX_USER_AGENT_LEN: usize = 256;
+
+impl ClientInfo {
+    /// Read the client address and browser from a request.
+    ///
+    /// The address follows the same trust rule as rate limiting: the
+    /// right-most `X-Forwarded-For` entry when the operator opted into
+    /// forwarded headers (Ruscker behind its reverse proxy), the TCP
+    /// peer otherwise — never a value the client can simply invent.
+    pub fn from_request(
+        state: &crate::AppState,
+        headers: &axum::http::HeaderMap,
+        peer: Option<&std::net::SocketAddr>,
+    ) -> Self {
+        let user_agent = headers
+            .get(axum::http::header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .map(|ua| {
+                ua.chars()
+                    .filter(|c| !c.is_control())
+                    .take(MAX_USER_AGENT_LEN)
+                    .collect::<String>()
+            })
+            .filter(|ua| !ua.trim().is_empty());
+        Self {
+            ip: crate::routes::proxy::client_ip(state, headers, peer),
+            user_agent,
+        }
+    }
+}
+
 impl ActivityEvent {
+    /// Attach where the request came from.
+    pub fn with_client(mut self, client: ClientInfo) -> Self {
+        self.client_ip = client.ip;
+        self.user_agent = client.user_agent;
+        self
+    }
+
+    /// A refused password sign-in. `username` is set ONLY when it names
+    /// an existing account: an unknown name is not stored, because people
+    /// do type passwords into the wrong field, and an audit table must
+    /// not end up holding them.
+    pub fn login_failed(username: Option<String>, reason: &str) -> Self {
+        Self {
+            event_type: ActivityEventType::LoginFailed,
+            username,
+            spec_id: None,
+            // Every attempt is its own event; nothing to deduplicate.
+            event_key: uuid::Uuid::new_v4().to_string(),
+            auth_method: Some(AuthMethod::Password),
+            client_ip: None,
+            user_agent: None,
+            detail: Some(reason.to_string()),
+            occurred_at: Utc::now(),
+        }
+    }
+
+    /// An SSO sign-in refused for `client_id`, with the reason.
+    pub fn sso_denied(username: Option<String>, client_id: impl Into<String>, reason: &str) -> Self {
+        Self {
+            event_type: ActivityEventType::SsoDenied,
+            username,
+            spec_id: Some(client_id.into()),
+            event_key: uuid::Uuid::new_v4().to_string(),
+            auth_method: None,
+            client_ip: None,
+            user_agent: None,
+            detail: Some(reason.to_string()),
+            occurred_at: Utc::now(),
+        }
+    }
+
     /// A successful login.
     pub fn login_success(
         username: impl Into<String>,
@@ -117,6 +212,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method: Some(auth_method),
             client_ip,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -136,6 +233,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method: None,
             client_ip: None,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -156,6 +255,8 @@ impl ActivityEvent {
             event_key: event_key.into(),
             auth_method,
             client_ip,
+            user_agent: None,
+            detail: None,
             occurred_at: Utc::now(),
         }
     }
@@ -169,6 +270,10 @@ pub struct ActivitySink {
     tx: mpsc::Sender<ActivityEvent>,
     rx: Arc<Mutex<Option<mpsc::Receiver<ActivityEvent>>>>,
     dropped: Arc<AtomicU64>,
+    /// Per-key one-minute budgets for [`ActivitySink::record_limited`]:
+    /// key → (window start, events in the window).
+    budgets: Arc<Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>>,
+    suppressed: Arc<AtomicU64>,
 }
 
 impl Default for ActivitySink {
@@ -178,6 +283,8 @@ impl Default for ActivitySink {
             tx,
             rx: Arc::new(Mutex::new(Some(rx))),
             dropped: Arc::new(AtomicU64::new(0)),
+            budgets: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            suppressed: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -190,6 +297,64 @@ impl ActivitySink {
         if self.tx.try_send(event).is_err() {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Record an event that an outsider can cause at will — a refused
+    /// sign-in, a refused SSO request — under a budget, so it can neither
+    /// fill the table nor crowd legitimate events out of the queue.
+    ///
+    /// At most `per_minute` events are kept per `key` in any one-minute
+    /// window, and at most [`FAILURE_BUDGET_PER_MINUTE`] across all keys.
+    /// The rest are counted ([`ActivitySink::suppressed`]) and dropped:
+    /// an audit needs to show THAT an address hammered the login, not
+    /// one row per attempt.
+    pub fn record_limited(&self, key: &str, per_minute: u32, event: ActivityEvent) {
+        let now = std::time::Instant::now();
+        let window = Duration::from_secs(60);
+        let admitted = {
+            let mut budgets = self.budgets.lock().unwrap_or_else(PoisonError::into_inner);
+            // Forget finished windows before the map can grow large.
+            if budgets.len() > BUDGET_KEYS_MAX {
+                budgets.retain(|_, (start, _)| now.duration_since(*start) < window);
+                if budgets.len() > BUDGET_KEYS_MAX {
+                    budgets.clear();
+                }
+            }
+            // Is there room under `limit` for `k` in the current window?
+            // (A finished window counts as empty.)
+            let room = |budgets: &std::collections::HashMap<String, (std::time::Instant, u32)>,
+                        k: &str,
+                        limit: u32| match budgets.get(k) {
+                Some((start, used)) if now.duration_since(*start) < window => *used < limit,
+                _ => true,
+            };
+            // Consume ONLY when both budgets have room: an event already
+            // refused by its own key must not use up the global budget
+            // (one noisy address would otherwise silence everyone else).
+            let ok = room(&budgets, GLOBAL_BUDGET_KEY, FAILURE_BUDGET_PER_MINUTE)
+                && room(&budgets, key, per_minute);
+            if ok {
+                for k in [GLOBAL_BUDGET_KEY, key] {
+                    let slot = budgets.entry(k.to_string()).or_insert((now, 0));
+                    if now.duration_since(slot.0) >= window {
+                        *slot = (now, 0);
+                    }
+                    slot.1 += 1;
+                }
+            }
+            ok
+        };
+        if admitted {
+            self.record(event);
+        } else {
+            self.suppressed.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Failure-class events dropped by [`ActivitySink::record_limited`]
+    /// since boot.
+    pub fn suppressed(&self) -> u64 {
+        self.suppressed.load(Ordering::Relaxed)
     }
 
     /// Take the receiving half — called once by [`spawn`]. Returns `None`
@@ -242,9 +407,112 @@ pub fn spawn(sink: &ActivitySink, db: ConfigDb) -> Option<tokio::task::JoinHandl
     }))
 }
 
+/// Ceiling on failure-class events (refused sign-ins, refused SSO
+/// requests) recorded per minute across the whole process. Far above
+/// anything honest, far below the queue depth.
+pub const FAILURE_BUDGET_PER_MINUTE: u32 = 240;
+const GLOBAL_BUDGET_KEY: &str = "\u{0}all";
+/// Budget map size at which finished windows are swept.
+const BUDGET_KEYS_MAX: usize = 4096;
+
+/// How often the retention task looks for rows to purge.
+const RETENTION_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// Start the retention task: delete `user_activity` rows older than
+/// `retention_days`, once at startup and then every six hours. Returns
+/// `None` (no task) when retention is disabled with `0`.
+///
+/// The rows hold personal data (who signed in, from which address and
+/// browser); keeping them forever is neither needed for an audit nor
+/// defensible. Every node may run this — the delete is idempotent.
+pub fn spawn_retention(db: ConfigDb, retention_days: u32) -> Option<tokio::task::JoinHandle<()>> {
+    if retention_days == 0 {
+        return None;
+    }
+    Some(tokio::spawn(async move {
+        loop {
+            purge_expired(&db, retention_days).await;
+            tokio::time::sleep(RETENTION_INTERVAL).await;
+        }
+    }))
+}
+
+/// One retention pass: delete what is older than `retention_days`.
+/// Never panics — an absurdly large value (a date before the calendar
+/// begins) simply purges nothing.
+async fn purge_expired(db: &ConfigDb, retention_days: u32) {
+    let Some(cutoff) = chrono::Duration::try_days(i64::from(retention_days))
+        .and_then(|age| Utc::now().checked_sub_signed(age))
+    else {
+        tracing::warn!(retention_days, "activity retention is out of range; nothing purged");
+        return;
+    };
+    match db::user_activity::purge_older_than(db, cutoff).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!(rows = n, retention_days, "purged old user activity"),
+        Err(e) => tracing::warn!(error = ?e, "user activity retention purge failed"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Whatever an outsider can trigger at will is budgeted: per key and
+    /// overall. Ordinary events are never subject to it.
+    #[test]
+    fn failure_events_are_budgeted_per_key_and_overall() {
+        let sink = ActivitySink::default();
+        let mut rx = sink.take_receiver().unwrap();
+        let fail = || ActivityEvent::login_failed(None, "unknown-account");
+        // One address hammering: only its per-minute budget gets through.
+        for _ in 0..500 {
+            sink.record_limited("login.failed|203.0.113.9", 10, fail());
+        }
+        let mut kept = 0;
+        while rx.try_recv().is_ok() {
+            kept += 1;
+        }
+        assert_eq!(kept, 10);
+        assert_eq!(sink.suppressed(), 490);
+        // Many addresses: the overall ceiling holds (10 were already used).
+        for i in 0..1000 {
+            sink.record_limited(&format!("login.failed|198.51.100.{i}"), 10, fail());
+        }
+        let mut kept = 0;
+        while rx.try_recv().is_ok() {
+            kept += 1;
+        }
+        assert_eq!(kept as u32, FAILURE_BUDGET_PER_MINUTE - 10);
+        // A real sign-in is not a failure-class event and still goes in.
+        sink.record(ActivityEvent::login_success("alice", AuthMethod::Password, "k", None));
+        assert!(rx.try_recv().is_ok());
+    }
+
+    #[tokio::test]
+    async fn retention_pass_purges_and_survives_absurd_values() {
+        let db = mem_db().await;
+        let mut old = ActivityEvent::login_success("alice", AuthMethod::Password, "old", None);
+        old.occurred_at = Utc::now() - chrono::Duration::days(400);
+        db::user_activity::insert_batch(
+            &db,
+            &[old, ActivityEvent::login_success("alice", AuthMethod::Password, "new", None)],
+        )
+        .await
+        .unwrap();
+        let count = || async {
+            db::user_activity::count_filtered(&db, &db::user_activity::ActivityFilter::default())
+                .await
+                .unwrap()
+        };
+        // Out of range: no panic, nothing deleted.
+        purge_expired(&db, u32::MAX).await;
+        assert_eq!(count().await, 2);
+        purge_expired(&db, 180).await;
+        assert_eq!(count().await, 1);
+        // `0` means "keep everything": no task at all.
+        assert!(spawn_retention(db.clone(), 0).is_none());
+    }
 
     async fn mem_db() -> ConfigDb {
         ConfigDb::Sqlite(crate::db::open_memory().await.expect("open in-memory"))

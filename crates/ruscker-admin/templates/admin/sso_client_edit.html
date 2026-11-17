@@ -9,7 +9,7 @@
   <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-sso-subtitle") }}</p>
 </div>
 
-{% let sso_active = true %}
+{% let sso_access = false %}
 {% include "admin/_sso_subnav.html" %}
 
 {% match flash_error %}{% when Some with (msg) %}

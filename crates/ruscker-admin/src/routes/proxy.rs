@@ -73,7 +73,7 @@ impl<S: Send + Sync> FromRequestParts<S> for MaybeWs {
 /// blanket-impl `Option<T: FromRequestParts>`, so — like `MaybeWs`
 /// — we provide our own infallible wrapper that yields `None`
 /// instead of rejecting.
-struct MaybePeer(Option<SocketAddr>);
+pub(crate) struct MaybePeer(pub(crate) Option<SocketAddr>);
 
 /// Authenticated identity resolved once for this proxied request. Group
 /// membership is an `Arc` because cache hits should not clone the vector
@@ -750,13 +750,20 @@ async fn forward(
         // `None` for an anonymous access. Non-blocking enqueue; the session
         // id is the dedup key.
         if outcome == crate::sessions::TouchOutcome::Registered {
-            state.activity.record(crate::activity::ActivityEvent::app_access(
-                acting_user.clone(),
-                spec.id.clone(),
-                session_id.to_string(),
-                None,
-                None,
-            ));
+            state.activity.record(
+                crate::activity::ActivityEvent::app_access(
+                    acting_user.clone(),
+                    spec.id.clone(),
+                    session_id.to_string(),
+                    None,
+                    None,
+                )
+                .with_client(crate::activity::ClientInfo::from_request(
+                    &state,
+                    req.headers(),
+                    peer.as_ref(),
+                )),
+            );
             // stop-on-logout (#337): when a *known* user first registers a
             // session on a spec that opts in, index it so their logout can
             // end it immediately. Only on first registration and only for
@@ -1209,17 +1216,34 @@ pub(crate) fn forward_headers_trusted(server: &ruscker_config::Server) -> bool {
 /// deployment). With a chain of N proxies the real client is N-from-the-
 /// right; a configurable trusted-hop count is a future refinement.
 fn client_key(state: &AppState, headers: &HeaderMap, peer: Option<&SocketAddr>) -> String {
+    client_ip(state, headers, peer).unwrap_or_else(|| "unknown".to_string())
+}
+
+/// The client's address under the trust rule described on
+/// [`client_key`], or `None` when it cannot be known. Also what the
+/// activity log records (#1079), so the audit and the rate limiter can
+/// never disagree about who a request came from.
+pub(crate) fn client_ip(
+    state: &AppState,
+    headers: &HeaderMap,
+    peer: Option<&SocketAddr>,
+) -> Option<String> {
     if forward_headers_trusted(&state.config.server) {
+        // The LAST header line, then its right-most entry. Some proxies
+        // append their hop as a separate `X-Forwarded-For` line instead
+        // of extending the existing one; reading only the first line
+        // would then return whatever the client itself sent.
         if let Some(ip) = headers
-            .get("x-forwarded-for")
+            .get_all("x-forwarded-for")
+            .iter()
+            .next_back()
             .and_then(|v| v.to_str().ok())
             .and_then(rightmost_forwarded_ip)
         {
-            return ip.to_string();
+            return Some(ip.to_string());
         }
     }
     peer.map(|a| a.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 /// The right-most parseable IP in an `X-Forwarded-For` value — the hop

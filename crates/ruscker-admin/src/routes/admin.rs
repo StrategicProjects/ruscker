@@ -440,16 +440,18 @@ fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
 }
 
 /// Validate an explicit post-login destination and normalize it to the
-/// router's base-less form. The restricted-app guard is the only producer
-/// today, so deliberately accept `/app/...` destinations only: arbitrary
-/// admin paths keep using the existing role-aware Referer fallback.
+/// router's base-less form. Deliberately a short allowlist — arbitrary
+/// admin paths keep using the existing role-aware Referer fallback:
+///
+/// * `/app/...`, produced by the restricted-app guard;
+/// * exactly `/oauth/authorize`, produced by the OIDC provider when a
+///   client sends a user who is not signed in yet. After login the
+///   browser returns there and the authorization continues.
 fn app_next_path(next: Option<&str>, base: &str) -> Option<String> {
     let path = super::local_next_path(next)?;
     let path = strip_base_prefix(path, base);
     let path_only = path.split(['?', '#']).next().unwrap_or(path);
-    path_only
-        .starts_with("/app/")
-        .then(|| path.to_string())
+    (path_only.starts_with("/app/") || path_only == "/oauth/authorize").then(|| path.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1017,6 +1019,13 @@ mod tests {
         );
         assert_eq!(app_next_path(Some("//evil.example/app/demo"), ""), None);
         assert_eq!(app_next_path(Some("/admin/dashboard"), ""), None);
+        // The OIDC authorization endpoint, and only that exact path.
+        assert_eq!(
+            app_next_path(Some("/box/oauth/authorize?client_id=x&state=1"), "/box"),
+            Some("/oauth/authorize?client_id=x&state=1".to_string())
+        );
+        assert_eq!(app_next_path(Some("/oauth/token"), ""), None);
+        assert_eq!(app_next_path(Some("/oauth/authorize/extra"), ""), None);
     }
 
     #[test]

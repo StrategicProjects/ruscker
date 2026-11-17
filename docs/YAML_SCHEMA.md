@@ -125,9 +125,10 @@ new key is then created on first use, and tokens signed by the old one
 stop verifying). Ruscker never replaces the key by itself.
 
 What exists today: the client registry (admin, Credentials → SSO
-clients), `{issuer}/.well-known/openid-configuration` and
-`{issuer}/oauth/jwks`. The sign-in endpoints the discovery document
-names are not shipped yet, so no client can log anyone in.
+clients), `{issuer}/.well-known/openid-configuration`,
+`{issuer}/oauth/jwks` and the authorization endpoint
+`{issuer}/oauth/authorize`. The token endpoint is not shipped yet, so a
+client can send a user through sign-in but cannot complete it.
 
 ### `server.context-path` — subpath mounting
 

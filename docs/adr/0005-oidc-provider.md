@@ -1,8 +1,9 @@
 # ADR 0005 — Ruscker as an OpenID Connect provider ("Sign in with Ruscker")
 
-Status: proposed (slices 1 and 2 are implemented: the client registry,
-the signing key and the public metadata endpoints; the sign-in
-endpoints are not — nothing here can issue a token yet)
+Status: proposed (slices 1–3 are implemented: the client registry, the
+signing key, the public metadata endpoints and the authorization
+endpoint; the token endpoint is not — a client can obtain a code but
+cannot redeem it yet)
 
 ## Context
 
@@ -91,6 +92,35 @@ it themselves.
    signs.
 3. `/oauth/authorize`: session check or login, the client's group gate
    and MFA requirement, one-use authorization codes bound to PKCE.
+   *(implemented)* Decisions taken here:
+   - Until the client and its exact redirect URI are verified, nothing
+     is redirected; the user sees a 400. Later errors go back to the
+     client as `error=…`.
+   - A repeated query parameter is refused outright.
+   - `redirect_uri` is always required, PKCE is always required, and
+     only `S256`.
+   - No bypass of the group gate for Admin accounts, and a break-glass
+     token session (no account) can never obtain a code.
+   - The gate and `must_change_password` are read from the database on
+     every request, never from the session.
+   - MFA for a client is session-bound: the proof must have been given
+     in the same login session (the "0 days" setting of hosted apps).
+   - `prompt=none` is honoured (errors instead of pages); `prompt=login`
+     and `max_age` are ignored, as is anything else not listed here.
+   - The response carries `iss` (RFC 9207).
+   - The session cookie stays `SameSite=Strict`. A browser arriving
+     from a client on another site therefore sends no cookie; such a
+     request is answered with a tiny page that re-requests the same URL
+     from our own origin, so an existing session is recognised instead
+     of asking for the password on every sign-in. Browsers that do not
+     send `Sec-Fetch-Site` skip this and go to the login page.
+   - `auth_time` is not emitted: the session's creation time is not
+     recorded, and the code's issue time is not when the user
+     authenticated.
+   - What the client must do for its part: bind `state` and the PKCE
+     verifier to its own browser session, check `iss`, verify `nonce`.
+   - Codes live 60 seconds, are stored as a SHA-256 and are claimed by
+     one conditional `UPDATE`.
 4. `/oauth/token` and `/oauth/userinfo`.
 5. Integration recipes and a first real client.
 

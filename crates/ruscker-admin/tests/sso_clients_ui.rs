@@ -504,12 +504,27 @@ async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
         let db = db.clone();
         async move { ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap().allowed_scopes }
     };
-    // Created by a form without the checkboxes: unrestricted, as before.
-    assert_eq!(scopes(&db).await, None);
-    // The edit page offers them, all ticked for an unrestricted client.
+    let all = || Some(["profile", "email", "groups", "roles", "setor"].map(String::from).to_vec());
+    // Registered without the checkboxes (a script): an explicit list of
+    // every scope known today — never "unrestricted".
+    assert_eq!(scopes(&db).await, all());
     let (_, html) = get(state.clone(), "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
     assert_eq!(html.matches(r#"name="scope_"#).count(), 5);
-    assert!(html.matches(r#"value="on" checked"#).count() >= 5);
+    let ticked = |html: &str| -> Vec<String> {
+        html.split(r#"name="scope_"#)
+            .skip(1)
+            .filter(|chunk| chunk.split('>').next().unwrap().contains("checked"))
+            .map(|chunk| chunk.split('"').next().unwrap().to_string())
+            .collect()
+    };
+    assert_eq!(ticked(&html).len(), 5);
+
+    // Registered through the form with two boxes ticked.
+    let body = "client_id=norma&name=Norma&redirect_uris=https%3A%2F%2Fnorma.example%2Fcb&access_groups=&scopes_present=1&scope_email=on&scope_groups=on";
+    let (st, _, _) = post_page(state.clone(), "/admin/sso-clients", body, &cookie).await;
+    assert_eq!(st, StatusCode::OK);
+    let norma = ruscker_admin::db::oidc_clients::fetch(&db, "norma").await.unwrap().unwrap();
+    assert_eq!(norma.allowed_scopes, Some(vec!["email".to_string(), "groups".to_string()]));
 
     let base = "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=&enabled=on";
     let (st, _) = post(
@@ -522,9 +537,21 @@ async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
     assert_eq!(st, StatusCode::OK);
     assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
 
-    // No checkboxes in the post: untouched.
-    let (st, _) = post(state.clone(), "/admin/sso-clients/radar-fiscal/edit", base, &cookie).await;
+    // No checkboxes in the post: untouched — and the page that comes
+    // back shows the STORED boxes, not all of them, or the next Save
+    // would grant everything. Same on a validation error.
+    let (st, _, html) = post_page(state.clone(), "/admin/sso-clients/radar-fiscal/edit", base, &cookie).await;
     assert_eq!(st, StatusCode::OK);
+    assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
+    assert_eq!(ticked(&html), ["profile", "roles"]);
+    let (_, _, html) = post_page(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=http%3A%2F%2Finsecure.example%2Fcb",
+        &cookie,
+    )
+    .await;
+    assert_eq!(ticked(&html), ["profile", "roles"]);
     assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
 
     // Checkboxes present, none ticked: the id alone.

@@ -452,10 +452,19 @@ async fn a_client_gets_only_the_scopes_it_is_allowed() {
     assert_eq!(u.status, StatusCode::OK);
     assert!(u.json.get("preferred_username").is_none() && u.json.get("sub").is_some());
 
-    // `openid` alone is always possible.
+    // `openid` alone is always possible — and then NOTHING names the
+    // person but the id: not the ID token, and not the access token,
+    // which the client can read too (signed, not encrypted).
     let code = authorize(&f, "norma", ask).await;
+    assert_eq!(stored_scope(&f.db).await, "openid", "the grant itself is stored reduced");
     let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
     assert_eq!(r.json["scope"], "openid");
+    let (_, access) = jwt_parts(r.json["access_token"].as_str().unwrap());
+    assert_eq!(access["scope"], "openid");
+    for token in [&access, &claims_of(&r)] {
+        let text = token.to_string();
+        assert!(!text.contains("ana") && !text.contains("Ana"), "{text}");
+    }
 }
 
 #[tokio::test]
@@ -649,7 +658,7 @@ async fn userinfo_accepts_only_a_live_access_token_of_ours() {
     let now = chrono::Utc::now().timestamp();
     let claims = |patch: Value| {
         let mut c = json!({
-            "iss": ISSUER, "aud": ISSUER, "sub": user.id, "username": "ana",
+            "iss": ISSUER, "aud": ISSUER, "sub": user.id,
             "client_id": "radar", "scope": "openid profile", "iat": now, "exp": now + 60,
         });
         for (k, v) in patch.as_object().unwrap() {
@@ -778,7 +787,7 @@ async fn userinfo_refuses_a_token_we_did_not_sign() {
     // Same header and signature, claims swapped for another subject.
     let p: Vec<&str> = access.split('.').collect();
     let (_, mut claims) = jwt_parts(&access);
-    claims["username"] = json!("root");
+    claims["sub"] = json!("00000000-0000-0000-0000-000000000000");
     let forged = format!("{}.{}.{}", p[0], URL_SAFE_NO_PAD.encode(claims.to_string()), p[2]);
     assert_eq!(userinfo(&f, &forged).await.status, StatusCode::UNAUTHORIZED);
 
@@ -841,4 +850,13 @@ async fn the_endpoints_do_not_exist_when_the_provider_is_off() {
     let r = token_basic(&f, "radar", &f.radar, &exchange("x")).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
     assert_eq!(userinfo(&f, "x").await.status, StatusCode::NOT_FOUND);
+}
+
+/// The scope stored with the most recent authorization code.
+async fn stored_scope(db: &ConfigDb) -> String {
+    let ConfigDb::Sqlite(pool) = db else { unreachable!() };
+    sqlx::query_scalar("SELECT scope FROM oidc_auth_codes ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }

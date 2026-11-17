@@ -939,8 +939,10 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     let access_claims = json!({
         "iss": issuer,
         "aud": issuer,
+        // The person is named by `sub` alone. The client can read this
+        // token (it is signed, not encrypted), so it carries nothing a
+        // withheld scope would have hidden — no username here.
         "sub": user.id,
-        "username": user.username,
         "client_id": client.client_id,
         "scope": scope,
         "iat": now,
@@ -1035,10 +1037,9 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
         && c["iss"] == issuer.as_str()
         && c["aud"] == issuer.as_str()
         && c["exp"].as_i64().is_some_and(|exp| exp > now);
-    let (true, Some(sub), Some(username), Some(client_id), Some(scope)) = (
+    let (true, Some(sub), Some(client_id), Some(scope)) = (
         acceptable,
         c["sub"].as_str(),
-        c["username"].as_str(),
         c["client_id"].as_str(),
         c["scope"].as_str(),
     ) else {
@@ -1053,8 +1054,8 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
             return (StatusCode::INTERNAL_SERVER_ERROR, "server error").into_response();
         }
     };
-    let user = match crate::db::users::fetch(db, username).await {
-        Ok(Some(u)) if u.id == sub && client.allows_groups(&u.groups) => u,
+    let user = match crate::db::users::fetch_by_id(db, sub).await {
+        Ok(Some(u)) if client.allows_groups(&u.groups) => u,
         Ok(_) => return bearer_error(),
         Err(err) => {
             tracing::error!(error = ?err, "fetch user for userinfo failed");

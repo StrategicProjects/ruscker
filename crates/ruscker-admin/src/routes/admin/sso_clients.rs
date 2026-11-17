@@ -179,6 +179,18 @@ impl ClientForm {
         }
     }
 
+    /// Take the scope boxes from the stored client (the rest of the form
+    /// stays as posted).
+    fn copy_scopes_from(&mut self, c: &OidcClient) {
+        let stored = Self::from_client(c);
+        self.scopes_present = stored.scopes_present;
+        self.scope_profile = stored.scope_profile;
+        self.scope_email = stored.scope_email;
+        self.scope_groups = stored.scope_groups;
+        self.scope_roles = stored.scope_roles;
+        self.scope_setor = stored.scope_setor;
+    }
+
     /// Whether the checkbox for `scope` is ticked. A blank form (new
     /// client, nothing posted yet) starts with every scope allowed.
     fn scope_checked(&self, scope: &str) -> bool {
@@ -357,10 +369,17 @@ async fn create(
         return render_index(&state, loc, theme, form, None, None, Some("admin-sso-error-id")).await;
     }
     // A new client always starts enabled; disabling is an edit.
-    let settings = match form.settings(true) {
+    let mut settings = match form.settings(true) {
         Ok(s) => s,
         Err(key) => return render_index(&state, loc, theme, form, None, None, Some(key)).await,
     };
+    // A new client always gets an EXPLICIT list. Without the checkboxes
+    // (a scripted registration) that is every scope known today — never
+    // "unrestricted", which is reserved for clients that predate the
+    // setting and would silently include scopes added later.
+    settings.allowed_scopes.get_or_insert_with(|| {
+        db::oidc_clients::OPTIONAL_SCOPES.iter().map(|s| s.to_string()).collect()
+    });
     match db::oidc_clients::create(pool, &client_id, &settings, Some(admin.actor())).await {
         Ok(Some(secret)) => {
             let shown = NewSecret { client_id, secret };
@@ -471,15 +490,24 @@ async fn edit_submit(
     let Some(pool) = state.db.as_ref() else {
         return no_db();
     };
+    // A form without the scope checkboxes (a script, a page loaded before
+    // the setting existed) must not change the scopes — least of all
+    // reopen a client that had been restricted. And every page rendered
+    // back, including a validation error, must show what is STORED: a
+    // blank form would show every box ticked, and the next Save would
+    // grant them all.
+    let mut form = form;
+    let no_scope_boxes = form.scopes_present.is_none();
+    if no_scope_boxes {
+        form.copy_scopes_from(&client);
+    }
     let mut settings = match form.settings(form.enabled.is_some()) {
         Ok(s) => s,
         Err(key) => {
             return render_edit(&state, loc, theme, &client, form, EditNotice::Error(key)).await
         }
     };
-    // A form without the scope checkboxes must not change the scopes —
-    // least of all reopen a client that had been restricted.
-    if form.scopes_present.is_none() {
+    if no_scope_boxes {
         settings.allowed_scopes = client.allowed_scopes.clone();
     }
     match db::oidc_clients::update(pool, &id, &settings, Some(admin.actor())).await {

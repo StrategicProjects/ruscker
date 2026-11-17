@@ -10,7 +10,7 @@
 #     an EC P-256 key;
 #   * then iss, aud, exp and nonce.
 
-# Clock skew tolerated on `exp`, in seconds (the same as 'jose' uses).
+# Clock skew tolerated on `exp`, in seconds (the same in every package).
 exp_leeway <- 60
 
 verify_id_token <- function(client, id_token, nonce) {

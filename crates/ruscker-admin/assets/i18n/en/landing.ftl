@@ -762,6 +762,7 @@ spec-form-identity-claims = Additional identity claims
 spec-form-identity-claims-hint = Send only the selected profile data to this app. These claims are independent of the X-SP identity headers.
 spec-form-identity-claim-email = Email
 spec-form-identity-claim-setor = Department / unit
+spec-form-identity-claim-roles = Group roles
 spec-form-access-public = Public
 spec-form-access-add-group = + add group
 spec-form-access-public-hint = empty = visible to everyone

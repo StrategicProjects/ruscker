@@ -634,6 +634,11 @@
                    {% if !form.identity_claim_setor.is_empty() %}checked{% endif %}>
             <span>{{ self.t("spec-form-identity-claim-setor") }}</span>
           </label>
+          <label class="spec-form-check">
+            <input type="checkbox" name="identity_claim_roles" value="on"
+                   {% if !form.identity_claim_roles.is_empty() %}checked{% endif %}>
+            <span>{{ self.t("spec-form-identity-claim-roles") }}</span>
+          </label>
         </div>
       </fieldset>
 

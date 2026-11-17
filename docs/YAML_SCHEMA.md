@@ -435,7 +435,7 @@ A spec describes one app, API, or external link. Every spec has an
   require-mfa: true                   # require a user-owned MFA proof (Ruscker-native)
   mfa-validity-days: 7                # remembered-proof window; 0 = session-only
   add-default-http-headers: true       # opt in to X-SP-UserId / X-SP-UserGroups
-  identity-claims: [email, setor]      # opt in to selected profile claims
+  identity-claims: [email, setor, roles] # opt in to selected profile claims
 ```
 
 `container-volumes` is a list of Docker bind specs (`/host:/container`,
@@ -530,14 +530,25 @@ identity headers. Client-supplied `X-SP-*` identity headers and the reserved
 `X-Ruscker-User-*` namespace are always stripped before proxying.
 
 `identity-claims` is a Ruscker-native, per-spec list of additional profile
-attributes to disclose. Allowed values are `email` and `setor`, forwarded as
-`X-Ruscker-User-Email` and `X-Ruscker-User-Setor` respectively for signed-in
-users. It defaults to empty and is independent of `add-default-http-headers`,
+attributes to disclose. Allowed values are `email`, `setor` and `roles`,
+forwarded as `X-Ruscker-User-Email`, `X-Ruscker-User-Setor` and
+`X-Ruscker-User-Roles` respectively for signed-in users. It defaults to empty and is independent of `add-default-http-headers`,
 so a spec can request only an e-mail without receiving the username/group
 pair. A selected claim with no stored value is omitted, never sent as an empty
 header. Unknown claim names are retained by the schema but ignored by the
 runtime for forward compatibility. These values are PII; enable each one only
 for an app that needs and is trusted to receive it.
+
+`roles` sends the user's **group roles** (defined per group on the admin
+Groups page; unrelated to the account role) as comma-separated
+`GROUP:ROLE` entries. The group name is percent-encoded as UTF-8 (every
+byte outside `A-Z a-z 0-9 - . _ ~` becomes `%XX`), so neither `,` nor `:`
+can appear inside an entry's parts; the role name is restricted to
+`[A-Za-z0-9_.-]` and sent as is. Example for the group `Fazenda: núcleo A`:
+`Fazenda%3A%20n%C3%BAcleo%20A:analista,Fazenda%3A%20n%C3%BAcleo%20A:gestor`.
+When the spec has `access-groups`, only the roles of those groups are sent;
+otherwise all of the user's group roles are. The header is omitted when
+nothing remains.
 
 #### Registry credentials — inline vs. named (`docker-registry-credential`)
 

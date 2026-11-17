@@ -103,6 +103,11 @@ pub struct CachedIdentity {
     pub(crate) groups: Arc<Vec<String>>,
     pub(crate) email: Option<String>,
     pub(crate) setor: Option<String>,
+    /// Every `(group, role)` the user holds (#1067), UNFILTERED. The cache
+    /// is keyed by user only, so it must not depend on which app asked:
+    /// the per-spec `access-groups` filter is applied per request, when the
+    /// header is built (`routes::proxy::Identity::header_pairs`).
+    pub(crate) group_roles: Arc<Vec<(String, String)>>,
 }
 
 /// Shared short-TTL cache of user identity attributes for the proxy hot

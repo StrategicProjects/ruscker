@@ -766,6 +766,7 @@ spec-form-identity-claims = Dados adicionais de identidade
 spec-form-identity-claims-hint = Envia somente os dados de perfil selecionados a este app. Estes dados são independentes dos cabeçalhos de identidade X-SP.
 spec-form-identity-claim-email = E-mail
 spec-form-identity-claim-setor = Setor / unidade
+spec-form-identity-claim-roles = Funções nos grupos
 spec-form-access-public = Público
 spec-form-access-add-group = + add. grupo
 spec-form-access-public-hint = vazio = visível a todos

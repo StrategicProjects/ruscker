@@ -966,6 +966,9 @@ pub enum AuthScheme {
 pub enum IdentityClaim {
     Email,
     Setor,
+    /// The user's group roles (#1067) — `X-Ruscker-User-Roles`. Not the
+    /// account role (Admin/Editor/Viewer), which is never disclosed.
+    Roles,
 }
 
 /// A single spec — an app, API, or external link surfaced on the landing
@@ -1505,6 +1508,7 @@ impl Spec {
             let claim = match name.trim() {
                 "email" => IdentityClaim::Email,
                 "setor" => IdentityClaim::Setor,
+                "roles" => IdentityClaim::Roles,
                 _ => continue,
             };
             if !claims.contains(&claim) {
@@ -2839,7 +2843,7 @@ proxy:
         assert!(default.effective_identity_claims().is_empty());
 
         let spec = parse_spec(
-            "id: a\ncontainer-image: x\nidentity-claims: [email, future-claim, setor, email]",
+            "id: a\ncontainer-image: x\nidentity-claims: [email, future-claim, setor, email, roles]",
         );
         assert_eq!(
             spec.identity_claims.as_deref(),
@@ -2848,11 +2852,12 @@ proxy:
                 "future-claim".to_string(),
                 "setor".to_string(),
                 "email".to_string(),
+                "roles".to_string(),
             ][..])
         );
         assert_eq!(
             spec.effective_identity_claims(),
-            vec![IdentityClaim::Email, IdentityClaim::Setor]
+            vec![IdentityClaim::Email, IdentityClaim::Setor, IdentityClaim::Roles]
         );
     }
 

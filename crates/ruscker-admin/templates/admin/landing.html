@@ -709,6 +709,7 @@
         <div class="form-section__title">{{ self.t("admin-landing-catalog-layout") }}</div>
         <input type="hidden" name="catalog_layout" :value="form.catalog_layout">
         <input type="hidden" name="catalog_density" :value="form.catalog_density">
+        <input type="hidden" name="catalog_sections_by" :value="form.catalog_sections_by">
         <div class="spec-form-field">
           <div class="layout-tiles" role="group">
             <button type="button" class="layout-tile" :class="{ 'is-active': (form.catalog_layout || 'grid') === 'grid' }" @click="form.catalog_layout = 'grid'">
@@ -724,6 +725,17 @@
               <span>{{ self.t("admin-landing-layout-sections") }}</span>
             </button>
           </div>
+        </div>
+        {# Sections grouping (#1066) — only meaningful for the `sections`
+           layout, so it only shows there (the stored value survives a
+           switch to grid/list and back). #}
+        <div class="spec-form-field" x-show="form.catalog_layout === 'sections'" x-cloak>
+          <label class="spec-form-label">{{ self.t("admin-landing-sections-by") }}</label>
+          <div class="seg-control seg-control--full" role="group" aria-label="{{ self.t("admin-landing-sections-by") }}">
+            <button type="button" :class="{ 'is-active': form.catalog_sections_by !== 'subject' }" @click="form.catalog_sections_by = ''">{{ self.t("admin-landing-sections-by-type") }}</button>
+            <button type="button" :class="{ 'is-active': form.catalog_sections_by === 'subject' }" @click="form.catalog_sections_by = 'subject'">{{ self.t("admin-landing-sections-by-subject") }}</button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-sections-by-help") }}</div>
         </div>
         <div class="spec-form-field">
           <div class="seg-control seg-control--full seg-control--contrast" role="group">
@@ -764,6 +776,51 @@
       {# ── Card: Content — intro text (default + per-locale). #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-card-content") }}</div>
+
+      {# Intro style (#1065): text / banner / card. Alignment shows for
+         banner + card (the text style keeps its justified flow); the
+         background image only for the banner. Blank align ⇒ the style's
+         default (banner centred, card left) — pvIntroAlign() mirrors
+         LandingCustomization::effective_intro_align. #}
+      <input type="hidden" name="intro_style" :value="form.intro_style">
+      <input type="hidden" name="intro_align" :value="form.intro_align">
+      <input type="hidden" name="intro_image" :value="form.intro_image">
+      <div class="spec-form-field">
+        <label class="spec-form-label">{{ self.t("admin-landing-intro-style") }}</label>
+        <div class="seg-control seg-control--full" role="group" aria-label="{{ self.t("admin-landing-intro-style") }}">
+          <button type="button" :class="{ 'is-active': pvIntroStyle() === 'text' }" @click="form.intro_style = ''">{{ self.t("admin-landing-intro-style-text") }}</button>
+          <button type="button" :class="{ 'is-active': pvIntroStyle() === 'banner' }" @click="form.intro_style = 'banner'">{{ self.t("admin-landing-intro-style-banner") }}</button>
+          <button type="button" :class="{ 'is-active': pvIntroStyle() === 'card' }" @click="form.intro_style = 'card'">{{ self.t("admin-landing-intro-style-card") }}</button>
+        </div>
+        <div class="spec-form-help">{{ self.t("admin-landing-intro-style-help") }}</div>
+      </div>
+      <div class="spec-form-field" x-show="pvIntroStyle() !== 'text'" x-cloak>
+        <label class="spec-form-label">{{ self.t("admin-landing-intro-align") }}</label>
+        <div class="seg-control seg-control--full" role="group" aria-label="{{ self.t("admin-landing-intro-align") }}">
+          <button type="button" :class="{ 'is-active': pvIntroAlign() === 'left' }" @click="form.intro_align = 'left'">{{ self.t("admin-landing-intro-align-left") }}</button>
+          <button type="button" :class="{ 'is-active': pvIntroAlign() === 'center' }" @click="form.intro_align = 'center'">{{ self.t("admin-landing-intro-align-center") }}</button>
+        </div>
+      </div>
+      <div class="spec-form-field" x-show="pvIntroStyle() === 'banner'" x-cloak>
+        <label class="spec-form-label">{{ self.t("admin-landing-intro-image") }}</label>
+        {# Same shared picker as the logos (#451 mixin). It hands back
+           `/assets/img/<name>`; only the filename is stored. #}
+        <div class="landing-logo-image-row">
+          <img :src="assetUrl(introImageUrl())" alt="" class="landing-logo-thumb" x-show="form.intro_image" style="flex:none">
+          <button type="button" class="admin-login-btn landing-logo-pick"
+                  @click="openImagePicker((v) => setIntroImage(v), introImageUrl())">
+            <i class="ti ti-photo" aria-hidden="true"></i>
+            {{ self.t("spec-form-choose-image") }}
+          </button>
+          <span class="spec-form-input--mono text-xs" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                x-show="form.intro_image" x-text="form.intro_image"></span>
+          <button type="button" class="admin-nav-link" x-show="form.intro_image" @click="form.intro_image = ''"
+                  aria-label="{{ self.t("admin-landing-intro-image-clear") }}" title="{{ self.t("admin-landing-intro-image-clear") }}">
+            <i class="ti ti-x" aria-hidden="true"></i>
+          </button>
+        </div>
+        <div class="spec-form-help">{{ self.t("admin-landing-intro-image-help") }}</div>
+      </div>
 
       <div class="spec-form-section-title">{{ self.t("admin-landing-intro") }}</div>
 
@@ -999,16 +1056,22 @@
              server's inline-Markdown subset (#812); it escapes the raw
              text before the three rewrites, so typed HTML shows as
              text here exactly like on the portal. #}
+          {# Intro style (#1065): pvIntroClass() adds is-banner / is-card /
+             is-center / has-image; pvIntroBg() is the banner image, the
+             one inline value (mirrors the portal). #}
           <p class="landing-preview-intro"
              x-html="pvIntroHtml() || $el.dataset.placeholder"
              data-placeholder="{{ self.t("admin-landing-preview-empty") }}"
-             :class="!previewIntro() ? 'opacity-40 italic' : ''"></p>
+             :class="pvIntroClass()"
+             :style="pvIntroBg()"></p>
           {# Search pill honours the Visible-search toggle. #}
           <div class="landing-preview-mockfilter" x-show="!!form.show_search" x-cloak><i class="ti ti-search" aria-hidden="true"></i><span class="lp-search-ph"></span></div>
 
           {# Catalog mock: reacts to layout (grid/list/sections), density,
              accent and card-cover style. Sections renders two grouped
-             stacks with heading bars; grid/list is one grid. #}
+             stacks with heading bars; grid/list is one grid. By subject
+             (#1066) it adds a third, muted "Other" stack — the bucket for
+             apps without a subject always closes the list. #}
           <div class="landing-preview-catalog" :class="form.catalog_density === 'compact' ? 'is-compact' : ''">
             <template x-if="form.catalog_layout !== 'sections'">
               <div class="landing-preview-mockgrid" :class="form.catalog_layout === 'list' ? 'is-list' : ''">
@@ -1017,9 +1080,9 @@
             </template>
             <template x-if="form.catalog_layout === 'sections'">
               <div>
-                <template x-for="g in [1, 2]" :key="g">
+                <template x-for="g in (form.catalog_sections_by === 'subject' ? [1, 2, 3] : [1, 2])" :key="g">
                   <div class="lp-section">
-                    <div class="lp-section-head"></div>
+                    <div class="lp-section-head" :class="form.catalog_sections_by === 'subject' && g === 3 ? 'is-other' : ''"></div>
                     <div class="landing-preview-mockgrid">
                       <template x-for="i in [1, 2]" :key="i">{% call pv_card() %}{% endcall %}</template>
                     </div>
@@ -1394,6 +1457,44 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       .replace(/\*([^*]+)\*/g, '<em>$1</em>');
   },
   pvIntroHtml() { return this.mdInline(this.previewIntro()); },
+  // ── Intro style (#1065) — mirrors effective_intro_style /
+  // effective_intro_align and routes/landing.rs::intro_classes.
+  pvIntroStyle() {
+    const s = this.form.intro_style;
+    return s === 'banner' || s === 'card' ? s : 'text';
+  },
+  pvIntroAlign() {
+    const a = this.form.intro_align;
+    if (a === 'left' || a === 'center') return a;
+    return this.pvIntroStyle() === 'banner' ? 'center' : 'left';
+  },
+  introImageUrl() {
+    return this.form.intro_image ? '/assets/img/' + this.form.intro_image : '';
+  },
+  // The picker returns `/assets/img/<name>`; keep only the filename.
+  setIntroImage(v) {
+    const p = '/assets/img/';
+    this.form.intro_image = (v || '').indexOf(p) === 0 ? v.slice(p.length) : '';
+  },
+  pvIntroClass() {
+    const style = this.pvIntroStyle();
+    const c = [];
+    if (!this.previewIntro()) c.push('opacity-40', 'italic');
+    if (style === 'banner') {
+      c.push('is-banner');
+      if (this.pvIntroAlign() === 'left') c.push('is-left');
+      if (this.form.intro_image) c.push('has-image');
+    } else if (style === 'card') {
+      c.push('is-card');
+      if (this.pvIntroAlign() === 'center') c.push('is-center');
+    }
+    return c.join(' ');
+  },
+  pvIntroBg() {
+    if (this.pvIntroStyle() !== 'banner' || !this.form.intro_image) return '';
+    const url = this.assetUrl('/assets/img/' + encodeURIComponent(this.form.intro_image));
+    return "background-image:url('" + url + "')";
+  },
   previewIntro() {
     const code = "{{ locale.code() }}";
     const per = { pt: this.form.intro_pt, en: this.form.intro_en, es: this.form.intro_es, fr: this.form.intro_fr };
@@ -1444,6 +1545,9 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       `--border-strong:${mix(bg, dark ? 62 : 72, tw)}`,
       `--text-muted:${mix(text, 68, bg)}`,
       `--text-faint:${mix(text, 45, bg)}`,
+      // Portal accent for the intro banner mock (#1065) — the portal's
+      // --color-teal-600, under a preview-only name.
+      `--pv-accent:${this.pvAccent()}`,
     ].join(';');
   },
 

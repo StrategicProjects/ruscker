@@ -583,6 +583,14 @@ pub struct LandingCustomization {
     #[serde(default, rename = "catalog-layout")]
     pub catalog_layout: Option<String>,
 
+    /// What the `sections` catalog layout groups by (#1066): `"type"`
+    /// (default — one section per app type) or `"subject"` (one section
+    /// per distinct `template-properties.subject`, alphabetical, with a
+    /// final "Other" section for apps without one). Ignored by the
+    /// `grid`/`list` layouts. Admin-managed.
+    #[serde(default, rename = "catalog-sections-by")]
+    pub catalog_sections_by: Option<String>,
+
     /// Catalog density: `"comfortable"` (default) or `"compact"`.
     #[serde(default, rename = "catalog-density")]
     pub catalog_density: Option<String>,
@@ -623,6 +631,28 @@ pub struct LandingCustomization {
     /// ```
     #[serde(default, rename = "intro-locales")]
     pub intro_locales: std::collections::HashMap<String, String>,
+
+    /// How the intro renders (#1065): `"text"` (default — the plain
+    /// justified paragraph), `"banner"` (a hero band: larger type,
+    /// generous padding, brand-tinted background that follows the
+    /// light/dark theme) or `"card"` (inside a bordered surface).
+    /// Admin-managed.
+    #[serde(default, rename = "intro-style")]
+    pub intro_style: Option<String>,
+
+    /// Intro text alignment for the `banner`/`card` styles (#1065):
+    /// `"left"` or `"center"`. Unset ⇒ `center` for `banner`, `left`
+    /// for `card` (see [`Self::effective_intro_align`]). The `text`
+    /// style ignores it and keeps its historical justified flow.
+    #[serde(default, rename = "intro-align")]
+    pub intro_align: Option<String>,
+
+    /// Optional background image for the `banner` intro style (#1065): a
+    /// Media-library **filename** (e.g. `hero.webp`), served from
+    /// `/assets/img/<filename>`. A theme-aware overlay keeps the text
+    /// readable. Ignored by the other styles.
+    #[serde(default, rename = "intro-image")]
+    pub intro_image: Option<String>,
 
     /// SEO / social-share meta tags for the public landing `<head>`.
     /// Optional page-title override; falls back to `proxy.title`.
@@ -809,6 +839,44 @@ impl LandingCustomization {
             Some("list") => "list",
             Some("sections") => "sections",
             _ => "grid",
+        }
+    }
+    /// Intro style (#1065): `text` (default) | `banner` | `card`.
+    /// Unknown/absent ⇒ `text`, exactly the pre-#1065 rendering.
+    pub fn effective_intro_style(&self) -> &str {
+        match self.intro_style.as_deref() {
+            Some("banner") => "banner",
+            Some("card") => "card",
+            _ => "text",
+        }
+    }
+    /// Intro alignment (#1065): an explicit `left`/`center` wins;
+    /// otherwise the style's natural alignment — `center` for `banner`
+    /// (a hero reads centred), `left` for everything else. For `text`
+    /// the value is informational only: the paragraph keeps its
+    /// historical justified layout.
+    pub fn effective_intro_align(&self) -> &str {
+        match self.intro_align.as_deref() {
+            Some("left") => "left",
+            Some("center") => "center",
+            _ if self.effective_intro_style() == "banner" => "center",
+            _ => "left",
+        }
+    }
+    /// Banner background image filename (#1065), trimmed; `None` when
+    /// blank. Callers still validate it before building a URL.
+    pub fn effective_intro_image(&self) -> Option<&str> {
+        self.intro_image
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+    /// Grouping of the `sections` layout (#1066): `type` (default) |
+    /// `subject`. Unknown/absent ⇒ `type`, the pre-#1066 behaviour.
+    pub fn effective_catalog_sections_by(&self) -> &str {
+        match self.catalog_sections_by.as_deref() {
+            Some("subject") => "subject",
+            _ => "type",
         }
     }
     /// Catalog density: `comfortable` (default) | `compact`.
@@ -2358,6 +2426,81 @@ proxy:
         assert_eq!(lc.seo_title.as_deref(), Some("My Portal"));
         assert_eq!(lc.seo_description.as_deref(), Some("A short summary"));
         assert_eq!(lc.og_image.as_deref(), Some("/assets/img/og.png"));
+    }
+
+    // #1066: `catalog-sections-by` defaults to `type`; only the exact
+    // `subject` switches it, so a typo keeps the historical grouping.
+    #[test]
+    fn catalog_sections_by_defaults_and_unknowns() {
+        let lc = LandingCustomization::default();
+        assert_eq!(lc.effective_catalog_sections_by(), "type");
+        for (raw, want) in [("type", "type"), ("subject", "subject"), ("Subject", "type"), ("bogus", "type"), ("", "type")] {
+            let lc = LandingCustomization {
+                catalog_sections_by: Some(raw.into()),
+                ..Default::default()
+            };
+            assert_eq!(lc.effective_catalog_sections_by(), want, "raw {raw:?}");
+        }
+    }
+
+    // #1065: intro style/align defaults, unknown values, and the
+    // style-dependent alignment default.
+    #[test]
+    fn intro_style_defaults_and_unknowns() {
+        let lc = LandingCustomization::default();
+        assert_eq!(lc.effective_intro_style(), "text");
+        assert_eq!(lc.effective_intro_align(), "left");
+        assert_eq!(lc.effective_intro_image(), None);
+        for (raw, want) in [("text", "text"), ("banner", "banner"), ("card", "card"), ("Banner", "text"), ("hero", "text")] {
+            let lc = LandingCustomization {
+                intro_style: Some(raw.into()),
+                ..Default::default()
+            };
+            assert_eq!(lc.effective_intro_style(), want, "raw {raw:?}");
+        }
+        let with = |style: Option<&str>, align: Option<&str>| LandingCustomization {
+            intro_style: style.map(Into::into),
+            intro_align: align.map(Into::into),
+            ..Default::default()
+        };
+        assert_eq!(with(Some("banner"), None).effective_intro_align(), "center");
+        assert_eq!(with(Some("banner"), Some("left")).effective_intro_align(), "left");
+        assert_eq!(with(Some("banner"), Some("bogus")).effective_intro_align(), "center");
+        assert_eq!(with(Some("card"), None).effective_intro_align(), "left");
+        assert_eq!(with(Some("card"), Some("center")).effective_intro_align(), "center");
+        let lc = LandingCustomization {
+            intro_image: Some("   ".into()),
+            ..Default::default()
+        };
+        assert_eq!(lc.effective_intro_image(), None, "blank image collapses");
+    }
+
+    #[test]
+    fn intro_style_yaml_round_trip() {
+        let yaml = "proxy:\n  landing-customization:\n    intro: Hi\n    intro-style: banner\n    intro-align: left\n    intro-image: hero.webp\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let lc = &config.proxy.landing_customization;
+        assert_eq!(lc.effective_intro_style(), "banner");
+        assert_eq!(lc.effective_intro_align(), "left");
+        assert_eq!(lc.effective_intro_image(), Some("hero.webp"));
+        let out = serde_yaml_ng::to_string(lc).unwrap();
+        for key in ["intro-style: banner", "intro-align: left", "intro-image: hero.webp"] {
+            assert!(out.contains(key), "{key} missing from {out}");
+        }
+        let back: LandingCustomization = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(back.intro_image.as_deref(), Some("hero.webp"));
+    }
+
+    #[test]
+    fn catalog_sections_by_yaml_round_trip() {
+        let yaml = "proxy:\n  landing-customization:\n    catalog-layout: sections\n    catalog-sections-by: subject\n";
+        let config: Config = serde_yaml_ng::from_str(yaml).unwrap();
+        let lc = &config.proxy.landing_customization;
+        assert_eq!(lc.catalog_sections_by.as_deref(), Some("subject"));
+        let out = serde_yaml_ng::to_string(lc).unwrap();
+        assert!(out.contains("catalog-sections-by: subject"), "{out}");
+        let back: LandingCustomization = serde_yaml_ng::from_str(&out).unwrap();
+        assert_eq!(back.effective_catalog_sections_by(), "subject");
     }
 
     #[test]

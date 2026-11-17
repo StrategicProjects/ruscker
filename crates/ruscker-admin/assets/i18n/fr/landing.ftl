@@ -500,6 +500,17 @@ admin-landing-intro-pt = Portugais
 admin-landing-intro-en = Anglais
 admin-landing-intro-es = Espagnol
 admin-landing-intro-fr = Français
+admin-landing-intro-style = Style de l'introduction
+admin-landing-intro-style-text = Texte
+admin-landing-intro-style-banner = Bannière
+admin-landing-intro-style-card = Carte
+admin-landing-intro-style-help = Bannière : un bandeau mis en avant, texte plus grand et fond aux couleurs du portail (clair et sombre). Carte : le texte dans un cadre bordé. Plus besoin de blocs HTML/CSS personnalisés.
+admin-landing-intro-align = Alignement
+admin-landing-intro-align-left = À gauche
+admin-landing-intro-align-center = Centré
+admin-landing-intro-image = Image de fond (facultative)
+admin-landing-intro-image-clear = Retirer l'image
+admin-landing-intro-image-help = Choisie dans la médiathèque. Un voile sur l'image garde le texte lisible en thème clair comme en thème sombre.
 admin-landing-preview = Aperçu du portail
 admin-landing-preview-help = Approximation visuelle de l'en-tête et de l'intro. Les cartes et filtres ressemblent au portail réel.
 admin-landing-preview-empty = (pas de texte d'introduction)
@@ -952,6 +963,11 @@ admin-landing-layout-list = Liste
 admin-landing-layout-sections = Sections
 admin-landing-density-comfortable = Confortable
 admin-landing-density-compact = Compact
+admin-landing-sections-by = Regrouper les sections par
+admin-landing-sections-by-type = Type
+admin-landing-sections-by-subject = Sujet
+admin-landing-sections-by-help = Par sujet : une section par sujet (ordre alphabétique), les apps sans sujet dans une dernière section « Autres ».
+landing-section-other = Autres
 
 
 

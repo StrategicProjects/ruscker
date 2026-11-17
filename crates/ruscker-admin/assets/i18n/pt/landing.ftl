@@ -504,6 +504,17 @@ admin-landing-intro-pt = Português
 admin-landing-intro-en = Inglês
 admin-landing-intro-es = Espanhol
 admin-landing-intro-fr = Francês
+admin-landing-intro-style = Estilo da introdução
+admin-landing-intro-style-text = Texto
+admin-landing-intro-style-banner = Banner
+admin-landing-intro-style-card = Cartão
+admin-landing-intro-style-help = Banner: faixa de destaque com letra maior e fundo nas cores do portal (claro e escuro). Cartão: o texto numa caixa com borda. Dispensa blocos HTML/CSS personalizados.
+admin-landing-intro-align = Alinhamento
+admin-landing-intro-align-left = À esquerda
+admin-landing-intro-align-center = Centralizado
+admin-landing-intro-image = Imagem de fundo (opcional)
+admin-landing-intro-image-clear = Remover imagem
+admin-landing-intro-image-help = Escolhida na biblioteca de Mídia. Uma camada sobre a imagem mantém o texto legível nos temas claro e escuro.
 admin-landing-preview = Prévia do portal
 admin-landing-preview-help = Aproximação visual do cabeçalho e texto. Cards e filtros ficam como na landing real.
 admin-landing-preview-empty = (sem texto introdutório)
@@ -956,6 +967,11 @@ admin-landing-layout-list = Lista
 admin-landing-layout-sections = Seções
 admin-landing-density-comfortable = Confortável
 admin-landing-density-compact = Compacto
+admin-landing-sections-by = Agrupar seções por
+admin-landing-sections-by-type = Tipo
+admin-landing-sections-by-subject = Assunto
+admin-landing-sections-by-help = Por assunto: uma seção por assunto (em ordem alfabética), com os apps sem assunto numa seção final “Outros”.
+landing-section-other = Outros
 
 
 

@@ -219,6 +219,249 @@ files. Two things to check in the proxy's own documentation:
 Each successful sign-in to an external system is listed under
 **Activity** as "SSO sign-in".
 
+## API reference
+
+For most integrations a standard OpenID Connect library needs only the
+issuer URL and reads the rest from the discovery document. This section
+is for calling the endpoints by hand, or for checking what a library is
+doing.
+
+All paths are relative to the **issuer** (`https://portal.example.org`
+in the examples; include the subpath when the portal is mounted under
+one). Every endpoint answers `404` while the provider is off and `503`
+while `RUSCKER_MASTER_KEY` is not set.
+
+| Method | Path | Called by | Authentication |
+|---|---|---|---|
+| `GET` | `/.well-known/openid-configuration` | anyone | none |
+| `GET` | `/oauth/jwks` | anyone | none |
+| `GET` | `/oauth/authorize` | the user's browser | the user's Ruscker session |
+| `POST` | `/oauth/token` | the system's server | client ID + secret |
+| `GET`, `POST` | `/oauth/userinfo` | the system's server | access token |
+
+### Discovery
+
+```sh
+curl https://portal.example.org/.well-known/openid-configuration
+```
+
+```json
+{
+  "issuer": "https://portal.example.org",
+  "authorization_endpoint": "https://portal.example.org/oauth/authorize",
+  "token_endpoint": "https://portal.example.org/oauth/token",
+  "userinfo_endpoint": "https://portal.example.org/oauth/userinfo",
+  "jwks_uri": "https://portal.example.org/oauth/jwks",
+  "response_types_supported": ["code"],
+  "response_modes_supported": ["query"],
+  "grant_types_supported": ["authorization_code"],
+  "subject_types_supported": ["public"],
+  "id_token_signing_alg_values_supported": ["ES256"],
+  "token_endpoint_auth_methods_supported": ["client_secret_basic", "client_secret_post"],
+  "code_challenge_methods_supported": ["S256"],
+  "authorization_response_iss_parameter_supported": true,
+  "request_parameter_supported": false,
+  "request_uri_parameter_supported": false,
+  "scopes_supported": ["openid", "profile", "email", "groups"],
+  "claims_supported": ["sub", "iss", "aud", "exp", "iat", "nonce",
+                       "preferred_username", "name", "email", "groups"]
+}
+```
+
+Cacheable for five minutes (`Cache-Control: public, max-age=300`).
+
+### Keys — `GET /oauth/jwks`
+
+```sh
+curl https://portal.example.org/oauth/jwks
+```
+
+```json
+{
+  "keys": [
+    {
+      "kty": "EC", "crv": "P-256", "use": "sig", "alg": "ES256",
+      "kid": "BgMPTK9aUYp5HAtXLX2tNsYpoUAC43ofCtC2ySEpZDQ",
+      "x": "…", "y": "…"
+    }
+  ]
+}
+```
+
+The `kid` in a token's header names the key that signed it. Also
+cacheable for five minutes; a library that meets an unknown `kid` should
+fetch the set again.
+
+### Authorization — `GET /oauth/authorize`
+
+The system redirects the **user's browser** here. Before that it
+generates, and keeps in the user's session, a random `state`, a random
+`nonce` and a PKCE pair:
+
+```sh
+verifier=$(openssl rand -hex 32)
+challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary \
+            | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+```
+
+| Parameter | Required | Value |
+|---|---|---|
+| `response_type` | yes | `code` |
+| `client_id` | yes | the registered client ID |
+| `redirect_uri` | yes | exactly one of the registered URIs |
+| `scope` | yes | space-separated; must contain `openid`. Also understood: `profile`, `email`, `groups`. Anything else is ignored. |
+| `code_challenge` | yes | the PKCE challenge (43 characters) |
+| `code_challenge_method` | yes | `S256` |
+| `state` | recommended | opaque value returned unchanged (up to 1024 characters) |
+| `nonce` | recommended | returned inside the ID token (up to 255 printable ASCII characters) |
+| `prompt` | no | `none` to get an error instead of a sign-in page when the user would have to interact |
+| `response_mode` | no | only `query` |
+
+```text
+https://portal.example.org/oauth/authorize?response_type=code
+    &client_id=my-system
+    &redirect_uri=https%3A%2F%2Fmy-system.example.org%2Fauth%2Fcallback
+    &scope=openid+profile+groups
+    &state=af0ifjsldkj&nonce=n-0S6_WzA2Mj
+    &code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM
+    &code_challenge_method=S256
+```
+
+**On success** the browser is redirected (`302`) to the redirect URI:
+
+```text
+https://my-system.example.org/auth/callback?code=3f9c…&iss=https%3A%2F%2Fportal.example.org&state=af0ifjsldkj
+```
+
+The `code` is valid for 60 seconds and for one use. Check that `state`
+is the one you sent and that `iss` is your issuer.
+
+If the user is not signed in, Ruscker shows its sign-in page first (and
+the password-change or two-step page when one applies) and then
+continues to the redirect above.
+
+**On failure** there are two cases:
+
+- The client ID or the redirect URI did not check out, a parameter is
+  repeated, or the request is malformed (more than 32 parameters, a
+  query longer than 4096 bytes, a backslash). The user sees a `400`
+  page; **nothing is redirected**.
+- Anything else goes back to the redirect URI as
+  `?error=…&iss=…&state=…`:
+
+| `error` | Meaning |
+|---|---|
+| `invalid_request` | PKCE missing or not `S256`, a malformed `nonce`, an unsupported `response_mode`, `prompt=none` combined with another value |
+| `unsupported_response_type` | `response_type` is not `code` |
+| `invalid_scope` | `scope` lacks `openid` |
+| `request_not_supported`, `request_uri_not_supported` | request objects are not supported |
+| `access_denied` | the user is not in the client's allowed groups, or has no account (break-glass token session) |
+| `login_required`, `interaction_required` | with `prompt=none`: the user would have had to sign in, change a password or confirm a second factor |
+| `server_error` | Ruscker could not complete the request |
+
+### Token — `POST /oauth/token`
+
+Called by the system's **server** with the code from the callback. The
+body is `application/x-www-form-urlencoded`, at most 4 KiB.
+
+| Parameter | Required | Value |
+|---|---|---|
+| `grant_type` | yes | `authorization_code` |
+| `code` | yes | the code from the callback |
+| `redirect_uri` | yes | the same redirect URI used in the authorization request |
+| `code_verifier` | yes | the PKCE verifier (43–128 characters of `A-Z a-z 0-9 - . _ ~`) |
+
+The client authenticates in **one** of two ways — never both:
+
+```sh
+# HTTP Basic (client_secret_basic)
+curl -u "my-system:$CLIENT_SECRET" https://portal.example.org/oauth/token \
+  -d grant_type=authorization_code \
+  -d code="$CODE" \
+  --data-urlencode redirect_uri=https://my-system.example.org/auth/callback \
+  -d code_verifier="$verifier"
+
+# or in the body (client_secret_post)
+curl https://portal.example.org/oauth/token \
+  -d client_id=my-system -d client_secret="$CLIENT_SECRET" \
+  -d grant_type=authorization_code -d code="$CODE" \
+  --data-urlencode redirect_uri=https://my-system.example.org/auth/callback \
+  -d code_verifier="$verifier"
+```
+
+```json
+{
+  "access_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6ImF0K2p3dCIs…",
+  "token_type": "Bearer",
+  "expires_in": 300,
+  "id_token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIs…",
+  "scope": "openid profile groups"
+}
+```
+
+Responses carry `Cache-Control: no-store`.
+
+The **ID token** is a JWT signed with ES256. Its header and payload:
+
+```json
+{ "alg": "ES256", "typ": "JWT", "kid": "BgMPTK9aUYp5HAtXLX2tNsYpoUAC43ofCtC2ySEpZDQ" }
+```
+
+```json
+{
+  "iss": "https://portal.example.org",
+  "aud": "my-system",
+  "sub": "5966f47e-a879-4aee-8588-69e44be72525",
+  "iat": 1795042800,
+  "exp": 1795043100,
+  "nonce": "n-0S6_WzA2Mj",
+  "preferred_username": "ana",
+  "name": "ana",
+  "groups": ["fiscal"]
+}
+```
+
+`preferred_username` and `name` need the `profile` scope, `email` the
+`email` scope (and an e-mail on the account), `groups` the `groups`
+scope. There is no `auth_time`.
+
+Errors are JSON, `{"error": "…", "error_description": "…"}`:
+
+| Status | `error` | Meaning |
+|---|---|---|
+| `401` | `invalid_client` | unknown or disabled client, wrong secret, or an `Authorization` header that is not readable Basic. With Basic, the response carries `WWW-Authenticate: Basic`. |
+| `400` | `invalid_request` | wrong content type, a repeated or missing parameter, both authentication methods at once |
+| `400` | `unsupported_grant_type` | `grant_type` is not `authorization_code` |
+| `400` | `invalid_grant` | the code is unknown, already used or expired; or it is being redeemed by another client, with another redirect URI or with a verifier that does not match; or the user no longer has access |
+| `413` | — | the body is larger than 4 KiB |
+| `500`, `503` | `server_error` | Ruscker could not complete the request (for example the signing key is unavailable) |
+
+A failed **client authentication** does not spend the code. Once the
+client is authenticated, presenting the code spends it whatever the
+outcome — there is no second attempt with the same code.
+
+### UserInfo — `GET` or `POST /oauth/userinfo`
+
+```sh
+curl -H "Authorization: Bearer $ACCESS_TOKEN" https://portal.example.org/oauth/userinfo
+```
+
+```json
+{
+  "sub": "5966f47e-a879-4aee-8588-69e44be72525",
+  "preferred_username": "ana",
+  "name": "ana",
+  "groups": ["fiscal"]
+}
+```
+
+The same identity claims as the ID token, for the scopes that were
+granted, read from the database at the time of the call. The access
+token is valid for five minutes and only here. A missing, expired or
+foreign token — and an account or client that has since been removed,
+disabled or lost access — answers `401` with
+`WWW-Authenticate: Bearer error="invalid_token"`.
+
 ### What it deliberately does not do
 
 The profile is narrow on purpose — fewer options, fewer ways to

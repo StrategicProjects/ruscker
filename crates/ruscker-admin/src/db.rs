@@ -181,6 +181,30 @@ pub mod user_favorites;
 pub mod users;
 
 #[cfg(test)]
+mod bundled_sqlite {
+    /// The SQLite actually linked into this binary must be 3.54.0 or
+    /// newer: earlier versions are affected by CVE-2026-119375
+    /// (RUSTSEC-2026-0459). The fix comes from the vendored
+    /// `libsqlite3-sys` (`vendor/libsqlite3-sys/VENDORED.md`); this test
+    /// asks the library itself, so it also fails if the `[patch]` in the
+    /// workspace `Cargo.toml` stops applying or is removed too early.
+    #[tokio::test]
+    async fn bundled_sqlite_is_patched() {
+        let pool = super::open_memory().await.expect("open in-memory");
+        let (version,): (String,) = sqlx::query_as("SELECT sqlite_version()")
+            .fetch_one(&pool)
+            .await
+            .expect("sqlite_version()");
+        let mut parts = version.split('.').map(|p| p.parse::<u32>().expect("numeric version part"));
+        let (major, minor) = (parts.next().unwrap(), parts.next().unwrap());
+        assert!(
+            (major, minor) >= (3, 54),
+            "bundled SQLite is {version}; 3.54.0 or newer is required"
+        );
+    }
+}
+
+#[cfg(test)]
 mod migration_parity {
     // #758: `migrations-pg/` silently stopped at 0016 while `migrations/`
     // reached 0021 — every Postgres-catalog deployment's landing fetch

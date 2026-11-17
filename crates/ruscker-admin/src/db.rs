@@ -161,6 +161,7 @@ pub mod audit;
 pub mod builtin_logos;
 pub mod credentials;
 pub mod export;
+pub mod group_roles;
 pub mod images;
 pub mod landing;
 pub mod landing_blocks;

@@ -324,6 +324,16 @@ async fn create(
 async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &str) {
     let Some(db) = state.db.as_ref() else { return };
 
+    // Group roles (#1067) move BEFORE the memberships: `set_groups` below
+    // prunes the assignments of every group a user leaves, so on a rename
+    // they must already live under the new name. On a delete the order is
+    // reversed (prune per member first, then drop the definitions, below).
+    if let Some(n) = new {
+        if let Err(e) = crate::db::group_roles::rename_group(db, old, n, Some(actor)).await {
+            tracing::warn!(error = ?e, "group rewrite (group roles) failed");
+        }
+    }
+
     if let Ok(users) = crate::db::users::list_all(db).await {
         for u in users {
             if !u.groups.iter().any(|g| g == old) {
@@ -374,6 +384,14 @@ async fn rewrite_group(state: &AppState, old: &str, new: Option<&str>, actor: &s
     if let Err(e) = crate::db::oidc_clients::rewrite_group(db, old, new, Some(actor)).await {
         tracing::warn!(error = ?e, "group rewrite (sso clients) failed");
     }
+
+    if new.is_none() {
+        if let Err(e) = crate::db::group_roles::delete_group(db, old, Some(actor)).await {
+            tracing::warn!(error = ?e, "group rewrite (group roles) failed");
+        }
+    }
+    // Roles moved or vanished: the header must follow on the next request.
+    state.invalidate_identity_cache();
 }
 
 #[derive(Deserialize)]

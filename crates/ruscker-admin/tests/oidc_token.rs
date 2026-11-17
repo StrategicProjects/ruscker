@@ -331,6 +331,77 @@ async fn scopes_decide_the_claims_and_an_open_client_sees_all_groups() {
     assert_eq!(claims["groups"], json!(["fiscal", "outro"]));
 }
 
+/// The `profile`, `setor` and `roles` scopes (#1081): the person's full
+/// name (the username when there is none), the department, and the roles
+/// held in each group — filtered, like `groups`, to what the client is
+/// allowed to learn.
+#[tokio::test]
+async fn name_setor_and_group_roles_claims() {
+    use ruscker_admin::db::{group_roles, users};
+    let f = fixture(ON).await;
+    // ana is in `fiscal` and `outro`; give her roles in both.
+    for (g, r) in [("fiscal", "gestor"), ("fiscal", "analista"), ("outro", "leitor")] {
+        group_roles::define(&f.db, g, r, None).await.unwrap();
+        group_roles::assign(&f.db, "ana", g, r, None).await.unwrap();
+    }
+    let scope = "openid profile setor groups roles";
+    let claims_of = |r: &Reply| jwt_parts(r.json["id_token"].as_str().unwrap()).1;
+
+    // No full name and no department yet: `name` falls back to the
+    // username and `setor` is simply absent.
+    let code = authorize(&f, "radar", scope).await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    // The granted scope comes back in the provider's canonical order.
+    assert_eq!(r.json["scope"], "openid profile groups roles setor");
+    let c = claims_of(&r);
+    assert_eq!(c["name"], "ana");
+    assert!(c.get("setor").is_none());
+    // `radar` is restricted to `fiscal`: only that group's roles, sorted.
+    assert_eq!(c["group_roles"], json!({"fiscal": ["analista", "gestor"]}));
+    assert_eq!(c["groups"], json!(["fiscal"]));
+
+    users::set_full_name(&f.db, "ana", Some("  Ana Maria de Souza "), None).await.unwrap();
+    users::update_profile(&f.db, "ana", Some("GAPE"), Some("ana@example.org"), None, None).await.unwrap();
+    let code = authorize(&f, "radar", scope).await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    let c = claims_of(&r);
+    assert_eq!(c["name"], "Ana Maria de Souza");
+    assert_eq!(c["preferred_username"], "ana");
+    assert_eq!(c["setor"], "GAPE");
+    assert!(c.get("email").is_none(), "email needs its own scope");
+    // Userinfo agrees.
+    let u = userinfo(&f, r.json["access_token"].as_str().unwrap()).await;
+    for k in ["name", "setor", "group_roles", "groups"] {
+        assert_eq!(u.json[k], c[k], "{k}");
+    }
+
+    // An open client sees every group the user is in.
+    let code = authorize(&f, "norma", scope).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(
+        claims_of(&r)["group_roles"],
+        json!({"fiscal": ["analista", "gestor"], "outro": ["leitor"]})
+    );
+
+    // Without the scopes, none of it.
+    let code = authorize(&f, "norma", "openid").await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    let c = claims_of(&r);
+    for absent in ["name", "setor", "group_roles", "groups"] {
+        assert!(c.get(absent).is_none(), "{absent} must need its scope");
+    }
+
+    // A user with the scope but no roles gets an empty object, not a
+    // missing claim: "no roles" is an answer.
+    group_roles::unassign(&f.db, "ana", "outro", "leitor", None).await.unwrap();
+    group_roles::unassign(&f.db, "ana", "fiscal", "gestor", None).await.unwrap();
+    group_roles::unassign(&f.db, "ana", "fiscal", "analista", None).await.unwrap();
+    let code = authorize(&f, "norma", scope).await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(claims_of(&r)["group_roles"], json!({}));
+}
+
 #[tokio::test]
 async fn a_code_is_redeemed_once() {
     let f = fixture(ON).await;

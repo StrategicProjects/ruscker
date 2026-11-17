@@ -1153,6 +1153,141 @@ pub async fn set_groups(
     Ok(())
 }
 
+/// Longest full name stored. Generous for any real name; it travels in
+/// ID tokens, so it is bounded.
+pub const MAX_FULL_NAME_LEN: usize = 120;
+
+/// The person's full name (#1081), or `None` when unset.
+///
+/// Kept apart from [`UserRow`] on purpose: it is read in exactly two
+/// places (the user edit form and the SSO claims), and every list of
+/// users would otherwise carry a column it never shows.
+pub async fn full_name(db: &ConfigDb, username: &str) -> Result<Option<String>> {
+    let username = normalize_username(username);
+    let row: Option<(Option<String>,)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT full_name FROM users WHERE username = ?")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT full_name FROM users WHERE username = $1")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("fetch full name of {username}"))?;
+    Ok(row
+        .and_then(|(name,)| name)
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty()))
+}
+
+/// Normalise a full name for storage: whitespace and control characters
+/// become single spaces (a pasted tab or line break must not fuse two
+/// words), invisible formatting characters that can reorder or hide text
+/// are dropped (bidirectional overrides and isolates, zero-width space,
+/// BOM — the name is shown by other systems, and must read as written),
+/// the result is trimmed and cut at [`MAX_FULL_NAME_LEN`] characters.
+/// Zero-width joiners stay: some scripts need them. Blank → `None`.
+pub fn clean_full_name(raw: &str) -> Option<String> {
+    let invisible = |c: char| {
+        matches!(c, '\u{200B}' | '\u{FEFF}' | '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
+    };
+    let spaced: String = raw
+        .chars()
+        .filter(|c| !invisible(*c))
+        .map(|c| if c.is_whitespace() || c.is_control() { ' ' } else { c })
+        .collect();
+    let joined = spaced.split(' ').filter(|w| !w.is_empty()).collect::<Vec<_>>().join(" ");
+    let cut: String = joined.chars().take(MAX_FULL_NAME_LEN).collect();
+    let cut = cut.trim_end();
+    (!cut.is_empty()).then(|| cut.to_string())
+}
+
+/// Set (or, with a blank value, clear) the person's full name, cleaned
+/// by [`clean_full_name`]. Audited. Errors when the account does not
+/// exist. Returns whether anything changed: an unchanged name writes
+/// nothing — no audit row repeating a person's name on every edit.
+pub async fn set_full_name(
+    db: &ConfigDb,
+    username: &str,
+    full_name: Option<&str>,
+    actor: Option<&str>,
+) -> Result<bool> {
+    let username = normalize_username(username);
+    let clean: Option<String> = full_name.and_then(clean_full_name);
+    if fetch(db, &username).await?.is_none() {
+        anyhow::bail!("no such user: {username}");
+    }
+    if self::full_name(db, &username).await? == clean {
+        return Ok(false);
+    }
+    let now = Utc::now();
+    let target = format!("user:{username}");
+    let diff = serde_json::json!({ "full_name": clean }).to_string();
+    let affected = match db {
+        ConfigDb::Sqlite(pool) => {
+            let mut tx = pool.begin().await.context("begin full name update")?;
+            let n = sqlx::query("UPDATE users SET full_name = ?, updated_at = ? WHERE username = ?")
+                .bind(&clean)
+                .bind(now)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("update full name")?
+                .rows_affected();
+            if n == 1 {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES (?, 'user.full-name', ?, ?, ?)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(&diff)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit full name update")?;
+            }
+            tx.commit().await.context("commit full name update")?;
+            n
+        }
+        ConfigDb::Postgres(pool) => {
+            let mut tx = pool.begin().await.context("begin full name update")?;
+            let n = sqlx::query("UPDATE users SET full_name = $1, updated_at = $2 WHERE username = $3")
+                .bind(&clean)
+                .bind(now)
+                .bind(&username)
+                .execute(&mut *tx)
+                .await
+                .context("update full name")?
+                .rows_affected();
+            if n == 1 {
+                sqlx::query(
+                    "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
+                     VALUES ($1, 'user.full-name', $2, $3, $4)",
+                )
+                .bind(actor)
+                .bind(&target)
+                .bind(&diff)
+                .bind(now)
+                .execute(&mut *tx)
+                .await
+                .context("audit full name update")?;
+            }
+            tx.commit().await.context("commit full name update")?;
+            n
+        }
+    };
+    if affected == 0 {
+        anyhow::bail!("no such user: {username}");
+    }
+    Ok(true)
+}
+
 /// Replace a user's optional profile fields (#856): setor, e-mail,
 /// celular. A blank value is stored as `NULL` (see [`row_from`]'s clean).
 /// Records the change in the audit log.
@@ -1433,6 +1568,42 @@ mod tests {
         assert!(!is_valid_username("a#b"));
         assert!(!is_valid_username("with space"));
         assert!(!is_valid_username(""));
+    }
+
+    #[tokio::test]
+    async fn full_name_is_trimmed_bounded_and_clearable() {
+        let p = ConfigDb::Sqlite(crate::db::open_memory().await.unwrap());
+        create(&p, "ana", "CorrectPass9!", Role::Viewer, false, &[], None).await.unwrap();
+        assert_eq!(full_name(&p, "ana").await.unwrap(), None);
+
+        // A pasted tab or line break separates words, it does not fuse them;
+        // invisible direction overrides and zero-width spaces are dropped.
+        let changed = set_full_name(&p, "ANA", Some("  Ana Maria\tde\n\u{7}Souza\u{202E}\u{200B}  "), Some("root"))
+            .await
+            .unwrap();
+        assert!(changed);
+        assert_eq!(full_name(&p, "ana").await.unwrap().as_deref(), Some("Ana Maria de Souza"));
+
+        // Saving the same name again writes nothing: one audit row so far.
+        let audit_rows = || async {
+            let ConfigDb::Sqlite(pool) = &p else { unreachable!() };
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM audit_log WHERE action = 'user.full-name'")
+                .fetch_one(pool)
+                .await
+                .unwrap()
+        };
+        assert!(!set_full_name(&p, "ana", Some("Ana Maria de Souza "), None).await.unwrap());
+        assert_eq!(audit_rows().await, 1);
+
+        // Bounded: it travels in tokens.
+        set_full_name(&p, "ana", Some(&"é".repeat(500)), None).await.unwrap();
+        assert_eq!(full_name(&p, "ana").await.unwrap().unwrap().chars().count(), MAX_FULL_NAME_LEN);
+
+        // Blank clears it; a missing account is an error, not a silent no-op.
+        set_full_name(&p, "ana", Some("   "), None).await.unwrap();
+        assert_eq!(full_name(&p, "ana").await.unwrap(), None);
+        assert!(set_full_name(&p, "ghost", Some("x"), None).await.is_err());
+        assert_eq!(full_name(&p, "ghost").await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -1870,6 +2041,17 @@ mod tests {
             .await
             .unwrap();
         let db = ConfigDb::Postgres(pg);
+
+        // Full name (#1081) on the Postgres arm: set, read, clear, missing.
+        create(&db, "pgname", "CorrectPass9!", Role::Viewer, false, &[], None)
+            .await
+            .unwrap();
+        set_full_name(&db, "pgname", Some(" Ana Maria "), Some("root")).await.unwrap();
+        assert_eq!(full_name(&db, "pgname").await.unwrap().as_deref(), Some("Ana Maria"));
+        set_full_name(&db, "pgname", Some(""), None).await.unwrap();
+        assert_eq!(full_name(&db, "pgname").await.unwrap(), None);
+        assert!(set_full_name(&db, "pg-ghost", Some("x"), None).await.is_err());
+        delete(&db, "pgname", None).await.unwrap();
 
         assert!(!any_admin_exists(&db).await.unwrap());
         create(&db, "Root", "rootpw12", Role::Admin, false, &[], None)

@@ -361,10 +361,10 @@ pub fn discovery(issuer: &str) -> Value {
         "authorization_response_iss_parameter_supported": true,
         "request_parameter_supported": false,
         "request_uri_parameter_supported": false,
-        "scopes_supported": ["openid", "profile", "email", "groups"],
+        "scopes_supported": ["openid", "profile", "email", "groups", "roles", "setor"],
         "claims_supported": [
             "sub", "iss", "aud", "exp", "iat", "nonce",
-            "preferred_username", "name", "email", "groups"
+            "preferred_username", "name", "email", "setor", "groups", "group_roles"
         ],
     })
 }

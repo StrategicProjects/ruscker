@@ -43,8 +43,10 @@ portal, plus your current **access level** and account actions.
 Each person gets their own account (username + password). Admins, and
 Editors within the group boundary described below, manage accounts under
 **Users** (`/admin/users`): create one, or open a row's **Edit** button for
-the consolidated page — role, groups and profile in one form with a single
-save, plus the password reset. Each row shows a coloured avatar with the
+the consolidated page — full name, role, groups and profile in one form
+with a single save, plus the password reset. The **full name** is
+optional; SSO clients receive it as the person's name (the username is
+used when it is empty). Each row shows a coloured avatar with the
 user's initials and their groups as coloured badges (a group keeps the same
 colour on the Groups and Apps pages). The table is paginated on the server
 at 50 users per page. Its server-side, case-insensitive search (accented

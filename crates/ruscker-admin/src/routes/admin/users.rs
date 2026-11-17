@@ -174,6 +174,8 @@ struct UserEditPage<'a> {
     nav_section: &'static str,
     role: Role,
     user: db::users::UserRow,
+    /// The person's full name (#1081); empty when unset.
+    full_name: String,
     me: String,
     /// Groups this caller may replace and the foreign memberships preserved
     /// read-only by `merge_preserving_out_of_scope`.
@@ -681,6 +683,15 @@ async fn edit(
     } else {
         String::new()
     };
+    // A failed read must not render a blank field: saving the form would
+    // then clear the name.
+    let full_name = match db::users::full_name(pool, &user.username).await {
+        Ok(name) => name.unwrap_or_default(),
+        Err(e) => {
+            tracing::error!(error = ?e, %username, "fetch full name for user edit failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "db error").into_response();
+        }
+    };
     let editable_groups = scope.merge_preserving_out_of_scope(&[], &user.groups);
     let readonly_groups = scope.merge_preserving_out_of_scope(&user.groups, &[]);
     super::render(&UserEditPage {
@@ -691,6 +702,7 @@ async fn edit(
         base: state.base_path.clone(),
         nav_section: "users",
         role: scope.role,
+        full_name,
         user,
         me: scope.actor().to_string(),
         editable_groups,
@@ -703,6 +715,9 @@ async fn edit(
 
 #[derive(Debug, Deserialize)]
 struct EditForm {
+    /// The person's full name; blank clears it, absent leaves it alone.
+    #[serde(default)]
+    full_name: Option<String>,
     #[serde(default)]
     role: String,
     #[serde(default)]
@@ -766,6 +781,21 @@ async fn save_edit(
             // Group edits must reach the proxy's access checks and
             // identity headers now, not at cache expiry (#1001).
             state.invalidate_identity_cache();
+            // The full name is its own column and its own audited write
+            // (#1081). It comes AFTER the account update — a refused update
+            // (last admin, scope) never changes it — and after the session
+            // revocation above, so a failure here cannot leave a demoted
+            // account with its old session. A form that does not send the
+            // field (a script, a page loaded before the upgrade) leaves
+            // the name alone.
+            if let Some(full_name) = form.full_name.as_deref() {
+                if let Err(e) =
+                    db::users::set_full_name(pool, &username, Some(full_name), Some(scope.actor())).await
+                {
+                    tracing::warn!(error = ?e, %username, "full name update failed");
+                    return redirect_edit_flash(&username, "bad-input");
+                }
+            }
             redirect_flash("saved")
         }
         Err(e) => {

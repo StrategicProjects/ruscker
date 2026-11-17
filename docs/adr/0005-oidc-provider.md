@@ -145,6 +145,14 @@ it themselves.
      the client, so it stops answering when access is revoked.
    - Each successful exchange is recorded in the user activity log as
      `sso.login`, with the client id.
+   - Later additions: `name` carries the account's full name when set;
+     scope `setor` → `setor`; scope `roles` → `group_roles`, an object
+     of group → roles, filtered like `groups`. A system can derive its
+     own profiles from group roles instead of keeping a user table.
+     There is no per-client scope allowlist: every registered client
+     may ask for any supported scope, consistent with clients being
+     first-party systems registered by an Admin. A failed claims
+     lookup is `server_error`, never an empty claim.
 5. Integration recipes and a first real client.
 
 Later, separately decided: RP-initiated logout, refresh tokens,

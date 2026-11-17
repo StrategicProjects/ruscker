@@ -525,3 +525,73 @@ async fn page_shows_roles_and_scopes_them_for_an_editor() {
     assert!(!html.contains("medico"), "a foreign group's roles never render");
     assert!(!html.contains(">boss<"), "Admin accounts are not offered to an Editor");
 }
+
+/// The user edit form carries the person's full name (#1081): saved
+/// with the rest, shown again on the form, cleared by a blank value —
+/// and an Editor cannot set it for someone outside their groups.
+#[tokio::test]
+async fn edit_form_saves_and_clears_the_full_name() {
+    let (state, db) = fixture().await;
+    let admin = cookie(&state, Role::Admin, "root").await;
+    let full = |db: &ConfigDb, u: &'static str| {
+        let db = db.clone();
+        async move { ruscker_admin::db::users::full_name(&db, u).await.unwrap() }
+    };
+
+    let (st, _) = post(
+        &state,
+        "/admin/users/ana/edit",
+        "full_name=Ana+Maria+de+Souza&role=viewer&groups=fazenda&setor=&email=&celular=",
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await.as_deref(), Some("Ana Maria de Souza"));
+    let (_, html) = get(&state, "/admin/users/ana/edit", &admin).await;
+    assert!(html.contains(r#"name="full_name" value="Ana Maria de Souza""#));
+
+    // An Editor scoped to `fazenda` cannot touch `bia` (group `saude`).
+    let ed = cookie(&state, Role::Editor, "ed").await;
+    let (st, _) = post(
+        &state,
+        "/admin/users/bia/edit",
+        "full_name=Hacked&role=viewer&groups=saude&setor=&email=&celular=",
+        Some(&ed),
+    )
+    .await;
+    assert_eq!(st, StatusCode::NOT_FOUND);
+    assert_eq!(full(&db, "bia").await, None);
+
+    // A form that does not send the field leaves the name alone, and a
+    // refused update (demoting the only Admin) does not touch it either.
+    let (st, _) = post(&state, "/admin/users/ana/edit", "role=viewer&groups=fazenda&setor=X&email=&celular=", Some(&admin)).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await.as_deref(), Some("Ana Maria de Souza"));
+    let (st, _) = post(
+        &state,
+        "/admin/users/ana/edit",
+        "full_name=Nobody&role=bogus&groups=fazenda&setor=&email=&celular=",
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await.as_deref(), Some("Ana Maria de Souza"), "refused update leaves the name");
+    // An Editor cannot name themselves through this form, but can name
+    // someone in their own group.
+    let _ = post(&state, "/admin/users/ed/edit", "full_name=Chefe&role=editor&groups=fazenda&setor=&email=&celular=", Some(&ed)).await;
+    assert_eq!(full(&db, "ed").await, None);
+    let (st, _) = post(&state, "/admin/users/cris/edit", "full_name=Cris+Lima&role=viewer&groups=fazenda&setor=&email=&celular=", Some(&ed)).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "cris").await.as_deref(), Some("Cris Lima"));
+
+    // Blank clears it.
+    let (st, _) = post(
+        &state,
+        "/admin/users/ana/edit",
+        "full_name=&role=viewer&groups=fazenda&setor=&email=&celular=",
+        Some(&admin),
+    )
+    .await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
+    assert_eq!(full(&db, "ana").await, None);
+}

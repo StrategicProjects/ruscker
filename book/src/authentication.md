@@ -28,7 +28,7 @@ its password at the first sign-in.
 |---|---|
 | **Role** — Admin, Editor or Viewer | What the person may do *in the admin panel*. A Viewer is a portal user with no panel access; an Editor manages apps, media and the users of their own groups; an Admin manages everything. |
 | **Groups** | What the person may *reach*: an app or an external system restricted to a group is visible and usable only by its members. |
-| **Group roles** | Optional labels a group defines for its members (`gestor`, `analista`, …), forwarded to apps that ask for them. They mean nothing to Ruscker itself. |
+| **Group roles** | Optional labels a group defines for its members (`gestor`, `analista`, …), forwarded to hosted apps and to SSO clients that ask for them. They mean nothing to Ruscker itself — a system can use them to derive its own profiles. |
 
 The `RUSCKER_ADMIN_TOKEN` is a **break-glass** login for the operator
 (`/admin/login?token=1`). It is not a person: it has no account, so it
@@ -140,7 +140,7 @@ rest from `{issuer}/.well-known/openid-configuration`.
 | Flow | Authorization code with PKCE (`S256`) |
 | Client type | Confidential — the code exchange happens on the system's **server** |
 | Client authentication | `client_secret_basic` or `client_secret_post` |
-| Scopes | `openid`, plus `profile`, `email`, `groups` as needed |
+| Scopes | `openid`, plus `profile`, `email`, `setor`, `groups`, `roles` as needed |
 | ID token signature | `ES256`, keys at `{issuer}/oauth/jwks` |
 | Token lifetime | 5 minutes (the system keeps its own session) |
 
@@ -149,9 +149,11 @@ Claims, by scope:
 | Scope | Claims |
 |---|---|
 | `openid` | `sub` — the account's permanent id — plus `iss`, `aud`, `exp`, `iat`, and `nonce` when one was sent |
-| `profile` | `preferred_username`, `name` |
+| `profile` | `preferred_username`; `name` — the person's full name when the account has one, the username otherwise |
 | `email` | `email`, when the account has one |
+| `setor` | `setor` (department), when the account has one |
 | `groups` | `groups` — only the groups that grant access to the system when it is restricted, all of the user's groups when it is open |
+| `roles` | `group_roles` — an object mapping each of those groups to the [group roles](./admin.md#groups) the user holds in it, e.g. `{"fiscal": ["analista", "gestor"]}`; `{}` when there are none. Its keys are group names, so this scope names those groups even without `groups` |
 
 The same claims are available from `{issuer}/oauth/userinfo` with the
 access token.
@@ -265,9 +267,10 @@ curl https://portal.example.org/.well-known/openid-configuration
   "authorization_response_iss_parameter_supported": true,
   "request_parameter_supported": false,
   "request_uri_parameter_supported": false,
-  "scopes_supported": ["openid", "profile", "email", "groups"],
+  "scopes_supported": ["openid", "profile", "email", "groups", "roles", "setor"],
   "claims_supported": ["sub", "iss", "aud", "exp", "iat", "nonce",
-                       "preferred_username", "name", "email", "groups"]
+                       "preferred_username", "name", "email", "setor",
+                       "groups", "group_roles"]
 }
 ```
 
@@ -312,7 +315,7 @@ challenge=$(printf '%s' "$verifier" | openssl dgst -sha256 -binary \
 | `response_type` | yes | `code` |
 | `client_id` | yes | the registered client ID |
 | `redirect_uri` | yes | exactly one of the registered URIs |
-| `scope` | yes | space-separated; must contain `openid`. Also understood: `profile`, `email`, `groups`. Anything else is ignored. |
+| `scope` | yes | space-separated; must contain `openid`. Also understood: `profile`, `email`, `setor`, `groups`, `roles`. Anything else is ignored. |
 | `code_challenge` | yes | the PKCE challenge (43 characters) |
 | `code_challenge_method` | yes | `S256` |
 | `state` | recommended | opaque value returned unchanged (up to 1024 characters) |
@@ -425,8 +428,10 @@ The **ID token** is a JWT signed with ES256. Its header and payload:
 ```
 
 `preferred_username` and `name` need the `profile` scope, `email` the
-`email` scope (and an e-mail on the account), `groups` the `groups`
-scope. There is no `auth_time`.
+`email` scope (and an e-mail on the account), `setor` the `setor` scope,
+`groups` the `groups` scope and `group_roles` the `roles` scope. The
+`scope` returned lists what was granted, in the provider's own order.
+There is no `auth_time`.
 
 Errors are JSON, `{"error": "…", "error_description": "…"}`:
 

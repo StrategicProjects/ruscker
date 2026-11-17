@@ -28,6 +28,9 @@ server:
   # ShinyProxy's nested form is also accepted:
   servlet.context-path: /apps
   timezone: America/Recife             # Zone the SCHEDULER uses (see below)
+  oidc-provider:                       # "Sign in with Ruscker" (see below); off when absent
+    enabled: true
+    issuer: https://portal.example.org
 ```
 
 Parsed for compatibility but **ignored** (each produces a startup
@@ -92,6 +95,39 @@ apps, users, credentials) or the Logs tab. Those render in each
 viewer's own browser timezone — they're records of past events with a
 human looking at them, whereas the scheduler has no viewer, which is
 why it needs a configured zone.
+
+### `server.oidc-provider` — sign-in for external systems
+
+Turns Ruscker into an OpenID Connect provider for systems that live
+*outside* the portal (design and scope in
+[ADR 0005](adr/0005-oidc-provider.md)). **Off unless `enabled: true`
+and `issuer` is usable** — otherwise none of its endpoints exist.
+
+`issuer` is the portal's public base URL, including the subpath when it
+is mounted under one (`https://example.org/box`). It is written into
+every token and clients compare it byte for byte, so it is configured
+here and never derived from the request. It must be a lowercase
+`https://` URL (plain `http://` is accepted only for a loopback host,
+for local development) with a plain host, an optional numeric port and
+a plain path: no query, fragment, credentials, percent-encoding or
+`.`/`..` segments; a trailing slash is ignored. Its path must be exactly
+the path the portal is mounted under. Enabling the provider with a
+missing or unusable issuer, or one whose path is not the mount point,
+leaves it off and produces a startup warning.
+
+The provider needs `RUSCKER_MASTER_KEY`: its signing key is generated
+on first use and stored encrypted in the database, so every node of an
+HA deployment shares it. Without the master key the provider answers
+503. Changing the master key makes the stored signing key unreadable:
+the published keys stay available, but nothing can be signed until the
+old master key is restored or the rows of `oidc_keys` are deleted (a
+new key is then created on first use, and tokens signed by the old one
+stop verifying). Ruscker never replaces the key by itself.
+
+What exists today: the client registry (admin, Credentials → SSO
+clients), `{issuer}/.well-known/openid-configuration` and
+`{issuer}/oauth/jwks`. The sign-in endpoints the discovery document
+names are not shipped yet, so no client can log anyone in.
 
 ### `server.context-path` — subpath mounting
 

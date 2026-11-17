@@ -97,9 +97,135 @@ pub struct Server {
     /// those render in each viewer's own browser timezone (#1041).
     /// The scheduler has no viewer, which is why it needs a setting.
     pub timezone: Option<String>,
+
+    /// Optional OpenID Connect provider ("Sign in with Ruscker") for
+    /// systems that live outside the portal. Absent ⇒ off: none of its
+    /// endpoints exist. See `docs/adr/0005-oidc-provider.md`.
+    #[serde(rename = "oidc-provider")]
+    pub oidc_provider: Option<OidcProvider>,
+}
+
+/// `server.oidc-provider` — a Ruscker extension, not a ShinyProxy key.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OidcProvider {
+    /// Master switch. `false` (the default) ⇒ every provider endpoint
+    /// answers 404, exactly as if the feature did not exist.
+    pub enabled: bool,
+
+    /// The provider's public base URL, e.g. `https://portal.example.org`
+    /// or `https://example.org/box` when mounted under a subpath. It is
+    /// written into every token (`iss`) and clients compare it byte for
+    /// byte, so it is CONFIGURED, never guessed from the request's Host
+    /// header (which a client controls).
+    pub issuer: Option<String>,
+}
+
+/// Shape an operator-supplied issuer into its canonical form, or `None`
+/// when it cannot be one.
+///
+/// Deliberately strict. Clients compare the issuer byte for byte, so
+/// anything a URL library might rewrite on its way to
+/// `{issuer}/.well-known/…` is refused rather than normalized:
+///
+/// * `https://…`, or `http://` only for a loopback host (development);
+///   the scheme is lowercase;
+/// * host: letters, digits, `.` and `-`, or a bracketed IPv6 literal;
+///   an optional `:port` of 1–5 digits and nothing else;
+/// * path: no empty segment, no `.`/`..` segment, no percent-encoding;
+/// * no query, fragment or userinfo; printable ASCII only.
+///
+/// Trailing slashes are removed so `{issuer}/.well-known/…` never
+/// doubles one.
+pub fn normalize_issuer(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_end_matches('/');
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_graphic()) {
+        return None;
+    }
+    if s.contains(['?', '#', '@', '\\', '%']) {
+        return None;
+    }
+    let (rest, secure) = if let Some(r) = s.strip_prefix("https://") {
+        (r, true)
+    } else if let Some(r) = s.strip_prefix("http://") {
+        (r, false)
+    } else {
+        return None;
+    };
+    // authority = up to the first slash; path = the rest (maybe empty).
+    let (authority, path) = match rest.find('/') {
+        Some(i) => (&rest[..i], &rest[i..]),
+        None => (rest, ""),
+    };
+    // Split host and optional port, minding an IPv6 literal's brackets.
+    let (host, port) = if let Some(inner) = authority.strip_prefix('[') {
+        let end = inner.find(']')?;
+        let literal = &inner[..end];
+        if literal.is_empty() || !literal.bytes().all(|b| b.is_ascii_hexdigit() || b == b':') {
+            return None;
+        }
+        let after = &inner[end + 1..];
+        let port = match after.strip_prefix(':') {
+            Some(p) => Some(p),
+            None if after.is_empty() => None,
+            None => return None, // junk after `]`
+        };
+        (&authority[..end + 2], port)
+    } else {
+        match authority.split_once(':') {
+            Some((h, p)) => (h, Some(p)),
+            None => (authority, None),
+        }
+    };
+    let host_ok = host.starts_with('[')
+        || (!host.is_empty()
+            && host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-'));
+    if !host_ok {
+        return None;
+    }
+    if let Some(p) = port {
+        if p.is_empty() || p.len() > 5 || !p.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+    }
+    if !secure && !matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
+        return None;
+    }
+    // Every path segment must be a plain, non-empty name.
+    if path.split('/').skip(1).any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+/// The path part of a canonical issuer (as returned by
+/// [`normalize_issuer`]): `""` for a root issuer, `/box` for
+/// `https://example.org/box`. Same shape as a normalized base path, so
+/// the two can be compared directly.
+pub fn issuer_path(issuer: &str) -> &str {
+    let rest = issuer
+        .strip_prefix("https://")
+        .or_else(|| issuer.strip_prefix("http://"))
+        .unwrap_or(issuer);
+    match rest.find('/') {
+        Some(i) => &rest[i..],
+        None => "",
+    }
 }
 
 impl Server {
+    /// The issuer URL of the OIDC provider when it is enabled AND has a
+    /// usable issuer; `None` otherwise. Callers treat `None` as "the
+    /// provider does not exist" — an enabled provider with a broken
+    /// issuer must not half-work (`validate` warns about it).
+    pub fn oidc_issuer(&self) -> Option<String> {
+        let p = self.oidc_provider.as_ref()?;
+        if !p.enabled {
+            return None;
+        }
+        normalize_issuer(p.issuer.as_deref()?)
+    }
+
     /// The normalized base path the portal is served under: a leading
     /// slash, no trailing slash, never just `"/"`. Empty string ⇒ root
     /// (the default). Resolves the flat `context-path` first, then the
@@ -2033,6 +2159,73 @@ mod tests {
         };
         assert_eq!(both.effective_base_path(), "/a");
         assert_eq!(Server::default().effective_base_path(), "");
+    }
+
+    /// The OIDC provider is on only with the switch AND a usable issuer;
+    /// anything else reads as "the provider does not exist".
+    #[test]
+    fn oidc_issuer_requires_the_switch_and_a_sound_url() {
+        let server = |enabled: bool, issuer: Option<&str>| Server {
+            oidc_provider: Some(OidcProvider {
+                enabled,
+                issuer: issuer.map(str::to_string),
+            }),
+            ..Default::default()
+        };
+        // Off by default, and off without the switch even with an issuer.
+        assert_eq!(Server::default().oidc_issuer(), None);
+        assert_eq!(server(false, Some("https://p.example")).oidc_issuer(), None);
+        // Enabled but unusable ⇒ still off (never half-working).
+        assert_eq!(server(true, None).oidc_issuer(), None);
+        for bad in [
+            "",
+            "p.example",
+            "http://p.example",          // plain http off loopback
+            "http://localhost.evil.example",
+            "https://p.example/?x=1",
+            "https://p.example/#f",
+            "https://user@p.example",
+            "https://p.example/a b",
+            "https://",
+            "ftp://p.example",
+            "HTTPS://p.example",                  // scheme is lowercase
+            "http://localhost:80.evil.example",   // port must be digits
+            "https://p.example:abc",
+            "https://p.example:",
+            "https://p.example:123456",
+            "http://[::1]evil.example",           // junk after the bracket
+            "https://[garbage]",
+            "https://[::1",
+            "https://p.example/a/../b",
+            "https://p.example/./b",
+            "https://p.example//box",
+            "https://p.example/%2e%2e/x",
+            "https://p_x.example",
+        ] {
+            assert_eq!(server(true, Some(bad)).oidc_issuer(), None, "{bad:?}");
+        }
+        // Canonical form: trimmed, no trailing slash, subpath kept.
+        assert_eq!(
+            server(true, Some(" https://p.example/box/ ")).oidc_issuer().as_deref(),
+            Some("https://p.example/box")
+        );
+        for ok in ["http://localhost:8090", "http://127.0.0.1:8090/box", "http://[::1]:8090"] {
+            assert_eq!(server(true, Some(ok)).oidc_issuer().as_deref(), Some(ok));
+        }
+        assert_eq!(
+            server(true, Some("https://p.example:8443/a/b")).oidc_issuer().as_deref(),
+            Some("https://p.example:8443/a/b")
+        );
+        // The path part, in base-path shape.
+        assert_eq!(issuer_path("https://p.example"), "");
+        assert_eq!(issuer_path("https://p.example:8443/box"), "/box");
+        assert_eq!(issuer_path("http://[::1]:8090/a/b"), "/a/b");
+        // And it parses from YAML under the documented key.
+        let cfg = Config::from_yaml(
+            "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://p.example\nproxy:\n  specs: []\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.server.oidc_issuer().as_deref(), Some("https://p.example"));
     }
 
     /// `server.timezone` resolves to an IANA zone, and every way of NOT

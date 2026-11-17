@@ -126,6 +126,13 @@ pub enum Warning {
     UnknownTimezone {
         value: String,
     },
+    /// `server.oidc-provider.enabled` is true but `issuer` is missing or
+    /// not a usable URL (`value` is what was written, empty if absent).
+    /// The provider stays OFF — every endpoint 404s — which is safe but
+    /// certainly not what the operator meant.
+    OidcIssuerInvalid {
+        value: String,
+    },
     /// `container-cpu-limit` / `container-cpu-request` is set but isn't
     /// a positive, finite number of CPUs (e.g. `0,5` with a comma, `-1`,
     /// `abc`). The backend applies *no* CPU limit in that case, so the
@@ -443,6 +450,15 @@ pub fn run(config: &Config) -> ValidationReport {
         if !named.is_empty() && named.parse::<chrono_tz::Tz>().is_err() {
             warnings.push(Warning::UnknownTimezone {
                 value: named.to_string(),
+            });
+        }
+    }
+
+    // An enabled OIDC provider without a sound issuer stays off; say so.
+    if let Some(p) = config.server.oidc_provider.as_ref() {
+        if p.enabled && config.server.oidc_issuer().is_none() {
+            warnings.push(Warning::OidcIssuerInvalid {
+                value: p.issuer.clone().unwrap_or_default().trim().to_string(),
             });
         }
     }
@@ -1073,6 +1089,31 @@ proxy:
                 report.warnings
             );
         }
+    }
+
+    #[test]
+    fn flags_enabled_oidc_provider_without_a_usable_issuer() {
+        let warns = |yaml: &str| {
+            Config::from_yaml(yaml)
+                .unwrap()
+                .validate()
+                .warnings
+                .iter()
+                .any(|w| matches!(w, Warning::OidcIssuerInvalid { .. }))
+        };
+        let tail = "proxy:\n  specs: []\n";
+        assert!(warns(&format!("server:\n  oidc-provider:\n    enabled: true\n{tail}")));
+        assert!(warns(&format!(
+            "server:\n  oidc-provider:\n    enabled: true\n    issuer: http://p.example\n{tail}"
+        )));
+        // Sound issuer, switched off, or absent: quiet.
+        assert!(!warns(&format!(
+            "server:\n  oidc-provider:\n    enabled: true\n    issuer: https://p.example\n{tail}"
+        )));
+        assert!(!warns(&format!(
+            "server:\n  oidc-provider:\n    enabled: false\n    issuer: nonsense\n{tail}"
+        )));
+        assert!(!warns(tail));
     }
 
     #[test]

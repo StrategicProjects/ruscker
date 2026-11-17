@@ -56,6 +56,17 @@ server:
   # viewer's own browser timezone.
   #timezone: America/Recife
 
+  # OpenID Connect provider ("Sign in with Ruscker") for systems that
+  # live outside this portal. Off unless enabled with an issuer.
+  # `issuer` is this portal's PUBLIC base URL, including the subpath if
+  # you mount it under one; https only (http is accepted for localhost).
+  # Needs RUSCKER_MASTER_KEY: the signing key is stored encrypted in the
+  # database. Work in progress — the sign-in endpoints are not shipped
+  # yet; see docs/adr/0005-oidc-provider.md.
+  #oidc-provider:
+  #  enabled: true
+  #  issuer: https://portal.example.org
+
 proxy:
   # Portal title. This is a SEED/fallback: once you set a title in the
   # admin's Appearance editor, the database value wins (that's the

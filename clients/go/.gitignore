@@ -1,0 +1,5 @@
+# Build and test output
+*.test
+*.out
+/bin/
+/vendor/

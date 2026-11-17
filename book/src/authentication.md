@@ -158,6 +158,16 @@ Claims, by scope:
 The same claims are available from `{issuer}/oauth/userinfo` with the
 access token.
 
+### Client packages
+
+The repository carries small client packages — TypeScript, Python,
+Rust, Go and R — that do everything in the next section on top of each
+language's established OpenID Connect or JWT library:
+[`clients/`](https://github.com/StrategicProjects/ruscker/tree/main/clients).
+They share one contract (start a sign-in, finish it, read the identity)
+and are tested end to end against a real portal. Using one is optional;
+any standard library works with the settings above.
+
 ### What the system must verify
 
 The provider cannot do this part for the client:

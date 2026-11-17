@@ -144,6 +144,15 @@ What's in the box:
   (unlike ShinyProxy's X-SP pair). Reserved client headers are stripped on
   HTTP and WebSocket requests to prevent spoofing, and missing claims are
   omitted. See the [YAML reference].
+- **Sign in with Ruscker (OpenID Connect provider)** — systems outside
+  the portal can sign users in with the same accounts, groups and 2FA.
+  Off by default; a deliberately narrow profile (authorization code with
+  PKCE, Admin-registered confidential clients, exact redirect URIs,
+  ES256 ID tokens). Each client can be limited to groups and can require
+  two-step verification. Ruscker authenticates, the client authorizes.
+  See the [authentication guide].
+- **Group roles** — a group can define roles for its members, forwarded
+  to apps that opt in as `X-Ruscker-User-Roles`.
 - **Hardened cookie boundary** — hosted apps keep their own cookies, but
   their responses cannot overwrite Ruscker session, sticky or MFA cookies:
   reserved `Set-Cookie` values and cookie-clearing `Clear-Site-Data`
@@ -180,6 +189,7 @@ backend (`docker-it`), the full proxy + WebSocket path (`e2e`), and real
 Shiny/Streamlit WebSockets (`ws-e2e`).
 
 [admin guide]: https://strategicprojects.github.io/ruscker/admin.html#2fa--mfa-for-selected-apps
+[authentication guide]: https://strategicprojects.github.io/ruscker/authentication.html
 [Schedules page]: https://strategicprojects.github.io/ruscker/admin.html#schedules
 [YAML reference]: docs/YAML_SCHEMA.md
 [security guide]: docs/SECURITY.md

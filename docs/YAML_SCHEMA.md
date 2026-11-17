@@ -100,7 +100,7 @@ why it needs a configured zone.
 
 Turns Ruscker into an OpenID Connect provider for systems that live
 *outside* the portal (design and scope in
-[ADR 0005](adr/0005-oidc-provider.md)). **Off unless `enabled: true`
+[ADR 0005](https://github.com/StrategicProjects/ruscker/blob/main/docs/adr/0005-oidc-provider.md)). **Off unless `enabled: true`
 and `issuer` is usable** — otherwise none of its endpoints exist.
 
 `issuer` is the portal's public base URL, including the subpath when it

@@ -149,7 +149,12 @@ drill into any container.
 
 ## Phase 8 (optional) — Auth
 
-- [ ] OIDC integration (Keycloak, Auth0, Google)
+- [x] Ruscker as an OpenID Connect **provider** ("Sign in with Ruscker")
+      for systems outside the portal — authorization code with PKCE,
+      Admin-registered clients with a group gate and optional MFA, ES256
+      ID tokens (ADR 0005)
+- [ ] Signing in **to** Ruscker with an external provider — OIDC
+      (Keycloak, Auth0, Google)
 - [ ] SAML for enterprise
 - [ ] LDAP directory integration
 - [x] Role-based access control (Viewer / Editor / Admin), including
@@ -162,7 +167,8 @@ drill into any container.
 - [x] Opt-in identity headers for signed-in users on HTTP and WebSocket —
       ShinyProxy-compatible user/group headers plus selected profile claims
 
-> Only the external identity-provider items (OIDC / SAML / LDAP) remain; the
+> Only signing in *with* an external identity provider (OIDC / SAML / LDAP)
+> remains — Ruscker can already *be* the provider for other systems; the
 > database-backed role model (including group-scoped Editors), per-spec access
 > lists, step-up MFA, and identity forwarding already ship.
 

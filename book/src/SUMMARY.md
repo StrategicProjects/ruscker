@@ -12,6 +12,7 @@
   - [Field map (de-para)](./shinyproxy-fieldmap.md)
 - [Configuration](./configuration.md)
 - [The admin panel](./admin.md)
+- [Authentication](./authentication.md)
 - [Deploying in production](./deploying.md)
 - [Troubleshooting](./troubleshooting.md)
 - [FAQ](./faq.md)

@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="817.434052" height="216.870259" viewBox="0 0 817.434052 216.870259" font-family="sans-serif" font-size="14.666667" fill="none">
+<g id="s0">
+<rect x="11.414224" y="10.975216" width="793.727587" height="193.163793" rx="7.024138" fill="#ffffff" stroke="#ffffff" stroke-width="1.2"/>
+</g>
+<g id="s1">
+<rect x="35.998707" y="81.216595" width="105.362069" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
+</g>
+<g id="s2">
+<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="88.679741" y="100.318348" text-anchor="middle">User</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="88.679741" y="111.04967" text-anchor="middle">browser</text>
+</g>
+<g id="s3">
+<rect x="260.771121" y="75.948491" width="161.555173" height="49.168966" rx="4.214483" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.866667"/>
+</g>
+<g id="s4">
+<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="341.548707" y="100.318348" text-anchor="middle">Ruscker</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="341.548707" y="111.04967" text-anchor="middle">accounts · groups · 2FA</text>
+</g>
+<g id="s5">
+<rect x="597.929742" y="28.53556" width="147.506897" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
+</g>
+<g id="s6">
+<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="671.68319" y="47.637313" text-anchor="middle">Hosted app</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="671.68319" y="58.368635" text-anchor="middle">behind /app/{id}</text>
+</g>
+<g id="s7">
+<rect x="597.929742" y="133.897629" width="147.506897" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
+</g>
+<g id="s8">
+<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="671.68319" y="152.999382" text-anchor="middle">External system</text>
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="671.68319" y="163.730704" text-anchor="middle">another host or domain</text>
+</g>
+<g id="s9">
+<line x1="141.360776" y1="100.532974" x2="258.954868" y2="100.532974" stroke="#3d6b5f" stroke-width="1.2"/>
+<polygon stroke-width="0" points="253.746983,98.074526 260.771121,100.532974 253.746983,102.991423" fill="#3d6b5f"/>
+</g>
+<g id="s10">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="201.065948" y="96.812687" text-anchor="middle">signs in once</text>
+</g>
+<g id="s11">
+<polyline points="422.326293,89.996767 446.910776,89.996767 446.910776,89.996767 446.910776,47.85194 446.910776,47.85194 596.113489,47.85194" fill="none" stroke="#3d6b5f" stroke-width="1.2"/>
+<polygon stroke-width="0" points="590.905604,45.393491 597.929742,47.85194 590.905604,50.310388" fill="#3d6b5f"/>
+</g>
+<g id="s12">
+<polyline points="422.326293,111.069181 446.910776,111.069181 446.910776,111.069181 446.910776,153.214009 446.910776,153.214009 595.104459,153.214009" fill="none" stroke="#0f6e56" stroke-width="1.866667"/>
+<polygon stroke-width="0" points="590.905604,150.75556 597.929742,153.214009 590.905604,155.672457" fill="#0f6e56"/>
+</g>
+<g id="s13">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="522.420259" y="43.780445" text-anchor="middle">identity headers</text>
+</g>
+<g id="s14">
+<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="522.420259" y="149.142514" text-anchor="middle">ID token · OpenID Connect</text>
+</g>
+<g id="s15">
+<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="671.68319" y="80.885875" text-anchor="middle">per request, added by the proxy</text>
+</g>
+<g id="s16">
+<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="671.68319" y="186.247944" text-anchor="middle">once per sign-in, verified by the system</text>
+</g>
+</svg>

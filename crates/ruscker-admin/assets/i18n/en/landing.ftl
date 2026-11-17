@@ -92,6 +92,7 @@ admin-setup-submit = Create admin
 # — Password change / first login
 admin-pw-title = Change password
 admin-pw-help = Set a new password for your account.
+admin-pw-no-account = You are signed in with the emergency admin token, which is not an account, so there is no password to change here. To set a new password for an account, open Users, choose Edit on that account and reset its password.
 admin-pw-first-prompt = You're using a password set by an administrator. Set a new password to continue.
 admin-pw-current-label = Current password
 admin-pw-new-label = New password

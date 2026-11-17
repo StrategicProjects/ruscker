@@ -69,6 +69,9 @@ struct ClientsPage<'a> {
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
     flash_error: Option<String>,
+    /// Address of the sign-in button image (#1083) when the provider is
+    /// on; `None` hides the kit.
+    button_src: Option<String>,
 }
 
 impl ClientsPage<'_> {
@@ -271,6 +274,8 @@ async fn render_index(
         new_secret,
         flash_ok,
         flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
+        button_src: crate::oidc::active_issuer(&state.config, &state.base_path)
+            .map(|issuer| format!("{issuer}/oauth/button.svg")),
     };
     let resp = super::render(&page);
     if has_secret {

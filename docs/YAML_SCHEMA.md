@@ -278,6 +278,8 @@ proxy:
     intro-style: banner                # `text` (default) | `banner` | `card`
     intro-align: center                # `left` | `center` — banner/card only
     intro-image: hero.webp             # Media-library filename — banner only
+    login-layout: split                # sign-in page: `card` (default) | `split` | `minimal`
+    login-image: side.webp             # Media-library filename — split only
 
     # SEO / social-share meta tags injected into the landing `<head>`
     seo-title: "Portal — Org Name"     # overrides `proxy.title` for <title>
@@ -332,6 +334,8 @@ Field reference:
 | `intro-style` | enum | `text` | How the intro renders: `text` (plain justified paragraph), `banner` (a hero band in the content column — larger type, generous padding, a background tinted from the portal accent that follows the light/dark theme) or `card` (inside a bordered surface). Unknown values render `text`. |
 | `intro-align` | enum | style default | `left` or `center`, for `banner` and `card`. Unset ⇒ `center` for `banner`, `left` for `card`. The `text` style ignores it. |
 | `intro-image` | filename | none | Optional `banner` background: a Media-library filename (e.g. `hero.webp`, served from `/assets/img/`). A theme-aware overlay keeps the text readable. Paths and URLs are refused; ignored by the other styles. |
+| `login-layout` | enum | `card` | Layout of the sign-in page: `card` (centred card), `split` (the form beside a brand panel, hidden on narrow screens) or `minimal` (the form alone). Presets only — the page takes no custom HTML or CSS. |
+| `login-image` | filename | none | Image of the `split` panel: a Media-library filename. Paths and URLs are refused; without it the panel uses the portal's colours. |
 | `seo-title` | string | `proxy.title` | Override for `<title>`. |
 | `seo-description` | string | resolved intro | `<meta name="description">` + `og:description`. |
 | `og-image` | path / URL | none | `og:image` for social-share. |

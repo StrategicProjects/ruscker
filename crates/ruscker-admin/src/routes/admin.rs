@@ -122,6 +122,10 @@ struct LoginPage<'a> {
     brand_title: String,
     brand_logo: Option<String>,
     theme_style: String,
+    /// `card` | `split` | `minimal` (#1083).
+    layout: &'static str,
+    /// Side image of the split layout.
+    side_image: Option<String>,
     /// Set when the person arrived from an SSO client: the system they
     /// are signing in to, so the page can say so.
     sso_client: Option<SsoClientBrand>,
@@ -308,6 +312,8 @@ async fn login_page<'a>(
         brand_title: brand.title,
         brand_logo: brand.logo_src,
         theme_style: brand.theme_style,
+        layout: brand.login_layout,
+        side_image: brand.login_image_src,
         sso_client,
         locale: loc,
         theme,
@@ -1153,6 +1159,8 @@ mod tests {
             brand_title: "Ruscker".to_string(),
             brand_logo: None,
             theme_style: String::new(),
+            layout: "card",
+            side_image: None,
             sso_client: None,
         }
         .render()
@@ -1183,6 +1191,8 @@ mod tests {
             brand_title: "Ruscker".to_string(),
             brand_logo: None,
             theme_style: String::new(),
+            layout: "card",
+            side_image: None,
             sso_client: None,
         }
         .render()
@@ -1235,6 +1245,8 @@ mod tests {
             brand_title: "Ruscker".to_string(),
             brand_logo: None,
             theme_style: String::new(),
+            layout: "card",
+            side_image: None,
             sso_client: None,
         }
         .render()

@@ -672,6 +672,20 @@ pub struct LandingCustomization {
     #[serde(default, rename = "intro-image")]
     pub intro_image: Option<String>,
 
+    /// Layout of the sign-in page (#1083): `"card"` (default — a centred
+    /// card), `"split"` (the form beside a panel with the portal's brand
+    /// and an optional image) or `"minimal"` (the form alone, no card).
+    /// Admin-managed. Presets only: the page receives passwords, so it
+    /// takes no free-form HTML or CSS.
+    #[serde(default, rename = "login-layout")]
+    pub login_layout: Option<String>,
+
+    /// Side image of the `split` sign-in layout (#1083): a Media-library
+    /// **filename**, served from `/assets/img/<filename>`. Ignored by the
+    /// other layouts.
+    #[serde(default, rename = "login-image")]
+    pub login_image: Option<String>,
+
     /// SEO / social-share meta tags for the public landing `<head>`.
     /// Optional page-title override; falls back to `proxy.title`.
     #[serde(default, rename = "seo-title")]
@@ -880,6 +894,23 @@ impl LandingCustomization {
             _ if self.effective_intro_style() == "banner" => "center",
             _ => "left",
         }
+    }
+    /// Sign-in page layout (#1083): `card` (default) | `split` |
+    /// `minimal`. Unknown/absent ⇒ `card`, the historical page.
+    pub fn effective_login_layout(&self) -> &str {
+        match self.login_layout.as_deref() {
+            Some("split") => "split",
+            Some("minimal") => "minimal",
+            _ => "card",
+        }
+    }
+    /// Side image of the split sign-in layout, trimmed; `None` when
+    /// blank. Callers still validate it before building a URL.
+    pub fn effective_login_image(&self) -> Option<&str> {
+        self.login_image
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
     }
     /// Banner background image filename (#1065), trimmed; `None` when
     /// blank. Callers still validate it before building a URL.

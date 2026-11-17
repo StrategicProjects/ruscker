@@ -143,6 +143,12 @@ pub struct LandingForm {
     pub intro_align: String,
     #[serde(default)]
     pub intro_image: String,
+    // Sign-in page layout (#1083): ``|`split`|`minimal` (blank ⇒ card)
+    // and the split layout's Media-library image filename.
+    #[serde(default)]
+    pub login_layout: String,
+    #[serde(default)]
+    pub login_image: String,
     pub seo_title: String,
     pub seo_description: String,
     pub og_image: String,
@@ -204,6 +210,8 @@ impl LandingForm {
             intro_style: lc.intro_style.clone().unwrap_or_default(),
             intro_align: lc.intro_align.clone().unwrap_or_default(),
             intro_image: lc.intro_image.clone().unwrap_or_default(),
+            login_layout: lc.login_layout.clone().unwrap_or_default(),
+            login_image: lc.login_image.clone().unwrap_or_default(),
             seo_title: lc.seo_title.clone().unwrap_or_default(),
             seo_description: lc.seo_description.clone().unwrap_or_default(),
             og_image: lc.og_image.clone().unwrap_or_default(),
@@ -297,6 +305,12 @@ impl LandingForm {
                 _ => None,
             },
             intro_image: intro_image_filename(&self.intro_image),
+            login_layout: match self.login_layout.trim() {
+                "split" => Some("split".into()),
+                "minimal" => Some("minimal".into()),
+                _ => None,
+            },
+            login_image: intro_image_filename(&self.login_image),
             seo_title: empty_to_none(self.seo_title),
             seo_description: empty_to_none(self.seo_description),
             og_image: empty_to_none(self.og_image),
@@ -441,6 +455,8 @@ async fn reset_appearance(
     lc.intro_style = None;
     lc.intro_align = None;
     lc.intro_image = None;
+    lc.login_layout = None;
+    lc.login_image = None;
     lc.logo_mode = None;
     lc.logo_size = None;
     lc.logo_margin = None;

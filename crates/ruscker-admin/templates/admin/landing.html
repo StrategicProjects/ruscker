@@ -773,6 +773,45 @@
         </div>
       </section>
 
+      {# ── Card: Sign-in page (#1083) — layout preset + side image. The
+         page itself takes the portal's title, logo and colours from the
+         cards above; there is no free-form HTML here by design. #}
+      <section class="editor-card">
+        <div class="form-section__title">{{ self.t("admin-landing-card-login") }}</div>
+        <input type="hidden" name="login_layout" :value="form.login_layout">
+        <input type="hidden" name="login_image" :value="form.login_image">
+        <div class="spec-form-field">
+          <label class="spec-form-label">{{ self.t("admin-landing-login-layout") }}</label>
+          <div class="seg-control seg-control--full" role="group" aria-label="{{ self.t("admin-landing-login-layout") }}">
+            <button type="button" :class="{ 'is-active': pvLoginLayout() === 'card' }" @click="form.login_layout = ''">{{ self.t("admin-landing-login-layout-card") }}</button>
+            <button type="button" :class="{ 'is-active': pvLoginLayout() === 'split' }" @click="form.login_layout = 'split'">{{ self.t("admin-landing-login-layout-split") }}</button>
+            <button type="button" :class="{ 'is-active': pvLoginLayout() === 'minimal' }" @click="form.login_layout = 'minimal'">{{ self.t("admin-landing-login-layout-minimal") }}</button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-login-layout-help") }}</div>
+        </div>
+        <div class="spec-form-field" x-show="pvLoginLayout() === 'split'" x-cloak>
+          <label class="spec-form-label">{{ self.t("admin-landing-login-image") }}</label>
+          <div class="landing-logo-image-row">
+            <img :src="assetUrl(loginImageUrl())" alt="" class="landing-logo-thumb" x-show="form.login_image" style="flex:none">
+            <button type="button" class="admin-login-btn landing-logo-pick"
+                    @click="openImagePicker((v) => setLoginImage(v), loginImageUrl())">
+              <i class="ti ti-photo" aria-hidden="true"></i>
+              {{ self.t("spec-form-choose-image") }}
+            </button>
+            <span class="spec-form-input--mono text-xs" style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                  x-show="form.login_image" x-text="form.login_image"></span>
+            <button type="button" class="admin-nav-link" x-show="form.login_image" @click="form.login_image = ''"
+                    aria-label="{{ self.t("admin-landing-intro-image-clear") }}" title="{{ self.t("admin-landing-intro-image-clear") }}">
+              <i class="ti ti-x" aria-hidden="true"></i>
+            </button>
+          </div>
+          <div class="spec-form-help">{{ self.t("admin-landing-login-image-help") }}</div>
+        </div>
+        <a class="admin-nav-link" href="{{ base }}/admin/login" target="_blank" rel="noopener" style="align-self:flex-start">
+          <i class="ti ti-external-link" aria-hidden="true"></i> {{ self.t("admin-landing-login-preview") }}
+        </a>
+      </section>
+
       {# ── Card: Content — intro text (default + per-locale). #}
       <section class="editor-card">
         <div class="form-section__title">{{ self.t("admin-landing-card-content") }}</div>
@@ -1457,6 +1496,18 @@ window.ruscker.landingForm = (initial, logoImages) => ({
       .replace(/\*([^*]+)\*/g, '<em>$1</em>');
   },
   pvIntroHtml() { return this.mdInline(this.previewIntro()); },
+  // ── Sign-in page layout (#1083) — mirrors effective_login_layout.
+  pvLoginLayout() {
+    const l = this.form.login_layout;
+    return l === 'split' || l === 'minimal' ? l : 'card';
+  },
+  loginImageUrl() {
+    return this.form.login_image ? '/assets/img/' + this.form.login_image : '';
+  },
+  setLoginImage(v) {
+    const p = '/assets/img/';
+    this.form.login_image = (v || '').indexOf(p) === 0 ? v.slice(p.length) : '';
+  },
   // ── Intro style (#1065) — mirrors effective_intro_style /
   // effective_intro_align and routes/landing.rs::intro_classes.
   pvIntroStyle() {

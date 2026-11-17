@@ -224,6 +224,10 @@ async fn render_index(
         if let Some(f) = lc.effective_intro_image() {
             refs.push_str(&format!("/assets/img/{f}\n"));
         }
+        // So does the sign-in page's side image (#1083).
+        if let Some(f) = lc.effective_login_image() {
+            refs.push_str(&format!("/assets/img/{f}\n"));
+        }
     }
     // SSO client logos (#1080) store a bare filename too.
     if let Ok(clients) = db::oidc_clients::list_all(pool).await {
@@ -560,6 +564,10 @@ async fn rename(
                 lc.intro_image = Some(new.clone());
                 touched = true;
             }
+            if lc.effective_login_image() == Some(old.as_str()) {
+                lc.login_image = Some(new.clone());
+                touched = true;
+            }
             touched.then_some(lc)
         }
         Err(err) => {
@@ -666,6 +674,10 @@ async fn delete(
             // Intro banner background (#1065): drop it with the image.
             if lc.effective_intro_image() == Some(filename.as_str()) {
                 lc.intro_image = None;
+                touched = true;
+            }
+            if lc.effective_login_image() == Some(filename.as_str()) {
+                lc.login_image = None;
                 touched = true;
             }
             touched.then_some(lc)

@@ -59,6 +59,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
         intro_style: Option<String>,
         intro_align: Option<String>,
         intro_image: Option<String>,
+        login_layout: Option<String>,
+        login_image: Option<String>,
         analytics_provider: Option<String>,
         analytics_key: Option<String>,
     }
@@ -72,6 +74,7 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 card_cover_default, card_cover_default_dark,
                 catalog_layout, catalog_density, catalog_sections_by,
                 intro_style, intro_align, intro_image,
+                login_layout, login_image,
                 analytics_provider, analytics_key
            FROM landing_customization WHERE id = 1";
     let row: Option<Row> = match db {
@@ -108,6 +111,8 @@ pub async fn fetch(db: &ConfigDb) -> Result<LandingCustomization> {
                 intro_style: r.intro_style,
                 intro_align: r.intro_align,
                 intro_image: r.intro_image,
+                login_layout: r.login_layout,
+                login_image: r.login_image,
                 seo_title: r.seo_title,
                 seo_description: r.seo_description,
                 og_image: r.og_image,
@@ -217,6 +222,7 @@ pub(crate) async fn update_in_tx(
                 header_bg_dark = ?, header_fg_dark = ?,
                 card_cover_default_dark = ?, catalog_sections_by = ?,
                 intro_style = ?, intro_align = ?, intro_image = ?,
+                login_layout = ?, login_image = ?,
                 updated_at = ?
           WHERE id = 1",
     )
@@ -256,6 +262,8 @@ pub(crate) async fn update_in_tx(
     .bind(none_if_empty(&lc.intro_style))
     .bind(none_if_empty(&lc.intro_align))
     .bind(none_if_empty(&lc.intro_image))
+    .bind(none_if_empty(&lc.login_layout))
+    .bind(none_if_empty(&lc.login_image))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -303,7 +311,8 @@ pub(crate) async fn update_in_tx_pg(
                 header_bg_dark = $30, header_fg_dark = $31,
                 card_cover_default_dark = $32, catalog_sections_by = $33,
                 intro_style = $34, intro_align = $35, intro_image = $36,
-                updated_at = $37
+                login_layout = $37, login_image = $38,
+                updated_at = $39
           WHERE id = 1",
     )
     .bind(none_if_empty(&lc.header_bg))
@@ -342,6 +351,8 @@ pub(crate) async fn update_in_tx_pg(
     .bind(none_if_empty(&lc.intro_style))
     .bind(none_if_empty(&lc.intro_align))
     .bind(none_if_empty(&lc.intro_image))
+    .bind(none_if_empty(&lc.login_layout))
+    .bind(none_if_empty(&lc.login_image))
     .bind(now)
     .execute(&mut **tx)
     .await
@@ -477,6 +488,8 @@ mod tests {
             intro_style: Some("banner".into()),
             intro_align: Some("left".into()),
             intro_image: Some("hero.webp".into()),
+            login_layout: Some("split".into()),
+            login_image: Some("side.webp".into()),
             analytics_provider: Some("plausible".into()),
             ..Default::default()
         };
@@ -495,6 +508,8 @@ mod tests {
         assert_eq!(got.intro_style.as_deref(), Some("banner"));
         assert_eq!(got.intro_align.as_deref(), Some("left"));
         assert_eq!(got.intro_image.as_deref(), Some("hero.webp"));
+        assert_eq!(got.login_layout.as_deref(), Some("split"));
+        assert_eq!(got.login_image.as_deref(), Some("side.webp"));
         assert_eq!(got.analytics_provider.as_deref(), Some("plausible"));
     }
 
@@ -571,6 +586,8 @@ mod tests {
         lc.intro_style = Some("card".into());
         lc.intro_align = Some("center".into());
         lc.intro_image = Some("hero.webp".into());
+        lc.login_layout = Some("minimal".into());
+        lc.login_image = Some("side.webp".into());
         update(&db, &lc, Some("admin")).await.unwrap();
 
         let got = fetch(&db).await.unwrap();
@@ -581,6 +598,8 @@ mod tests {
         assert_eq!(got.catalog_sections_by.as_deref(), Some("subject"));
         assert_eq!(got.intro_style.as_deref(), Some("card"));
         assert_eq!(got.intro_align.as_deref(), Some("center"));
+        assert_eq!(got.login_layout.as_deref(), Some("minimal"));
+        assert_eq!(got.login_image.as_deref(), Some("side.webp"));
         assert_eq!(got.intro_image.as_deref(), Some("hero.webp"));
 
         // Whitespace-only collapses to NULL on write.

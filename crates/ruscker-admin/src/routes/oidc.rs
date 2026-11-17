@@ -53,6 +53,7 @@ pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/.well-known/openid-configuration", get(discovery))
         .route("/oauth/jwks", get(jwks))
+        .route("/oauth/button.svg", get(button))
         .route("/oauth/authorize", get(authorize))
         // A token request is a few hundred bytes. The cap is enforced
         // while the body is READ, so an oversized one is rejected before
@@ -93,6 +94,45 @@ async fn discovery(State(state): State<AppState>) -> Response {
         Ok(issuer) => json(crate::oidc::discovery(&issuer)),
         Err(refusal) => refusal.into_response(),
     }
+}
+
+/// `GET /oauth/button.svg` — the "Sign in with <portal>" button (#1083).
+///
+/// Public, like discovery: it shows only the portal's title, which the
+/// landing page already shows. `?theme=dark` for dark surfaces, `?lang=`
+/// (`pt`, `en`, `es`, `fr`) for the wording; anything else falls back to
+/// light and the portal's default language. Client systems embed it as
+/// an `<img>` inside their own link to their own sign-in route.
+async fn button(State(state): State<AppState>, RawQuery(query): RawQuery) -> Response {
+    if let Err(refusal) = provider(&state) {
+        return refusal.into_response();
+    }
+    let mut dark = false;
+    let mut loc = crate::i18n::DEFAULT;
+    for (k, v) in url::form_urlencoded::parse(query.as_deref().unwrap_or("").as_bytes()) {
+        match &*k {
+            "theme" => dark = v == "dark",
+            "lang" => loc = crate::i18n::Locale::parse(&v).unwrap_or(loc),
+            _ => {}
+        }
+    }
+    let portal = super::landing::portal_brand(&state, loc).await.title;
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("portal", portal);
+    let label = state.locales.t(loc, "sso-button-label", Some(&args));
+    // Fluent wraps placeables in direction-isolation marks; they are
+    // invisible but would count as glyphs for the fitted width.
+    let label: String = label.chars().filter(|c| !matches!(c, '\u{2066}'..='\u{2069}')).collect();
+    (
+        [
+            (axum::http::header::CONTENT_TYPE, "image/svg+xml; charset=utf-8"),
+            (CACHE_CONTROL, CACHE),
+            // An SVG is a document: this one needs nothing at all.
+            (axum::http::header::CONTENT_SECURITY_POLICY, "default-src 'none'; style-src 'unsafe-inline'"),
+        ],
+        crate::oidc::sign_in_button_svg(&label, dark),
+    )
+        .into_response()
 }
 
 async fn jwks(State(state): State<AppState>) -> Response {

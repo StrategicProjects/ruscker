@@ -69,6 +69,10 @@ struct ClientsPage<'a> {
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
     flash_error: Option<String>,
+    /// Public address of the sign-in button image (#1083), for the
+    /// snippet. `None` hides the kit: provider off, or no master key (the
+    /// image route answers 503 then — same condition as the route).
+    button_src: Option<String>,
 }
 
 impl ClientsPage<'_> {
@@ -271,6 +275,9 @@ async fn render_index(
         new_secret,
         flash_ok,
         flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
+        button_src: crate::oidc::active_issuer(&state.config, &state.base_path)
+            .filter(|_| state.master_key.is_configured())
+            .map(|issuer| format!("{issuer}/oauth/button.svg")),
     };
     let resp = super::render(&page);
     if has_secret {

@@ -13,8 +13,23 @@
    portal. Sanitized by `build_theme_style`, same as on the landing. #}
 {% if !theme_style.is_empty() %}<style>{{ theme_style|safe }}</style>{% endif %}
 </head>
-<body class="min-h-screen flex flex-col items-center justify-center px-4 relative">
+<body class="min-h-screen flex flex-col items-center justify-center px-4 relative admin-login-page admin-login-page--{{ layout }}">
 {% include "_perceived_speed.html" %}
+
+{# Split layout (#1083): a brand panel beside the form. Decorative —
+   the form carries the brand again for small screens, where the panel
+   is hidden. Presets only; no free-form HTML on this page. #}
+{% if layout == "split" %}
+<aside class="admin-login-aside" aria-hidden="true">
+  {% match side_image %}{% when Some with (src) %}<img class="admin-login-aside-img" src="{{ src }}" alt="" loading="lazy">{% when None %}{% endmatch %}
+  <div class="admin-login-aside-brand">
+    {% match brand_logo %}{% when Some with (src) %}
+      <img src="{{ src }}" alt="" style="height:64px;max-width:220px;object-fit:contain">
+    {% when None %}{% endmatch %}
+    <div class="admin-login-aside-title">{{ brand_title }}</div>
+  </div>
+</aside>
+{% endif %}
 
 {# Top-right chrome cluster (#182 + #183). Lives outside the login form
    so its POSTs to /__set/{theme,locale} aren't shadowed by the outer

@@ -1530,6 +1530,53 @@ input[type="range"]::-moz-range-thumb {
   display: flex; align-items: center; gap: 10px;
   margin-bottom: 8px;
 }
+/* Sign-in page layouts (#1083). `card` is the base above.
+   `minimal`: the form alone — no surface, border or shadow.
+   `split`: a brand panel beside the form on wide screens; below 860px
+   the panel is hidden and the page is the plain form. */
+.admin-login-page--minimal .admin-login-card {
+  background: transparent; border: 0; box-shadow: none; padding: 8px 0;
+}
+.admin-login-page--split {
+  flex-direction: row; align-items: stretch; justify-content: flex-start;
+  padding-left: 0; padding-right: 0;
+}
+.admin-login-page--split .admin-login-card {
+  background: transparent; border: 0; box-shadow: none;
+  margin: auto; padding: 28px 24px;
+  /* The form column: fixed on wide screens, the whole page on narrow. */
+  flex: 0 0 auto; width: min(100%, 420px); max-width: 420px;
+}
+.admin-login-aside {
+  position: relative; flex: 1 1 0; min-width: 0; min-height: 100vh;
+  display: flex; align-items: flex-end;
+  /* Built from --color-teal-600 alone: that is the one variable the
+     portal's accent colour (Appearance) overrides, so the panel follows
+     the portal's colour instead of staying teal beside a recoloured form. */
+  background: linear-gradient(150deg,
+    color-mix(in srgb, var(--color-teal-600) 62%, #000),
+    var(--color-teal-600));
+  color: #fff; overflow: hidden;
+}
+.admin-login-aside-img {
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+}
+.admin-login-aside-brand {
+  position: relative; width: 100%;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 40px 44px;
+  /* Keeps the title readable over any image. */
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.62), rgba(0, 0, 0, 0));
+}
+.admin-login-aside-title {
+  font-size: 28px; font-weight: 500; letter-spacing: -0.01em; line-height: 1.15;
+  overflow-wrap: anywhere; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+@media (max-width: 860px) {
+  .admin-login-aside { display: none; }
+  .admin-login-page--split { justify-content: center; padding-left: 16px; padding-right: 16px; }
+}
+
 /* "You are signing in to <system>" note on the sign-in page (#1080). */
 .admin-login-sso {
   display: flex; align-items: center; gap: 10px;

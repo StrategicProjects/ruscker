@@ -923,6 +923,11 @@ pub(crate) struct PortalBrand {
     /// CSS that recolours the theme variables (per-theme palette); may
     /// be empty. Already sanitized by [`build_theme_style`].
     pub theme_style: String,
+    /// Sign-in page layout (#1083): `card` | `split` | `minimal`.
+    pub login_layout: &'static str,
+    /// Side image of the split layout, mount-prefixed; only ever a file
+    /// of the Media library.
+    pub login_image_src: Option<String>,
 }
 
 /// Resolve the portal's brand from the database (or the YAML when there
@@ -959,10 +964,23 @@ pub(crate) async fn portal_brand(state: &AppState, loc: Locale) -> PortalBrand {
         .find(|l| l.slot == "header" && l.align == "left")
         .filter(|l| l.url.starts_with('/') && !l.url.starts_with("//"))
         .map(|l| format!("{}{}", state.base_path, l.url));
+    let login_layout = match lc.effective_login_layout() {
+        "split" => "split",
+        "minimal" => "minimal",
+        _ => "card",
+    };
+    // Re-validated here (bare filename) even though the editor already
+    // normalises it: the value may also come from YAML.
+    let login_image_src = lc
+        .effective_login_image()
+        .and_then(crate::routes::admin::landing::intro_image_filename)
+        .map(|f| format!("{}/assets/img/{}", state.base_path, urlencoding::encode(&f)));
     PortalBrand {
         title,
         logo_src,
         theme_style: build_theme_style(&lc.theme_colors),
+        login_layout,
+        login_image_src,
     }
 }
 

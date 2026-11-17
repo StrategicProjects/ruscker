@@ -752,3 +752,59 @@ async fn the_sign_in_note_works_under_a_base_path() {
     assert_eq!(page.status, StatusCode::OK);
     assert!(page.body.contains("admin-login-sso\"") && page.body.contains(">Radar</div>"));
 }
+
+/// Sign-in page layouts (#1083) and the sign-in button image.
+#[tokio::test]
+async fn sign_in_layouts_and_the_button_image() {
+    let (state, db) = setup(ON, false).await;
+
+    // Default: the card, no side panel.
+    let page = get(&state, "/admin/login", "").await;
+    assert!(page.body.contains("admin-login-page--card"));
+    assert!(!page.body.contains("<aside class=\"admin-login-aside\""));
+
+    // Split, with a Media-library image: the panel and the image, as a
+    // same-origin encoded path.
+    let mut lc = ruscker_admin::db::landing::fetch(&db).await.unwrap();
+    lc.login_layout = Some("split".into());
+    lc.login_image = Some("side photo.webp".into());
+    ruscker_admin::db::landing::update(&db, &lc, None).await.unwrap();
+    let page = get(&state, "/admin/login", "").await;
+    assert!(page.body.contains("admin-login-page--split"));
+    assert!(page.body.contains("<aside class=\"admin-login-aside\""));
+    assert!(page.body.contains("src=\"/assets/img/side%20photo.webp\""));
+
+    // A value that is not a bare filename never becomes an image, and
+    // an unknown layout is the card.
+    lc.login_layout = Some("weird".into());
+    lc.login_image = Some("https://evil.example/x.png".into());
+    ruscker_admin::db::landing::update(&db, &lc, None).await.unwrap();
+    let page = get(&state, "/admin/login", "").await;
+    assert!(page.body.contains("admin-login-page--card"));
+    assert!(!page.body.contains("evil.example"));
+
+    lc.login_layout = Some("minimal".into());
+    ruscker_admin::db::landing::update(&db, &lc, None).await.unwrap();
+    assert!(get(&state, "/admin/login", "").await.body.contains("admin-login-page--minimal"));
+
+    // The button: an SVG with the portal's title, public, cacheable.
+    let svg = get(&state, "/oauth/button.svg?lang=en", "").await;
+    assert_eq!(svg.status, StatusCode::OK);
+    assert!(svg.body.starts_with("<svg") && svg.body.contains(">Sign in with T</text>"), "{}", svg.body);
+    assert!(svg.body.contains("#ffffff"));
+    let dark = get(&state, "/oauth/button.svg?theme=dark&lang=pt", "").await;
+    assert!(dark.body.contains(">Entrar com T</text>") && dark.body.contains("#111827"));
+    // Unknown parameters fall back; nothing from the query is echoed.
+    let odd = get(&state, "/oauth/button.svg?theme=%3Cx%3E&lang=zz&x=%3Cscript%3E", "").await;
+    assert_eq!(odd.status, StatusCode::OK);
+    assert!(!odd.body.contains("script") && odd.body.contains("#ffffff"));
+
+    // Without the master key the provider cannot serve: 503, like its
+    // other documents.
+    let no_key = app_state(db.clone(), ON, None).await;
+    assert_eq!(get(&no_key, "/oauth/button.svg", "").await.status, StatusCode::SERVICE_UNAVAILABLE);
+
+    // With the provider off the image does not exist.
+    let (off, _) = setup(OFF, false).await;
+    assert_eq!(get(&off, "/oauth/button.svg", "").await.status, StatusCode::NOT_FOUND);
+}

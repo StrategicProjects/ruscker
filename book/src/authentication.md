@@ -240,6 +240,7 @@ while `RUSCKER_MASTER_KEY` is not set.
 |---|---|---|---|
 | `GET` | `/.well-known/openid-configuration` | anyone | none |
 | `GET` | `/oauth/jwks` | anyone | none |
+| `GET` | `/oauth/button.svg` | anyone | none |
 | `GET` | `/oauth/authorize` | the user's browser | the user's Ruscker session |
 | `POST` | `/oauth/token` | the system's server | client ID + secret |
 | `GET`, `POST` | `/oauth/userinfo` | the system's server | access token |
@@ -275,6 +276,26 @@ curl https://portal.example.org/.well-known/openid-configuration
 ```
 
 Cacheable for five minutes (`Cache-Control: public, max-age=300`).
+
+### Sign-in button — `GET /oauth/button.svg`
+
+An SVG image reading "Sign in with *portal title*", for a system to put
+on its own sign-in screen. Self-contained (no external font or image).
+
+| Parameter | Values | Default |
+|---|---|---|
+| `theme` | `light`, `dark` | `light` |
+| `lang` | `pt`, `en`, `es`, `fr` | `pt` |
+
+```html
+<a href="/login">
+  <img src="https://portal.example.org/oauth/button.svg" height="40"
+       alt="Sign in with the portal">
+</a>
+```
+
+The link goes to the system's **own** sign-in route, which starts the
+flow; the image is only a picture.
 
 ### Keys — `GET /oauth/jwks`
 

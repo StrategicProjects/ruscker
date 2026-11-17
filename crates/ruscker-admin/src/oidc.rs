@@ -369,6 +369,85 @@ pub fn discovery(issuer: &str) -> Value {
     })
 }
 
+/// Longest label drawn on the sign-in button; longer portal titles are
+/// cut with an ellipsis so the image stays a button, not a banner.
+const BUTTON_LABEL_MAX_CHARS: usize = 48;
+
+/// The "Sign in with <portal>" button as a standalone SVG (#1083), for
+/// client systems to show next to their own sign-in. Self-contained (no
+/// external font, image or script) so it works as an `<img>` anywhere.
+///
+/// SVG text does not reflow and the label's real width depends on the
+/// viewer's font, so the width is *estimated* from the characters and
+/// then imposed with `textLength`: whatever font is used, the text is
+/// fitted to the space reserved for it and can never overflow the
+/// button. `label` is escaped here.
+pub fn sign_in_button_svg(label: &str, dark: bool) -> String {
+    // Control characters and the two code points XML 1.0 forbids: an
+    // SVG is parsed strictly, one of them would break the whole image.
+    let mut label: String = label
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '\u{FFFE}' | '\u{FFFF}'))
+        .collect();
+    if label.chars().count() > BUTTON_LABEL_MAX_CHARS {
+        label = label.chars().take(BUTTON_LABEL_MAX_CHARS - 1).collect::<String>() + "…";
+    }
+    // Rough advance widths at 14px in a system sans-serif.
+    let text_w: f32 = label
+        .chars()
+        .map(|c| match c {
+            // Combining marks sit on the previous glyph.
+            '\u{0300}'..='\u{036F}' => 0.0,
+            // East Asian wide glyphs and emoji (tested before the
+            // alphabetic arm, which would otherwise claim them).
+            '\u{1100}'..='\u{115F}'
+            | '\u{2E80}'..='\u{A4CF}'
+            | '\u{AC00}'..='\u{D7A3}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{FE30}'..='\u{FE4F}'
+            | '\u{FF00}'..='\u{FF60}'
+            | '\u{1F300}'..='\u{1FAFF}' => 14.0,
+            'i' | 'j' | 'l' | 't' | 'f' | 'r' | 'I' | ' ' | '.' | ',' | '\'' | '|' | '!' => 4.4,
+            'm' | 'w' | 'M' | 'W' | '@' => 11.4,
+            c if c.is_uppercase() => 9.4,
+            c if c.is_ascii() || c.is_alphabetic() => 7.6,
+            _ => 9.0,
+        })
+        .sum::<f32>()
+        .ceil();
+    let (bg, border, fg) = if dark {
+        ("#111827", "#374151", "#f9fafb")
+    } else {
+        ("#ffffff", "#d0d5dd", "#1f2937")
+    };
+    let escaped = label
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    let width = 44.0 + text_w + 16.0;
+    format!(
+        concat!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="40" viewBox="0 0 {w} 40" role="img" aria-label="{label}">"##,
+            r##"<title>{label}</title>"##,
+            r##"<rect x="0.5" y="0.5" width="{rw}" height="39" rx="8" fill="{bg}" stroke="{border}"/>"##,
+            r##"<g transform="translate(12 10) scale(0.25)">"##,
+            r##"<polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>"##,
+            r##"<polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>"##,
+            r##"<polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/></g>"##,
+            r##"<text x="44" y="25" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif" "##,
+            r##"font-size="14" font-weight="500" fill="{fg}" textLength="{tw}" lengthAdjust="spacingAndGlyphs">{label}</text></svg>"##
+        ),
+        w = width,
+        rw = width - 1.0,
+        tw = text_w,
+        label = escaped,
+        bg = bg,
+        border = border,
+        fg = fg,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -387,6 +466,37 @@ mod tests {
         p.extend(URL_SAFE_NO_PAD.decode(jwk["x"].as_str().unwrap()).unwrap());
         p.extend(URL_SAFE_NO_PAD.decode(jwk["y"].as_str().unwrap()).unwrap());
         p
+    }
+
+    #[test]
+    fn sign_in_button_escapes_fits_and_follows_the_theme() {
+        let svg = sign_in_button_svg("Entrar com <Portal> & \"Cia\"", false);
+        assert!(svg.contains("Entrar com &lt;Portal&gt; &amp; &quot;Cia&quot;"));
+        assert!(!svg.contains("<Portal>"));
+        // The text is fitted to the reserved width, whatever the font.
+        assert!(svg.contains("textLength=") && svg.contains("lengthAdjust=\"spacingAndGlyphs\""));
+        // Nothing external: no href, no script, no style element.
+        for banned in ["href", "<script", "<style", "<image", "<foreignObject"] {
+            assert!(!svg.contains(banned), "{banned}");
+        }
+        assert!(svg.contains("#ffffff") && sign_in_button_svg("x", true).contains("#111827"));
+
+        // A longer label makes a wider button; an absurd one is cut.
+        let width = |s: &str| -> f32 {
+            let svg = sign_in_button_svg(s, false);
+            let i = svg.find("width=\"").unwrap() + 7;
+            svg[i..].split('"').next().unwrap().parse().unwrap()
+        };
+        assert!(width("Entrar com Portal de Dados") > width("Entrar"));
+        let long = sign_in_button_svg(&"a".repeat(500), false);
+        assert!(long.contains('…') && width(&"a".repeat(500)) < 500.0);
+        // Wide glyphs get wide slots; a combining mark adds nothing.
+        assert!(width("日本語ポータル") > width("abcdefg"));
+        assert_eq!(width("a\u{0303}o"), width("ao"));
+        // Code points XML forbids are dropped, so the image always parses.
+        assert!(!sign_in_button_svg("a\u{FFFE}b\u{FFFF}", false).contains(['\u{FFFE}', '\u{FFFF}']));
+        // Control characters never reach the document.
+        assert!(!sign_in_button_svg("a\u{0}b\nc", false).contains('\n'));
     }
 
     #[tokio::test]

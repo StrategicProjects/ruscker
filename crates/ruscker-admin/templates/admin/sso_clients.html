@@ -97,4 +97,22 @@
   </table>
 {% endif %}
 
+{# ── Sign-in button kit (#1083) ───────────────────────────────
+   An image served by the portal with its own title, for client systems
+   to put on their sign-in screen. Shown only when the provider is on. #}
+{% match button_src %}{% when Some with (src) %}
+<section class="editor-card mt-6" style="max-width:760px">
+  <div class="form-section__title">{{ self.t("admin-sso-button-title") }}</div>
+  <p class="spec-form-help" style="margin-top:0">{{ self.t("admin-sso-button-help") }}</p>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+    <span style="padding:14px 18px;border-radius:10px;background:#f3f4f6;display:inline-flex"><img src="{{ base }}/oauth/button.svg?lang={{ locale.code() }}" alt="" height="40"></span>
+    <span style="padding:14px 18px;border-radius:10px;background:#0b1220;display:inline-flex"><img src="{{ base }}/oauth/button.svg?theme=dark&amp;lang={{ locale.code() }}" alt="" height="40"></span>
+  </div>
+  <pre class="spec-form-input--mono text-xs" style="white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;border:0.5px solid var(--border);border-radius:8px;background:var(--surface-soft);margin:0">&lt;a href="/login"&gt;
+  &lt;img src="{{ src }}?lang={{ locale.code() }}" height="40" alt="{{ self.t("admin-sso-button-alt") }}"&gt;
+&lt;/a&gt;</pre>
+  <p class="spec-form-help" style="margin:0">{{ self.t("admin-sso-button-params") }}</p>
+</section>
+{% when None %}{% endmatch %}
+
 {% endblock %}

@@ -7,6 +7,14 @@ rust-version = "1.85"
 # (several current releases already need a newer compiler).
 resolver = "3"
 description = "Sign people in to a Rust backend through a Ruscker portal (OpenID Connect, code flow + PKCE)"
+authors = [
+    "André Leite <leite@castlab.org>",
+    "Marcos Wasiliew <marcos.wasiliew@gmail.com>",
+    "Hugo Vasconcelos <hugo.vasconcelos@ufpe.br>",
+    "Carlos Amorim <carlos.agaf@ufpe.br>",
+    "Diogo Bezerra <diogo.bezerra@ufpe.br>",
+    "Júlia Nascimento Barreto <juliabarreto@gd.seplag.pe.gov.br>",
+]
 license = "Apache-2.0"
 repository = "https://github.com/StrategicProjects/ruscker"
 homepage = "https://ruscker.com/client-packages.html"

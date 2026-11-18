@@ -10,7 +10,14 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-authors = [{ name = "André Leite", email = "leite@castlab.org" }]
+authors = [
+    { name = "André Leite", email = "leite@castlab.org" },
+    { name = "Marcos Wasiliew", email = "marcos.wasiliew@gmail.com" },
+    { name = "Hugo Vasconcelos", email = "hugo.vasconcelos@ufpe.br" },
+    { name = "Carlos Amorim", email = "carlos.agaf@ufpe.br" },
+    { name = "Diogo Bezerra", email = "diogo.bezerra@ufpe.br" },
+    { name = "Júlia Nascimento Barreto", email = "juliabarreto@gd.seplag.pe.gov.br" },
+]
 keywords = ["oidc", "openid-connect", "sso", "authentication", "pkce"]
 dependencies = [
     # ES256 signature checks and JWKS parsing. The [crypto] extra pulls in

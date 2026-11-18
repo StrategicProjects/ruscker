@@ -4,6 +4,13 @@
   "description": "Sign people in through a Ruscker portal (OpenID Connect): a dependency-free browser half and a Node backend half.",
   "license": "Apache-2.0",
   "author": "André Leite <leite@castlab.org>",
+  "contributors": [
+    "Marcos Wasiliew <marcos.wasiliew@gmail.com>",
+    "Hugo Vasconcelos <hugo.vasconcelos@ufpe.br>",
+    "Carlos Amorim <carlos.agaf@ufpe.br>",
+    "Diogo Bezerra <diogo.bezerra@ufpe.br>",
+    "Júlia Nascimento Barreto <juliabarreto@gd.seplag.pe.gov.br>"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/StrategicProjects/ruscker.git",

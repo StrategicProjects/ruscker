@@ -9,6 +9,34 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.56 — 2026-11-18
+
+The package can now keep a server up to date by itself.
+
+- **`ruscker-update`** ships in the `.deb`. `--check` says whether a
+  newer release exists; `--apply` downloads it, checks it against the
+  published checksum, installs it keeping your configuration, and
+  verifies that the service came back on the new version and ready. If
+  the verification fails, the previous version and the database copy are
+  put back. `--status` shows what the last run did.
+- **A timer, turned off by default.** `systemctl enable --now
+  ruscker-update.timer` makes the server look for a release every hour;
+  `/etc/ruscker/update.conf` decides whether it only records it
+  (`MODE=check`, the default) or installs it (`MODE=auto`), in which
+  hours, and up to which version.
+- **Releases that change the database wait for a person.** The updater
+  compares the database version of the installed binary and of the new
+  one (new subcommand `ruscker schema-version`) and holds a release that
+  migrates unless told otherwise. A catalog in a shared Postgres
+  database is never migrated by the updater.
+- A release that was installed and undone is not tried again by the
+  timer.
+
+This release itself is still installed the usual way; the updater is
+available from here on. See [Upgrading](./deploying.md#upgrading).
+
+No database migration in this release.
+
 ## v0.2.55 — 2026-11-18
 
 Sign-in can no longer be paused for everybody by someone failing on

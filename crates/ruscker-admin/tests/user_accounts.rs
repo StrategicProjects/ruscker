@@ -483,6 +483,85 @@ async fn password_page_explains_itself_to_a_token_session() {
     assert!(body.contains(r#"name="new_password""#));
 }
 
+/// The sign-in throttle works per account and per address: repeated wrong
+/// passwords for one account get `429` + `Retry-After` and the sign-in
+/// page saying so — while another person signs in normally, which the
+/// old single global window did not allow.
+#[tokio::test]
+async fn repeated_wrong_passwords_slow_one_account_not_everyone() {
+    let (mut state, pool) = state_with_db().await;
+    state.config = Arc::new(
+        Config::from_yaml("server:\n  useForwardHeaders: true\nproxy:\n  title: T\n  specs: []\n").unwrap(),
+    );
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool.clone());
+    for who in ["alice", "bob"] {
+        ruscker_admin::db::users::create(&db, who, "Correct#Pass9", Role::Editor, false, &[], None)
+            .await
+            .unwrap();
+    }
+    let attempt = |state: AppState, body: &'static str, from: &'static str| async move {
+        let resp = router(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/login")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("x-forwarded-for", from)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let retry = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_string);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        (status, retry, String::from_utf8_lossy(&body).into_owned())
+    };
+    const MALLORY: &str = "203.0.113.66";
+
+    // Three wrong passwords for alice from one address…
+    for _ in 0..3 {
+        let (status, _, _) = attempt(state.clone(), "username=alice&password=WRONG", MALLORY).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    // …and the next attempt is told to wait, even with the RIGHT
+    // password: the throttle answers before the password is looked at.
+    let (status, retry, body) = attempt(state.clone(), "username=alice&password=Correct%23Pass9", MALLORY).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(retry.as_deref(), Some("1"), "the first wait is one second");
+    assert!(body.contains("admin-login-card") && body.contains("Muitas tentativas"), "the sign-in page, saying why");
+
+    // Nobody else is affected: bob from the same address, and alice
+    // herself from her own.
+    let (status, _, _) = attempt(state.clone(), "username=bob&password=Correct%23Pass9", MALLORY).await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let (status, _, _) = attempt(state.clone(), "username=alice&password=Correct%23Pass9", "198.51.100.20").await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+
+    // Her success cleared the account-wide count, but the guesser's own
+    // streak (their address) is theirs to wait out.
+    let (status, _, _) = attempt(state.clone(), "username=alice&password=WRONG", MALLORY).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+
+    // The token form is throttled by address, not by anyone's account.
+    let token = |state: AppState, from: &'static str| async move {
+        router(state)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/login/token")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("x-forwarded-for", from)
+                    .body(Body::from("token=nope"))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+    };
+    assert_eq!(token(state.clone(), "198.51.100.77").await, StatusCode::UNAUTHORIZED);
+}
+
 /// Refused sign-ins are reachable without an account, so their audit
 /// rows are budgeted: a burst from one address leaves a handful of rows,
 /// not one per attempt — and cannot push real events out of the queue.

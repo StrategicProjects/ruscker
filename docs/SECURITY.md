@@ -68,13 +68,29 @@ Status: living document. Tracks the Phase 5 security audit
   path so an operator can never be locked out; treat it as a
   break-glass secret. The old `RUSCKER_EDITOR_TOKEN`/`RUSCKER_VIEWER_TOKEN`
   (the #101 MVP) are **removed** — Editor/Viewer are DB accounts now.
-- **[implemented]** Login rate limiting —
-  `auth::LoginRateLimiter` (global sliding window, default 10
-  failures / 60 s). Saturated → `429` + `Retry-After`. Wired in
-  `routes::admin::login_submit`. **Global, not per-IP**: behind a
-  reverse proxy the peer IP is the proxy, and a per-IP key would
-  trust a spoofable `X-Forwarded-For`. A global cap can't be
-  evaded by rotating source addresses.
+- **[implemented]** Sign-in throttling — `auth::LoginRateLimiter`,
+  on the password and the break-glass token forms. Failures are counted
+  in four layers, each refusing on its own with `429` + `Retry-After`:
+  - **account + address**: from the third failure in a row, each new
+    attempt waits twice as long (1 s, 2 s, 4 s … up to 5 min);
+  - **account**, from any address: 30 failures per 10 minutes, so
+    spreading guesses over many addresses does not help;
+  - **address** (an IPv6 /64 counts as one): 30 failures per minute,
+    against one password tried on many accounts;
+  - **global**: 300 failures per minute, the last line.
+
+  A refused attempt is not counted, a success clears that account's
+  counters only, and an unknown username is throttled exactly like a
+  real one. The first version was a single global window (10 failures
+  per minute): it stopped guessing but let anyone pause sign-in for
+  everybody by failing on purpose. The address is the one resolved for
+  auditing — from `X-Forwarded-For` only with
+  `server.useForwardHeaders`; without it every request has the proxy's
+  address and the address layer becomes one shared ceiling. Counters
+  are in memory, per process (an HA deployment throttles per node).
+  There is deliberately no CAPTCHA: a third-party one would put an
+  outside script on the page that receives passwords and need outbound
+  access from the server.
 - **[implemented]** Self-service password change revokes the
   account's **other** sessions (#739) — changing your password is the
   natural response to a suspected compromise, so every other live

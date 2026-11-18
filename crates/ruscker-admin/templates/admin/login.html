@@ -76,6 +76,12 @@
     {% if bootstrap %}{{ self.t("admin-login-help") }}{% else %}{{ self.t("admin-login-help-user") }}{% endif %}
   </p>
 
+  {% if error == "too-many" %}
+    <div class="admin-login-error" role="alert">
+      <i class="ti ti-clock" aria-hidden="true"></i>
+      {{ self.t("admin-login-error-throttled") }}
+    </div>
+  {% endif %}
   {% if error == "wrong-token" || error == "wrong-login" %}
     <div class="admin-login-error" role="alert">
       <i class="ti ti-alert-circle" aria-hidden="true"></i>

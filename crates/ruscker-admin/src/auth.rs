@@ -334,72 +334,231 @@ fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// Global sliding-window rate limiter for login attempts.
-///
-/// Brute-forcing the admin token is the threat. This bounds how
-/// many failed attempts the server will entertain in a window,
-/// regardless of source — deliberately **global** (not per-IP)
-/// because Ruscker runs behind a reverse proxy where the peer
-/// IP is always the proxy, and a per-IP key would trust a
-/// spoofable `X-Forwarded-For`. A global cap can't be evaded by
-/// rotating source addresses.
-///
-/// Trade-off: a flood of bad attempts can lock out the
-/// legitimate operator for up to `window`. Acceptable for a
-/// single-operator install and documented in SECURITY.md; the
-/// window is short (60s) so lockout self-heals quickly.
-///
-/// Successful logins clear the window so an operator who
-/// fat-fingered a few times isn't blocked once they get it right.
-#[derive(Debug)]
-pub struct LoginRateLimiter {
-    failures: std::sync::Mutex<std::collections::VecDeque<std::time::Instant>>,
-    max: usize,
-    window: std::time::Duration,
+/// What the sign-in throttle allows. The defaults ([`Default`]) are the
+/// production policy; tests build smaller ones.
+#[derive(Debug, Clone, Copy)]
+pub struct LoginPolicy {
+    /// Window of the address and global counters.
+    pub window: std::time::Duration,
+    /// Failures in `window` from everywhere before sign-in pauses for
+    /// everyone. A high ceiling: the last line, not the working limit.
+    pub global_max: usize,
+    /// Failures in `window` from one address (an IPv6 /64 counts as one).
+    pub address_max: usize,
+    /// Failures in `account_window` against one account, from anywhere.
+    pub account_max: usize,
+    pub account_window: std::time::Duration,
+    /// After this many failures in a row for one account from one
+    /// address, each further attempt waits: 1 s, 2 s, 4 s … up to
+    /// `backoff_cap`.
+    pub backoff_after: u32,
+    pub backoff_cap: std::time::Duration,
 }
+
+impl Default for LoginPolicy {
+    fn default() -> Self {
+        use std::time::Duration;
+        Self {
+            window: Duration::from_secs(60),
+            global_max: 300,
+            address_max: 30,
+            account_max: 30,
+            account_window: Duration::from_secs(600),
+            backoff_after: 3,
+            backoff_cap: Duration::from_secs(300),
+        }
+    }
+}
+
+/// Failures in a row for one account from one address.
+#[derive(Debug, Clone, Copy)]
+struct Streak {
+    failures: u32,
+    last: std::time::Instant,
+}
+
+#[derive(Debug, Default)]
+struct LimiterState {
+    global: std::collections::VecDeque<std::time::Instant>,
+    by_address: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    by_account: std::collections::HashMap<String, std::collections::VecDeque<std::time::Instant>>,
+    streaks: std::collections::HashMap<(String, String), Streak>,
+}
+
+/// Throttle for sign-in attempts (password and break-glass token).
+///
+/// Guessing a password is the threat; locking honest people out is the
+/// cost to avoid. The first version was one global window: it stopped
+/// guessing, but anyone could pause sign-in **for everybody** by failing
+/// on purpose — tolerable for a single-operator install, not for a
+/// portal that is the sign-in of several systems. So failures are now
+/// counted where they belong, in four layers, each refusing on its own:
+///
+/// 1. **Account + address** — after a few failures in a row, each new
+///    attempt waits twice as long as the last. Slows a guesser to a
+///    crawl; someone else signing in to the same account from another
+///    address is not affected.
+/// 2. **Account**, from anywhere — a ceiling on failures per ten
+///    minutes, so spreading guesses over many addresses does not help.
+/// 3. **Address** — a ceiling per minute, against trying one password
+///    on many accounts.
+/// 4. **Global** — a high ceiling, the last line.
+///
+/// The address is the client's as the portal resolves it for auditing:
+/// taken from `X-Forwarded-For` only when the operator trusts forwarded
+/// headers, the TCP peer otherwise. Behind a proxy WITHOUT that trust
+/// every request has the proxy's address, and layer 3 degrades to one
+/// shared ceiling — which is the old behaviour, not a new hole.
+///
+/// A refused attempt is not counted (it never reached the password
+/// check), so being throttled does not extend the throttle. A success
+/// clears the account's own counters only.
+///
+/// In memory, per process: an HA deployment throttles per node.
+#[derive(Debug, Default)]
+pub struct LoginRateLimiter {
+    state: std::sync::Mutex<LimiterState>,
+    policy: LoginPolicy,
+}
+
+/// Most distinct keys tracked per map. The ceilings above already bound
+/// how many failures can be recorded; this is the backstop.
+const LIMITER_MAX_KEYS: usize = 20_000;
+/// Longest account key kept (a typed username can be any length).
+const LIMITER_KEY_MAX_CHARS: usize = 128;
 
 impl LoginRateLimiter {
-    pub fn new(max: usize, window: std::time::Duration) -> Self {
-        Self {
-            failures: std::sync::Mutex::new(std::collections::VecDeque::new()),
-            max,
-            window,
-        }
+    pub fn with_policy(policy: LoginPolicy) -> Self {
+        Self { state: std::sync::Mutex::new(LimiterState::default()), policy }
     }
 
-    /// Default policy: 10 failed attempts per 60s. Generous for
-    /// human retries, far below anything that threatens a
-    /// high-entropy token.
+    /// The production policy ([`LoginPolicy::default`]).
     pub fn default_policy() -> Self {
-        Self::new(10, std::time::Duration::from_secs(60))
+        Self::with_policy(LoginPolicy::default())
     }
 
-    /// Returns `true` if a login attempt is allowed right now
-    /// (i.e. the failure window isn't saturated). Prunes expired
-    /// failures as a side effect.
-    pub fn allow(&self) -> bool {
-        let now = std::time::Instant::now();
-        let mut q = self.failures.lock().unwrap();
-        while q.front().is_some_and(|t| now.duration_since(*t) > self.window) {
-            q.pop_front();
+    /// May this attempt go ahead? `Err` carries how long to wait.
+    /// `account` is the typed username (`None` for the token form).
+    pub fn check(&self, account: Option<&str>, address: &str) -> Result<(), std::time::Duration> {
+        self.check_at(std::time::Instant::now(), account, address)
+    }
+
+    pub fn record_failure(&self, account: Option<&str>, address: &str) {
+        self.record_failure_at(std::time::Instant::now(), account, address)
+    }
+
+    /// A correct sign-in: forget this account's failures (from this
+    /// address and in total). Other accounts and the address counter
+    /// are untouched — signing in to your own account must not buy
+    /// guesses against someone else's.
+    pub fn record_success(&self, account: Option<&str>, address: &str) {
+        let Some(account) = account_key(account) else { return };
+        let mut st = self.lock();
+        st.by_account.remove(&account);
+        st.streaks.remove(&(account, address.to_string()));
+    }
+
+    /// The lock, even after a panic elsewhere while holding it: the
+    /// counters stay usable (a poisoned throttle must not become "no
+    /// throttle", nor "nobody can sign in").
+    fn lock(&self) -> std::sync::MutexGuard<'_, LimiterState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn check_at(
+        &self,
+        now: std::time::Instant,
+        account: Option<&str>,
+        address: &str,
+    ) -> Result<(), std::time::Duration> {
+        let p = &self.policy;
+        let mut st = self.lock();
+        // Time until the oldest failure leaves a full window.
+        fn full(
+            q: &mut std::collections::VecDeque<std::time::Instant>,
+            max: usize,
+            window: std::time::Duration,
+            now: std::time::Instant,
+        ) -> Option<std::time::Duration> {
+            while q.front().is_some_and(|t| now.duration_since(*t) > window) {
+                q.pop_front();
+            }
+            (q.len() >= max).then(|| window.saturating_sub(now.duration_since(*q.front().unwrap())))
         }
-        q.len() < self.max
+        if let Some(wait) = full(&mut st.global, p.global_max, p.window, now) {
+            return Err(wait);
+        }
+        if let Some(q) = st.by_address.get_mut(address) {
+            if let Some(wait) = full(q, p.address_max, p.window, now) {
+                return Err(wait);
+            }
+        }
+        let Some(account) = account_key(account) else { return Ok(()) };
+        if let Some(q) = st.by_account.get_mut(&account) {
+            if let Some(wait) = full(q, p.account_max, p.account_window, now) {
+                return Err(wait);
+            }
+        }
+        if let Some(streak) = st.streaks.get(&(account, address.to_string())) {
+            let wait = backoff(p, streak.failures);
+            let waited = now.duration_since(streak.last);
+            if waited < wait {
+                return Err(wait - waited);
+            }
+        }
+        Ok(())
     }
 
-    pub fn record_failure(&self) {
-        let mut q = self.failures.lock().unwrap();
-        q.push_back(std::time::Instant::now());
-    }
-
-    pub fn record_success(&self) {
-        self.failures.lock().unwrap().clear();
+    fn record_failure_at(&self, now: std::time::Instant, account: Option<&str>, address: &str) {
+        let p = self.policy;
+        let mut st = self.lock();
+        // Housekeeping first, so the maps cannot grow without bound.
+        if st.by_address.len() >= LIMITER_MAX_KEYS
+            || st.by_account.len() >= LIMITER_MAX_KEYS
+            || st.streaks.len() >= LIMITER_MAX_KEYS
+        {
+            st.by_address.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= p.window));
+            st.by_account.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= p.account_window));
+            st.streaks.retain(|_, s| now.duration_since(s.last) <= p.backoff_cap);
+        }
+        st.global.push_back(now);
+        if st.by_address.len() < LIMITER_MAX_KEYS || st.by_address.contains_key(address) {
+            st.by_address.entry(address.to_string()).or_default().push_back(now);
+        }
+        let Some(account) = account_key(account) else { return };
+        if st.by_account.len() < LIMITER_MAX_KEYS || st.by_account.contains_key(&account) {
+            st.by_account.entry(account.clone()).or_default().push_back(now);
+        }
+        let key = (account, address.to_string());
+        if st.streaks.len() < LIMITER_MAX_KEYS || st.streaks.contains_key(&key) {
+            let streak = st.streaks.entry(key).or_insert(Streak { failures: 0, last: now });
+            // A streak that went quiet for longer than the longest wait
+            // starts over: old mistakes are not held against anyone.
+            if now.duration_since(streak.last) > p.backoff_cap {
+                streak.failures = 0;
+            }
+            streak.failures = streak.failures.saturating_add(1);
+            streak.last = now;
+        }
     }
 }
 
-impl Default for LoginRateLimiter {
-    fn default() -> Self {
-        Self::default_policy()
+/// How long to wait after `failures` in a row: nothing until
+/// `backoff_after`, then 1 s doubling up to the cap.
+fn backoff(p: &LoginPolicy, failures: u32) -> std::time::Duration {
+    if failures < p.backoff_after {
+        return std::time::Duration::ZERO;
     }
+    let doublings = (failures - p.backoff_after).min(20);
+    std::time::Duration::from_secs(1u64 << doublings).min(p.backoff_cap)
+}
+
+/// The key an account is counted under: as typed, trimmed, lower-cased
+/// and cut — NOT looked up, so an unknown username is throttled exactly
+/// like a real one (and reveals nothing by behaving differently).
+fn account_key(account: Option<&str>) -> Option<String> {
+    let key: String = account?.trim().to_lowercase().chars().take(LIMITER_KEY_MAX_CHARS).collect();
+    (!key.is_empty()).then_some(key)
 }
 
 /// Whether the original client request reached us over HTTPS.
@@ -773,36 +932,139 @@ mod tests {
         assert!(!ct_eq(b"abc", b"ab")); // length mismatch
     }
 
-    #[test]
-    fn rate_limiter_allows_until_saturated() {
-        let rl = LoginRateLimiter::new(3, Duration::from_secs(60));
-        assert!(rl.allow());
-        rl.record_failure();
-        rl.record_failure();
-        assert!(rl.allow(), "2 < 3 still allowed");
-        rl.record_failure();
-        assert!(!rl.allow(), "3 failures saturate the window");
+    /// A small policy so the tests read easily.
+    fn policy() -> LoginPolicy {
+        LoginPolicy {
+            window: Duration::from_secs(60),
+            global_max: 50,
+            address_max: 8,
+            account_max: 6,
+            account_window: Duration::from_secs(600),
+            backoff_after: 3,
+            backoff_cap: Duration::from_secs(300),
+        }
     }
 
     #[test]
-    fn rate_limiter_success_clears_window() {
-        let rl = LoginRateLimiter::new(2, Duration::from_secs(60));
-        rl.record_failure();
-        rl.record_failure();
-        assert!(!rl.allow());
-        rl.record_success();
-        assert!(rl.allow(), "success clears the failure window");
+    fn repeated_failures_on_one_account_wait_longer_each_time() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        let t0 = std::time::Instant::now();
+        let at = |s: u64| t0 + Duration::from_secs(s);
+        // Two mistakes cost nothing.
+        for s in 0..2 {
+            assert!(rl.check_at(at(s), Some("ana"), "10.0.0.1").is_ok());
+            rl.record_failure_at(at(s), Some("ana"), "10.0.0.1");
+        }
+        assert!(rl.check_at(at(2), Some("ana"), "10.0.0.1").is_ok());
+        // The third starts the waits: 1 s, then 2 s, then 4 s.
+        rl.record_failure_at(at(2), Some("ana"), "10.0.0.1");
+        assert_eq!(rl.check_at(at(2), Some("ana"), "10.0.0.1"), Err(Duration::from_secs(1)));
+        assert!(rl.check_at(at(3), Some("ana"), "10.0.0.1").is_ok());
+        rl.record_failure_at(at(3), Some("ana"), "10.0.0.1");
+        assert_eq!(rl.check_at(at(4), Some("ana"), "10.0.0.1"), Err(Duration::from_secs(1)));
+        assert!(rl.check_at(at(5), Some("ana"), "10.0.0.1").is_ok());
+        rl.record_failure_at(at(5), Some("ana"), "10.0.0.1");
+        assert_eq!(rl.check_at(at(5), Some("ana"), "10.0.0.1"), Err(Duration::from_secs(4)));
+
+        // The username is matched as typed, whatever its case or padding.
+        assert!(rl.check_at(at(5), Some("  ANA "), "10.0.0.1").is_err());
+        // Nobody else is slowed: another account, or the same account
+        // from another address.
+        assert!(rl.check_at(at(5), Some("bia"), "10.0.0.1").is_ok());
+        assert!(rl.check_at(at(5), Some("ana"), "10.0.0.2").is_ok());
+        // The token form (no account) is not slowed by an account's streak.
+        assert!(rl.check_at(at(5), None, "10.0.0.1").is_ok());
     }
 
     #[test]
-    fn rate_limiter_prunes_expired_failures() {
-        // Zero-length window → every failure is immediately
-        // expired, so allow() always trims back to empty.
-        let rl = LoginRateLimiter::new(1, Duration::from_secs(0));
-        rl.record_failure();
-        rl.record_failure();
-        std::thread::sleep(Duration::from_millis(2));
-        assert!(rl.allow(), "expired failures pruned");
+    fn the_wait_is_capped_and_a_quiet_streak_starts_over() {
+        let rl = LoginRateLimiter::with_policy(LoginPolicy { account_max: 1000, address_max: 1000, global_max: 1000, ..policy() });
+        let t0 = std::time::Instant::now();
+        let mut now = t0;
+        for _ in 0..40 {
+            rl.record_failure_at(now, Some("ana"), "a");
+            now += Duration::from_millis(10);
+        }
+        // 40 failures in a row: the wait is the cap, not 2^37 seconds.
+        assert_eq!(rl.check_at(now, Some("ana"), "a").unwrap_err().as_secs(), 299);
+        // After the cap has passed, one new mistake does not bring the
+        // long wait back.
+        let later = now + Duration::from_secs(301);
+        assert!(rl.check_at(later, Some("ana"), "a").is_ok());
+        rl.record_failure_at(later, Some("ana"), "a");
+        assert!(rl.check_at(later, Some("ana"), "a").is_ok());
+    }
+
+    #[test]
+    fn a_success_clears_that_account_only() {
+        // A roomy address ceiling: this test is about the account streaks.
+        let rl = LoginRateLimiter::with_policy(LoginPolicy { address_max: 100, ..policy() });
+        let t0 = std::time::Instant::now();
+        for who in ["ana", "bia"] {
+            for _ in 0..4 {
+                rl.record_failure_at(t0, Some(who), "a");
+            }
+        }
+        assert!(rl.check_at(t0, Some("ana"), "a").is_err());
+        rl.record_success(Some("Ana"), "a");
+        assert!(rl.check_at(t0, Some("ana"), "a").is_ok(), "her own streak is gone");
+        assert!(rl.check_at(t0, Some("bia"), "a").is_err(), "signing in does not buy guesses on another account");
+    }
+
+    #[test]
+    fn guesses_spread_over_many_addresses_hit_the_account_ceiling() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        let t0 = std::time::Instant::now();
+        // Six addresses, one guess each: no streak anywhere…
+        for i in 0..6 {
+            let addr = format!("10.0.0.{i}");
+            assert!(rl.check_at(t0, Some("ana"), &addr).is_ok());
+            rl.record_failure_at(t0, Some("ana"), &addr);
+        }
+        // …but the account itself has had enough, from any address.
+        let wait = rl.check_at(t0, Some("ana"), "10.9.9.9").unwrap_err();
+        assert_eq!(wait, Duration::from_secs(600));
+        assert!(rl.check_at(t0, Some("bia"), "10.9.9.9").is_ok());
+        // It frees up when the window has passed.
+        assert!(rl.check_at(t0 + Duration::from_secs(601), Some("ana"), "10.9.9.9").is_ok());
+    }
+
+    #[test]
+    fn one_password_tried_on_many_accounts_hits_the_address_ceiling() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        let t0 = std::time::Instant::now();
+        for i in 0..8 {
+            let who = format!("user{i}");
+            assert!(rl.check_at(t0, Some(&who), "10.0.0.1").is_ok());
+            rl.record_failure_at(t0, Some(&who), "10.0.0.1");
+        }
+        assert_eq!(rl.check_at(t0, Some("user99"), "10.0.0.1"), Err(Duration::from_secs(60)));
+        assert_eq!(rl.check_at(t0, None, "10.0.0.1"), Err(Duration::from_secs(60)), "the token form too");
+        // Everyone else signs in normally: this is the point of the change.
+        assert!(rl.check_at(t0, Some("ana"), "10.0.0.2").is_ok());
+        assert!(rl.check_at(t0 + Duration::from_secs(61), Some("user99"), "10.0.0.1").is_ok());
+    }
+
+    #[test]
+    fn the_global_ceiling_is_the_last_line() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        let t0 = std::time::Instant::now();
+        for i in 0..50 {
+            rl.record_failure_at(t0, Some(&format!("u{i}")), &format!("a{i}"));
+        }
+        assert!(rl.check_at(t0, Some("ana"), "elsewhere").is_err());
+        assert!(rl.check_at(t0 + Duration::from_secs(61), Some("ana"), "elsewhere").is_ok());
+    }
+
+    #[test]
+    fn account_keys_are_bounded_and_blank_is_no_account() {
+        assert_eq!(account_key(None), None);
+        assert_eq!(account_key(Some("   ")), None);
+        assert_eq!(account_key(Some(&"x".repeat(5000))).unwrap().chars().count(), LIMITER_KEY_MAX_CHARS);
+        // The production policy: the working limits are per account and
+        // per address; the global one is far above them.
+        let p = LoginPolicy::default();
+        assert!(p.global_max >= 10 * p.address_max && p.backoff_after >= 3);
     }
 
     #[test]

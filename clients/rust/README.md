@@ -4,7 +4,7 @@ A thin client that signs people in to a Rust backend through a Ruscker
 portal ("Sign in with …"). The portal is an OpenID Connect provider with a
 narrow profile — authorization code + PKCE `S256`, a confidential client,
 ES256 ID tokens — and this crate is pre-set for exactly that. It follows
-the [shared contract](../README.md).
+the [shared contract](https://github.com/StrategicProjects/ruscker/blob/main/clients/README.md).
 
 It implements no cryptography: ID tokens are verified by
 [`jsonwebtoken`](https://crates.io/crates/jsonwebtoken) against the
@@ -18,11 +18,9 @@ MSRV: Rust 1.85.
 
 ## Install
 
-Not published to a registry; depend on it by path or git:
-
 ```toml
 [dependencies]
-ruscker-sso = { path = "clients/rust" }
+ruscker-sso = "0.1"
 ```
 
 ## Example (axum 0.8)

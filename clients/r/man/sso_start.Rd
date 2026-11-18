@@ -22,3 +22,17 @@ Send the person's browser to \code{url}. Keep \code{pending} \strong{on the serv
 in a short-lived \code{HttpOnly} cookie) until they come back; it is one
 plain list, so it can be saved however the app likes. Use it once.
 }
+\examples{
+\dontrun{
+# Needs a reachable portal: the first call reads its discovery document.
+client <- sso_client(
+  issuer = "https://portal.example.org",
+  client_id = "my-app",
+  client_secret = Sys.getenv("MY_APP_CLIENT_SECRET"),
+  redirect_uri = "https://app.example.org/"
+)
+start <- sso_start(client)
+start$url      # send the browser here
+start$pending  # keep until the person comes back
+}
+}

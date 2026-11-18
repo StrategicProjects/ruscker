@@ -9,6 +9,59 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.55 — 2026-11-18
+
+Sign-in can no longer be paused for everybody by someone failing on
+purpose. Reviewed by independent reviewers before merging (#1094).
+
+- **The sign-in throttle works per account and per address** (#1094).
+  It used to be one window for the whole portal — ten failures a
+  minute, everyone together — which stopped password guessing but let
+  anyone lock everybody out. Attempts are now counted where they
+  belong:
+  - **account + address**: after three failures in a row each new
+    attempt waits twice as long (1 s, 2 s, 4 s … up to 5 minutes) — a
+    growing delay, not a lockout;
+  - **account**, from any address: 30 attempts per 10 minutes;
+  - **address**: 30 attempts per minute;
+  - **global**: 300 attempts per minute, the last line.
+
+  A throttled attempt gets `429` with `Retry-After` and the sign-in
+  page saying so. Attempts are counted when they are admitted, so a
+  burst of parallel requests cannot outrun the limits.
+- **People the portal knows are not held hostage.** An account that
+  has signed in correctly from an address in the last 30 days is
+  exempt, at that address, from the three collective ceilings and
+  keeps only its own growing delay. A password change or reset, or
+  deleting the account, forgets where it was known.
+- **That memory survives restarts.** It is rebuilt from the audit log
+  and — when `RUSCKER_COOKIE_KEY` is set — from a small table of the
+  throttle's own (`signin_memory`) that keeps a keyed hash of each
+  (account, address) pair instead of the address, for 30 days,
+  whatever the audit retention is. Nodes of an HA deployment hear of
+  each other's sign-ins within about half a minute.
+- **The break-glass token form** has a low ceiling of its own (10
+  attempts a minute, all addresses together) and shares no counter
+  with the password form: flooding one does not close the other. An
+  address the token was used correctly from is not shut out by
+  strangers failing on purpose.
+- There is deliberately **no CAPTCHA**: a third-party one would put an
+  outside script on the page that receives passwords and need outbound
+  access from the server.
+
+What remains possible, and why, is in `docs/SECURITY.md` ("Sign-in
+throttling") — chiefly that two people at the same address (an office
+network) cannot be told apart without something per browser.
+
+**Upgrade notes.** Migration `0043` runs on start (SQLite and
+Postgres). Behind a reverse proxy, `server.useForwardHeaders` must be
+on for the per-address layers to tell people apart. Set
+`RUSCKER_COOKIE_KEY` to keep the throttle's memory across restarts
+when the audit retention is short, and for the token form. The new
+table keeps the account name and the date of its last correct sign-in
+per address for 30 days, and one row per address where the break-glass
+token was used.
+
 ## v0.2.54 — 2026-11-17
 
 A security fix for hosted apps that read identity headers, and the

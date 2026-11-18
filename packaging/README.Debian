@@ -35,6 +35,25 @@ filled in on upgrade if an older install was missing them. Log in at
   sudo grep RUSCKER_ADMIN_TOKEN /etc/ruscker/ruscker.env
   # to rotate: edit the value, then  sudo systemctl restart ruscker
 
+Updating
+--------
+
+  sudo ruscker-update --check     # is there a newer release?
+  sudo ruscker-update --apply     # download, verify, install, check
+  ruscker-update --status         # what the last run did
+
+The updater copies the database first and goes back to the previous
+version if the new one does not come up. A release that changes the
+database is held until you run it with --allow-migrations.
+
+A timer that follows releases is installed but NOT enabled:
+
+  sudo systemctl enable --now ruscker-update.timer
+
+What it does is set in /etc/ruscker/update.conf (MODE=check only
+records a newer release; MODE=auto installs it, in the hours given by
+WINDOW). Details: https://ruscker.com/deploying.html#upgrading
+
 First steps
 -----------
 1. Add your apps/APIs in the admin panel at /admin (they live in the

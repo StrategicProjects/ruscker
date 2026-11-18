@@ -247,8 +247,15 @@ sudo apt install ./ruscker_<version>-1_amd64.deb
 # freshly-generated admin token on first install.
 ```
 
-Upgrades preserve `/etc/ruscker` and `/var/lib/ruscker`. Install the new
-package, restart, then verify the binary and readiness endpoint:
+Upgrades preserve `/etc/ruscker` and `/var/lib/ruscker`. The package
+carries an updater: `sudo ruscker-update --apply` downloads the newest
+release, checks it, installs it, verifies the service and goes back to the
+previous version if the new one does not come up. A timer that ships turned
+off can do the same on a schedule — see
+[Upgrading](https://ruscker.com/deploying.html#upgrading).
+
+By hand: install the new package, restart, then verify the binary and
+readiness endpoint:
 
 ```bash
 sudo apt-get install -y --no-install-recommends ./ruscker_<version>-1_amd64.deb
@@ -319,6 +326,7 @@ ruscker import <path> --config-db-url <dsn>   # populate a Postgres HA catalog
 ruscker export --db <file>               # round-trip SQLite back to YAML
 ruscker show <path>                       # render YAML with env vars interpolated
 ruscker inspect <path>                    # dump the fully-parsed config as JSON
+ruscker schema-version                    # newest database migration this binary carries
 ```
 
 Without `--config`, `serve` loads `ruscker.yml` from the working directory,

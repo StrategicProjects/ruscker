@@ -38,3 +38,12 @@ keys, \code{iss}, \code{aud}, \code{exp}, \code{nonce} -> \code{rusckersso_inval
 Steps 1-3 happen before any network call. A code works once: never
 call this twice with the same callback.
 }
+\examples{
+\dontrun{
+# Needs a reachable portal and the callback of a real sign-in.
+# In a Shiny server function, with `start` kept from sso_start():
+id <- sso_finish(client, session$clientData$url_search, start$pending)
+id$sub                          # the person's permanent id
+has_role(id, "fiscal", "gestor")
+}
+}

@@ -1,15 +1,19 @@
 Package: rusckersso
-Title: Sign People in Through a Ruscker Portal
+Title: Sign People in Through a 'Ruscker' Portal
 Version: 0.1.0
 Authors@R:
-    person("André", "Leite", email = "leite@castlab.org", role = c("aut", "cre"),
+    person("André", "Leite", email = "leite@castlab.org",
+           role = c("aut", "cre", "cph"),
            comment = c(ORCID = "0000-0002-4718-9766"))
-Description: Two small helpers for R web apps that need to know who is
-    using them. Apps hosted inside a Ruscker portal read the identity the
-    portal's proxy adds to every request. Shiny and plumber2 apps running
-    elsewhere sign people in through the portal's OpenID Connect provider
-    (authorization code flow with PKCE, ES256-signed ID tokens), using
-    'httr2' for HTTP and 'jose' for signature verification.
+Description: Helpers for R web applications that need to know who is
+    using them, when the people are managed by a 'Ruscker' portal
+    <https://ruscker.com/>. Applications hosted inside the portal read the
+    identity that the portal's proxy adds to every request. 'shiny' and
+    'plumber2' applications running elsewhere sign people in through the
+    portal's 'OpenID Connect' provider (authorization code flow with
+    'PKCE', 'ES256'-signed ID tokens), using 'httr2' for HTTP and 'jose'
+    for signature verification. The provider and its claims are described
+    at <https://ruscker.com/authentication.html>.
 License: Apache License (>= 2)
 URL: https://ruscker.com/r/, https://github.com/StrategicProjects/ruscker/tree/main/clients/r
 BugReports: https://github.com/StrategicProjects/ruscker/issues

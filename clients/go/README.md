@@ -8,7 +8,7 @@ ID-token signature) and [`golang.org/x/oauth2`](https://pkg.go.dev/golang.org/x/
 code + PKCE `S256`, ES256 only, client secret sent in an HTTP Basic
 header. It adds the checks those libraries leave to you — the callback's
 `state` and `iss`, and the token's `nonce` — and returns the person's
-identity. The contract it follows is in [`../README.md`](../README.md).
+identity. The contract it follows is in [`../README.md`](https://github.com/StrategicProjects/ruscker/blob/main/clients/README.md).
 
 It does not manage sessions: after a sign-in, your application issues
 its own, as it does today.

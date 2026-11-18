@@ -4,6 +4,21 @@
   "private": true,
   "description": "Sign people in through a Ruscker portal (OpenID Connect): a dependency-free browser half and a Node backend half.",
   "license": "Apache-2.0",
+  "author": "André Leite <leite@castlab.org>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StrategicProjects/ruscker.git",
+    "directory": "clients/js"
+  },
+  "homepage": "https://ruscker.com/client-packages.html",
+  "bugs": "https://github.com/StrategicProjects/ruscker/issues",
+  "keywords": [
+    "oidc",
+    "openid-connect",
+    "sso",
+    "authentication",
+    "pkce"
+  ],
   "type": "module",
   "engines": {
     "node": ">=20"
@@ -19,14 +34,17 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "build:test": "tsc -p tsconfig.test.json",
     "test": "npm run build:test && node --test build-test/test/unit.test.js",
     "test:e2e": "npm run build:test && node --test build-test/test/e2e.test.js",
-    "test:all": "npm run build:test && node --test 'build-test/test/*.test.js'"
+    "test:all": "npm run build:test && node --test 'build-test/test/*.test.js'",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "jose": "^6.2.17"

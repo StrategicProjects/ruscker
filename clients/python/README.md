@@ -4,7 +4,7 @@ Sign people in to a Python backend through a Ruscker portal ("Sign in
 with …"). A thin wrapper over [PyJWT](https://pyjwt.readthedocs.io/)
 and [httpx](https://www.python-httpx.org/) pre-set for the provider's
 profile: authorization code + PKCE, ID tokens signed with ES256 only.
-It follows the [contract shared by every client package](../README.md).
+It follows the [contract shared by every client package](https://github.com/StrategicProjects/ruscker/blob/main/clients/README.md).
 
 Two calls do the work: `start_sign_in()` builds the URL to send the
 browser to, and `finish_sign_in()` checks the callback, redeems the code
@@ -122,7 +122,7 @@ uv run --with pytest --with-editable . pytest            # unit tests, no networ
 ```
 
 The end-to-end test runs against a real provider started with
-`clients/testing/provider.sh` (see [the testing notes](../README.md#testing-against-a-real-provider))
+`clients/testing/provider.sh` (see [the testing notes](https://github.com/StrategicProjects/ruscker/blob/main/clients/README.md#testing-against-a-real-provider))
 and is skipped when `RUSCKER_ISSUER` is unset:
 
 ```sh

@@ -8,7 +8,12 @@ rust-version = "1.85"
 resolver = "3"
 description = "Sign people in to a Rust backend through a Ruscker portal (OpenID Connect, code flow + PKCE)"
 license = "Apache-2.0"
-publish = false
+repository = "https://github.com/StrategicProjects/ruscker"
+homepage = "https://ruscker.com/client-packages.html"
+readme = "README.md"
+keywords = ["oidc", "openid-connect", "sso", "authentication", "axum"]
+categories = ["authentication", "web-programming"]
+include = ["src/**", "tests/**", "README.md", "LICENSE", "Cargo.toml"]
 
 # An empty table makes this crate its own workspace root, so it never
 # joins (or disturbs) the workspace of the repository it lives in.

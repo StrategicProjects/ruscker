@@ -1,0 +1,64 @@
+name: Publish client packages
+
+# Publishes a client package to its registry when a tag for it is pushed:
+#
+#   clients/python/vX.Y.Z  →  PyPI   (ruscker-sso)
+#
+# PyPI uses "trusted publishing": no token is stored anywhere. PyPI
+# trusts this workflow, in this repository, in the `pypi` environment —
+# configured once on PyPI (Publishing → add a publisher) with:
+#
+#   PyPI project name   ruscker-sso
+#   Owner               StrategicProjects
+#   Repository name     ruscker
+#   Workflow name       publish-clients.yml
+#   Environment name    pypi
+#
+# The Go module needs no registry (a `clients/go/vX.Y.Z` tag is enough),
+# the Rust crate is published with `cargo publish` from clients/rust,
+# and the R package goes through CRAN's own submission.
+
+on:
+  push:
+    tags: ["clients/python/v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python → PyPI
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ruscker-sso/
+    permissions:
+      id-token: write # the short-lived credential PyPI exchanges for an upload
+    defaults: { run: { working-directory: clients/python } }
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+
+      - name: The tag must match the package version
+        run: |
+          tag="${GITHUB_REF_NAME#clients/python/v}"
+          ver="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')"
+          [ "$tag" = "$ver" ] || { echo "tag $tag, pyproject.toml $ver"; exit 1; }
+
+      - name: Test
+        run: |
+          python -m pip install '.[test]'
+          python -m pytest -q
+
+      - name: Build
+        run: |
+          python -m pip install build twine
+          python -m build
+          python -m twine check dist/*
+
+      # Pinned to a commit, not a branch: this step receives the
+      # credential that can publish the package.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: clients/python/dist

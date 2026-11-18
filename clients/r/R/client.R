@@ -76,6 +76,19 @@ print.rusckersso_client <- function(x, ...) {
 #' @param client A client from [sso_client()].
 #' @return A list with `url` and `pending` (a list of `state`, `nonce` and
 #'   `code_verifier`).
+#' @examples
+#' \dontrun{
+#' # Needs a reachable portal: the first call reads its discovery document.
+#' client <- sso_client(
+#'   issuer = "https://portal.example.org",
+#'   client_id = "my-app",
+#'   client_secret = Sys.getenv("MY_APP_CLIENT_SECRET"),
+#'   redirect_uri = "https://app.example.org/"
+#' )
+#' start <- sso_start(client)
+#' start$url      # send the browser here
+#' start$pending  # keep until the person comes back
+#' }
 #' @export
 sso_start <- function(client) {
   conf <- get_discovery(client)
@@ -122,6 +135,14 @@ sso_start <- function(client) {
 #' @param pending The `pending` value [sso_start()] returned.
 #' @return An identity (see [has_group()]). The raw ID token claims are in
 #'   `$claims`.
+#' @examples
+#' \dontrun{
+#' # Needs a reachable portal and the callback of a real sign-in.
+#' # In a Shiny server function, with `start` kept from sso_start():
+#' id <- sso_finish(client, session$clientData$url_search, start$pending)
+#' id$sub                          # the person's permanent id
+#' has_role(id, "fiscal", "gestor")
+#' }
 #' @export
 sso_finish <- function(client, query, pending) {
   query <- normalise_query(query)

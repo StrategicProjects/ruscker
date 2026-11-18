@@ -481,20 +481,33 @@ pub fn address_bucket(ip: Option<&str>) -> String {
 /// the audit log.
 const KNOWN_SIGN_INS_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
-/// Tell the sign-in throttle about the correct password sign-ins in the
-/// audit log since `since`. Returns how many rows were read.
+/// Bring the sign-in throttle's known pairs in step with the database
+/// for everything since `since`: first forget the accounts whose
+/// password changed or that were deleted, then learn the correct
+/// password sign-ins. Returns how many sign-ins were read.
 ///
 /// The throttle exempts people it knows from its collective ceilings
 /// (see `auth::LoginRateLimiter`), but it only knows what it has seen —
 /// and it forgets at every restart, which is every upgrade. The audit
 /// log already has each correct sign-in with the account and the
-/// address, so that is where the list is rebuilt from.
+/// address, so that is where the list is rebuilt from. Forgetting comes
+/// first so that a sign-in made AFTER a password change in the same
+/// period is kept (the read leaves out those made before it).
 pub async fn load_known_sign_ins(
     db: &ConfigDb,
     limiter: &crate::auth::LoginRateLimiter,
     since: chrono::DateTime<Utc>,
 ) -> anyhow::Result<usize> {
-    let rows = db::user_activity::password_sign_ins_since(db, since).await?;
+    for account in db::user_activity::accounts_to_forget_since(db, since).await? {
+        limiter.forget_account(&account);
+    }
+    let (rows, cut) = db::user_activity::password_sign_ins_since(db, since).await?;
+    if cut {
+        tracing::warn!(
+            rows = rows.len(),
+            "sign-in throttle: more sign-ins in the period than are read; the oldest were left out"
+        );
+    }
     let now = Utc::now();
     for (username, ip, at) in &rows {
         // A clock that went backwards reads as "just now".
@@ -505,9 +518,11 @@ pub async fn load_known_sign_ins(
 }
 
 /// Start the task that keeps the throttle's known sign-ins in step with
-/// the audit log: everything within the trust period at start-up, then
+/// the database: everything within the trust period at start-up, then
 /// what is new every few minutes — which is also how one node of an HA
-/// deployment learns about sign-ins made on another.
+/// deployment learns about sign-ins, and password changes, made on
+/// another (within a few minutes, and assuming the nodes' clocks agree
+/// to within the overlap below).
 pub fn spawn_known_sign_ins(
     db: ConfigDb,
     limiter: Arc<crate::auth::LoginRateLimiter>,
@@ -528,6 +543,7 @@ pub fn spawn_known_sign_ins(
                     since = started - chrono::Duration::minutes(2);
                     first = false;
                 }
+                // `since` is kept: the next pass covers this one too.
                 Err(e) => tracing::warn!(error = ?e, "sign-in throttle: could not read known sign-ins"),
             }
             tokio::time::sleep(KNOWN_SIGN_INS_INTERVAL).await;

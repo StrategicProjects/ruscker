@@ -277,31 +277,58 @@ pub async fn purge_older_than(db: &ConfigDb, cutoff: DateTime<Utc>) -> Result<u6
 /// what a month of sign-ins is on the deployments this is built for.
 const SIGN_INS_LIMIT: i64 = 50_000;
 
-/// Correct **password** sign-ins since `since`, oldest first: who, from
+/// Correct **password** sign-ins since `since`, newest first: who, from
 /// which address, when. Used to tell the sign-in throttle which
 /// (account, address) pairs it knows (#1094) — so a restart, or another
-/// node of an HA deployment, does not forget them. Rows without a
-/// username or an address are of no use for that and are left out.
+/// node of an HA deployment, does not forget them.
+///
+/// Only sign-ins that still say something about the account as it is
+/// today:
+/// * the account exists, and the sign-in is not older than it (a
+///   username can be reused after an account is deleted — the new
+///   person must not inherit the old one's addresses);
+/// * no password change or reset happened after it (a password is
+///   usually changed because someone else may have had it).
+///
+/// Rows without a username or an address are of no use and are left
+/// out. Newest first, so that if the backstop limit ever cuts the list
+/// it is the oldest sign-ins that are dropped (`.1` says whether it did).
 pub async fn password_sign_ins_since(
     db: &ConfigDb,
     since: DateTime<Utc>,
-) -> Result<Vec<(String, String, DateTime<Utc>)>> {
+) -> Result<(Vec<(String, String, DateTime<Utc>)>, bool)> {
     let rows: Vec<(String, String, DateTime<Utc>)> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT username, client_ip, occurred_at FROM user_activity
-              WHERE event_type = 'login.success' AND auth_method = 'password'
-                AND username IS NOT NULL AND client_ip IS NOT NULL AND occurred_at >= ?
-              ORDER BY occurred_at ASC LIMIT ?",
+            "SELECT a.username, a.client_ip, a.occurred_at
+               FROM user_activity a
+               JOIN users u ON u.username = a.username
+              WHERE a.event_type = 'login.success' AND a.auth_method = 'password'
+                AND a.client_ip IS NOT NULL AND a.occurred_at >= ?
+                AND a.occurred_at >= u.created_at
+                AND NOT EXISTS (
+                      SELECT 1 FROM audit_log l
+                       WHERE l.action = 'user.password'
+                         AND l.target = 'user:' || a.username
+                         AND l.occurred_at > a.occurred_at)
+              ORDER BY a.occurred_at DESC, a.id DESC LIMIT ?",
         )
         .bind(since)
         .bind(SIGN_INS_LIMIT)
         .fetch_all(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT username, client_ip, occurred_at FROM user_activity
-              WHERE event_type = 'login.success' AND auth_method = 'password'
-                AND username IS NOT NULL AND client_ip IS NOT NULL AND occurred_at >= $1
-              ORDER BY occurred_at ASC LIMIT $2",
+            "SELECT a.username, a.client_ip, a.occurred_at
+               FROM user_activity a
+               JOIN users u ON u.username = a.username
+              WHERE a.event_type = 'login.success' AND a.auth_method = 'password'
+                AND a.client_ip IS NOT NULL AND a.occurred_at >= $1
+                AND a.occurred_at >= u.created_at
+                AND NOT EXISTS (
+                      SELECT 1 FROM audit_log l
+                       WHERE l.action = 'user.password'
+                         AND l.target = 'user:' || a.username
+                         AND l.occurred_at > a.occurred_at)
+              ORDER BY a.occurred_at DESC, a.id DESC LIMIT $2",
         )
         .bind(since)
         .bind(SIGN_INS_LIMIT)
@@ -309,7 +336,38 @@ pub async fn password_sign_ins_since(
         .await,
     }
     .context("read recent sign-ins")?;
-    Ok(rows)
+    let cut = rows.len() as i64 >= SIGN_INS_LIMIT;
+    Ok((rows, cut))
+}
+
+/// Accounts whose password was changed or reset, or that were deleted,
+/// since `since`. The sign-in throttle forgets where they were known —
+/// also on the nodes of an HA deployment where the change did not
+/// happen.
+pub async fn accounts_to_forget_since(db: &ConfigDb, since: DateTime<Utc>) -> Result<Vec<String>> {
+    let targets: Vec<(String,)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(
+            "SELECT DISTINCT target FROM audit_log
+              WHERE action IN ('user.password', 'user.delete')
+                AND target IS NOT NULL AND occurred_at >= ?",
+        )
+        .bind(since)
+        .fetch_all(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(
+            "SELECT DISTINCT target FROM audit_log
+              WHERE action IN ('user.password', 'user.delete')
+                AND target IS NOT NULL AND occurred_at >= $1",
+        )
+        .bind(since)
+        .fetch_all(pool)
+        .await,
+    }
+    .context("read password changes")?;
+    Ok(targets
+        .into_iter()
+        .filter_map(|(t,)| t.strip_prefix("user:").map(str::to_string))
+        .collect())
 }
 
 /// Distinct usernames among events whose type starts with `prefix`.
@@ -408,14 +466,39 @@ mod tests {
     }
 
     /// What the sign-in throttle reads back: correct PASSWORD sign-ins
-    /// with a username and an address, inside the period, oldest first.
+    /// with an address, inside the period, of accounts that exist — and
+    /// not from before the account was created or its password changed.
     async fn check_password_sign_ins(db: &ConfigDb) {
+        use crate::auth::Role;
+        use crate::db::users;
         let ip = |s: &str| Some(s.to_string());
+        let sign_in = |who: &str, key: &str, from: &str| ActivityEvent::login_success(who, AuthMethod::Password, key, ip(from));
+        let pairs = |rows: Vec<(String, String, DateTime<Utc>)>| -> Vec<(String, String)> {
+            let mut v: Vec<_> = rows.into_iter().map(|(u, a, _)| (u, a)).collect();
+            v.sort();
+            v
+        };
+        let since = Utc::now() - chrono::Duration::hours(1);
+
+        // A sign-in by an `ana` who was then deleted: the username will
+        // be reused below, and the new person must not inherit it.
+        users::create(db, "ana", "Correct#Pass9", Role::Viewer, false, &[], None).await.unwrap();
+        insert_batch(db, &[sign_in("ana", "old", "198.51.100.1")]).await.unwrap();
+        users::delete(db, "ana", None).await.unwrap();
+        assert!(password_sign_ins_since(db, since).await.unwrap().0.is_empty(), "deleted account");
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        for who in ["ana", "bia", "root"] {
+            users::create(db, who, "Correct#Pass9", Role::Viewer, false, &[], None).await.unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         insert_batch(
             db,
             &[
-                ActivityEvent::login_success("ana", AuthMethod::Password, "s1", ip("203.0.113.9")),
-                ActivityEvent::login_success("ana", AuthMethod::Password, "s2", ip("2001:db8:1:2::5")),
+                sign_in("ana", "s1", "203.0.113.9"),
+                sign_in("ana", "s2", "2001:db8:1:2::5"),
+                sign_in("bia", "s6", "203.0.113.50"),
+                sign_in("ghost", "s7", "203.0.113.60"), // no such account
                 // Not usable: no address; the token; a refused sign-in; an app visit.
                 ActivityEvent::login_success("bia", AuthMethod::Password, "s3", None),
                 ActivityEvent::login_success("root", AuthMethod::Token, "s4", ip("203.0.113.1")),
@@ -425,14 +508,40 @@ mod tests {
         )
         .await
         .unwrap();
-        let since = Utc::now() - chrono::Duration::hours(1);
-        let got = password_sign_ins_since(db, since).await.unwrap();
-        let pairs: Vec<(&str, &str)> = got.iter().map(|(u, ip, _)| (u.as_str(), ip.as_str())).collect();
-        assert_eq!(pairs, [("ana", "203.0.113.9"), ("ana", "2001:db8:1:2::5")]);
-        assert!(got.iter().all(|(_, _, at)| *at >= since));
-        // Nothing from before the period.
+        let (rows, cut) = password_sign_ins_since(db, since).await.unwrap();
+        assert!(!cut);
+        assert!(rows.iter().all(|(_, _, at)| *at >= since));
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(
+            pairs(rows),
+            [s("ana", "2001:db8:1:2::5"), s("ana", "203.0.113.9"), s("bia", "203.0.113.50")],
+            "the old ana's 198.51.100.1 is not inherited"
+        );
+
+        // bia's password is reset: her earlier sign-ins say nothing any
+        // more; a sign-in after it does.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        let reset_at = Utc::now();
+        users::set_password(db, "bia", "Another#Pass7", false, Some("root")).await.unwrap();
+        // Reported for the throttle to forget (the old `ana`, deleted a
+        // moment ago, is in the same period).
+        assert!(accounts_to_forget_since(db, reset_at).await.unwrap().contains(&"bia".to_string()));
+        assert!(!accounts_to_forget_since(db, reset_at).await.unwrap().contains(&"root".to_string()));
+        let (rows, _) = password_sign_ins_since(db, since).await.unwrap();
+        assert_eq!(pairs(rows), [s("ana", "2001:db8:1:2::5"), s("ana", "203.0.113.9")]);
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        insert_batch(db, &[sign_in("bia", "s8", "203.0.113.51")]).await.unwrap();
+        let (rows, _) = password_sign_ins_since(db, since).await.unwrap();
+        assert!(pairs(rows).contains(&s("bia", "203.0.113.51")));
+
+        // Deleting an account is reported too; nothing from before the period.
+        users::delete(db, "ana", None).await.unwrap();
+        let mut gone = accounts_to_forget_since(db, since).await.unwrap();
+        gone.sort();
+        assert_eq!(gone, ["ana", "bia"]);
         let later = Utc::now() + chrono::Duration::hours(1);
-        assert!(password_sign_ins_since(db, later).await.unwrap().is_empty());
+        assert!(password_sign_ins_since(db, later).await.unwrap().0.is_empty());
+        assert!(accounts_to_forget_since(db, later).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -666,11 +775,15 @@ mod tests {
             .execute(&pg)
             .await
             .unwrap();
+        sqlx::query("DELETE FROM users").execute(&pg).await.unwrap();
+        sqlx::query("DELETE FROM audit_log").execute(&pg).await.unwrap();
         let db = ConfigDb::Postgres(pg);
         // The throttle's read, through the Postgres arm; then start clean.
         check_password_sign_ins(&db).await;
         let ConfigDb::Postgres(pg) = &db else { unreachable!() };
         sqlx::query("DELETE FROM user_activity").execute(pg).await.unwrap();
+        sqlx::query("DELETE FROM users").execute(pg).await.unwrap();
+        sqlx::query("DELETE FROM audit_log").execute(pg).await.unwrap();
 
         insert_batch(
             &db,

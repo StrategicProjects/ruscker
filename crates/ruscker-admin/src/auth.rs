@@ -405,9 +405,17 @@ struct LimiterState {
     by_address: std::collections::HashMap<String, Window>,
     by_account: std::collections::HashMap<String, Window>,
     streaks: std::collections::HashMap<(String, String), Streak>,
-    /// (account, address) pairs that signed in correctly, and when.
+    /// (account, address) pairs that signed in correctly, and UNTIL WHEN
+    /// they count as known.
+    ///
+    /// An expiry, not a start: `Instant` counts from when the machine
+    /// booted, so "known since three days ago" cannot be written down on
+    /// a server that has been up for an hour — and right after a reboot
+    /// is exactly when sign-ins read back from the audit log must count.
+    /// A moment in the future can always be written.
     known: std::collections::HashMap<(String, String), std::time::Instant>,
-    /// Addresses the break-glass token was used correctly from, and when.
+    /// Addresses the break-glass token was used correctly from, and
+    /// until when they count as known.
     known_token: std::collections::HashMap<String, std::time::Instant>,
     /// Token attempts from each of those addresses.
     token_by_address: std::collections::HashMap<String, Window>,
@@ -568,14 +576,23 @@ impl LoginRateLimiter {
     /// period. It only ever grants the exemption a sign-in on this node
     /// would have granted; it removes no failure and no streak.
     pub fn remember_sign_in(&self, account: &str, address: &str, age: std::time::Duration) {
-        if age > self.policy.trust_for {
-            return;
-        }
-        let (Some(account), Some(since)) = (account_key(account), std::time::Instant::now().checked_sub(age))
-        else {
+        // What is left of the trust period; none ⇒ too old to count.
+        let Some(left) = self.policy.trust_for.checked_sub(age).filter(|d| !d.is_zero()) else {
             return;
         };
-        Self::remember_pair(&mut self.lock(), (account, address.to_string()), since);
+        let Some(account) = account_key(account) else { return };
+        let until = std::time::Instant::now() + left;
+        Self::remember_pair(&mut self.lock(), (account, address.to_string()), until);
+    }
+
+    /// Forget every address this account is known at. Called when its
+    /// password is changed or reset, or the account is deleted: a
+    /// password is usually changed because someone else may have had
+    /// it, and that someone's address would be among the known ones.
+    /// Failures and streaks are kept.
+    pub fn forget_account(&self, account: &str) {
+        let Some(account) = account_key(account) else { return };
+        self.lock().known.retain(|(a, _), _| *a != account);
     }
 
     /// How long a correct sign-in keeps a pair known.
@@ -624,7 +641,7 @@ impl LoginRateLimiter {
         let known = pair
             .as_ref()
             .and_then(|k| st.known.get(k))
-            .is_some_and(|since| now.duration_since(*since) <= p.trust_for);
+            .is_some_and(|until| now <= *until);
 
         // The collective ceilings. Always evaluated (it prunes the
         // windows); they only REFUSE people the portal does not know.
@@ -675,7 +692,7 @@ impl LoginRateLimiter {
         let known = st
             .known_token
             .get(address)
-            .is_some_and(|since| now.duration_since(*since) <= p.trust_for);
+            .is_some_and(|until| now <= *until);
         if known {
             // The operator's address: its own ceiling, so strangers
             // failing on purpose cannot close the break-glass path to it.
@@ -731,7 +748,7 @@ impl LoginRateLimiter {
             st.token.clear();
             st.token_by_address.remove(&attempt.address);
             if st.known_token.len() < LIMITER_MAX_KEYS || st.known_token.contains_key(&attempt.address) {
-                st.known_token.insert(attempt.address, now);
+                st.known_token.insert(attempt.address, now + self.policy.trust_for);
             }
             return;
         }
@@ -748,36 +765,43 @@ impl LoginRateLimiter {
                 st.streaks.remove(&key);
             }
         }
-        Self::remember_pair(&mut st, key, now);
+        Self::remember_pair(&mut st, key, now + self.policy.trust_for);
     }
 
-    /// Record `key` as known since `since` — at most `KNOWN_PER_ACCOUNT`
-    /// addresses per account, oldest out, so one account cannot fill the
-    /// table. An older date never replaces a newer one.
-    fn remember_pair(st: &mut LimiterState, key: (String, String), since: std::time::Instant) {
+    /// Record `key` as known until `until` — at most `KNOWN_PER_ACCOUNT`
+    /// addresses per account, the one expiring soonest out, so one
+    /// account cannot fill the table. A sooner expiry never replaces a
+    /// later one.
+    fn remember_pair(st: &mut LimiterState, key: (String, String), until: std::time::Instant) {
         if let Some(existing) = st.known.get_mut(&key) {
-            if since > *existing {
-                *existing = since;
+            if until > *existing {
+                *existing = until;
             }
             return;
         }
-        let mut mine: Vec<(std::time::Instant, String)> = st
-            .known
-            .iter()
-            .filter(|((a, _), _)| *a == key.0)
-            .map(|((_, addr), since)| (*since, addr.clone()))
-            .collect();
-        if mine.len() >= KNOWN_PER_ACCOUNT {
-            mine.sort();
-            if let Some((oldest_since, oldest)) = mine.into_iter().next() {
-                if oldest_since >= since {
-                    return; // everything kept is newer than this one
+        // This account's entries: how many, and which expires soonest.
+        let mut count = 0;
+        let mut soonest: Option<(std::time::Instant, &String)> = None;
+        for ((account, address), expiry) in &st.known {
+            if *account == key.0 {
+                count += 1;
+                if soonest.is_none_or(|(e, _)| *expiry < e) {
+                    soonest = Some((*expiry, address));
                 }
-                st.known.remove(&(key.0.clone(), oldest));
+            }
+        }
+        if count >= KNOWN_PER_ACCOUNT {
+            match soonest {
+                Some((expiry, address)) if expiry < until => {
+                    let evict = (key.0.clone(), address.clone());
+                    st.known.remove(&evict);
+                }
+                // Everything kept outlasts this one.
+                _ => return,
             }
         }
         if st.known.len() < LIMITER_MAX_KEYS {
-            st.known.insert(key, since);
+            st.known.insert(key, until);
         }
     }
 
@@ -792,8 +816,8 @@ impl LoginRateLimiter {
         st.by_address.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= p.window));
         st.by_account.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= p.account_window));
         st.streaks.retain(|_, s| now.duration_since(s.last) <= p.streak_forget);
-        st.known.retain(|_, since| now.duration_since(*since) <= p.trust_for);
-        st.known_token.retain(|_, since| now.duration_since(*since) <= p.trust_for);
+        st.known.retain(|_, until| now <= *until);
+        st.known_token.retain(|_, until| now <= *until);
         let known_token = &st.known_token;
         st.token_by_address.retain(|addr, _| known_token.contains_key(addr));
     }
@@ -1520,11 +1544,58 @@ mod tests {
             fail(&rl, t0, "ana", "home");
         }
         assert_eq!(rl.begin_at(t0, "ana", "home").unwrap_err(), Duration::from_secs(1));
-        // An older date never replaces a newer one.
+        // An older sign-in never shortens what a newer one granted.
         rl.remember_sign_in("ana", "home", Duration::from_secs(80_000));
         let st = rl.lock();
-        let since = st.known[&("ana".to_string(), "home".to_string())];
-        assert!(std::time::Instant::now().duration_since(since) < Duration::from_secs(4000));
+        let until = st.known[&("ana".to_string(), "home".to_string())];
+        let left = until.duration_since(std::time::Instant::now());
+        assert!(left > Duration::from_secs(86_400 - 3700), "{left:?}");
+    }
+
+    /// The expiry is a moment in the FUTURE, so a sign-in from days ago
+    /// counts even on a machine that booted a minute ago (`Instant`
+    /// starts at boot: "three days ago" may not exist as an `Instant`).
+    #[test]
+    fn a_sign_in_older_than_the_uptime_still_counts() {
+        let rl = LoginRateLimiter::with_policy(LoginPolicy { trust_for: Duration::from_secs(400 * 86_400), ..policy() });
+        // Almost a year ago — longer than any test machine has been up
+        // is not guaranteed, but no subtraction from "now" happens at all.
+        rl.remember_sign_in("ana", "home", Duration::from_secs(399 * 86_400));
+        let t0 = std::time::Instant::now();
+        for i in 0..6 {
+            fail(&rl, t0, "ana", &format!("evil{i}"));
+        }
+        assert!(rl.begin_at(t0, "ana", "home").is_ok());
+        // And it still ends when it should: one day was left of the trust
+        // period, so a day later she is a stranger again.
+        let later = t0 + Duration::from_secs(86_400 + 700);
+        for i in 0..6 {
+            fail(&rl, later, "ana", &format!("evil{i}"));
+        }
+        assert!(rl.begin_at(later, "ana", "home").is_err());
+    }
+
+    /// A password change (or reset, or deleting the account) forgets
+    /// where the account was known: whoever had the old password does
+    /// not keep the exemption.
+    #[test]
+    fn forgetting_an_account_ends_its_exemptions_only() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        let t0 = std::time::Instant::now();
+        for who in ["ana", "bia"] {
+            for from in ["home", "thief"] {
+                let ok = rl.begin_at(t0, who, from).unwrap();
+                rl.success_at(t0, ok);
+            }
+        }
+        rl.forget_account(" ANA ");
+        for who in ["ana", "bia"] {
+            for i in 0..6 {
+                fail(&rl, t0, who, &format!("evil{i}"));
+            }
+        }
+        assert!(rl.begin_at(t0, "ana", "thief").is_err() && rl.begin_at(t0, "ana", "home").is_err());
+        assert!(rl.begin_at(t0, "bia", "home").is_ok(), "other accounts keep theirs");
     }
 
     /// One account cannot fill the table of known pairs.

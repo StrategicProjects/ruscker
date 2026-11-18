@@ -687,6 +687,19 @@ async fn known_sign_ins_survive_a_restart_through_the_audit_log() {
     assert_eq!(read, 1);
     assert_eq!(sign_in(restarted.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
     assert_eq!(sign_in(restarted.clone(), "/admin/login", RIGHT, Some("192.0.2.99")).await.0, StatusCode::TOO_MANY_REQUESTS);
+
+    // Her password is reset (someone may have had it). After the next
+    // pass over the database she is no longer known at home — nor is
+    // whoever else signed in with the old password, wherever from — and
+    // the old sign-in is not read back.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    ruscker_admin::db::users::set_password(&db, "alice", "Changed#Pass8", false, Some("root")).await.unwrap();
+    load_known_sign_ins(&db, &restarted.login_limiter, since).await.unwrap();
+    assert_eq!(
+        sign_in(restarted.clone(), "/admin/login", "username=alice&password=Changed%23Pass8", HOME).await.0,
+        StatusCode::TOO_MANY_REQUESTS,
+        "a stranger again until she signs in with the new password"
+    );
 }
 
 /// Refused sign-ins are reachable without an account, so their audit

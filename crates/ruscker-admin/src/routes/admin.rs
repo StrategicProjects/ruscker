@@ -867,6 +867,9 @@ async fn password_submit(
         tracing::error!(error = ?e, "password change failed");
         return (StatusCode::INTERNAL_SERVER_ERROR, "save failed").into_response();
     }
+    // A new password: forget where the account was known to the sign-in
+    // throttle — whoever had the old one must not keep the exemption.
+    state.login_limiter.forget_account(&actor);
 
     // A self-service password change must invalidate every OTHER live
     // session for this account (#739) — changing the password is the

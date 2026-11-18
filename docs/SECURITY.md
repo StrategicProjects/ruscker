@@ -121,15 +121,24 @@ Status: living document. Tracks the Phase 5 security audit
   - a co-located observer can tell a known pair from an unknown one by
     which attempts are refused.
 
-  The list of known pairs is in memory, and rebuilt from the audit
-  log: at start-up the portal reads the correct password sign-ins of
-  the last 30 days (account and address), and every five minutes what
-  is new — so a restart does not forget them, and each node of an HA
-  deployment learns about sign-ins made on the others. It depends on
-  those rows existing: with the audit retention set below 30 days the
-  memory is that much shorter, and without a database there is none.
-  The token form's known addresses are not in the log and do not
-  survive a restart.
+  The list of known pairs is in memory, and rebuilt from the database:
+  at start-up the portal reads the correct password sign-ins of the
+  last 30 days (account and address) from the audit log, and every
+  five minutes what is new — so a restart does not forget them, and
+  each node of an HA deployment learns about sign-ins made on the
+  others (within a few minutes; nodes need clocks that agree to within
+  two minutes). A **password change or reset, or deleting the
+  account, forgets** where it was known — at once on the node where it
+  happens, at the next pass on the others — and sign-ins from before
+  the change, or from before the account was created (a username can
+  be reused), are not read back. It depends on those rows existing:
+  with the audit retention set below 30 days the memory is that much
+  shorter, a sign-in whose audit event was dropped is not remembered,
+  and without a database there is none. At most 50,000 sign-ins are
+  read (the newest; a warning is logged if more exist). The token
+  form's known addresses are not in the log and do not survive a
+  restart. Nothing new is stored: this is a second reader of rows the
+  audit already keeps.
 
   The break-glass **token** form has no account and its secret opens
   everything, so it keeps one low ceiling for all addresses together

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 173.2 200" width="173.2" height="200" role="img" aria-label="rusckersso">
+  <title>rusckersso</title>
+  <defs>
+    <linearGradient id="hexFill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d9e75"/>
+      <stop offset="1" stop-color="#0b5744"/>
+    </linearGradient>
+  </defs>
+  <polygon points="86.6,1.5 171.7,50.75 171.7,149.25 86.6,198.5 1.5,149.25 1.5,50.75" fill="url(#hexFill)"/>
+  <!-- the portal: the three stacked layers of the Ruscker mark -->
+  <polygon points="86.6,92 132.6,71 86.6,50 40.6,71" transform="translate(0,34)" fill="#7fcdb5"/>
+  <polygon points="86.6,92 132.6,71 86.6,50 40.6,71" transform="translate(0,17)" fill="#c2e9dd"/>
+  <polygon points="86.6,92 132.6,71 86.6,50 40.6,71" fill="#ffffff"/>
+  <!-- the person it vouches for: a verified sign-in -->
+  <circle cx="126" cy="115" r="17" fill="#f7a23b" stroke="#0e6650" stroke-width="3"/>
+  <path d="M117.5,115.5 l6,6 l11,-12" fill="none" stroke="#ffffff" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="86.6" y="159" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="18" font-weight="600" letter-spacing="0.5" fill="#ffffff">rusckersso</text>
+  <polygon points="86.6,1.5 171.7,50.75 171.7,149.25 86.6,198.5 1.5,149.25 1.5,50.75" fill="none" stroke="#ffffff" stroke-width="3"/>
+</svg>

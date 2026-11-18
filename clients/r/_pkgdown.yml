@@ -1,6 +1,7 @@
 url: https://ruscker.com/r/
 
 template:
+  package: tidytemplate
   bootstrap: 5
   bslib:
     primary: "#0f6e56"
@@ -15,7 +16,7 @@ home:
 
 navbar:
   structure:
-    left: [intro, reference]
+    left: [intro, reference, articles]
     right: [portal, github]
   components:
     portal:

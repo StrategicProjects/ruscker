@@ -1,6 +1,7 @@
 url: https://ruscker.com/r/
 
 template:
+  package: tidytemplate
   bootstrap: 5
   bslib:
     primary: "#0f6e56"

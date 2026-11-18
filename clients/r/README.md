@@ -1,4 +1,4 @@
-# rusckersso
+# rusckersso <img src="man/figures/logo.svg" align="right" height="138" alt="" />
 
 Know who is using your R web app, through a Ruscker portal. Two halves:
 

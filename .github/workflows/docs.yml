@@ -61,7 +61,8 @@ jobs:
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
           working-directory: clients/r
-          extra-packages: any::pkgdown, local::.
+          # tidytemplate is the site theme (not on CRAN).
+          extra-packages: any::pkgdown, github::tidyverse/tidytemplate, local::.
       - name: Build the R package site
         run: |
           Rscript -e 'pkgdown::build_site("clients/r", override = list(destination = file.path(getwd(), "book/book/r")), preview = FALSE)'

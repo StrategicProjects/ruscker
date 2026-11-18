@@ -17,6 +17,10 @@ the settings in [Authentication](./authentication.md#what-the-systems-developers
 | Go | [`rusckersso`](https://github.com/StrategicProjects/ruscker/tree/main/clients/go) | go-oidc, x/oauth2 | a backend (`net/http`, gin) |
 | R | [`rusckersso`](https://github.com/StrategicProjects/ruscker/tree/main/clients/r) | httr2, jose | Shiny and plumber2 apps, outside or inside the portal |
 
+Reference sites: [Go](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go)
+on pkg.go.dev, [R](https://ruscker.com/r/) here. The other packages
+are documented by their READMEs until they are published.
+
 > The packages live in the repository and are **not published to npm,
 > PyPI, crates.io or CRAN yet**; install them from the repository as
 > shown below. Each package's README has a complete, runnable example
@@ -187,6 +191,9 @@ remotes::install_github("StrategicProjects/ruscker", subdir = "clients/r")
 
 The README has a complete Shiny app, including how to keep the pending
 values tied to the browser that started the sign-in.
+
+The package has its own reference site, with every function's help
+page: <https://ruscker.com/r/>.
 
 ## Handling a failed sign-in
 

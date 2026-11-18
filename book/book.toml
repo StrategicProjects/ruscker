@@ -6,8 +6,9 @@ language = "en"
 src = "src"
 
 [output.html]
-# A neutral light base, re-tinted to the brand teal in theme/ruscker.css
-# (mdBook's "rust" theme is orange/brown — off-brand for Ruscker's teal).
+# The site follows the system: light, or dark in mdBook's "navy" slot.
+# Both palettes are redefined in theme/ruscker.css to match the landing
+# page (book/landing/), which the docs workflow puts at the site's root.
 default-theme = "light"
 preferred-dark-theme = "navy"
 additional-css = ["theme/ruscker.css"]

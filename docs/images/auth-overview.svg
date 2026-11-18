@@ -1,60 +1,59 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="817.434052" height="216.870259" viewBox="0 0 817.434052 216.870259" font-family="sans-serif" font-size="14.666667" fill="none">
-<g id="s0">
-<rect x="11.414224" y="10.975216" width="793.727587" height="193.163793" rx="7.024138" fill="#ffffff" stroke="#ffffff" stroke-width="1.2"/>
-</g>
-<g id="s1">
-<rect x="35.998707" y="81.216595" width="105.362069" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
-</g>
-<g id="s2">
-<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="88.679741" y="100.318348" text-anchor="middle">User</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="88.679741" y="111.04967" text-anchor="middle">browser</text>
-</g>
-<g id="s3">
-<rect x="260.771121" y="75.948491" width="161.555173" height="49.168966" rx="4.214483" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.866667"/>
-</g>
-<g id="s4">
-<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="341.548707" y="100.318348" text-anchor="middle">Ruscker</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="341.548707" y="111.04967" text-anchor="middle">accounts · groups · 2FA</text>
-</g>
-<g id="s5">
-<rect x="597.929742" y="28.53556" width="147.506897" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
-</g>
-<g id="s6">
-<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="671.68319" y="47.637313" text-anchor="middle">Hosted app</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="671.68319" y="58.368635" text-anchor="middle">behind /app/{id}</text>
-</g>
-<g id="s7">
-<rect x="597.929742" y="133.897629" width="147.506897" height="38.632759" rx="4.214483" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
-</g>
-<g id="s8">
-<text font-size="8.048491pt" stroke-width="0.266667" fill="#085041" x="671.68319" y="152.999382" text-anchor="middle">External system</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="671.68319" y="163.730704" text-anchor="middle">another host or domain</text>
-</g>
-<g id="s9">
-<line x1="141.360776" y1="100.532974" x2="258.954868" y2="100.532974" stroke="#3d6b5f" stroke-width="1.2"/>
-<polygon stroke-width="0" points="253.746983,98.074526 260.771121,100.532974 253.746983,102.991423" fill="#3d6b5f"/>
-</g>
-<g id="s10">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="201.065948" y="96.812687" text-anchor="middle">signs in once</text>
-</g>
-<g id="s11">
-<polyline points="422.326293,89.996767 446.910776,89.996767 446.910776,89.996767 446.910776,47.85194 446.910776,47.85194 596.113489,47.85194" fill="none" stroke="#3d6b5f" stroke-width="1.2"/>
-<polygon stroke-width="0" points="590.905604,45.393491 597.929742,47.85194 590.905604,50.310388" fill="#3d6b5f"/>
-</g>
-<g id="s12">
-<polyline points="422.326293,111.069181 446.910776,111.069181 446.910776,111.069181 446.910776,153.214009 446.910776,153.214009 595.104459,153.214009" fill="none" stroke="#0f6e56" stroke-width="1.866667"/>
-<polygon stroke-width="0" points="590.905604,150.75556 597.929742,153.214009 590.905604,155.672457" fill="#0f6e56"/>
-</g>
-<g id="s13">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="522.420259" y="43.780445" text-anchor="middle">identity headers</text>
-</g>
-<g id="s14">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="522.420259" y="149.142514" text-anchor="middle">ID token · OpenID Connect</text>
-</g>
-<g id="s15">
-<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="671.68319" y="80.885875" text-anchor="middle">per request, added by the proxy</text>
-</g>
-<g id="s16">
-<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="671.68319" y="186.247944" text-anchor="middle">once per sign-in, verified by the system</text>
-</g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg class="rk-d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 250" width="720" height="250" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="One account base in Ruscker: accounts, groups and two-step verification. The user signs in once. A hosted app receives identity headers on every request, added by the proxy. An external system receives an ID token over OpenID Connect, once per sign-in, and verifies it itself.">
+  <title>Ruscker — one account base, two ways to use it</title>
+  <style media="(prefers-color-scheme: dark)" data-rk-dark="">
+    .rk-d rect[fill="#FFFFFF" i], .rk-d circle[fill="#FFFFFF" i] { fill: #132a22; }
+    .rk-d rect[fill="#F4F8F7" i], .rk-d path[fill="#F4F8F7" i] { fill: #0f211b; }
+    .rk-d rect[fill="#E8F3EE" i], .rk-d path[fill="#E8F3EE" i] { fill: #17352b; }
+    .rk-d rect[fill="#CDECE0" i], .rk-d path[fill="#CDECE0" i] { fill: #1c4034; }
+    .rk-d [fill="#1A1A1A" i] { fill: #e7f3ee; }
+    .rk-d text[fill="#085041" i], .rk-d tspan[fill="#085041" i] { fill: #a8e6cf; }
+    .rk-d text[fill="#0F6E56" i], .rk-d tspan[fill="#0F6E56" i] { fill: #5dcaa5; }
+    .rk-d [fill="#5B6B66" i] { fill: #9bb8ac; }
+    .rk-d [fill="#90A39C" i], .rk-d [fill="#B9CDC6" i] { fill: #7f9c90; }
+    .rk-d [stroke="#0F6E56" i] { stroke: #2fae87; }
+    .rk-d [stroke="#D7E5E0" i] { stroke: #2a4a3f; }
+    .rk-d [stroke="#B9CDC6" i] { stroke: #3b5a4f; }
+    .rk-d path[stroke="#FFFFFF" i][fill="#1D9E75" i] { stroke: #08130f; }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1D9E75"/>
+    </marker>
+  </defs>
+
+  <!-- the user -->
+  <rect x="20" y="95" width="140" height="60" rx="10" fill="#FFFFFF" stroke="#1D9E75" stroke-width="1.5"/>
+  <text x="90" y="121" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">User</text>
+  <text x="90" y="140" text-anchor="middle" font-size="11" fill="#5B6B66">browser</text>
+
+  <line x1="160" y1="125" x2="250" y2="125" stroke="#1D9E75" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="203" y="116" text-anchor="middle" font-size="11" fill="#5B6B66">signs in once</text>
+
+  <!-- Ruscker -->
+  <rect x="250" y="80" width="190" height="90" rx="12" fill="#E8F3EE" stroke="#0F6E56" stroke-width="2"/>
+  <g transform="translate(262,86) scale(0.3)">
+    <polygon points="14,52 40,40 66,52 40,64" fill="#1D9E75" opacity="0.45"/>
+    <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75" opacity="0.72"/>
+    <polygon points="14,28 40,16 66,28 40,40" fill="#1D9E75"/>
+  </g>
+  <text x="345" y="122" text-anchor="middle" font-size="15" font-weight="700" fill="#085041">Ruscker</text>
+  <text x="345" y="143" text-anchor="middle" font-size="11" fill="#5B6B66">accounts · groups · 2FA</text>
+
+  <!-- to a hosted app -->
+  <path d="M440,110 H465 V60 H560" fill="none" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="512" y="51" text-anchor="middle" font-size="11" fill="#5B6B66">identity headers</text>
+  <rect x="560" y="30" width="140" height="60" rx="10" fill="#FFFFFF" stroke="#1D9E75" stroke-width="1.5"/>
+  <text x="630" y="56" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Hosted app</text>
+  <text x="630" y="75" text-anchor="middle" font-size="11" fill="#5B6B66">behind /app/{id}</text>
+  <text x="700" y="108" text-anchor="end" font-size="11" font-style="italic" fill="#5B6B66">per request, added by the proxy</text>
+
+  <!-- to an external system -->
+  <path d="M440,140 H465 V190 H560" fill="none" stroke="#0F6E56" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="512" y="181" text-anchor="middle" font-size="11" fill="#5B6B66">ID token · OIDC</text>
+  <rect x="560" y="160" width="140" height="60" rx="10" fill="#FFFFFF" stroke="#0F6E56" stroke-width="2"/>
+  <text x="630" y="186" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">External system</text>
+  <text x="630" y="205" text-anchor="middle" font-size="11" fill="#5B6B66">another host or domain</text>
+  <text x="700" y="238" text-anchor="end" font-size="11" font-style="italic" fill="#5B6B66">once per sign-in, verified by the system</text>
 </svg>

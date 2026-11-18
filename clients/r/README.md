@@ -16,10 +16,15 @@ Both return the same **identity** object.
 ## Install
 
 ```r
-# from a checkout of the repository
+# straight from GitHub
+remotes::install_github("StrategicProjects/ruscker", subdir = "clients/r")
+
+# or from a checkout of the repository
 install.packages(c("httr2", "jose", "jsonlite", "openssl", "rlang"))
 install.packages("clients/r", repos = NULL, type = "source")
 ```
+
+Reference for every function: <https://ruscker.com/r/>.
 
 ## Inside the portal
 

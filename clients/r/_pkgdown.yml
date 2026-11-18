@@ -1,0 +1,53 @@
+url: https://ruscker.com/r/
+
+template:
+  bootstrap: 5
+  bslib:
+    primary: "#0f6e56"
+
+home:
+  title: rusckersso — sign people in through a Ruscker portal
+  links:
+    - text: All client packages
+      href: https://ruscker.com/client-packages.html
+    - text: Authentication guide
+      href: https://ruscker.com/authentication.html
+
+navbar:
+  structure:
+    left: [intro, reference]
+    right: [portal, github]
+  components:
+    portal:
+      text: ruscker.com
+      href: https://ruscker.com/
+    github:
+      icon: fa-github
+      href: https://github.com/StrategicProjects/ruscker/tree/main/clients/r
+      aria-label: Source on GitHub
+
+reference:
+  - title: Inside the portal
+    desc: >
+      For an app hosted by the portal: read the identity the portal's
+      proxy adds to every request. No sign-in to do.
+    contents:
+      - hosted_identity
+      - hosted_identity_plumber
+      - parse_roles_header
+  - title: Outside the portal
+    desc: >
+      For a Shiny or plumber2 app running elsewhere: sign people in
+      through the portal.
+    contents:
+      - sso_client
+      - sso_start
+      - sso_finish
+  - title: The identity
+    contents:
+      - has_group
+      - has_role
+      - roles
+  - title: Errors
+    contents:
+      - rusckersso-errors

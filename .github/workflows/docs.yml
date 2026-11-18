@@ -1,6 +1,7 @@
 name: docs
 
-# Build the mdBook site and publish it to GitHub Pages
+# Build the mdBook site — plus the R client package's reference site,
+# served under /r/ — and publish it to GitHub Pages
 # (https://strategicprojects.github.io/ruscker/).
 #
 # Requires Pages to be enabled for the repo with source = "GitHub
@@ -12,6 +13,7 @@ on:
     paths:
       - "book/**"
       - "docs/**" # chapters {{#include}} files from docs/
+      - "clients/r/**" # the R package's pkgdown site lives under /r/
       - ".github/workflows/docs.yml"
   workflow_dispatch:
 
@@ -49,6 +51,21 @@ jobs:
 
       - name: Build the book
         run: mdbook build book
+
+      # The R client package's reference site (pkgdown), into /r/ of the
+      # same site. Built after the book, which owns the output folder.
+      - uses: r-lib/actions/setup-pandoc@v2
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: clients/r
+          extra-packages: any::pkgdown, local::.
+      - name: Build the R package site
+        run: |
+          Rscript -e 'pkgdown::build_site("clients/r", override = list(destination = file.path(getwd(), "book/book/r")), preview = FALSE)'
+          test -f book/book/r/index.html
 
       - uses: actions/configure-pages@v6
 

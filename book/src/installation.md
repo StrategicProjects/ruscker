@@ -65,8 +65,24 @@ production](./deploying.md) for nginx + TLS, and
 
 An upgrade replaces the binary and packaged unit while preserving the
 operator-managed files in `/etc/ruscker` and the catalog, images and state
-under `/var/lib/ruscker`. Back those directories up as usual, then install
-the package for the host architecture:
+under `/var/lib/ruscker`.
+
+The package carries its own updater. On a server that can reach GitHub:
+
+```sh
+sudo ruscker-update --check     # is there a newer release?
+sudo ruscker-update --apply     # download, verify, install, check — or go back
+```
+
+It copies the database first, verifies the service afterwards, and puts
+the previous version back if the new one does not come up. It can also run
+from a timer that ships turned off. See
+[Upgrading](./deploying.md#upgrading) for how it treats releases that
+change the database and how to turn on automatic updates.
+
+To do it by hand instead — a server without access to GitHub, or an
+installed version that predates the updater — back those directories up as
+usual, then install the package for the host architecture:
 
 ```sh
 sudo apt-get install -y --no-install-recommends \

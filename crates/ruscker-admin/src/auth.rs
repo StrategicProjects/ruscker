@@ -515,6 +515,10 @@ pub struct LoginRateLimiter {
     /// start-up, when the deployment has a stable secret to derive it
     /// from; unset ⇒ nothing is hashed and nothing is persisted there.
     memory_key: std::sync::OnceLock<[u8; 32]>,
+    /// A digest of the break-glass token, mixed into the hash of a token
+    /// sign-in — so rows remembered under one token mean nothing once
+    /// the token is rotated. Never stored anywhere.
+    token_binding: std::sync::OnceLock<String>,
 }
 
 /// A correct sign-in to write to the throttle's own table — see
@@ -564,7 +568,12 @@ fn give_back(q: &mut Window, at: std::time::Instant) {
 
 impl LoginRateLimiter {
     pub fn with_policy(policy: LoginPolicy) -> Self {
-        Self { state: std::sync::Mutex::new(LimiterState::default()), policy, memory_key: std::sync::OnceLock::new() }
+        Self {
+            state: std::sync::Mutex::new(LimiterState::default()),
+            policy,
+            memory_key: std::sync::OnceLock::new(),
+            token_binding: std::sync::OnceLock::new(),
+        }
     }
 
     /// The production policy ([`LoginPolicy::default`]).
@@ -599,7 +608,12 @@ impl LoginRateLimiter {
             } else {
                 ("password", attempt.account.clone().unwrap_or_default())
             };
-            let pair_hash = self.pair_hash(kind, &username, &attempt.address).unwrap_or_default();
+            let pair_hash = if attempt.token {
+                self.token_hash(&attempt.address)
+            } else {
+                self.pair_hash(kind, &username, &attempt.address)
+            }
+            .unwrap_or_default();
             RememberedSignIn { kind, username, pair_hash }
         });
         // A password attempt without an account key (an empty username
@@ -615,6 +629,20 @@ impl LoginRateLimiter {
     /// set (a second call is ignored).
     pub fn set_memory_key(&self, key: [u8; 32]) -> bool {
         self.memory_key.set(key).is_ok()
+    }
+
+    /// Bind remembered token sign-ins to the current break-glass token.
+    /// A token is rotated because someone else may have had it; an
+    /// address that used the OLD one must not stay known. Call once, at
+    /// start-up. Only a digest is kept, and only inside a keyed hash.
+    pub fn bind_token(&self, token: &str) -> bool {
+        let digest = ring::digest::digest(&ring::digest::SHA256, token.as_bytes());
+        self.token_binding.set(hex::encode(digest.as_ref())).is_ok()
+    }
+
+    /// Hash of a token sign-in from `address`, bound to the current token.
+    fn token_hash(&self, address: &str) -> Option<String> {
+        self.pair_hash("token", self.token_binding.get().map_or("", String::as_str), address)
     }
 
     /// Whether sign-ins can be remembered in the database.
@@ -801,7 +829,7 @@ impl LoginRateLimiter {
             .get(address)
             .is_some_and(|until| now <= *until)
             || self
-                .pair_hash("token", "", address)
+                .token_hash(address)
                 .and_then(|h| st.known_token_hashed.get(&h).copied())
                 .is_some_and(|until| now <= until);
         if known {
@@ -1789,6 +1817,24 @@ mod tests {
         }
         assert!(restarted.begin_token_at(t0, "another-stranger").is_err());
         assert!(restarted.begin_token_at(t0, "198.51.100.5").is_ok(), "the operator is still known after a restart");
+        // The token was rotated: an address that used the OLD token is
+        // not known under the new one, though the key is the same.
+        let before = LoginRateLimiter::with_policy(policy());
+        before.set_memory_key([7; 32]);
+        assert!(before.bind_token("old-token"));
+        let ok = before.begin_token_at(t0, "198.51.100.5").unwrap();
+        let old_row = before.success(ok).unwrap();
+        for (token, known) in [("old-token", true), ("new-token", false)] {
+            let after = LoginRateLimiter::with_policy(policy());
+            after.set_memory_key([7; 32]);
+            after.bind_token(token);
+            after.remember_hashed("token", "", &old_row.pair_hash, Duration::from_secs(60));
+            for i in 0..4 {
+                let _ = after.begin_token_at(t0, &format!("stranger{i}")).unwrap();
+            }
+            assert_eq!(after.begin_token_at(t0, "198.51.100.5").is_ok(), known, "{token}");
+        }
+
         // Too old to count.
         let stale = LoginRateLimiter::with_policy(policy());
         stale.set_memory_key([7; 32]);

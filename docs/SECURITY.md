@@ -132,15 +132,27 @@ Status: living document. Tracks the Phase 5 security audit
   - **the throttle's own table** (`signin_memory`), when
     `RUSCKER_COOKIE_KEY` is set: for each correct sign-in — password
     or token — the account, a **keyed hash** of the (account, address)
-    pair, and the date. The key is derived from the cookie key, which
-    lives outside the database, so an address cannot be read back from
-    the table; the throttle can only recognise a pair it is shown.
-    Rows are deleted after 30 days whatever the audit retention is.
-    This is what makes the memory independent of a short audit
-    retention and what keeps the operator's token address known across
-    a restart. Without the variable the cookie key is random per
-    process, there is nothing stable to hash with, and the table is
-    not used.
+    pair, and the date. Rows are deleted after 30 days whatever the
+    audit retention is. This is what makes the memory independent of
+    a short audit retention and what keeps the operator's token
+    address known across a restart; token rows are bound to the
+    current token, so rotating it orphans them. Without the variable
+    the cookie key is random per process, there is nothing stable to
+    hash with, and the table is not used.
+
+    What the hash does and does not protect: the key is derived from
+    the cookie key, which is not in the database, so someone holding
+    **only the database** (a backup, SQL access) cannot turn a hash
+    back into an address. Someone who also has the key can, by trying
+    addresses (IPv4 is small); it is not protection against a
+    compromise of the host. And while the audit log still has the
+    same sign-in, the address is there in clear anyway — the hash
+    matters for token sign-ins and for a short audit retention.
+    **New retained data:** the account name and the date of its last
+    correct sign-in per address are kept for 30 days even when the
+    audit retention is shorter, and one row per address records that
+    the break-glass token was used (no account, no readable address) —
+    something that was written nowhere before.
 
   A **password change or reset, or deleting the account, forgets**
   where it was known — in memory and in the table at once on the node
@@ -159,7 +171,7 @@ Status: living document. Tracks the Phase 5 security audit
   Failing on purpose can pause the token form for strangers, but not
   for an address the token was used correctly from in the last 30
   days, which has a window of its own. That address is remembered
-  across restarts when `RUSCKER_COOKIE_KEY` is set (see below);
+  across restarts when `RUSCKER_COOKIE_KEY` is set (see above);
   otherwise nobody is known after a restart, and an operator locked
   out of the form then still has the server itself.
 

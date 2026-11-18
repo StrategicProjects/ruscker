@@ -9,3 +9,5 @@ CREATE TABLE IF NOT EXISTS signin_memory (
     PRIMARY KEY (kind, username, pair_hash)
 );
 CREATE INDEX IF NOT EXISTS signin_memory_last_at_idx ON signin_memory (last_at);
+
+CREATE INDEX IF NOT EXISTS audit_log_action_occurred_idx ON audit_log (action, occurred_at);

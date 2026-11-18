@@ -536,29 +536,24 @@ pub async fn load_known_sign_ins(
     Ok(read)
 }
 
-/// The key for the throttle's persistent memory, derived from
-/// `RUSCKER_COOKIE_KEY` when the operator set one: a secret that
+/// The key for the throttle's persistent memory, derived from the
+/// cookie key when the operator set `RUSCKER_COOKIE_KEY`: a secret that
 /// outlives the process, is the same on every node of an HA deployment,
-/// and lives outside the database — which is what makes the hashes in
-/// `signin_memory` useless to someone who only has the database.
-/// `None` when the variable is unset (the cookie key is then random per
-/// process, and there is nothing stable to derive from).
-pub fn signin_memory_key_from_env() -> Option<[u8; 32]> {
-    let raw = std::env::var("RUSCKER_COOKIE_KEY").ok()?;
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    // Domain-separated: this is not the cookie key itself.
-    let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
-    ctx.update(b"ruscker-signin-memory-v1\0");
-    ctx.update(raw.as_bytes());
-    ctx.finish().as_ref().try_into().ok()
+/// and is not in the database. `None` when the variable is unset — the
+/// cookie key is then random per process, and there is nothing stable
+/// to derive from.
+///
+/// Derived from the parsed 32 bytes, not from the text of the variable:
+/// two nodes that write the same key as hex and as base64 share cookies
+/// and must share this too.
+pub fn signin_memory_key(cookie_key: &ruscker_proxy::sticky::CookieKey) -> Option<[u8; 32]> {
+    let set = std::env::var("RUSCKER_COOKIE_KEY").is_ok_and(|v| !v.trim().is_empty());
+    set.then(|| cookie_key.derive(b"ruscker-signin-memory-v1\0"))
 }
 
 /// Start the task that keeps the throttle's known sign-ins in step with
 /// the database: everything within the trust period at start-up, then
-/// what is new every few minutes — which is also how one node of an HA
+/// what is new every half minute — which is also how one node of an HA
 /// deployment learns about sign-ins, and password changes, made on
 /// another (within a few minutes, and assuming the nodes' clocks agree
 /// to within the overlap below).
@@ -573,8 +568,10 @@ pub fn spawn_known_sign_ins(
         let mut passes: u32 = 0;
         loop {
             let started = Utc::now();
-            // Rows past the trust period are of no use to anyone.
-            if limiter.has_memory_key() && passes.is_multiple_of(SIGNIN_MEMORY_PURGE_EVERY) {
+            // Rows past the trust period are of no use to anyone — purged
+            // whether or not the key is still set, so removing the
+            // variable does not strand old rows.
+            if passes.is_multiple_of(SIGNIN_MEMORY_PURGE_EVERY) {
                 if let Err(e) = db::signin_memory::purge_older_than(&db, started - trust).await {
                     tracing::warn!(error = ?e, "sign-in throttle: could not purge old remembered sign-ins");
                 }

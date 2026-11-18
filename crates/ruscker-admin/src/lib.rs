@@ -655,8 +655,12 @@ impl AdminServer {
             // rebuilt from the database so a restart does not forget them.
             // With RUSCKER_COOKIE_KEY set it also keeps its own table of
             // keyed hashes, independent of the audit retention.
-            if let Some(key) = activity::signin_memory_key_from_env() {
+            if let Some(key) = activity::signin_memory_key(&self.state.cookie_key) {
                 self.state.login_limiter.set_memory_key(key);
+            }
+            // Token sign-ins are remembered under the CURRENT token only.
+            if let Some(token) = self.state.admin_auth.admin.as_deref() {
+                self.state.login_limiter.bind_token(token);
             }
             #[allow(clippy::let_underscore_future)]
             let _ = activity::spawn_known_sign_ins(db, self.state.login_limiter.clone());

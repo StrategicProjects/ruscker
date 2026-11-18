@@ -7,8 +7,11 @@
 //! break-glass token is deliberately not in it. This table is the
 //! throttle's own memory, and it holds as little as it can: a **keyed
 //! hash** of each (account, address) pair and when it last signed in.
-//! The key is derived from `RUSCKER_COOKIE_KEY`, outside the database,
-//! so an address cannot be read back from here.
+//! The key is derived from `RUSCKER_COOKIE_KEY`, which is not in the
+//! database: someone holding only the database (a backup, SQL access)
+//! cannot turn a hash back into an address. Someone who also holds the
+//! key can, by trying addresses — this is protection against a reader
+//! of the database, not against a compromise of the host.
 //!
 //! Without that key there is nothing stable to hash with, and the table
 //! is simply not used.
@@ -134,6 +137,29 @@ pub async fn forget_account(db: &ConfigDb, username: &str) -> Result<u64> {
     .context("forget remembered sign-ins")
 }
 
+/// Whether `username`'s password was changed or reset at or after `since`.
+pub async fn password_changed_since(db: &ConfigDb, username: &str, since: DateTime<Utc>) -> Result<bool> {
+    let target = format!("user:{username}");
+    let n: i64 = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action = 'user.password' AND target = ? AND occurred_at >= ?",
+        )
+        .bind(&target)
+        .bind(since)
+        .fetch_one(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE action = 'user.password' AND target = $1 AND occurred_at >= $2",
+        )
+        .bind(&target)
+        .bind(since)
+        .fetch_one(pool)
+        .await,
+    }
+    .context("check for a password change")?;
+    Ok(n > 0)
+}
+
 /// Delete rows older than `cutoff` (the end of the trust period).
 pub async fn purge_older_than(db: &ConfigDb, cutoff: DateTime<Utc>) -> Result<u64> {
     match db {
@@ -205,6 +231,11 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         upsert(db, "password", "bia", "h5", Utc::now()).await.unwrap();
         assert!(pairs(since(db, now - hour).await.unwrap().0).contains(&s("password", "bia", "h5")));
+
+        // The check the sign-in path makes after remembering a pair.
+        assert!(password_changed_since(db, "bia", now - hour).await.unwrap());
+        assert!(!password_changed_since(db, "ana", now - hour).await.unwrap());
+        assert!(!password_changed_since(db, "bia", Utc::now() + hour).await.unwrap());
 
         // Forgetting an account removes its password rows only.
         assert_eq!(forget_account(db, "ana").await.unwrap(), 3, "h1, h2 and the old ana's");

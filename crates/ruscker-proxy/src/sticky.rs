@@ -151,6 +151,20 @@ impl CookieKey {
         })
     }
 
+    /// A second, independent 32-byte key derived from this one for
+    /// another purpose named by `tag`: SHA-256(tag ‖ key). One-way and
+    /// domain-separated, so the derived key says nothing about this
+    /// one, and it is the same wherever the 32 bytes are the same —
+    /// however the variable happened to be written (hex, base64).
+    pub fn derive(&self, tag: &[u8]) -> [u8; 32] {
+        let mut ctx = ring::digest::Context::new(&ring::digest::SHA256);
+        ctx.update(tag);
+        ctx.update(self.inner.as_slice());
+        let mut out = [0u8; 32];
+        out.copy_from_slice(ctx.finish().as_ref());
+        out
+    }
+
     pub fn random() -> Self {
         use ring::rand::{SecureRandom, SystemRandom};
         let mut bytes = [0u8; 32];

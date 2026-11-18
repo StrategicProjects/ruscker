@@ -987,6 +987,9 @@ async fn reset_password(
     .await
     {
         Ok(()) => {
+            // …and the sign-in throttle forgets where the account was
+            // known: a reset is often the answer to a stolen password.
+            state.login_limiter.forget_account(&target.username);
             // A password reset must invalidate existing sessions (#544).
             state
                 .admin_sessions
@@ -1063,6 +1066,9 @@ async fn delete(
         Ok(()) => {
             // A deleted user must lose access now, not at session expiry (#544).
             state.admin_sessions.revoke_by_actor(&username).await;
+            // The username can be reused: the next person must not
+            // inherit where this one was known to the sign-in throttle.
+            state.login_limiter.forget_account(&username);
             state.invalidate_identity_cache();
             redirect_flash("deleted")
         }

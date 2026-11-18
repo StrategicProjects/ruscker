@@ -648,6 +648,60 @@ async fn without_trusted_forwarded_headers_the_address_is_shared() {
     assert_eq!(sign_in(state.clone(), "/admin/login", BOB, Some("192.0.2.9")).await.0, StatusCode::TOO_MANY_REQUESTS);
 }
 
+/// The people the throttle knows survive a restart: they are rebuilt from
+/// the audit log, which has every correct sign-in with its address.
+#[tokio::test]
+async fn known_sign_ins_survive_a_restart_through_the_audit_log() {
+    use ruscker_admin::activity::load_known_sign_ins;
+    use ruscker_admin::auth::{LoginPolicy, LoginRateLimiter};
+    let state = throttled_state().await;
+    let db = state.db.clone().unwrap();
+    const HOME: Option<&str> = Some("198.51.100.20");
+
+    // alice signs in from home; the event reaches the audit table (the
+    // drain task is not running in this harness, so write the batch).
+    let mut rx = state.activity.take_receiver().unwrap();
+    assert_eq!(sign_in(state.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+    let mut batch = Vec::new();
+    while let Ok(event) = rx.try_recv() {
+        batch.push(event);
+    }
+    ruscker_admin::db::user_activity::insert_batch(&db, &batch).await.unwrap();
+
+    // "Restart": a brand-new throttle that has seen nothing.
+    let mut restarted = state.clone();
+    restarted.login_limiter = Arc::new(LoginRateLimiter::with_policy(LoginPolicy {
+        backoff_base: std::time::Duration::from_secs(60),
+        account_max: 5,
+        ..LoginPolicy::default()
+    }));
+    // Someone fills alice's account ceiling from five addresses.
+    for from in ["192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5"] {
+        assert_eq!(sign_in(restarted.clone(), "/admin/login", WRONG, Some(from)).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // Without the log, alice is a stranger to the new throttle…
+    assert_eq!(sign_in(restarted.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::TOO_MANY_REQUESTS);
+    // …with it, she is known at home again — and only there.
+    let since = chrono::Utc::now() - chrono::Duration::days(30);
+    let read = load_known_sign_ins(&db, &restarted.login_limiter, since).await.unwrap();
+    assert_eq!(read, 1);
+    assert_eq!(sign_in(restarted.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+    assert_eq!(sign_in(restarted.clone(), "/admin/login", RIGHT, Some("192.0.2.99")).await.0, StatusCode::TOO_MANY_REQUESTS);
+
+    // Her password is reset (someone may have had it). After the next
+    // pass over the database she is no longer known at home — nor is
+    // whoever else signed in with the old password, wherever from — and
+    // the old sign-in is not read back.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    ruscker_admin::db::users::set_password(&db, "alice", "Changed#Pass8", false, Some("root")).await.unwrap();
+    load_known_sign_ins(&db, &restarted.login_limiter, since).await.unwrap();
+    assert_eq!(
+        sign_in(restarted.clone(), "/admin/login", "username=alice&password=Changed%23Pass8", HOME).await.0,
+        StatusCode::TOO_MANY_REQUESTS,
+        "a stranger again until she signs in with the new password"
+    );
+}
+
 /// Refused sign-ins are reachable without an account, so their audit
 /// rows are budgeted: a burst from one address leaves a handful of rows,
 /// not one per attempt — and cannot push real events out of the queue.

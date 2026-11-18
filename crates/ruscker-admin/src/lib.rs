@@ -650,7 +650,11 @@ impl AdminServer {
             // purged after `server.activity-retention-days` (default 180).
             let days = self.state.config.server.effective_activity_retention_days();
             #[allow(clippy::let_underscore_future)]
-            let _ = activity::spawn_retention(db, days);
+            let _ = activity::spawn_retention(db.clone(), days);
+            // The sign-in throttle's "people the portal knows" (#1094),
+            // rebuilt from the audit log so a restart does not forget them.
+            #[allow(clippy::let_underscore_future)]
+            let _ = activity::spawn_known_sign_ins(db, self.state.login_limiter.clone());
         }
 
         let app = router_with_images(self.state.clone(), self.images_dir.as_deref());

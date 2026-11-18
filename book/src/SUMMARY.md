@@ -13,6 +13,7 @@
 - [Configuration](./configuration.md)
 - [The admin panel](./admin.md)
 - [Authentication](./authentication.md)
+  - [Client packages](./client-packages.md)
 - [Deploying in production](./deploying.md)
 - [Troubleshooting](./troubleshooting.md)
 - [FAQ](./faq.md)

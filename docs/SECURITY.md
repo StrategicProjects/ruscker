@@ -94,27 +94,51 @@ Status: living document. Tracks the Phase 5 security audit
   everybody by failing on purpose. The account, address and global
   ceilings are still collective, so a pair (account, address) that has
   signed in correctly in the last 30 days is **exempt from those
-  three** and keeps only its own streak: someone failing on purpose
-  cannot keep a person out of the address they normally use.
-  **What remains:** an account can be kept out *from an address it has
-  never signed in from* for as long as someone keeps failing against
-  it (30 attempts per 10 minutes), and with enough addresses (ten at
-  full rate) the password form can be paused for people the portal
-  does not know yet. The list of known pairs is in memory and lost on
-  restart.
+  three** and keeps only its own streak (at most 50 addresses are
+  remembered per account). Strangers failing on purpose cannot keep a
+  person out of the address they normally use.
+
+  A correct sign-in gives back its own slot and halves the pair's
+  earlier failures; it does not erase them, nor the account's window —
+  otherwise the owner signing in would hand a guesser at the same
+  address a clean slate each time. An attempt the portal could not
+  judge (the user store failed) is uncounted. When a table is at its
+  backstop size and an attempt cannot be counted, it is refused.
+
+  **What remains**, because it would take something per browser (a
+  device cookie) to tell two people at one address apart:
+  - an account can be kept out *from an address it has never signed in
+    from* for as long as someone keeps failing against it (30 attempts
+    per 10 minutes), and with enough addresses (ten at full rate) the
+    password form can be paused for people the portal does not know;
+  - someone **at the same address** as a person — an office NAT — can
+    keep that person's streak alive from there with one wrong password
+    every few minutes;
+  - a guesser at the owner's address gets, besides the steady 12 an
+    hour, a few faster tries after each of the owner's sign-ins
+    (halving, not resetting); and three free tries per new address
+    until the account ceiling;
+  - a co-located observer can tell a known pair from an unknown one by
+    which attempts are refused.
+
+  The list of known pairs is in memory and lost on restart.
 
   The break-glass **token** form has no account and its secret opens
   everything, so it keeps one low ceiling for all addresses together
-  (10 attempts per minute) plus the address ceiling. It is separate
-  from the password form in both directions: flooding one does not
-  close the other. Failing on purpose can still pause the token form.
+  (10 attempts per minute). It shares no counter with the password
+  form: flooding one does not close the other, from any address.
+  Failing on purpose can pause the token form for strangers, but not
+  for an address the token was used correctly from in the last 30
+  days, which has a window of its own. After a restart nobody is known
+  yet; an operator locked out of the form then still has the server
+  itself.
 
   The address is the one resolved for auditing — from `X-Forwarded-For`
   only with `server.useForwardHeaders`. Behind a proxy **without** it
-  every request has the proxy's address: the address layer is then one
-  ceiling shared by everyone (30 per minute, where the first version
-  had 10) and the streak no longer tells people apart. Set the flag
-  behind a proxy. Counters are in memory, per process (an HA
+  every request has the proxy's address, so everyone is "at the same
+  address": the address layer is one ceiling shared by all (30 per
+  minute, where the first version had 10), and anyone can keep a
+  chosen account's streak alive. **Set the flag behind a proxy.** Counters are in memory, per process (an HA
   deployment throttles per node). There is deliberately no CAPTCHA: a
   third-party one would put an outside script on the page that receives
   passwords and need outbound access from the server.

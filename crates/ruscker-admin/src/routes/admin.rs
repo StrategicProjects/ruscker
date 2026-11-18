@@ -443,6 +443,8 @@ async fn login_submit(
             ).await;
         }
         Err(e) => {
+            // The store failed: this was nobody's wrong password.
+            state.login_limiter.cancel(attempt);
             tracing::error!(error = ?e, "login lookup failed");
             return (StatusCode::INTERNAL_SERVER_ERROR, "login error").into_response();
         }
@@ -586,8 +588,8 @@ async fn token_login(
     }
     let next = app_next_path(form.next.as_deref(), &state.base_path);
     // No account here, and one secret that opens everything: the token
-    // form keeps a low ceiling of its own that ignores the address, on
-    // top of the address and global ones.
+    // form has a low ceiling of its own that ignores the address, and
+    // shares no counter with the password form.
     let client = crate::activity::ClientInfo::from_request(&state, &headers, peer.0.as_ref());
     let address = crate::activity::address_bucket(client.ip.as_deref());
     let attempt = match state.login_limiter.begin_token(&address) {

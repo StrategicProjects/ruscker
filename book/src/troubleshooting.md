@@ -138,6 +138,30 @@ See the full nginx snippet in [Deploying](./deploying.md).
 forwarded to app containers. If a specific API spec rejects large POSTs
 with 413, raise `proxy.max-body-size` globally or as a per-spec override.
 
+## "Too many attempts" on the sign-in page
+
+The sign-in page refuses to check another password for a while (HTTP
+`429`, with the wait in the `Retry-After` header). It is the throttle
+that stops password guessing, and it has four layers; which one fired
+tells you what is happening.
+
+| Who sees it | What it means | What to do |
+|---|---|---|
+| One person, after mistyping | Three or more wrong passwords in a row for that account from that address. The wait doubles each time, up to five minutes, and is forgotten after an hour without attempts. | Wait it out, then sign in — a correct password halves the count. If the password is forgotten, an Admin resets it under **Users → Edit**. |
+| One person who did nothing wrong, from a place they have not signed in from before | Someone else is failing against their account (30 attempts per 10 minutes, from anywhere). | Sign in from a usual address, where the account is exempt. Look at **Activity** for refused sign-ins on that account and where they come from. |
+| Everybody behind one network address | 30 failed attempts a minute from that address — one password tried on many accounts, or a misbehaving script. | Find the source in **Activity** (refused sign-ins, by address). People who signed in from there before are not affected. |
+| Everybody, from everywhere | Either a large attack (300 attempts a minute), or — far more often — the portal is behind a reverse proxy **without** `server.useForwardHeaders: true`, so every request looks like it comes from the proxy and shares one allowance. | Set `useForwardHeaders: true` (see [Deploying](./deploying.md)). |
+
+The break-glass **token** form has its own, separate allowance (10
+attempts a minute for all addresses together): a flood on the password
+form does not close it, and an address the token was used correctly
+from is not shut out by strangers.
+
+Restarting the service clears the counters. It does not make people
+strangers again: where each account signed in correctly is rebuilt
+from the audit log, and — with `RUSCKER_COOKIE_KEY` set — from the
+throttle's own memory, which also covers the token form.
+
 ## `429 Too Many Requests` from an API
 The spec's `api.rate-limit` is throttling the caller. The `Retry-After`
 header says when to retry. Behind a proxy, set

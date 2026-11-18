@@ -17,13 +17,16 @@ the settings in [Authentication](./authentication.md#what-the-systems-developers
 | Go | [`rusckersso`](https://github.com/StrategicProjects/ruscker/tree/main/clients/go) | go-oidc, x/oauth2 | a backend (`net/http`, gin) |
 | R | [`rusckersso`](https://github.com/StrategicProjects/ruscker/tree/main/clients/r) | httr2, jose | Shiny and plumber2 apps, outside or inside the portal |
 
-Reference sites: [Go](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go)
-on pkg.go.dev, [R](https://ruscker.com/r/) here. The other packages
-are documented by their READMEs until they are published.
+Reference sites: [Rust](https://docs.rs/ruscker-sso) on docs.rs,
+[Go](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go)
+on pkg.go.dev, [R](https://ruscker.com/r/) here. TypeScript and Python
+are documented by their READMEs, shown on their registry pages.
 
-> The packages live in the repository and are **not published to npm,
-> PyPI, crates.io or CRAN yet**; install them from the repository as
-> shown below. Each package's README has a complete, runnable example
+> Published on [npm](https://www.npmjs.com/package/ruscker-sso),
+> [PyPI](https://pypi.org/project/ruscker-sso/),
+> [crates.io](https://crates.io/crates/ruscker-sso) and as a Go module;
+> the R package installs from the repository while its CRAN submission
+> is pending. Each package's README has a complete, runnable example
 > for the most common framework of its language.
 
 ## What every package does
@@ -99,9 +102,7 @@ const who = await sso.exchangeCode(req.body);   // { code, codeVerifier, nonce }
 A backend that renders its own pages can do everything itself with
 `sso.startSignIn()` and `sso.finishSignIn(query, pending)`.
 
-Install from a checkout: `cd clients/js && npm install && npm run
-build`, then `npm install /path/to/clients/js` in the application.
-Node 20 or later.
+Install: `npm install ruscker-sso`. Node 20 or later.
 
 ## Python
 
@@ -117,9 +118,8 @@ person = sso.finish_sign_in(str(request.url), PendingSignIn.from_json(stored))
 # person.sub, person.name, person.has_role("fiscal", "gestor")
 ```
 
-Install: `pip install "git+https://github.com/StrategicProjects/ruscker#subdirectory=clients/python"`
-(or `pip install ./clients/python` from a checkout). Python 3.10 or
-later. The README has the complete FastAPI example.
+Install: `pip install ruscker-sso`. Python 3.10 or later. The README
+has the complete FastAPI example.
 
 ## Rust
 
@@ -133,11 +133,9 @@ let id = sso.finish_sign_in(callback_query, &pending).await?;
 // id.sub, id.name, id.has_role("fiscal", "gestor")
 ```
 
-Depend on it by path, from a checkout (or by git):
-
 ```toml
 [dependencies]
-ruscker-sso = { path = "clients/rust" }
+ruscker-sso = "0.1"
 ```
 
 The README has the complete axum example, including how to turn group

@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="How Ruscker works: browsers and API clients hit a single Ruscker binary, which proxies to app containers it spawns on demand via the Docker daemon, keeps accounts and groups in SQLite, and can sign users in for external systems over OpenID Connect.">
+<svg class="rk-d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 600" width="720" height="600" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="How Ruscker works: browsers and API clients hit a single Ruscker binary, which proxies to app containers it spawns on demand via the Docker daemon, keeps accounts and groups in SQLite, and can sign users in for external systems over OpenID Connect.">
   <title>Ruscker — how it works</title>
+  <style media="(prefers-color-scheme: dark)" data-rk-dark="">
+    .rk-d rect[fill="#FFFFFF" i], .rk-d circle[fill="#FFFFFF" i] { fill: #132a22; }
+    .rk-d rect[fill="#F4F8F7" i], .rk-d path[fill="#F4F8F7" i] { fill: #0f211b; }
+    .rk-d rect[fill="#E8F3EE" i], .rk-d path[fill="#E8F3EE" i] { fill: #17352b; }
+    .rk-d rect[fill="#CDECE0" i], .rk-d path[fill="#CDECE0" i] { fill: #1c4034; }
+    .rk-d [fill="#1A1A1A" i] { fill: #e7f3ee; }
+    .rk-d text[fill="#085041" i], .rk-d tspan[fill="#085041" i] { fill: #a8e6cf; }
+    .rk-d text[fill="#0F6E56" i], .rk-d tspan[fill="#0F6E56" i] { fill: #5dcaa5; }
+    .rk-d [fill="#5B6B66" i] { fill: #9bb8ac; }
+    .rk-d [fill="#90A39C" i], .rk-d [fill="#B9CDC6" i] { fill: #7f9c90; }
+    .rk-d [stroke="#0F6E56" i] { stroke: #2fae87; }
+    .rk-d [stroke="#D7E5E0" i] { stroke: #2a4a3f; }
+    .rk-d [stroke="#B9CDC6" i] { stroke: #3b5a4f; }
+    .rk-d path[stroke="#FFFFFF" i][fill="#1D9E75" i] { stroke: #08130f; }
+  </style>
 
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

@@ -1,6 +1,21 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="720" height="430" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Two deployment shapes. Single-node (today): reverse proxy to one Ruscker to the local Docker daemon to app containers. Multi-node HA (active-active): an L4 load balancer fans to two Ruscker instances that share session state in Postgres and schedule across multiple Docker hosts.">
+<svg class="rk-d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 430" width="720" height="430" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Two deployment shapes. Single-node (today): reverse proxy to one Ruscker to the local Docker daemon to app containers. Multi-node HA (active-active): an L4 load balancer fans to two Ruscker instances that share session state in Postgres and schedule across multiple Docker hosts.">
   <title>Ruscker — deployment shapes</title>
+  <style media="(prefers-color-scheme: dark)" data-rk-dark="">
+    .rk-d rect[fill="#FFFFFF" i], .rk-d circle[fill="#FFFFFF" i] { fill: #132a22; }
+    .rk-d rect[fill="#F4F8F7" i], .rk-d path[fill="#F4F8F7" i] { fill: #0f211b; }
+    .rk-d rect[fill="#E8F3EE" i], .rk-d path[fill="#E8F3EE" i] { fill: #17352b; }
+    .rk-d rect[fill="#CDECE0" i], .rk-d path[fill="#CDECE0" i] { fill: #1c4034; }
+    .rk-d [fill="#1A1A1A" i] { fill: #e7f3ee; }
+    .rk-d text[fill="#085041" i], .rk-d tspan[fill="#085041" i] { fill: #a8e6cf; }
+    .rk-d text[fill="#0F6E56" i], .rk-d tspan[fill="#0F6E56" i] { fill: #5dcaa5; }
+    .rk-d [fill="#5B6B66" i] { fill: #9bb8ac; }
+    .rk-d [fill="#90A39C" i], .rk-d [fill="#B9CDC6" i] { fill: #7f9c90; }
+    .rk-d [stroke="#0F6E56" i] { stroke: #2fae87; }
+    .rk-d [stroke="#D7E5E0" i] { stroke: #2a4a3f; }
+    .rk-d [stroke="#B9CDC6" i] { stroke: #3b5a4f; }
+    .rk-d path[stroke="#FFFFFF" i][fill="#1D9E75" i] { stroke: #08130f; }
+  </style>
 
   <defs>
     <!-- Right-pointing triangle + orient="auto": the renderer rotates it
@@ -15,7 +30,7 @@
   <line x1="360" y1="20" x2="360" y2="410" stroke="#D7E5E0" stroke-width="1.5" stroke-dasharray="4 5"/>
 
   <!-- ───────────── Single-node (left) ───────────── -->
-  <text x="185" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Single-node · today</text>
+  <text x="185" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Single-node · the default</text>
 
   <rect x="55" y="50" width="260" height="44" rx="9" fill="#FFFFFF" stroke="#5DCAA5" stroke-width="1.6"/>
   <text x="185" y="77" text-anchor="middle" font-size="12.5" fill="#085041">Reverse proxy · terminates TLS</text>
@@ -35,7 +50,7 @@
   <text x="185" y="310" text-anchor="middle" font-size="12.5" font-weight="600" fill="#085041">App containers ×N</text>
   <text x="185" y="328" text-anchor="middle" font-size="10.5" fill="#5B6B66">spawned on demand · reaped when idle</text>
 
-  <text x="185" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">what 99% of installs run — simple and fast</text>
+  <text x="185" y="372" text-anchor="middle" font-size="11" fill="#5B6B66">what most installs run — simple and fast</text>
 
   <!-- ───────────── Multi-node HA (right) ───────────── -->
   <text x="535" y="34" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Multi-node HA · active-active</text>

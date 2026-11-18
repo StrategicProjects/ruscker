@@ -29,31 +29,273 @@ html.ayu .ruscker-logo-dark {
   display: inline-block;
 }
 
-/* Brand re-tint — paint mdBook's accents in the Ruscker teal palette
- * (#0F6E56 / #1D9E75 / #5DCAA5) instead of the stock theme colours. This
- * additional-css loads after the built-in theme CSS, so these override
- * the per-theme custom-property values. */
+/* ── The site's look ──────────────────────────────────────────────────
+ * Same palette and manners as the landing page (book/landing/index.html):
+ * deep green-black in the dark, soft mint-white in the light, the brand
+ * teal for anything you can act on. Two themes are offered — Light and
+ * Dark (mdBook's "navy" slot) — and the site follows the system unless
+ * the reader picks one. This file loads after mdBook's own CSS, so the
+ * custom properties below replace the stock theme values. */
 
-/* Light theme (the default): primary teal reads well on white. */
 html.light {
-  --links: #0f6e56;
+  --bg: #f5faf8;
+  --fg: #0e211b;
+  --sidebar-bg: #ecf5f1;
+  --sidebar-fg: #2c463d;
+  --sidebar-non-existant: #9bb0a8;
   --sidebar-active: #0f6e56;
+  --sidebar-spacer: #d5e6df;
+  --scrollbar: #9bb8ac;
+  --icons: #6b877c;
   --icons-hover: #0f6e56;
-  --searchbar-border-color: #5dcaa5;
-  --search-mark-bg: #b9e6d5;
-  --searchresults-header-fg: #0f6e56;
+  --links: #0f6e56;
   --inline-code-color: #0b5d49;
+  --theme-popup-bg: #ffffff;
+  --theme-popup-border: #d5e6df;
+  --theme-hover: #e2f0ea;
+  --quote-bg: #ecf5f1;
+  --quote-border: #d5e6df;
+  --table-border-color: #d5e6df;
+  --table-header-bg: #e2f0ea;
+  --table-alternate-bg: #f0f7f4;
+  --searchbar-border-color: #5dcaa5;
+  --searchbar-bg: #ffffff;
+  --searchbar-fg: #0e211b;
+  --searchbar-shadow-color: #cfe4dc;
+  --searchresults-header-fg: #0f6e56;
+  --searchresults-border-color: #d5e6df;
+  --searchresults-li-bg: #e2f0ea;
+  --search-mark-bg: #b9e6d5;
+  --sidebar-header-border-color: #b9dccf;
+  --rk-card: #ffffff;
+  --rk-border: #d5e6df;
+  --rk-muted: #4f6b61;
+  --rk-code-tint: rgba(15, 110, 86, 0.09);
+  --rk-shadow: 0 10px 30px rgba(15, 60, 45, 0.1);
 }
 
-/* Dark themes: the lighter teal keeps contrast on dark backgrounds. */
-html.coal,
 html.navy,
+html.coal,
 html.ayu {
-  --links: #5dcaa5;
+  --bg: #08130f;
+  --fg: #d9e9e2;
+  --sidebar-bg: #0d1c17;
+  --sidebar-fg: #b4cdc2;
+  --sidebar-non-existant: #55756a;
   --sidebar-active: #5dcaa5;
+  --sidebar-spacer: #1f3a30;
+  --scrollbar: #37574b;
+  --icons: #7c9a8e;
   --icons-hover: #5dcaa5;
-  --search-mark-bg: #1d9e75;
+  --links: #5dcaa5;
+  --inline-code-color: #a8e6cf;
+  --theme-popup-bg: #11241d;
+  --theme-popup-border: #1f3a30;
+  --theme-hover: #17352b;
+  --quote-bg: #0d1c17;
+  --quote-border: #1f3a30;
+  --table-border-color: #1f3a30;
+  --table-header-bg: #17352b;
+  --table-alternate-bg: #0b1814;
+  --searchbar-border-color: #2fae87;
+  --searchbar-bg: #11241d;
+  --searchbar-fg: #e7f3ee;
+  --searchbar-shadow-color: #08130f;
   --searchresults-header-fg: #5dcaa5;
+  --searchresults-border-color: #1f3a30;
+  --searchresults-li-bg: #11241d;
+  --search-mark-bg: #1d9e75;
+  --footnote-highlight: #1d9e75;
+  --color-scheme: dark;
+  --sidebar-header-border-color: #24493c;
+  --rk-card: #11241d;
+  --rk-border: #1f3a30;
+  --rk-muted: #9bb8ac;
+  --rk-code-tint: rgba(93, 202, 165, 0.12);
+  --rk-shadow: 0 12px 36px rgba(0, 0, 0, 0.4);
+}
+
+/* Only Light and Dark in the theme menu: the other three stock themes
+ * would show the same dark palette under different names. */
+#mdbook-theme-rust,
+#mdbook-theme-coal,
+#mdbook-theme-ayu {
+  display: none;
+}
+li:has(> #mdbook-theme-rust),
+li:has(> #mdbook-theme-coal),
+li:has(> #mdbook-theme-ayu) {
+  display: none;
+}
+
+/* Type: the system face, tighter headings — as on the landing page. */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+body {
+  -webkit-font-smoothing: antialiased;
+}
+.content {
+  line-height: 1.7;
+}
+.content h1,
+.content h2,
+.content h3,
+.content h4 {
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.content h1 {
+  font-size: 2.3em;
+  letter-spacing: -0.03em;
+  margin-block-end: 0.6em;
+}
+.content h2 {
+  margin-block-start: 2em;
+  padding-block-end: 0.3em;
+  border-bottom: 1px solid var(--rk-border);
+}
+.content a:hover {
+  text-decoration: underline;
+}
+
+/* The dark page carries the landing page's glow in its top corner. */
+html.navy .page,
+html.coal .page,
+html.ayu .page {
+  background:
+    radial-gradient(900px 480px at 85% -10%, rgba(29, 158, 117, 0.14), transparent 60%),
+    var(--bg);
+}
+
+/* Top bar: translucent, with a hairline — and the title leads home. */
+#mdbook-menu-bar,
+#mdbook-menu-bar.bordered {
+  border-block-end: 1px solid var(--rk-border);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+}
+.menu-title {
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.menu-title a {
+  color: inherit;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+}
+.menu-title a:hover {
+  color: var(--links);
+}
+.menu-title img {
+  width: 1.25em;
+  height: 1.25em;
+  border-radius: 0.3em;
+}
+
+/* Sidebar: section titles as small caps, a hairline on the edge. */
+.sidebar {
+  border-inline-end: 1px solid var(--rk-border);
+}
+.chapter li.part-title {
+  font-size: 0.74em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rk-muted);
+  margin-block-start: 1.6em;
+}
+.on-this-page {
+  border-inline-start-width: 2px;
+}
+.chapter li.chapter-item a:hover {
+  color: var(--sidebar-active);
+}
+
+/* Code: blocks as cards, inline code on a tint. */
+.content pre {
+  border: 1px solid var(--rk-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.content pre > code {
+  padding: 1em 1.1em;
+}
+html.navy .content pre > .hljs,
+html.coal .content pre > .hljs,
+html.ayu .content pre > .hljs {
+  background: #07110d;
+}
+html.light .content pre > .hljs {
+  background: #ffffff;
+}
+.content :not(pre) > code {
+  background: var(--rk-code-tint);
+  padding: 0.12em 0.4em;
+  border-radius: 6px;
+  font-size: 0.86em;
+}
+.content :not(pre) > .hljs {
+  color: var(--inline-code-color);
+}
+
+/* Tables: one rounded frame, quiet rules. */
+.content table {
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--rk-border);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.95em;
+}
+.content table td,
+.content table th {
+  border: 0;
+  border-block-end: 1px solid var(--table-border-color);
+  padding: 0.55em 0.9em;
+  vertical-align: top;
+}
+.content table tr:last-child td {
+  border-block-end: 0;
+}
+.content table thead th {
+  text-align: start;
+  font-weight: 700;
+}
+
+/* Quotes and notes: a teal rail instead of a box on all sides. */
+.content blockquote {
+  border: 0;
+  border-inline-start: 3px solid var(--sidebar-active);
+  border-radius: 0 10px 10px 0;
+  padding: 0.2em 1.1em;
+  margin-inline: 0;
+}
+
+/* Pictures: screenshots get a frame; diagrams sit centred, unframed. */
+.content img[src$=".png"],
+.content img[src$=".webp"] {
+  border: 1px solid var(--rk-border);
+  border-radius: 12px;
+  box-shadow: var(--rk-shadow);
+}
+.content img[src$=".svg"]:not(.ruscker-logo),
+.content svg.rk-d {
+  display: block;
+  margin: 1.6em auto;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Previous / next at the foot of a page. */
+.nav-wrapper .mobile-nav-chapters,
+.nav-chapters {
+  transition: color 0.15s;
+}
+.nav-chapters:hover {
+  color: var(--sidebar-active);
 }
 
 /* The active page in the sidebar gets a subtle teal rail in every

@@ -1,11 +1,26 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 520" width="720" height="520" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Roadmap timeline. Phases 0 through 7 are done. Phases 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence and admin CRUD, proxy and Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) shipped across v0.1.1 and v0.1.2; phase 7 (HA / multi-instance) shipped in v0.1.1. Post-phase releases added the admin redesign, group-scoped Editor delegation, scheduled jobs with an operator-selected IANA timezone, viewer-local admin timestamps, and security and reliability fixes. Phase 8 contains only the planned, optional external identity-provider integrations.">
+<svg class="rk-d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 556" width="720" height="556" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Roadmap timeline. Phases 0 through 7 are done. Phases 0 to 5 shipped in v0.1.0 (scaffolding, landing page, persistence and admin CRUD, proxy and Docker backend, monitoring dashboard, production polish); phase 6 (multi-host scheduling, app visibility, sub-path mounting) shipped across v0.1.1 and v0.1.2; phase 7 (HA / multi-instance) shipped in v0.1.1. Post-phase releases added the admin redesign, group-scoped Editor delegation, scheduled jobs with an operator-selected IANA timezone, viewer-local admin timestamps, the sign-in provider (OpenID Connect) for external systems, self-healing of containers, the package updater, and security and reliability fixes. Phase 8 contains only the planned, optional external identity-provider integrations.">
   <title>Ruscker — roadmap</title>
+  <style media="(prefers-color-scheme: dark)" data-rk-dark="">
+    .rk-d rect[fill="#FFFFFF" i], .rk-d circle[fill="#FFFFFF" i] { fill: #132a22; }
+    .rk-d rect[fill="#F4F8F7" i], .rk-d path[fill="#F4F8F7" i] { fill: #0f211b; }
+    .rk-d rect[fill="#E8F3EE" i], .rk-d path[fill="#E8F3EE" i] { fill: #17352b; }
+    .rk-d rect[fill="#CDECE0" i], .rk-d path[fill="#CDECE0" i] { fill: #1c4034; }
+    .rk-d [fill="#1A1A1A" i] { fill: #e7f3ee; }
+    .rk-d text[fill="#085041" i], .rk-d tspan[fill="#085041" i] { fill: #a8e6cf; }
+    .rk-d text[fill="#0F6E56" i], .rk-d tspan[fill="#0F6E56" i] { fill: #5dcaa5; }
+    .rk-d [fill="#5B6B66" i] { fill: #9bb8ac; }
+    .rk-d [fill="#90A39C" i], .rk-d [fill="#B9CDC6" i] { fill: #7f9c90; }
+    .rk-d [stroke="#0F6E56" i] { stroke: #2fae87; }
+    .rk-d [stroke="#D7E5E0" i] { stroke: #2a4a3f; }
+    .rk-d [stroke="#B9CDC6" i] { stroke: #3b5a4f; }
+    .rk-d path[stroke="#FFFFFF" i][fill="#1D9E75" i] { stroke: #08130f; }
+  </style>
 
   <!-- rail: solid teal through the done phases (0–7) and the post-phase
        release marker, dashed grey after toward the planned phase 8 -->
-  <line x1="60" y1="52" x2="60" y2="446" stroke="#1D9E75" stroke-width="3"/>
-  <line x1="60" y1="446" x2="60" y2="476" stroke="#B9CDC6" stroke-width="3" stroke-dasharray="3 6"/>
+  <line x1="60" y1="52" x2="60" y2="472" stroke="#1D9E75" stroke-width="3"/>
+  <line x1="60" y1="472" x2="60" y2="524" stroke="#B9CDC6" stroke-width="3" stroke-dasharray="3 6"/>
 
   <!-- done phases -->
   <g font-size="13">
@@ -67,18 +82,19 @@
   <!-- Post-phase release marker — between phase 7 and the planned phase 8.
        A diamond (not a phase circle): a cross-cutting release, not a
        phase. Sits at the solid→dashed transition. -->
-  <path d="M60,439 l7,7 l-7,7 l-7,-7 z" fill="#1D9E75" stroke="#FFFFFF" stroke-width="1.5"/>
-  <text x="86" y="450" font-size="12.5">
-    <tspan font-weight="700" fill="#085041">Post-phase polish</tspan><tspan fill="#5B6B66"> · admin UX · scoped Editors · schedules · security + reliability</tspan>
-  </text>
+  <path d="M60,464 l8,8 l-8,8 l-8,-8 z" fill="#1D9E75" stroke="#FFFFFF" stroke-width="1.5"/>
+  <g font-size="13">
+    <text x="86" y="469" font-weight="700" fill="#085041">Since then · release by release</text>
+    <text x="86" y="485" font-size="11" fill="#5B6B66">scoped Editors · scheduled jobs · sign-in provider (OIDC) · self-healing · package updater</text>
+  </g>
 
   <!-- planned phase -->
   <g font-size="13">
     <!-- 8 -->
-    <circle cx="60" cy="476" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
-    <text x="86" y="473" font-weight="700" fill="#5B6B66">Phase 8 · External identity providers</text>
-    <text x="86" y="489" font-size="11" fill="#90A39C">sign in via OIDC · SAML · LDAP (Ruscker as OIDC provider shipped)</text>
-    <rect x="520" y="462" width="120" height="22" rx="11" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="1.5"/>
-    <text x="580" y="477" text-anchor="middle" font-size="11" font-weight="600" fill="#5B6B66">planned · optional</text>
+    <circle cx="60" cy="524" r="8.5" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="2.5"/>
+    <text x="86" y="521" font-weight="700" fill="#5B6B66">Phase 8 · External identity providers</text>
+    <text x="86" y="537" font-size="11" fill="#90A39C">sign in via OIDC · SAML · LDAP (Ruscker as OIDC provider shipped)</text>
+    <rect x="520" y="510" width="120" height="22" rx="11" fill="#FFFFFF" stroke="#B9CDC6" stroke-width="1.5"/>
+    <text x="580" y="525" text-anchor="middle" font-size="11" font-weight="600" fill="#5B6B66">planned · optional</text>
   </g>
 </svg>

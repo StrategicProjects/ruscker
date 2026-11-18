@@ -1,100 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="818.352907" height="534.120349" viewBox="0 0 818.352907 534.120349" font-family="sans-serif" font-size="14.666667" fill="none">
-<g id="s0">
-<rect x="15.39593" y="14.803779" width="786.376744" height="502.144186" rx="9.474419" fill="#ffffff" stroke="#ffffff" stroke-width="1.2"/>
-</g>
-<g id="s1">
-<rect x="34.344767" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
-</g>
-<g id="s2">
-<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="114.877326" y="64.728702" text-anchor="middle">External system</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="114.877326" y="79.203508" text-anchor="middle">its server</text>
-</g>
-<g id="s3">
-<rect x="328.051744" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#ffffff" stroke="#085041" stroke-width="1.2"/>
-</g>
-<g id="s4">
-<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="408.584302" y="64.728702" text-anchor="middle">Browser</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="408.584302" y="79.203508" text-anchor="middle">the user</text>
-</g>
-<g id="s5">
-<rect x="621.758721" y="38.963547" width="161.065116" height="52.109302" rx="5.684651" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.866667"/>
-</g>
-<g id="s6">
-<text font-size="10.856105pt" stroke-width="0.266667" fill="#085041" x="702.291279" y="64.728702" text-anchor="middle">Ruscker</text>
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="702.291279" y="79.203508" text-anchor="middle">OIDC provider</text>
-</g>
-<g id="s7">
-<line x1="114.877326" y1="91.072849" x2="114.877326" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
-</g>
-<g id="s8">
-<line x1="408.584302" y1="91.072849" x2="408.584302" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
-</g>
-<g id="s9">
-<line x1="702.291279" y1="91.072849" x2="702.291279" y2="484.261221" stroke="#b9d6cc" stroke-width="1.2" stroke-dasharray="6.632093,4.737209"/>
-</g>
-<g id="s10">
-<rect x="696.606628" y="181.079826" width="11.369302" height="279.495349" rx="5.684651" fill="#e1f5ee" stroke="#0f6e56" stroke-width="1.2"/>
-</g>
-<g id="s11">
-<line x1="408.584302" y1="133.707733" x2="116.693579" y2="133.707733" stroke="#3d6b5f" stroke-width="1.2"/>
-<polygon stroke-width="0" points="124.351744,137.023779 114.877326,133.707733 124.351744,130.391686" fill="#3d6b5f"/>
-</g>
-<g id="s12">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="127.251298" text-anchor="middle">1  open the system</text>
-</g>
-<g id="s13">
-<line x1="114.877326" y1="181.079826" x2="406.768049" y2="181.079826" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
-<polygon stroke-width="0" points="399.109884,177.763779 408.584302,181.079826 399.109884,184.395872" fill="#3d6b5f"/>
-</g>
-<g id="s14">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="174.623391" text-anchor="middle">2  redirect to Ruscker</text>
-</g>
-<g id="s15">
-<line x1="408.584302" y1="181.079826" x2="694.790375" y2="181.079826" stroke="#3d6b5f" stroke-width="1.2"/>
-<polygon stroke-width="0" points="687.132209,177.763779 696.606628,181.079826 687.132209,184.395872" fill="#3d6b5f"/>
-</g>
-<g id="s16">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="174.623391" text-anchor="middle">/oauth/authorize + PKCE challenge</text>
-</g>
-<g id="s17">
-<line x1="696.606628" y1="237.926337" x2="410.400555" y2="237.926337" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
-<polygon stroke-width="0" points="418.058721,241.242384 408.584302,237.926337 418.058721,234.610291" fill="#3d6b5f"/>
-</g>
-<g id="s18">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="231.469903" text-anchor="middle">3  sign in · groups · MFA</text>
-</g>
-<g id="s19">
-<line x1="696.606628" y1="294.772849" x2="410.400555" y2="294.772849" stroke="#3d6b5f" stroke-width="1.2" stroke-dasharray="5.526744,3.947674"/>
-<polygon stroke-width="0" points="418.058721,298.088895 408.584302,294.772849 418.058721,291.456802" fill="#3d6b5f"/>
-</g>
-<g id="s20">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="552.595465" y="288.316415" text-anchor="middle">4  redirect back with a one-use code</text>
-</g>
-<g id="s21">
-<line x1="408.584302" y1="294.772849" x2="116.693579" y2="294.772849" stroke="#3d6b5f" stroke-width="1.2"/>
-<polygon stroke-width="0" points="124.351744,298.088895 114.877326,294.772849 124.351744,291.456802" fill="#3d6b5f"/>
-</g>
-<g id="s22">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#3d6b5f" x="261.730814" y="288.316415" text-anchor="middle">code</text>
-</g>
-<g id="s23">
-<line x1="114.877326" y1="370.568198" x2="693.781345" y2="370.568198" stroke="#0f6e56" stroke-width="1.866667"/>
-<polygon stroke-width="0" points="687.132209,367.252151 696.606628,370.568198 687.132209,373.884244" fill="#0f6e56"/>
-</g>
-<g id="s24">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="260.309651" y="364.111764" text-anchor="middle">5  POST /oauth/token  ·  secret + code + verifier</text>
-</g>
-<g id="s25">
-<line x1="696.606628" y1="427.414709" x2="117.702608" y2="427.414709" stroke="#0f6e56" stroke-width="1.866667" stroke-dasharray="5.526744,3.947674"/>
-<polygon stroke-width="0" points="124.351744,430.730756 114.877326,427.414709 124.351744,424.098663" fill="#0f6e56"/>
-</g>
-<g id="s26">
-<text font-size="7.7pt" font-family="monospace" stroke-width="0.266667" fill="#085041" x="551.174302" y="420.958275" text-anchor="middle">6  ID token (ES256)</text>
-</g>
-<g id="s27">
-<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="37.011434" y="511.290948" text-anchor="start">the system keeps its own session</text>
-</g>
-<g id="s28">
-<text font-size="7.7pt" font-style="italic" stroke-width="0.266667" fill="#3d6b5f" x="780.157171" y="511.290948" text-anchor="end">Ruscker authenticates; the system authorizes</text>
-</g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg class="rk-d" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 510" width="720" height="510" font-family="Jost, Inter, system-ui, -apple-system, sans-serif" role="img" aria-label="Authorization-code flow with PKCE between the external system's server, the user's browser and Ruscker. 1: the user opens the system. 2: the system redirects the browser to Ruscker's authorize endpoint with a PKCE challenge. 3: the user signs in at Ruscker, which checks groups and two-step verification. 4: Ruscker redirects back with a one-use code, which the browser hands to the system. 5: the system's server posts the code, its secret and the PKCE verifier to the token endpoint. 6: Ruscker answers with an ID token signed with ES256.">
+  <title>Ruscker — signing in to an external system</title>
+  <style media="(prefers-color-scheme: dark)" data-rk-dark="">
+    .rk-d rect[fill="#FFFFFF" i], .rk-d circle[fill="#FFFFFF" i] { fill: #132a22; }
+    .rk-d rect[fill="#F4F8F7" i], .rk-d path[fill="#F4F8F7" i] { fill: #0f211b; }
+    .rk-d rect[fill="#E8F3EE" i], .rk-d path[fill="#E8F3EE" i] { fill: #17352b; }
+    .rk-d rect[fill="#CDECE0" i], .rk-d path[fill="#CDECE0" i] { fill: #1c4034; }
+    .rk-d [fill="#1A1A1A" i] { fill: #e7f3ee; }
+    .rk-d text[fill="#085041" i], .rk-d tspan[fill="#085041" i] { fill: #a8e6cf; }
+    .rk-d text[fill="#0F6E56" i], .rk-d tspan[fill="#0F6E56" i] { fill: #5dcaa5; }
+    .rk-d [fill="#5B6B66" i] { fill: #9bb8ac; }
+    .rk-d [fill="#90A39C" i], .rk-d [fill="#B9CDC6" i] { fill: #7f9c90; }
+    .rk-d [stroke="#0F6E56" i] { stroke: #2fae87; }
+    .rk-d [stroke="#D7E5E0" i] { stroke: #2a4a3f; }
+    .rk-d [stroke="#B9CDC6" i] { stroke: #3b5a4f; }
+    .rk-d path[stroke="#FFFFFF" i][fill="#1D9E75" i] { stroke: #08130f; }
+  </style>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1D9E75"/>
+    </marker>
+  </defs>
+
+  <!-- lifelines -->
+  <line x1="110" y1="72" x2="110" y2="456" stroke="#B9CDC6" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <line x1="360" y1="72" x2="360" y2="456" stroke="#B9CDC6" stroke-width="1.5" stroke-dasharray="5 5"/>
+  <line x1="610" y1="72" x2="610" y2="456" stroke="#B9CDC6" stroke-width="1.5" stroke-dasharray="5 5"/>
+
+  <!-- who -->
+  <rect x="30" y="20" width="160" height="52" rx="10" fill="#FFFFFF" stroke="#1D9E75" stroke-width="1.5"/>
+  <text x="110" y="42" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">External system</text>
+  <text x="110" y="60" text-anchor="middle" font-size="11" fill="#5B6B66">its server</text>
+
+  <rect x="280" y="20" width="160" height="52" rx="10" fill="#FFFFFF" stroke="#1D9E75" stroke-width="1.5"/>
+  <text x="360" y="42" text-anchor="middle" font-size="14" font-weight="600" fill="#085041">Browser</text>
+  <text x="360" y="60" text-anchor="middle" font-size="11" fill="#5B6B66">the user</text>
+
+  <rect x="530" y="20" width="160" height="52" rx="10" fill="#E8F3EE" stroke="#0F6E56" stroke-width="2"/>
+  <text x="610" y="42" text-anchor="middle" font-size="14" font-weight="700" fill="#085041">Ruscker</text>
+  <text x="610" y="60" text-anchor="middle" font-size="11" fill="#5B6B66">sign-in provider</text>
+
+  <!-- 1 -->
+  <line x1="360" y1="112" x2="110" y2="112" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="235" y="104" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">1</tspan> · opens the system</text>
+
+  <!-- 2 -->
+  <line x1="110" y1="158" x2="360" y2="158" stroke="#1D9E75" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <text x="235" y="150" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">2</tspan> · redirect to Ruscker</text>
+  <line x1="360" y1="158" x2="610" y2="158" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="485" y="150" text-anchor="middle" font-size="11.5" fill="#5B6B66">/oauth/authorize + PKCE challenge</text>
+
+  <!-- 3 -->
+  <line x1="610" y1="212" x2="360" y2="212" stroke="#1D9E75" stroke-width="2" stroke-dasharray="6 4" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="485" y="204" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">3</tspan> · sign in · groups · 2FA</text>
+
+  <!-- 4 -->
+  <line x1="610" y1="266" x2="360" y2="266" stroke="#1D9E75" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <text x="485" y="258" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">4</tspan> · redirect back with a one-use code</text>
+  <line x1="360" y1="266" x2="110" y2="266" stroke="#1D9E75" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="235" y="258" text-anchor="middle" font-size="11.5" fill="#5B6B66">code</text>
+
+  <!-- 5 and 6: server to server -->
+  <rect x="96" y="300" width="528" height="118" rx="12" fill="#F4F8F7" stroke="#D7E5E0" stroke-width="1"/>
+  <text x="360" y="320" text-anchor="middle" font-size="11" font-style="italic" fill="#5B6B66">server to server — the browser never sees this</text>
+  <line x1="110" y1="356" x2="610" y2="356" stroke="#0F6E56" stroke-width="2.5" marker-end="url(#arrow)"/>
+  <text x="360" y="348" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">5</tspan> · POST /oauth/token · client secret + code + PKCE verifier</text>
+  <line x1="610" y1="400" x2="110" y2="400" stroke="#0F6E56" stroke-width="2.5" stroke-dasharray="6 4" marker-end="url(#arrow)"/>
+  <text x="360" y="392" text-anchor="middle" font-size="11.5" fill="#5B6B66"><tspan font-weight="700" fill="#085041">6</tspan> · ID token (ES256)</text>
+
+  <text x="30" y="486" font-size="11" font-style="italic" fill="#5B6B66">the system keeps its own session</text>
+  <text x="690" y="486" text-anchor="end" font-size="11" font-style="italic" fill="#5B6B66">Ruscker authenticates; the system authorizes</text>
 </svg>

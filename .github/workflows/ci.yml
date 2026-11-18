@@ -48,6 +48,15 @@ jobs:
       - name: Test workspace
         run: cargo test --locked
 
+  diagrams:
+    # Every diagram carries the same dark-scheme block and its copies in
+    # docs/ are identical to the one in the book (scripts/diagram-theme.py).
+    name: Diagrams
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - run: python3 scripts/diagram-theme.py --check
+
   updater:
     # The package updater (packaging/ruscker-update), end to end in a
     # Debian container with stand-in packages: install, hold, go back.

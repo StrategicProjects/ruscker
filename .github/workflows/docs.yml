@@ -52,6 +52,15 @@ jobs:
       - name: Build the book
         run: mdbook build book
 
+      # The site's front page is a hand-written landing page, not the
+      # book's first chapter (which stays at /introduction.html, so no
+      # existing link changes). It uses the book's images in place.
+      - name: Put the landing page at the root
+        run: |
+          cp book/landing/* book/book/
+          grep -q 'href="introduction.html"' book/book/index.html
+          test -f book/book/introduction.html
+
       # The R client package's reference site (pkgdown), into /r/ of the
       # same site. Built after the book, which owns the output folder.
       - uses: r-lib/actions/setup-pandoc@v2

@@ -478,8 +478,13 @@ pub fn address_bucket(ip: Option<&str>) -> String {
     }
 }
 /// How often the throttle's list of known sign-ins is refreshed from
-/// the audit log.
-const KNOWN_SIGN_INS_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// the database. Short, because it is also how one node of an HA
+/// deployment hears about a sign-in — or a password change — made on
+/// another; each pass reads a couple of minutes of rows by an index.
+const KNOWN_SIGN_INS_INTERVAL: Duration = Duration::from_secs(30);
+/// The throttle's own table is purged once every this many passes
+/// (about hourly).
+const SIGNIN_MEMORY_PURGE_EVERY: u32 = 120;
 
 /// Bring the sign-in throttle's known pairs in step with the database
 /// for everything since `since`: first forget the accounts whose
@@ -514,12 +519,41 @@ pub async fn load_known_sign_ins(
         let age = (now - *at).to_std().unwrap_or_default();
         limiter.remember_sign_in(username, &address_bucket(Some(ip)), age);
     }
-    Ok(rows.len())
+    let mut read = rows.len();
+    // The throttle's own table (keyed hashes; see `db::signin_memory`):
+    // what does not depend on the audit retention, and the token form.
+    if limiter.has_memory_key() {
+        let (rows, cut) = db::signin_memory::since(db, since).await?;
+        if cut {
+            tracing::warn!(rows = rows.len(), "sign-in throttle: more remembered sign-ins than are read");
+        }
+        for (kind, username, pair_hash, at) in &rows {
+            let age = (now - *at).to_std().unwrap_or_default();
+            limiter.remember_hashed(kind, username, pair_hash, age);
+        }
+        read += rows.len();
+    }
+    Ok(read)
+}
+
+/// The key for the throttle's persistent memory, derived from the
+/// cookie key when the operator set `RUSCKER_COOKIE_KEY`: a secret that
+/// outlives the process, is the same on every node of an HA deployment,
+/// and is not in the database. `None` when the variable is unset — the
+/// cookie key is then random per process, and there is nothing stable
+/// to derive from.
+///
+/// Derived from the parsed 32 bytes, not from the text of the variable:
+/// two nodes that write the same key as hex and as base64 share cookies
+/// and must share this too.
+pub fn signin_memory_key(cookie_key: &ruscker_proxy::sticky::CookieKey) -> Option<[u8; 32]> {
+    let set = std::env::var("RUSCKER_COOKIE_KEY").is_ok_and(|v| !v.trim().is_empty());
+    set.then(|| cookie_key.derive(b"ruscker-signin-memory-v1\0"))
 }
 
 /// Start the task that keeps the throttle's known sign-ins in step with
 /// the database: everything within the trust period at start-up, then
-/// what is new every few minutes — which is also how one node of an HA
+/// what is new every half minute — which is also how one node of an HA
 /// deployment learns about sign-ins, and password changes, made on
 /// another (within a few minutes, and assuming the nodes' clocks agree
 /// to within the overlap below).
@@ -531,12 +565,26 @@ pub fn spawn_known_sign_ins(
         let trust = chrono::Duration::from_std(limiter.trust_for()).unwrap_or(chrono::Duration::days(30));
         let mut since = Utc::now() - trust;
         let mut first = true;
+        let mut passes: u32 = 0;
         loop {
             let started = Utc::now();
+            // Rows past the trust period are of no use to anyone — purged
+            // whether or not the key is still set, so removing the
+            // variable does not strand old rows.
+            if passes.is_multiple_of(SIGNIN_MEMORY_PURGE_EVERY) {
+                if let Err(e) = db::signin_memory::purge_older_than(&db, started - trust).await {
+                    tracing::warn!(error = ?e, "sign-in throttle: could not purge old remembered sign-ins");
+                }
+            }
+            passes = passes.wrapping_add(1);
             match load_known_sign_ins(&db, &limiter, since).await {
                 Ok(n) => {
                     if first {
-                        tracing::info!(sign_ins = n, "sign-in throttle: known sign-ins loaded from the audit log");
+                        tracing::info!(
+                            sign_ins = n,
+                            persistent = limiter.has_memory_key(),
+                            "sign-in throttle: known sign-ins loaded from the database"
+                        );
                     }
                     // Overlap a little: rows are written in batches, a
                     // moment after they happen.

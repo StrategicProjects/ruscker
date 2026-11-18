@@ -702,6 +702,116 @@ async fn known_sign_ins_survive_a_restart_through_the_audit_log() {
     );
 }
 
+/// With a stable key the throttle keeps its own memory — keyed hashes,
+/// no addresses — so it does not depend on the audit log: it survives a
+/// restart even when the audit rows are gone (a short retention), and it
+/// covers the break-glass token, which is never in the audit log.
+#[tokio::test]
+async fn the_throttles_own_memory_survives_without_the_audit_log() {
+    use ruscker_admin::activity::load_known_sign_ins;
+    use ruscker_admin::auth::{LoginPolicy, LoginRateLimiter};
+    let state = throttled_state().await;
+    let db = state.db.clone().unwrap();
+    const KEY: [u8; 32] = [42; 32];
+    const HOME: Option<&str> = Some("198.51.100.20");
+    const OPS: Option<&str> = Some("198.51.100.30");
+    assert!(state.login_limiter.set_memory_key(KEY));
+
+    // alice signs in with her password, the operator with the token.
+    assert_eq!(sign_in(state.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+    assert_eq!(sign_in(state.clone(), "/admin/login/token", "token=break-glass-tok", OPS).await.0, StatusCode::SEE_OTHER);
+
+    // What was stored: two rows, hashes only — no address anywhere.
+    let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else { unreachable!() };
+    let rows: Vec<(String, String, String)> =
+        sqlx::query_as("SELECT kind, username, pair_hash FROM signin_memory ORDER BY kind")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.iter().map(|r| (r.0.as_str(), r.1.as_str())).collect::<Vec<_>>(), [("password", "alice"), ("token", "")]);
+    assert!(rows.iter().all(|r| r.2.len() == 64 && !r.2.contains("198")));
+
+    // "Restart" with the audit log empty (as with a short retention).
+    sqlx::query("DELETE FROM user_activity").execute(pool).await.unwrap();
+    let restart = |key: Option<[u8; 32]>| {
+        let mut s = state.clone();
+        let limiter = LoginRateLimiter::with_policy(LoginPolicy {
+            backoff_base: std::time::Duration::from_secs(60),
+            account_max: 5,
+            token_max: 3,
+            ..LoginPolicy::default()
+        });
+        if let Some(key) = key {
+            limiter.set_memory_key(key);
+        }
+        s.login_limiter = Arc::new(limiter);
+        s
+    };
+    let since = chrono::Utc::now() - chrono::Duration::days(30);
+    let attack = |s: AppState| async move {
+        for from in ["192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5"] {
+            assert_eq!(sign_in(s.clone(), "/admin/login", WRONG, Some(from)).await.0, StatusCode::UNAUTHORIZED);
+        }
+        for from in ["192.0.2.11", "192.0.2.12", "192.0.2.13"] {
+            assert_eq!(sign_in(s.clone(), "/admin/login/token", "token=nope", Some(from)).await.0, StatusCode::UNAUTHORIZED);
+        }
+    };
+
+    // Same key: both are known again, from the hashes alone.
+    let same = restart(Some(KEY));
+    assert_eq!(load_known_sign_ins(&db, &same.login_limiter, since).await.unwrap(), 2);
+    attack(same.clone()).await;
+    assert_eq!(sign_in(same.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+    assert_eq!(sign_in(same.clone(), "/admin/login/token", "token=break-glass-tok", OPS).await.0, StatusCode::SEE_OTHER);
+    // …and only there.
+    assert_eq!(sign_in(same.clone(), "/admin/login", RIGHT, Some("192.0.2.99")).await.0, StatusCode::TOO_MANY_REQUESTS);
+
+    // Without the key the rows mean nothing (and are not even read).
+    let keyless = restart(None);
+    assert_eq!(load_known_sign_ins(&db, &keyless.login_limiter, since).await.unwrap(), 0);
+    attack(keyless.clone()).await;
+    assert_eq!(sign_in(keyless.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(sign_in(keyless.clone(), "/admin/login/token", "token=break-glass-tok", OPS).await.0, StatusCode::TOO_MANY_REQUESTS);
+
+    // The race: a password reset lands while a sign-in with the OLD
+    // password is still in flight. Simulated by resetting just before —
+    // the sign-in sees a change within its margin and forgets the pair
+    // instead of remembering it; and the row it wrote is dated at the
+    // check, so the read leaves it out as well.
+    let raced = restart(Some(KEY));
+    ruscker_admin::db::users::set_password(&db, "bob", "Correct#Pass9", false, Some("root")).await.unwrap();
+    assert_eq!(sign_in(raced.clone(), "/admin/login", BOB, HOME).await.0, StatusCode::SEE_OTHER);
+    for from in ["192.0.2.21", "192.0.2.22", "192.0.2.23", "192.0.2.24", "192.0.2.25"] {
+        assert_eq!(sign_in(raced.clone(), "/admin/login", "username=bob&password=WRONG", Some(from)).await.0, StatusCode::UNAUTHORIZED);
+    }
+    assert_eq!(sign_in(raced.clone(), "/admin/login", BOB, HOME).await.0, StatusCode::TOO_MANY_REQUESTS, "not remembered");
+    let bob_rows: i64 = sqlx::query_scalar("SELECT count(*) FROM signin_memory WHERE username = 'bob'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(bob_rows, 0);
+
+    // alice changes her own password through the page: her rows go,
+    // in the table and in memory, and only hers.
+    let sid = state.admin_sessions.create(Role::Editor, Some("alice".into())).await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let (status, _) = post(
+        state.clone(),
+        "/admin/account/password",
+        "current=Correct%23Pass9&new_password=Changed%23Pass8&confirm=Changed%23Pass8",
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    let left: Vec<(String, String)> = sqlx::query_as("SELECT kind, username FROM signin_memory ORDER BY kind")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    assert_eq!(left, [("token".to_string(), String::new())], "only the token row is left");
+    let after = restart(Some(KEY));
+    assert_eq!(load_known_sign_ins(&db, &after.login_limiter, since).await.unwrap(), 1);
+}
+
 /// Refused sign-ins are reachable without an account, so their audit
 /// rows are budgeted: a burst from one address leaves a handful of rows,
 /// not one per attempt — and cannot push real events out of the queue.

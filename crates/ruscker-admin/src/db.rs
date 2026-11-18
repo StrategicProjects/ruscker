@@ -176,6 +176,7 @@ pub mod settings;
 pub mod showcase;
 pub mod spec_access;
 pub mod specs;
+pub mod signin_memory;
 pub mod user_activity;
 pub mod user_favorites;
 pub mod users;

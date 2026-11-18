@@ -34,6 +34,18 @@ an [SSO client](#sso), it also says which system they are signing in
 to, using the name and logo registered for that client. There is no
 free-form HTML on this page, by design: it receives passwords.
 
+After a few wrong passwords in a row the page answers **"Too many
+attempts. Wait a moment and try again."** instead of checking the next
+one. The wait starts at one second and doubles with each further
+failure, up to five minutes; it applies to that account from that
+network address, so one person mistyping does not slow anyone else
+down, and nobody can lock the whole portal by failing on purpose. A
+correct sign-in from an address is remembered for 30 days, and from
+there the person is not affected by attacks on their account from
+elsewhere. See [Troubleshooting](./troubleshooting.md#too-many-attempts-on-the-sign-in-page)
+for what to do when someone is stuck, and
+[Security](./security.md) for the exact limits.
+
 Appearance → **Sign-in page** picks one of three layouts: **Card** (the
 form in a centred card), **Split** (the form beside a panel with the
 portal's brand and an optional image from the Media library; the panel

@@ -1,0 +1,424 @@
+#!/bin/bash
+# ruscker-update — bring this server to a newer Ruscker release.
+#
+#   ruscker-update --check              is there a newer release? (changes nothing)
+#   ruscker-update --apply              install it now
+#   ruscker-update --apply --allow-migrations
+#   ruscker-update --apply --version 0.3.1
+#   ruscker-update --status             what the last run did
+#   ruscker-update --timer              what the systemd timer runs: obeys update.conf
+#
+# What an update does, in order — and it stops at the first thing that
+# is not as expected. Nothing on the server changes before step 5.
+#
+#   1. finds the newest release (or the pinned / requested one);
+#   2. downloads the package for this architecture and checks its sha256
+#      against the one published with the release;
+#   3. asks the new binary and the installed one for their database
+#      version: if they differ, the release migrates the database;
+#   4. makes sure it can go back: the package of the installed version,
+#      and a copy of the database;
+#   5. installs, keeping the configuration files in use;
+#   6. waits for the service and checks it: version, /healthz, /readyz;
+#   7. if that fails, puts the previous version and the database copy
+#      back, says so loudly, and does not try that release again by
+#      itself.
+#
+# Automatic runs (the timer) never install a release that migrates the
+# database unless update.conf says APPLY_MIGRATIONS=yes: after a
+# migration, going back is a restore, not just a reinstall.
+#
+# Runs as root. Configuration: /etc/ruscker/update.conf (--conf FILE
+# reads another one).
+set -euo pipefail
+
+# dpkg replaces this very file during the update, and bash reads scripts
+# as it goes — so run from a private copy.
+SELF_COPY=""
+if [ "${1:-}" = --self-copy ]; then
+  # Only ever delete the file this process is running from.
+  if [ "${2:-}" -ef "${BASH_SOURCE[0]}" ]; then SELF_COPY="$2"; fi
+  shift 2
+else
+  copy="$(mktemp /tmp/ruscker-update.XXXXXX)"
+  cp "$0" "$copy"
+  exec bash "$copy" --self-copy "$copy" "$@"
+fi
+
+say()  { printf '%s\n' "$*"; }
+note() { printf 'ruscker-update: %s\n' "$*"; }
+die()  { printf 'ruscker-update: ERROR: %s\n' "$*" >&2; record "error" "$*"; exit 1; }
+
+# Root-owned, on purpose: /var/lib/ruscker belongs to the service
+# account, and root must not write through paths that account controls.
+STATE=/var/lib/ruscker-update
+STATUS=$STATE/status
+FAILED=$STATE/failed      # the release that was undone; the timer skips it
+CACHE=/var/cache/ruscker
+BACKUPS=/var/backups/ruscker
+LOCK=/run/ruscker-update.lock
+
+# One line per fact, for people and for the admin panel to read.
+RECORDED=no
+record() {
+  local tmp
+  RECORDED=yes
+  [ "$(id -u)" = 0 ] || return 0
+  mkdir -p "$STATE" 2>/dev/null || return 0
+  tmp="$(mktemp "$STATE/.status.XXXXXX")" || return 0
+  {
+    printf 'checked_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf 'installed=%s\n' "${INSTALLED:-}"
+    printf 'latest=%s\n' "${TARGET:-}"
+    printf 'result=%s\n' "$1"
+    printf 'detail=%s\n' "${2:-}"
+  } > "$tmp"
+  chmod 644 -- "$tmp"; mv -f -- "$tmp" "$STATUS"
+}
+
+# Whatever way this program ends, the service is not left stopped by
+# it, and an unexpected end is on the record.
+SERVICE_STOPPED=no
+on_exit() {
+  local rc=$?
+  trap - EXIT
+  if [ -n "$SELF_COPY" ]; then rm -f -- "$SELF_COPY"; fi
+  if [ "$SERVICE_STOPPED" = yes ]; then
+    note "starting the service again"
+    systemctl start ruscker || true
+  fi
+  if [ "$rc" != 0 ] && [ "$RECORDED" = no ] && [ "${ACTION:-}" != status ]; then
+    printf 'ruscker-update: ERROR: stopped unexpectedly (exit %s)\n' "$rc" >&2
+    record "error" "stopped unexpectedly (exit $rc)"
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
+# ── arguments ───────────────────────────────────────────────────────
+CONF=/etc/ruscker/update.conf
+ACTION=""; WANT=""; ALLOW_MIGRATIONS=no; FROM_TIMER=no
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check|--apply|--status) ACTION="${1#--}" ;;
+    --timer) FROM_TIMER=yes ;;
+    --version) WANT="${2:?--version needs a value}"; shift ;;
+    --conf) CONF="${2:?--conf needs a file}"; shift ;;
+    --allow-migrations) ALLOW_MIGRATIONS=yes ;;
+    -h|--help) RECORDED=yes; sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) RECORDED=yes; echo "ruscker-update: unknown option $1 (try --help)" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [ "$ACTION" = status ]; then
+  if [ -f "$STATUS" ]; then cat "$STATUS"; else say "no update has been checked yet"; fi
+  exit 0
+fi
+[ "$(id -u)" = 0 ] || { RECORDED=yes; echo "ruscker-update: must run as root" >&2; exit 1; }
+
+# ── settings ────────────────────────────────────────────────────────
+MODE=check              # check | auto       (what --timer does)
+APPLY_MIGRATIONS=no     # no | yes           (automatic runs only)
+PIN=""                  # e.g. 0.3.1 — never go past this version
+WINDOW=""               # e.g. 01-05 — automatic installs only in these hours
+REPO=StrategicProjects/ruscker
+SOURCE=https://github.com   # where releases are fetched from (a mirror, or a test server)
+HEALTH_URL=""           # default: worked out from the service's unit and configuration
+HEALTH_WAIT=60          # seconds to wait for the service after installing
+if [ -f "$CONF" ]; then
+  # shellcheck disable=SC1090
+  . "$CONF" || die "$CONF could not be read as settings (a syntax error?)"
+fi
+is_number()  { case "$1" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac; }
+is_version() { [[ "$1" =~ ^[0-9]+(\.[0-9]+)+$ ]]; }
+case "$MODE" in check|auto) ;; *) die "MODE must be check or auto in $CONF (it is '$MODE')" ;; esac
+case "$APPLY_MIGRATIONS" in yes|no) ;; *) die "APPLY_MIGRATIONS must be yes or no in $CONF" ;; esac
+is_number "$HEALTH_WAIT" || die "HEALTH_WAIT must be a number of seconds in $CONF"
+PIN="${PIN#v}"
+[ -z "$PIN" ] || is_version "$PIN" || die "PIN is not a version in $CONF (it is '$PIN')"
+WINDOW_FROM=""; WINDOW_TO=""
+if [ -n "$WINDOW" ]; then
+  # A window that cannot be read must stop the update, not open it.
+  if [[ "$WINDOW" =~ ^([0-9]{1,2})-([0-9]{1,2})$ ]]; then
+    WINDOW_FROM=$((10#${BASH_REMATCH[1]})); WINDOW_TO=$((10#${BASH_REMATCH[2]}))
+  fi
+  if [ -z "$WINDOW_FROM" ] || [ "$WINDOW_FROM" -gt 23 ] || [ "$WINDOW_TO" -gt 24 ] || [ "$WINDOW_FROM" = "$WINDOW_TO" ]; then
+    die "WINDOW must be two different hours as from-to, e.g. 01-05, in $CONF (it is '$WINDOW')"
+  fi
+fi
+
+if [ "$FROM_TIMER" = yes ]; then
+  case "$MODE" in auto) ACTION=apply ;; check) ACTION=check ;; esac
+  if [ "$APPLY_MIGRATIONS" = yes ]; then ALLOW_MIGRATIONS=yes; fi
+fi
+[ -n "$ACTION" ] || { RECORDED=yes; echo "ruscker-update: say --check, --apply or --status (try --help)" >&2; exit 2; }
+
+exec 9>"$LOCK"
+flock -n 9 || { RECORDED=yes; note "another update is running"; exit 0; }
+# Nothing started from here may inherit the lock: a service started
+# without systemd would keep it for as long as it lives.
+systemctl() { command systemctl "$@" 9>&-; }
+dpkg() { command dpkg "$@" 9>&-; }
+
+# ── 1. versions ─────────────────────────────────────────────────────
+INSTALLED="$(dpkg-query -W -f='${Version}' ruscker 2>/dev/null || true)"
+[ -n "$INSTALLED" ] || die "the ruscker package is not installed"
+OLD_VERSION="${INSTALLED%-*}"
+ARCH="$(dpkg --print-architecture)"
+
+# The newest release, read from the redirect of /releases/latest — not
+# from the API, which rate-limits by address and answers 403 on servers
+# that share one outbound address with many others.
+latest_release() {
+  local loc
+  loc="$(curl -fsS -o /dev/null -m 30 -w '%{redirect_url}' "$SOURCE/$REPO/releases/latest")" || return 1
+  case "$loc" in */tag/v*) printf '%s\n' "${loc##*/tag/v}" ;; *) return 1 ;; esac
+}
+if [ -n "$WANT" ]; then
+  TARGET="${WANT#v}"
+  is_version "$TARGET" || die "not a version: $WANT"
+  if dpkg --compare-versions "$TARGET-1" lt "$INSTALLED"; then
+    die "$TARGET is older than the installed $OLD_VERSION; this program does not go backwards (nothing was changed)"
+  fi
+else
+  TARGET="$(latest_release)" || die "could not find the latest release at $SOURCE/$REPO"
+  is_version "$TARGET" || die "the latest release has an unexpected name: $TARGET"
+  if [ -n "$PIN" ] && dpkg --compare-versions "$TARGET-1" gt "$PIN-1"; then
+    note "latest is $TARGET but $CONF pins $PIN"
+    TARGET="$PIN"
+  fi
+fi
+
+if dpkg --compare-versions "$TARGET-1" le "$INSTALLED"; then
+  note "up to date ($INSTALLED)"
+  record "up-to-date"
+  exit 0
+fi
+if [ "$ACTION" = check ]; then
+  note "a newer release is available: $TARGET (installed: $INSTALLED)"
+  note "notes: https://github.com/$REPO/releases/tag/v$TARGET — install with: ruscker-update --apply"
+  record "available"
+  exit 0
+fi
+
+if [ "$FROM_TIMER" = yes ]; then
+  # A release that was installed and undone is not tried again by the
+  # timer: a person looks at it first (running --apply clears this).
+  if [ -f "$FAILED" ] && [ "$(cat "$FAILED")" = "$TARGET" ]; then
+    note "$TARGET was installed before and undone; not trying again automatically. Run: ruscker-update --apply"
+    record "held" "$TARGET failed before and was undone; run ruscker-update --apply to try again"
+    exit 0
+  fi
+  # Automatic installs keep to their hours.
+  if [ -n "$WINDOW" ]; then
+    hour=$((10#$(date +%H))); in_window=no
+    if [ "$WINDOW_FROM" -lt "$WINDOW_TO" ]; then
+      if [ "$hour" -ge "$WINDOW_FROM" ] && [ "$hour" -lt "$WINDOW_TO" ]; then in_window=yes; fi
+    else # a window that crosses midnight, e.g. 22-04
+      if [ "$hour" -ge "$WINDOW_FROM" ] || [ "$hour" -lt "$WINDOW_TO" ]; then in_window=yes; fi
+    fi
+    if [ "$in_window" = no ]; then
+      note "$TARGET is available; waiting for the update window ($WINDOW h)"
+      record "available" "waiting for the window $WINDOW"
+      exit 0
+    fi
+  fi
+else
+  rm -f -- "${FAILED:?}"
+fi
+
+# ── what the service looks like ─────────────────────────────────────
+# The unit as systemd sees it (drop-ins included), with continuation
+# lines joined.
+UNIT="$(systemctl cat ruscker 2>/dev/null | sed -e ':a' -e '/\\$/N; s/\\\n/ /; ta' || true)"
+unit_arg() { printf '%s\n' "$UNIT" | grep -E '^ExecStart=.+' | tail -1 | grep -oE -- "$1[= ]+[^ ]+" | sed -E "s/$1[= ]+//" | tr -d "\"'" || true; }
+DB="$(unit_arg --db)"; DB="${DB:-/var/lib/ruscker/ruscker.db}"
+# Is the catalog in a shared database? The address can be on the command
+# line or — more likely, since it carries a password — in the environment.
+shared_catalog() {
+  local f
+  [ -z "$(unit_arg --config-db-url)" ] || return 0
+  if printf '%s\n' "$UNIT" | grep -qE '^Environment=.*RUSCKER_CONFIG_DB_URL=.'; then return 0; fi
+  while read -r f; do
+    f="${f#-}"
+    if [ -f "$f" ] && grep -qE '^[[:space:]]*(export[[:space:]]+)?RUSCKER_CONFIG_DB_URL=.' "$f"; then return 0; fi
+  done < <(printf '%s\n' "$UNIT" | sed -n 's/^EnvironmentFile=//p')
+  return 1
+}
+if [ -z "$HEALTH_URL" ]; then
+  # Where the service listens: --bind in the unit, else `bind-address`
+  # and `port` in its configuration file, else the defaults.
+  bind="$(unit_arg --bind)"
+  if [ -z "$bind" ]; then
+    cfg="$(unit_arg --config)"; cfg="${cfg:-/etc/ruscker/ruscker.yml}"
+    port="$(grep -E '^[[:space:]]+port:[[:space:]]*[0-9]+' "$cfg" 2>/dev/null | head -1 | grep -oE '[0-9]+' || true)"
+    addr="$(grep -E '^[[:space:]]+bind-address:[[:space:]]*[0-9a-fA-F.:]+' "$cfg" 2>/dev/null | head -1 | sed -E 's/.*bind-address:[[:space:]]*//; s/[[:space:]].*//' || true)"
+    bind="${addr:-127.0.0.1}:${port:-8080}"
+  fi
+  HEALTH_URL="http://${bind/#0.0.0.0:/127.0.0.1:}"
+fi
+
+healthy() { # is the service up, on version $1, and ready? waits up to $2 seconds
+  local v="$1" wait="${2:-$HEALTH_WAIT}" i body code
+  for ((i = 0; i < wait; i++)); do
+    body="$(curl -fsS -m 5 "$HEALTH_URL/healthz" 2>/dev/null || true)"
+    case "$body" in *"\"$v\""*)
+      code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "$HEALTH_URL/readyz" || true)"
+      if [ "$code" = 200 ]; then return 0; fi ;;
+    esac
+    sleep 1
+  done
+  return 1
+}
+
+# The check after installing only means something if it passes now.
+if ! healthy "$OLD_VERSION" 5; then
+  if [ "$FROM_TIMER" = yes ]; then
+    die "the service is not healthy on $OLD_VERSION right now ($HEALTH_URL/healthz, /readyz); an automatic update could not tell whether $TARGET works (nothing was changed)"
+  fi
+  note "warning: the service is not healthy on $OLD_VERSION right now ($HEALTH_URL); if $TARGET is not healthy either, the update is undone"
+fi
+
+# ── 2. download and verify ──────────────────────────────────────────
+mkdir -p "$CACHE" "$STATE"; chmod 700 "$CACHE"; chmod 755 "$STATE"
+fetch_deb() { # version → path of a verified .deb in the cache
+  local v="$1" f="ruscker_$1-1_${ARCH}.deb" base="$SOURCE/$REPO/releases/download/v$1"
+  local file="${CACHE:?}/${f:?}"
+  if [ ! -f "$file" ] || [ ! -f "$file.sha256" ]; then
+    curl -fsSL -m 600 -o "$file.part" "$base/$f" || return 1
+    curl -fsSL -m 60 -o "$file.sha256" "$base/$f.sha256" || return 1
+    mv "$file.part" "$file"
+  fi
+  local want got
+  want="$(cut -d' ' -f1 "$file.sha256")"
+  got="$(sha256sum "$file" | cut -d' ' -f1)"
+  if [ -z "$want" ] || [ "$want" != "$got" ]; then
+    rm -f -- "$file" "$file.sha256"
+    return 2
+  fi
+  [ "$(dpkg-deb -f "$file" Package)" = ruscker ] || return 2
+  [ "$(dpkg-deb -f "$file" Version)" = "$v-1" ] || return 2
+  printf '%s\n' "$file"
+}
+note "downloading $TARGET"
+NEW_DEB="$(fetch_deb "$TARGET")" || die "could not download or verify the package of $TARGET (nothing was changed)"
+
+# ── 3. does it migrate the database? ────────────────────────────────
+# Each binary says which database version it carries. The new one is
+# asked before it is installed — as an unprivileged account, with a time
+# limit, from a directory only root can write to. A binary that cannot
+# answer (too old, or it could not be run) counts as "yes".
+if id -u ruscker >/dev/null 2>&1; then PROBE_USER=ruscker; else PROBE_USER=nobody; fi
+schema_of() { timeout 10 setpriv --reuid "$PROBE_USER" --regid "$(id -gn "$PROBE_USER")" --clear-groups "$1" schema-version 2>/dev/null || true; }
+schema_of_installed="$(schema_of /usr/bin/ruscker)"
+probe="$(mktemp -d "$STATE/probe.XXXXXX")"; chmod 755 "$probe"
+dpkg-deb --fsys-tarfile "$NEW_DEB" | tar -x -C "$probe" ./usr/bin/ruscker 2>/dev/null || true
+schema_of_new="$(schema_of "$probe/usr/bin/ruscker")"
+rm -rf -- "${probe:?}"
+if is_number "$schema_of_installed" && is_number "$schema_of_new" && [ "$schema_of_installed" = "$schema_of_new" ]; then
+  MIGRATES=no
+else
+  MIGRATES=yes
+fi
+schema_note="schema ${schema_of_installed:-not stated by the installed version} → ${schema_of_new:-could not be asked of the new one}"
+if [ "$MIGRATES" = yes ] && shared_catalog; then
+  die "the catalog is in a shared database and $TARGET changes it ($schema_note). That cannot be undone from one node: update the nodes by hand, with dpkg (nothing was changed)"
+fi
+if [ "$MIGRATES" = yes ] && [ "$ALLOW_MIGRATIONS" != yes ]; then
+  note "$TARGET changes the database ($schema_note)."
+  note "It was NOT installed. Read the notes, then run: ruscker-update --apply --allow-migrations"
+  record "held" "changes the database; needs --allow-migrations"
+  exit 0
+fi
+
+# ── 4. the way back ─────────────────────────────────────────────────
+OLD_DEB="$(fetch_deb "$OLD_VERSION" 2>/dev/null || true)"
+if [ -z "$OLD_DEB" ]; then
+  if [ "$FROM_TIMER" = yes ]; then
+    die "could not fetch the package of the installed version ($OLD_VERSION) to go back to; an automatic update needs it (nothing was changed)"
+  fi
+  note "warning: could not fetch the package of $OLD_VERSION; if $TARGET fails it CANNOT be undone from here"
+fi
+
+BACKUP=""
+backup_db() {
+  [ -f "$DB" ] || { note "no local database at $DB — nothing to copy"; return 0; }
+  local dir extra
+  dir="$BACKUPS/pre-$TARGET-$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$dir" || return 1
+  chmod 700 "$BACKUPS" "$dir" || return 1
+  # The service is stopped, so the files are consistent as they are.
+  cp -a "$DB" "$dir/" || return 1
+  for extra in "$DB-wal" "$DB-shm"; do
+    if [ -f "$extra" ]; then cp -a "$extra" "$dir/" || return 1; fi
+  done
+  BACKUP="$dir"
+  note "database copied to $BACKUP"
+}
+restore_db() {
+  [ -n "$BACKUP" ] || return 0
+  rm -f -- "${DB:?}-wal" "${DB:?}-shm"
+  # --remove-destination: never write through whatever sits at the
+  # destination (the directory belongs to the service account).
+  cp -a --remove-destination "$BACKUP"/. "$(dirname "$DB")"/ || return 1
+  note "database restored from $BACKUP"
+}
+# Keep the two newest packages and the five newest database copies.
+prune() {
+  local f
+  { ls -1t "$CACHE"/ruscker_*.deb 2>/dev/null || true; } | tail -n +3 | while read -r f; do
+    case "$f" in "$CACHE"/ruscker_*.deb) rm -f -- "$f" "$f.sha256" ;; esac
+  done
+  { ls -1dt "$BACKUPS"/pre-* 2>/dev/null || true; } | tail -n +6 | while read -r f; do
+    case "$f" in "$BACKUPS"/pre-*) rm -rf -- "$f" ;; esac
+  done
+}
+stop_service()  { systemctl stop ruscker || true; SERVICE_STOPPED=yes; }
+start_service() { systemctl start ruscker || true; SERVICE_STOPPED=no; }
+package_state() { dpkg-query -W -f='${Version} ${db:Status-Abbrev}' ruscker 2>/dev/null | sed 's/ *$//'; }
+
+# ── 5. install ──────────────────────────────────────────────────────
+note "installing $TARGET over $INSTALLED$([ "$MIGRATES" = yes ] && echo ' (migrates the database)')"
+stop_service
+backup_db || die "could not copy the database to $BACKUPS (disk full?) — nothing was changed"
+install_ok=yes
+DEBIAN_FRONTEND=noninteractive dpkg --force-confold -i "$NEW_DEB" || install_ok=no
+
+if [ "$install_ok" = no ] && [ "$(package_state)" = "$INSTALLED ii" ]; then
+  # dpkg refused before touching anything (its lock held by another
+  # package operation, a failing pre-install step…).
+  start_service
+  die "dpkg could not install $TARGET; $OLD_VERSION is still installed and was started again (nothing was changed)"
+fi
+start_service
+
+# ── 6. verify — 7. or go back ───────────────────────────────────────
+if [ "$install_ok" = yes ] && healthy "$TARGET"; then
+  note "now on $TARGET"
+  INSTALLED="$TARGET-1"
+  record "updated" "from $OLD_VERSION"
+  rm -f -- "${FAILED:?}"
+  prune
+  exit 0
+fi
+
+note "ERROR: $TARGET did not come up healthy — going back to $OLD_VERSION"
+journalctl -u ruscker -n 25 --no-pager 2>/dev/null || true
+printf '%s\n' "$TARGET" > "$FAILED"
+if [ -z "$OLD_DEB" ]; then
+  die "$TARGET is installed but unhealthy and there is no package of $OLD_VERSION to reinstall — act by hand"
+fi
+stop_service
+# The copy goes back whether or not the release said it migrates: the
+# service was stopped when it was taken, and the release was rejected.
+restore_db || die "could not restore the database from $BACKUP — act by hand"
+DEBIAN_FRONTEND=noninteractive dpkg --force-confold -i "$OLD_DEB" || die "could not reinstall $OLD_VERSION — act by hand; the database copy is in ${BACKUP:-(none)}"
+start_service
+prune
+if healthy "$OLD_VERSION"; then
+  record "rolled-back" "$TARGET did not come up healthy; back on $OLD_VERSION"
+  note "back on $OLD_VERSION. The timer will not try $TARGET again; after looking into it, run: ruscker-update --apply"
+  exit 1
+fi
+die "went back to $OLD_VERSION but the service is still unhealthy — act by hand; the database copy is in ${BACKUP:-(none)}"

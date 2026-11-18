@@ -37,6 +37,18 @@ pub static MIGRATIONS: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 /// opt-in for clustering.
 pub static MIGRATIONS_PG: sqlx::migrate::Migrator = sqlx::migrate!("./migrations-pg");
 
+/// The number of the newest migration this binary carries (the numeric
+/// prefix of its file name; the two directories are kept in lockstep, so
+/// one number describes both).
+///
+/// Printed by `ruscker schema-version`. The package updater compares
+/// the number of the installed binary with the one of a new release: if
+/// they differ, the release changes the database, and going back to the
+/// previous version afterwards is no longer just reinstalling it.
+pub fn schema_version() -> i64 {
+    MIGRATIONS.iter().map(|m| m.version).max().unwrap_or(0)
+}
+
 /// A handle to the admin config database.
 ///
 /// SQLite is the zero-config single-node default; Postgres backs the
@@ -203,6 +215,27 @@ mod bundled_sqlite {
             (major, minor) >= (3, 54),
             "bundled SQLite is {version}; 3.54.0 or newer is required"
         );
+    }
+}
+
+#[cfg(test)]
+mod schema_version_tests {
+    /// The number is the newest migration file's prefix, the same for
+    /// both dialects — the updater relies on it changing exactly when a
+    /// release adds a migration.
+    #[test]
+    fn schema_version_is_the_newest_migration_in_both_directories() {
+        let newest = |dir: &str| -> i64 {
+            std::fs::read_dir(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(dir))
+                .unwrap()
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter_map(|n| n.split('_').next()?.parse::<i64>().ok())
+                .max()
+                .unwrap()
+        };
+        assert_eq!(super::schema_version(), newest("migrations"));
+        assert_eq!(super::schema_version(), newest("migrations-pg"));
+        assert!(super::schema_version() >= 43);
     }
 }
 

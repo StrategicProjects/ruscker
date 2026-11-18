@@ -252,6 +252,28 @@ fn issue_session_cookie(state: &AppState, cookies: &Cookies, headers: &HeaderMap
     cookies.add(c);
 }
 
+/// Write a correct sign-in to the throttle's own table, so the pair is
+/// still known after a restart and on the other nodes. Best effort: a
+/// failed write only means the pair is forgotten at the next restart.
+async fn remember_sign_in(state: &AppState, remembered: Option<crate::auth::RememberedSignIn>) {
+    let (Some(r), Some(db)) = (remembered, state.db.as_ref()) else { return };
+    if let Err(e) = db::signin_memory::upsert(db, r.kind, &r.username, &r.pair_hash, chrono::Utc::now()).await {
+        tracing::warn!(error = ?e, "could not remember the sign-in for the throttle");
+    }
+}
+
+/// Forget where `username` was known to the sign-in throttle, in memory
+/// and in its table. For a password change or reset and for a deleted
+/// account.
+pub(crate) async fn forget_known_sign_ins(state: &AppState, username: &str) {
+    state.login_limiter.forget_account(username);
+    if let Some(db) = state.db.as_ref() {
+        if let Err(e) = db::signin_memory::forget_account(db, &db::users::normalize_username(username)).await {
+            tracing::warn!(error = ?e, "could not forget the account's remembered sign-ins");
+        }
+    }
+}
+
 /// 429 + `Retry-After` when the sign-in throttle refuses an attempt:
 /// the sign-in page again, saying so, instead of a bare error text.
 async fn rate_limited(
@@ -450,7 +472,7 @@ async fn login_submit(
         }
     };
 
-    state.login_limiter.success(attempt);
+    remember_sign_in(&state, state.login_limiter.success(attempt)).await;
     let session_id = state
         .admin_sessions
         .create(user.role, Some(user.username.clone()))
@@ -610,7 +632,7 @@ async fn token_login(
         ).await;
     }
 
-    state.login_limiter.success(attempt);
+    remember_sign_in(&state, state.login_limiter.success(attempt)).await;
     let session_id = state.admin_sessions.create(Role::Admin, None).await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
 
@@ -869,7 +891,7 @@ async fn password_submit(
     }
     // A new password: forget where the account was known to the sign-in
     // throttle — whoever had the old one must not keep the exemption.
-    state.login_limiter.forget_account(&actor);
+    forget_known_sign_ins(&state, &actor).await;
 
     // A self-service password change must invalidate every OTHER live
     // session for this account (#739) — changing the password is the

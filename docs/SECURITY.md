@@ -121,24 +121,36 @@ Status: living document. Tracks the Phase 5 security audit
   - a co-located observer can tell a known pair from an unknown one by
     which attempts are refused.
 
-  The list of known pairs is in memory, and rebuilt from the database:
-  at start-up the portal reads the correct password sign-ins of the
-  last 30 days (account and address) from the audit log, and every
-  five minutes what is new — so a restart does not forget them, and
-  each node of an HA deployment learns about sign-ins made on the
-  others (within a few minutes; nodes need clocks that agree to within
-  two minutes). A **password change or reset, or deleting the
-  account, forgets** where it was known — at once on the node where it
-  happens, at the next pass on the others — and sign-ins from before
-  the change, or from before the account was created (a username can
-  be reused), are not read back. It depends on those rows existing:
-  with the audit retention set below 30 days the memory is that much
-  shorter, a sign-in whose audit event was dropped is not remembered,
-  and without a database there is none. At most 50,000 sign-ins are
-  read (the newest; a warning is logged if more exist). The token
-  form's known addresses are not in the log and do not survive a
-  restart. Nothing new is stored: this is a second reader of rows the
-  audit already keeps.
+  The list of known pairs is in memory, and rebuilt from the database
+  at start-up and then **every 30 seconds** — so a restart does not
+  forget it, and each node of an HA deployment hears about a sign-in or
+  a password change made on another within about half a minute (nodes
+  need clocks that agree to within two minutes). Two sources:
+  - **the audit log**: the correct password sign-ins of the last 30
+    days, account and address. Always used; limited by the audit
+    retention, and it never has the break-glass token.
+  - **the throttle's own table** (`signin_memory`), when
+    `RUSCKER_COOKIE_KEY` is set: for each correct sign-in — password
+    or token — the account, a **keyed hash** of the (account, address)
+    pair, and the date. The key is derived from the cookie key, which
+    lives outside the database, so an address cannot be read back from
+    the table; the throttle can only recognise a pair it is shown.
+    Rows are deleted after 30 days whatever the audit retention is.
+    This is what makes the memory independent of a short audit
+    retention and what keeps the operator's token address known across
+    a restart. Without the variable the cookie key is random per
+    process, there is nothing stable to hash with, and the table is
+    not used.
+
+  A **password change or reset, or deleting the account, forgets**
+  where it was known — in memory and in the table at once on the node
+  where it happens, within 30 seconds on the others — and sign-ins
+  from before the change, or from before the account was created (a
+  username can be reused), are not read back. A sign-in whose audit
+  event was dropped, or whose table write failed, is simply not
+  remembered. At most 50,000 rows are read from each source (the
+  newest; a warning is logged if more exist). Without a database there
+  is no memory across restarts.
 
   The break-glass **token** form has no account and its secret opens
   everything, so it keeps one low ceiling for all addresses together
@@ -146,9 +158,10 @@ Status: living document. Tracks the Phase 5 security audit
   form: flooding one does not close the other, from any address.
   Failing on purpose can pause the token form for strangers, but not
   for an address the token was used correctly from in the last 30
-  days, which has a window of its own. After a restart nobody is known
-  yet; an operator locked out of the form then still has the server
-  itself.
+  days, which has a window of its own. That address is remembered
+  across restarts when `RUSCKER_COOKIE_KEY` is set (see below);
+  otherwise nobody is known after a restart, and an operator locked
+  out of the form then still has the server itself.
 
   The address is the one resolved for auditing — from `X-Forwarded-For`
   only with `server.useForwardHeaders`. Behind a proxy **without** it

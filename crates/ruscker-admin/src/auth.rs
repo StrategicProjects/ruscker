@@ -419,6 +419,11 @@ struct LimiterState {
     known_token: std::collections::HashMap<String, std::time::Instant>,
     /// Token attempts from each of those addresses.
     token_by_address: std::collections::HashMap<String, Window>,
+    /// The same two lists as read back from the throttle's own table,
+    /// where only a keyed hash of the address is kept (see
+    /// `db::signin_memory`): (account, hash) and hash, with their expiry.
+    known_hashed: std::collections::HashMap<(String, String), std::time::Instant>,
+    known_token_hashed: std::collections::HashMap<String, std::time::Instant>,
 }
 
 /// An attempt the throttle let through. It is **already counted as a
@@ -476,9 +481,13 @@ pub struct Attempt {
 /// * a co-located observer can tell a known pair from an unknown one by
 ///   which attempts the ceilings refuse.
 ///
-/// The memory of known pairs is per process, and rebuilt from the audit
-/// log at start-up and every few minutes ([`Self::remember_sign_in`]),
-/// so it survives a restart and is shared between HA nodes.
+/// The memory of known pairs is per process, and rebuilt from the
+/// database at start-up and every half minute, so it survives a restart
+/// and is shared between HA nodes: from the audit log
+/// ([`Self::remember_sign_in`]) and, when a key is set
+/// ([`Self::set_memory_key`]), from the throttle's own table of keyed
+/// hashes ([`Self::remember_hashed`]), which does not depend on the
+/// audit retention and also covers the token form.
 ///
 /// The break-glass **token** form has no account, and its secret opens
 /// everything, so it keeps what the first version had: one low ceiling
@@ -486,9 +495,8 @@ pub struct Attempt {
 /// no counter with the password form: flooding one does not close the
 /// other, from any address. Failing on purpose can pause the token
 /// form for strangers — but not for an address the token was used
-/// correctly from, which has a window of its own. After a restart
-/// nobody is known yet; an operator locked out then still has the
-/// server itself (restart, or a new token).
+/// correctly from, which has a window of its own (remembered across
+/// restarts when a memory key is set).
 ///
 /// The address is the client's as the portal resolves it for auditing:
 /// from `X-Forwarded-For` only when the operator trusts forwarded
@@ -503,6 +511,22 @@ pub struct Attempt {
 pub struct LoginRateLimiter {
     state: std::sync::Mutex<LimiterState>,
     policy: LoginPolicy,
+    /// Key for the hashes kept in `db::signin_memory`. Set once, at
+    /// start-up, when the deployment has a stable secret to derive it
+    /// from; unset ⇒ nothing is hashed and nothing is persisted there.
+    memory_key: std::sync::OnceLock<[u8; 32]>,
+}
+
+/// A correct sign-in to write to the throttle's own table — see
+/// [`LoginRateLimiter::success`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RememberedSignIn {
+    /// `"password"` or `"token"`.
+    pub kind: &'static str,
+    /// The account; empty for the token form.
+    pub username: String,
+    /// Keyed hash of (kind, account, address). Not the address.
+    pub pair_hash: String,
 }
 
 /// Most distinct keys tracked per map — a backstop. Admitted attempts
@@ -540,7 +564,7 @@ fn give_back(q: &mut Window, at: std::time::Instant) {
 
 impl LoginRateLimiter {
     pub fn with_policy(policy: LoginPolicy) -> Self {
-        Self { state: std::sync::Mutex::new(LimiterState::default()), policy }
+        Self { state: std::sync::Mutex::new(LimiterState::default()), policy, memory_key: std::sync::OnceLock::new() }
     }
 
     /// The production policy ([`LoginPolicy::default`]).
@@ -560,12 +584,87 @@ impl LoginRateLimiter {
         self.begin_token_at(std::time::Instant::now(), address)
     }
 
-    /// The attempt's credentials were right: give its slot back, forget
-    /// the account's failures and remember the pair as known. Other
+    /// The attempt's credentials were right: give its slot back, halve
+    /// the pair's earlier failures and remember it as known. Other
     /// accounts are untouched — signing in to your own account must not
     /// buy guesses against someone else's.
-    pub fn success(&self, attempt: Attempt) {
-        self.success_at(std::time::Instant::now(), attempt)
+    ///
+    /// Returns what to write to `db::signin_memory` so the pair is still
+    /// known after a restart — `None` when no key was set
+    /// ([`Self::set_memory_key`]), i.e. when nothing can be persisted.
+    pub fn success(&self, attempt: Attempt) -> Option<RememberedSignIn> {
+        let remembered = self.memory_key.get().map(|_| {
+            let (kind, username) = if attempt.token {
+                ("token", String::new())
+            } else {
+                ("password", attempt.account.clone().unwrap_or_default())
+            };
+            let pair_hash = self.pair_hash(kind, &username, &attempt.address).unwrap_or_default();
+            RememberedSignIn { kind, username, pair_hash }
+        });
+        // A password attempt without an account key (an empty username
+        // cannot sign in) has nothing to remember.
+        let remembered = remembered.filter(|r| r.kind == "token" || !r.username.is_empty());
+        self.success_at(std::time::Instant::now(), attempt);
+        remembered
+    }
+
+    /// Give the throttle the key for its persistent memory: 32 bytes
+    /// derived from a secret that outlives the process and is the same
+    /// on every node. Call once, before serving. Returns whether it was
+    /// set (a second call is ignored).
+    pub fn set_memory_key(&self, key: [u8; 32]) -> bool {
+        self.memory_key.set(key).is_ok()
+    }
+
+    /// Whether sign-ins can be remembered in the database.
+    pub fn has_memory_key(&self) -> bool {
+        self.memory_key.get().is_some()
+    }
+
+    /// HMAC-SHA256 of the pair under the memory key, hex. `None` without
+    /// a key. The address goes in only as its bucket (an IPv6 /64), and
+    /// comes out of this as nothing a reader of the table can reverse
+    /// without the key.
+    fn pair_hash(&self, kind: &str, account: &str, address: &str) -> Option<String> {
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, self.memory_key.get()?);
+        let mut ctx = ring::hmac::Context::with_key(&key);
+        // Length-prefixed fields: no two different triples can collide.
+        for field in [kind, account, address] {
+            ctx.update(&(field.len() as u64).to_be_bytes());
+            ctx.update(field.as_bytes());
+        }
+        Some(hex::encode(ctx.sign().as_ref()))
+    }
+
+    /// Tell the throttle about a sign-in read back from its own table:
+    /// the hash of a pair, and how long ago. Ignored when older than the
+    /// trust period or without a key.
+    pub fn remember_hashed(&self, kind: &str, username: &str, pair_hash: &str, age: std::time::Duration) {
+        if !self.has_memory_key() {
+            return;
+        }
+        let Some(left) = self.policy.trust_for.checked_sub(age).filter(|d| !d.is_zero()) else {
+            return;
+        };
+        let until = std::time::Instant::now() + left;
+        let mut st = self.lock();
+        match kind {
+            "token" => {
+                if st.known_token_hashed.len() < LIMITER_MAX_KEYS || st.known_token_hashed.contains_key(pair_hash) {
+                    let entry = st.known_token_hashed.entry(pair_hash.to_string()).or_insert(until);
+                    if until > *entry {
+                        *entry = until;
+                    }
+                }
+            }
+            "password" => {
+                if let Some(account) = account_key(username) {
+                    Self::remember_in(&mut st.known_hashed, (account, pair_hash.to_string()), until);
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Tell the throttle about a correct password sign-in it did not see
@@ -582,7 +681,7 @@ impl LoginRateLimiter {
         };
         let Some(account) = account_key(account) else { return };
         let until = std::time::Instant::now() + left;
-        Self::remember_pair(&mut self.lock(), (account, address.to_string()), until);
+        Self::remember_in(&mut self.lock().known, (account, address.to_string()), until);
     }
 
     /// Forget every address this account is known at. Called when its
@@ -592,7 +691,9 @@ impl LoginRateLimiter {
     /// Failures and streaks are kept.
     pub fn forget_account(&self, account: &str) {
         let Some(account) = account_key(account) else { return };
-        self.lock().known.retain(|(a, _), _| *a != account);
+        let mut st = self.lock();
+        st.known.retain(|(a, _), _| *a != account);
+        st.known_hashed.retain(|(a, _), _| *a != account);
     }
 
     /// How long a correct sign-in keeps a pair known.
@@ -641,7 +742,13 @@ impl LoginRateLimiter {
         let known = pair
             .as_ref()
             .and_then(|k| st.known.get(k))
-            .is_some_and(|until| now <= *until);
+            .is_some_and(|until| now <= *until)
+            // …or known from the throttle's own table, by its hash.
+            || account
+                .as_ref()
+                .and_then(|a| Some((a.clone(), self.pair_hash("password", a, address)?)))
+                .and_then(|k| st.known_hashed.get(&k).copied())
+                .is_some_and(|until| now <= until);
 
         // The collective ceilings. Always evaluated (it prunes the
         // windows); they only REFUSE people the portal does not know.
@@ -692,7 +799,11 @@ impl LoginRateLimiter {
         let known = st
             .known_token
             .get(address)
-            .is_some_and(|until| now <= *until);
+            .is_some_and(|until| now <= *until)
+            || self
+                .pair_hash("token", "", address)
+                .and_then(|h| st.known_token_hashed.get(&h).copied())
+                .is_some_and(|until| now <= until);
         if known {
             // The operator's address: its own ceiling, so strangers
             // failing on purpose cannot close the break-glass path to it.
@@ -765,15 +876,19 @@ impl LoginRateLimiter {
                 st.streaks.remove(&key);
             }
         }
-        Self::remember_pair(&mut st, key, now + self.policy.trust_for);
+        Self::remember_in(&mut st.known, key, now + self.policy.trust_for);
     }
 
-    /// Record `key` as known until `until` — at most `KNOWN_PER_ACCOUNT`
-    /// addresses per account, the one expiring soonest out, so one
-    /// account cannot fill the table. A sooner expiry never replaces a
-    /// later one.
-    fn remember_pair(st: &mut LimiterState, key: (String, String), until: std::time::Instant) {
-        if let Some(existing) = st.known.get_mut(&key) {
+    /// Record `key` (account, address-or-hash) in `map` as known until
+    /// `until` — at most `KNOWN_PER_ACCOUNT` entries per account, the one
+    /// expiring soonest out, so one account cannot fill the table. A
+    /// sooner expiry never replaces a later one.
+    fn remember_in(
+        map: &mut std::collections::HashMap<(String, String), std::time::Instant>,
+        key: (String, String),
+        until: std::time::Instant,
+    ) {
+        if let Some(existing) = map.get_mut(&key) {
             if until > *existing {
                 *existing = until;
             }
@@ -782,32 +897,41 @@ impl LoginRateLimiter {
         // This account's entries: how many, and which expires soonest.
         let mut count = 0;
         let mut soonest: Option<(std::time::Instant, &String)> = None;
-        for ((account, address), expiry) in &st.known {
+        for ((account, second), expiry) in map.iter() {
             if *account == key.0 {
                 count += 1;
                 if soonest.is_none_or(|(e, _)| *expiry < e) {
-                    soonest = Some((*expiry, address));
+                    soonest = Some((*expiry, second));
                 }
             }
         }
         if count >= KNOWN_PER_ACCOUNT {
             match soonest {
-                Some((expiry, address)) if expiry < until => {
-                    let evict = (key.0.clone(), address.clone());
-                    st.known.remove(&evict);
+                Some((expiry, second)) if expiry < until => {
+                    let evict = (key.0.clone(), second.clone());
+                    map.remove(&evict);
                 }
                 // Everything kept outlasts this one.
                 _ => return,
             }
         }
-        if st.known.len() < LIMITER_MAX_KEYS {
-            st.known.insert(key, until);
+        if map.len() < LIMITER_MAX_KEYS {
+            map.insert(key, until);
         }
     }
 
     /// Drop expired entries when a map is at its backstop size.
     fn housekeeping(st: &mut LimiterState, p: &LoginPolicy, now: std::time::Instant) {
-        let at_limit = [st.by_address.len(), st.by_account.len(), st.streaks.len(), st.known.len(), st.known_token.len()]
+        let at_limit = [
+            st.by_address.len(),
+            st.by_account.len(),
+            st.streaks.len(),
+            st.known.len(),
+            st.known_token.len(),
+            st.known_hashed.len(),
+            st.known_token_hashed.len(),
+            st.token_by_address.len(),
+        ]
             .iter()
             .any(|n| *n >= LIMITER_MAX_KEYS);
         if !at_limit {
@@ -818,8 +942,9 @@ impl LoginRateLimiter {
         st.streaks.retain(|_, s| now.duration_since(s.last) <= p.streak_forget);
         st.known.retain(|_, until| now <= *until);
         st.known_token.retain(|_, until| now <= *until);
-        let known_token = &st.known_token;
-        st.token_by_address.retain(|addr, _| known_token.contains_key(addr));
+        st.known_hashed.retain(|_, until| now <= *until);
+        st.known_token_hashed.retain(|_, until| now <= *until);
+        st.token_by_address.retain(|_, q| q.back().is_some_and(|t| now.duration_since(*t) <= p.window));
     }
 }
 
@@ -1596,6 +1721,82 @@ mod tests {
         }
         assert!(rl.begin_at(t0, "ana", "thief").is_err() && rl.begin_at(t0, "ana", "home").is_err());
         assert!(rl.begin_at(t0, "bia", "home").is_ok(), "other accounts keep theirs");
+    }
+
+    /// The throttle's own table holds keyed hashes. A limiter with the
+    /// same key recognises the pair from the hash alone; one with another
+    /// key, or none, does not — and without a key nothing is produced to
+    /// persist at all.
+    #[test]
+    fn a_hashed_memory_is_recognised_only_with_the_same_key() {
+        let t0 = std::time::Instant::now();
+        let saturate = |rl: &LoginRateLimiter| {
+            for i in 0..6 {
+                fail(rl, t0, "ana", &format!("evil{i}"));
+            }
+        };
+        // No key: nothing to persist.
+        let plain = LoginRateLimiter::with_policy(policy());
+        let ok = plain.begin_at(t0, "ana", "home").unwrap();
+        assert_eq!(plain.success(ok), None);
+
+        // With a key: a record with a hash that is not the address.
+        let first = LoginRateLimiter::with_policy(policy());
+        assert!(first.set_memory_key([7; 32]));
+        assert!(!first.set_memory_key([8; 32]), "set once");
+        let ok = first.begin_at(t0, " ANA ", "203.0.113.9").unwrap();
+        let remembered = first.success(ok).expect("something to persist");
+        assert_eq!((remembered.kind, remembered.username.as_str()), ("password", "ana"));
+        assert_eq!(remembered.pair_hash.len(), 64);
+        assert!(!remembered.pair_hash.contains("203"));
+
+        // "Restart": a new limiter, same key, told only the hash.
+        let restarted = LoginRateLimiter::with_policy(policy());
+        restarted.set_memory_key([7; 32]);
+        restarted.remember_hashed("password", "ana", &remembered.pair_hash, Duration::from_secs(3600));
+        saturate(&restarted);
+        for i in 0..6 {
+            fail(&restarted, t0, "bia", &format!("evil{i}"));
+        }
+        assert!(restarted.begin_at(t0, "ana", "203.0.113.9").is_ok(), "known by the hash");
+        assert!(restarted.begin_at(t0, "ana", "203.0.113.10").is_err(), "another address is not");
+        assert!(restarted.begin_at(t0, "bia", "203.0.113.9").is_err(), "nor another account there");
+        // A password change forgets the hashed memory too.
+        restarted.forget_account("ana");
+        assert!(restarted.begin_at(t0, "ana", "203.0.113.9").is_err());
+
+        // Another key, or none: the same hash means nothing.
+        let other = LoginRateLimiter::with_policy(policy());
+        other.set_memory_key([9; 32]);
+        other.remember_hashed("password", "ana", &remembered.pair_hash, Duration::from_secs(3600));
+        saturate(&other);
+        assert!(other.begin_at(t0, "ana", "203.0.113.9").is_err());
+        let keyless = LoginRateLimiter::with_policy(policy());
+        keyless.remember_hashed("password", "ana", &remembered.pair_hash, Duration::from_secs(3600));
+        saturate(&keyless);
+        assert!(keyless.begin_at(t0, "ana", "203.0.113.9").is_err());
+
+        // The token form: the operator's address, by its hash.
+        let ok = first.begin_token_at(t0, "198.51.100.5").unwrap();
+        let token = first.success(ok).unwrap();
+        assert_eq!((token.kind, token.username.as_str()), ("token", ""));
+        assert_ne!(token.pair_hash, remembered.pair_hash);
+        let restarted = LoginRateLimiter::with_policy(policy());
+        restarted.set_memory_key([7; 32]);
+        restarted.remember_hashed("token", "", &token.pair_hash, Duration::from_secs(60));
+        for i in 0..4 {
+            let _ = restarted.begin_token_at(t0, &format!("stranger{i}")).unwrap();
+        }
+        assert!(restarted.begin_token_at(t0, "another-stranger").is_err());
+        assert!(restarted.begin_token_at(t0, "198.51.100.5").is_ok(), "the operator is still known after a restart");
+        // Too old to count.
+        let stale = LoginRateLimiter::with_policy(policy());
+        stale.set_memory_key([7; 32]);
+        stale.remember_hashed("token", "", &token.pair_hash, Duration::from_secs(86_400 + 5));
+        for i in 0..4 {
+            let _ = stale.begin_token_at(t0, &format!("stranger{i}")).unwrap();
+        }
+        assert!(stale.begin_token_at(t0, "198.51.100.5").is_err());
     }
 
     /// One account cannot fill the table of known pairs.

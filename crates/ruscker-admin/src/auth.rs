@@ -468,7 +468,9 @@ pub struct Attempt {
 /// * a co-located observer can tell a known pair from an unknown one by
 ///   which attempts the ceilings refuse.
 ///
-/// The memory of known pairs is per process and lost on restart.
+/// The memory of known pairs is per process, and rebuilt from the audit
+/// log at start-up and every few minutes ([`Self::remember_sign_in`]),
+/// so it survives a restart and is shared between HA nodes.
 ///
 /// The break-glass **token** form has no account, and its secret opens
 /// everything, so it keeps what the first version had: one low ceiling
@@ -556,6 +558,29 @@ impl LoginRateLimiter {
     /// buy guesses against someone else's.
     pub fn success(&self, attempt: Attempt) {
         self.success_at(std::time::Instant::now(), attempt)
+    }
+
+    /// Tell the throttle about a correct password sign-in it did not see
+    /// itself — before a restart, or on another node — that happened
+    /// `age` ago. Read from the audit log at start-up and now and then
+    /// (see `activity::spawn_known_sign_ins`), so the "people the portal
+    /// knows" survive a restart. Ignored when older than the trust
+    /// period. It only ever grants the exemption a sign-in on this node
+    /// would have granted; it removes no failure and no streak.
+    pub fn remember_sign_in(&self, account: &str, address: &str, age: std::time::Duration) {
+        if age > self.policy.trust_for {
+            return;
+        }
+        let (Some(account), Some(since)) = (account_key(account), std::time::Instant::now().checked_sub(age))
+        else {
+            return;
+        };
+        Self::remember_pair(&mut self.lock(), (account, address.to_string()), since);
+    }
+
+    /// How long a correct sign-in keeps a pair known.
+    pub fn trust_for(&self) -> std::time::Duration {
+        self.policy.trust_for
     }
 
     /// The attempt could not be judged — the user store failed, say. It
@@ -723,24 +748,36 @@ impl LoginRateLimiter {
                 st.streaks.remove(&key);
             }
         }
-        // Remember the pair — at most `KNOWN_PER_ACCOUNT` addresses per
-        // account, oldest out, so one account cannot fill the table.
-        if !st.known.contains_key(&key) {
-            let mut mine: Vec<(std::time::Instant, String)> = st
-                .known
-                .iter()
-                .filter(|((a, _), _)| *a == key.0)
-                .map(|((_, addr), since)| (*since, addr.clone()))
-                .collect();
-            if mine.len() >= KNOWN_PER_ACCOUNT {
-                mine.sort();
-                if let Some((_, oldest)) = mine.into_iter().next() {
-                    st.known.remove(&(key.0.clone(), oldest));
+        Self::remember_pair(&mut st, key, now);
+    }
+
+    /// Record `key` as known since `since` — at most `KNOWN_PER_ACCOUNT`
+    /// addresses per account, oldest out, so one account cannot fill the
+    /// table. An older date never replaces a newer one.
+    fn remember_pair(st: &mut LimiterState, key: (String, String), since: std::time::Instant) {
+        if let Some(existing) = st.known.get_mut(&key) {
+            if since > *existing {
+                *existing = since;
+            }
+            return;
+        }
+        let mut mine: Vec<(std::time::Instant, String)> = st
+            .known
+            .iter()
+            .filter(|((a, _), _)| *a == key.0)
+            .map(|((_, addr), since)| (*since, addr.clone()))
+            .collect();
+        if mine.len() >= KNOWN_PER_ACCOUNT {
+            mine.sort();
+            if let Some((oldest_since, oldest)) = mine.into_iter().next() {
+                if oldest_since >= since {
+                    return; // everything kept is newer than this one
                 }
+                st.known.remove(&(key.0.clone(), oldest));
             }
         }
-        if st.known.len() < LIMITER_MAX_KEYS || st.known.contains_key(&key) {
-            st.known.insert(key, now);
+        if st.known.len() < LIMITER_MAX_KEYS {
+            st.known.insert(key, since);
         }
     }
 
@@ -1458,6 +1495,36 @@ mod tests {
             fail(&rl, t0, "ana", "a");
         }
         assert_eq!(rl.begin_at(t0, "ana", "a").unwrap_err(), Duration::from_secs(1));
+    }
+
+    /// A sign-in the throttle is told about (from the audit log, after a
+    /// restart) exempts the pair exactly as one it saw itself — and no
+    /// more than that.
+    #[test]
+    fn a_remembered_sign_in_makes_the_pair_known() {
+        let rl = LoginRateLimiter::with_policy(policy());
+        rl.remember_sign_in(" ANA ", "home", Duration::from_secs(3600));
+        rl.remember_sign_in("bia", "home", Duration::from_secs(86_400 + 60)); // too old
+        let t0 = std::time::Instant::now();
+        // Fill ana's and bia's account ceilings from elsewhere.
+        for who in ["ana", "bia"] {
+            for i in 0..6 {
+                fail(&rl, t0, who, &format!("evil{i}"));
+            }
+        }
+        assert!(rl.begin_at(t0, "ana", "home").is_ok(), "known from the log");
+        assert!(rl.begin_at(t0, "ana", "cafe").is_err(), "only at that address");
+        assert!(rl.begin_at(t0, "bia", "home").is_err(), "a sign-in older than the trust period does not count");
+        // It grants nothing else: her streak at home still applies.
+        for _ in 0..2 {
+            fail(&rl, t0, "ana", "home");
+        }
+        assert_eq!(rl.begin_at(t0, "ana", "home").unwrap_err(), Duration::from_secs(1));
+        // An older date never replaces a newer one.
+        rl.remember_sign_in("ana", "home", Duration::from_secs(80_000));
+        let st = rl.lock();
+        let since = st.known[&("ana".to_string(), "home".to_string())];
+        assert!(std::time::Instant::now().duration_since(since) < Duration::from_secs(4000));
     }
 
     /// One account cannot fill the table of known pairs.

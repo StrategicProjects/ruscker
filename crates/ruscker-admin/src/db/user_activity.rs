@@ -273,6 +273,45 @@ pub async fn purge_older_than(db: &ConfigDb, cutoff: DateTime<Utc>) -> Result<u6
     Ok(n)
 }
 
+/// Most rows read by [`password_sign_ins_since`]: a backstop, far above
+/// what a month of sign-ins is on the deployments this is built for.
+const SIGN_INS_LIMIT: i64 = 50_000;
+
+/// Correct **password** sign-ins since `since`, oldest first: who, from
+/// which address, when. Used to tell the sign-in throttle which
+/// (account, address) pairs it knows (#1094) — so a restart, or another
+/// node of an HA deployment, does not forget them. Rows without a
+/// username or an address are of no use for that and are left out.
+pub async fn password_sign_ins_since(
+    db: &ConfigDb,
+    since: DateTime<Utc>,
+) -> Result<Vec<(String, String, DateTime<Utc>)>> {
+    let rows: Vec<(String, String, DateTime<Utc>)> = match db {
+        ConfigDb::Sqlite(pool) => sqlx::query_as(
+            "SELECT username, client_ip, occurred_at FROM user_activity
+              WHERE event_type = 'login.success' AND auth_method = 'password'
+                AND username IS NOT NULL AND client_ip IS NOT NULL AND occurred_at >= ?
+              ORDER BY occurred_at ASC LIMIT ?",
+        )
+        .bind(since)
+        .bind(SIGN_INS_LIMIT)
+        .fetch_all(pool)
+        .await,
+        ConfigDb::Postgres(pool) => sqlx::query_as(
+            "SELECT username, client_ip, occurred_at FROM user_activity
+              WHERE event_type = 'login.success' AND auth_method = 'password'
+                AND username IS NOT NULL AND client_ip IS NOT NULL AND occurred_at >= $1
+              ORDER BY occurred_at ASC LIMIT $2",
+        )
+        .bind(since)
+        .bind(SIGN_INS_LIMIT)
+        .fetch_all(pool)
+        .await,
+    }
+    .context("read recent sign-ins")?;
+    Ok(rows)
+}
+
 /// Distinct usernames among events whose type starts with `prefix`.
 pub async fn distinct_usernames_with_prefix(db: &ConfigDb, prefix: &'static str) -> Result<Vec<String>> {
     let like = format!("{prefix}%");
@@ -366,6 +405,39 @@ mod tests {
     }
     fn access(user: Option<&str>, spec: &str, key: &str) -> ActivityEvent {
         ActivityEvent::app_access(user.map(String::from), spec, key, None, None)
+    }
+
+    /// What the sign-in throttle reads back: correct PASSWORD sign-ins
+    /// with a username and an address, inside the period, oldest first.
+    async fn check_password_sign_ins(db: &ConfigDb) {
+        let ip = |s: &str| Some(s.to_string());
+        insert_batch(
+            db,
+            &[
+                ActivityEvent::login_success("ana", AuthMethod::Password, "s1", ip("203.0.113.9")),
+                ActivityEvent::login_success("ana", AuthMethod::Password, "s2", ip("2001:db8:1:2::5")),
+                // Not usable: no address; the token; a refused sign-in; an app visit.
+                ActivityEvent::login_success("bia", AuthMethod::Password, "s3", None),
+                ActivityEvent::login_success("root", AuthMethod::Token, "s4", ip("203.0.113.1")),
+                ActivityEvent::login_failed(Some("ana".into()), "wrong-password"),
+                ActivityEvent::app_access(Some("ana".into()), "sales", "s5", None, ip("203.0.113.9")),
+            ],
+        )
+        .await
+        .unwrap();
+        let since = Utc::now() - chrono::Duration::hours(1);
+        let got = password_sign_ins_since(db, since).await.unwrap();
+        let pairs: Vec<(&str, &str)> = got.iter().map(|(u, ip, _)| (u.as_str(), ip.as_str())).collect();
+        assert_eq!(pairs, [("ana", "203.0.113.9"), ("ana", "2001:db8:1:2::5")]);
+        assert!(got.iter().all(|(_, _, at)| *at >= since));
+        // Nothing from before the period.
+        let later = Utc::now() + chrono::Duration::hours(1);
+        assert!(password_sign_ins_since(db, later).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn password_sign_ins_are_read_back_for_the_throttle() {
+        check_password_sign_ins(&ConfigDb::Sqlite(open_memory().await.unwrap())).await;
     }
 
     #[tokio::test]
@@ -595,6 +667,10 @@ mod tests {
             .await
             .unwrap();
         let db = ConfigDb::Postgres(pg);
+        // The throttle's read, through the Postgres arm; then start clean.
+        check_password_sign_ins(&db).await;
+        let ConfigDb::Postgres(pg) = &db else { unreachable!() };
+        sqlx::query("DELETE FROM user_activity").execute(pg).await.unwrap();
 
         insert_batch(
             &db,

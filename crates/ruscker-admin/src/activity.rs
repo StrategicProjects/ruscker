@@ -477,6 +477,64 @@ pub fn address_bucket(ip: Option<&str>) -> String {
         None => "-".to_string(),
     }
 }
+/// How often the throttle's list of known sign-ins is refreshed from
+/// the audit log.
+const KNOWN_SIGN_INS_INTERVAL: Duration = Duration::from_secs(5 * 60);
+
+/// Tell the sign-in throttle about the correct password sign-ins in the
+/// audit log since `since`. Returns how many rows were read.
+///
+/// The throttle exempts people it knows from its collective ceilings
+/// (see `auth::LoginRateLimiter`), but it only knows what it has seen —
+/// and it forgets at every restart, which is every upgrade. The audit
+/// log already has each correct sign-in with the account and the
+/// address, so that is where the list is rebuilt from.
+pub async fn load_known_sign_ins(
+    db: &ConfigDb,
+    limiter: &crate::auth::LoginRateLimiter,
+    since: chrono::DateTime<Utc>,
+) -> anyhow::Result<usize> {
+    let rows = db::user_activity::password_sign_ins_since(db, since).await?;
+    let now = Utc::now();
+    for (username, ip, at) in &rows {
+        // A clock that went backwards reads as "just now".
+        let age = (now - *at).to_std().unwrap_or_default();
+        limiter.remember_sign_in(username, &address_bucket(Some(ip)), age);
+    }
+    Ok(rows.len())
+}
+
+/// Start the task that keeps the throttle's known sign-ins in step with
+/// the audit log: everything within the trust period at start-up, then
+/// what is new every few minutes — which is also how one node of an HA
+/// deployment learns about sign-ins made on another.
+pub fn spawn_known_sign_ins(
+    db: ConfigDb,
+    limiter: Arc<crate::auth::LoginRateLimiter>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let trust = chrono::Duration::from_std(limiter.trust_for()).unwrap_or(chrono::Duration::days(30));
+        let mut since = Utc::now() - trust;
+        let mut first = true;
+        loop {
+            let started = Utc::now();
+            match load_known_sign_ins(&db, &limiter, since).await {
+                Ok(n) => {
+                    if first {
+                        tracing::info!(sign_ins = n, "sign-in throttle: known sign-ins loaded from the audit log");
+                    }
+                    // Overlap a little: rows are written in batches, a
+                    // moment after they happen.
+                    since = started - chrono::Duration::minutes(2);
+                    first = false;
+                }
+                Err(e) => tracing::warn!(error = ?e, "sign-in throttle: could not read known sign-ins"),
+            }
+            tokio::time::sleep(KNOWN_SIGN_INS_INTERVAL).await;
+        }
+    })
+}
+
 /// Budget map size at which finished windows are swept.
 const BUDGET_KEYS_MAX: usize = 4096;
 

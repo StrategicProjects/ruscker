@@ -121,7 +121,15 @@ Status: living document. Tracks the Phase 5 security audit
   - a co-located observer can tell a known pair from an unknown one by
     which attempts are refused.
 
-  The list of known pairs is in memory and lost on restart.
+  The list of known pairs is in memory, and rebuilt from the audit
+  log: at start-up the portal reads the correct password sign-ins of
+  the last 30 days (account and address), and every five minutes what
+  is new — so a restart does not forget them, and each node of an HA
+  deployment learns about sign-ins made on the others. It depends on
+  those rows existing: with the audit retention set below 30 days the
+  memory is that much shorter, and without a database there is none.
+  The token form's known addresses are not in the log and do not
+  survive a restart.
 
   The break-glass **token** form has no account and its secret opens
   everything, so it keeps one low ceiling for all addresses together

@@ -69,28 +69,55 @@ Status: living document. Tracks the Phase 5 security audit
   break-glass secret. The old `RUSCKER_EDITOR_TOKEN`/`RUSCKER_VIEWER_TOKEN`
   (the #101 MVP) are **removed** — Editor/Viewer are DB accounts now.
 - **[implemented]** Sign-in throttling — `auth::LoginRateLimiter`,
-  on the password and the break-glass token forms. Failures are counted
-  in four layers, each refusing on its own with `429` + `Retry-After`:
-  - **account + address**: from the third failure in a row, each new
-    attempt waits twice as long (1 s, 2 s, 4 s … up to 5 min);
-  - **account**, from any address: 30 failures per 10 minutes, so
-    spreading guesses over many addresses does not help;
-  - **address** (an IPv6 /64 counts as one): 30 failures per minute,
+  on the password and the break-glass token forms. Attempts are counted
+  in layers, each refusing on its own with `429` + `Retry-After`:
+  - **account + address**: after three failures in a row, each new
+    attempt waits twice as long (1 s, 2 s, 4 s … up to 5 min). The
+    streak is forgotten only after an hour without attempts, so sitting
+    out the longest wait does not buy a fresh run of fast guesses:
+    about 12 guesses an hour per account from one address;
+  - **account**, from any address: 30 attempts per 10 minutes, so
+    spreading guesses over many addresses does not help (at most about
+    180 an hour against one account, however many addresses);
+  - **address** (an IPv6 /64 counts as one): 30 attempts per minute,
     against one password tried on many accounts;
-  - **global**: 300 failures per minute, the last line.
+  - **global**: 300 attempts per minute, the last line.
 
-  A refused attempt is not counted, a success clears that account's
-  counters only, and an unknown username is throttled exactly like a
-  real one. The first version was a single global window (10 failures
-  per minute): it stopped guessing but let anyone pause sign-in for
-  everybody by failing on purpose. The address is the one resolved for
-  auditing — from `X-Forwarded-For` only with
-  `server.useForwardHeaders`; without it every request has the proxy's
-  address and the address layer becomes one shared ceiling. Counters
-  are in memory, per process (an HA deployment throttles per node).
-  There is deliberately no CAPTCHA: a third-party one would put an
-  outside script on the page that receives passwords and need outbound
-  access from the server.
+  An attempt is counted **when it is admitted**, before the (slow)
+  password check, and a correct sign-in gives its slot back — otherwise
+  a burst of parallel requests would all get in before the first
+  failure was recorded. A refused attempt is not counted, and an
+  unknown username is throttled exactly like a real one.
+
+  The first version was a single global window (10 failures per
+  minute): it stopped guessing but let anyone pause sign-in for
+  everybody by failing on purpose. The account, address and global
+  ceilings are still collective, so a pair (account, address) that has
+  signed in correctly in the last 30 days is **exempt from those
+  three** and keeps only its own streak: someone failing on purpose
+  cannot keep a person out of the address they normally use.
+  **What remains:** an account can be kept out *from an address it has
+  never signed in from* for as long as someone keeps failing against
+  it (30 attempts per 10 minutes), and with enough addresses (ten at
+  full rate) the password form can be paused for people the portal
+  does not know yet. The list of known pairs is in memory and lost on
+  restart.
+
+  The break-glass **token** form has no account and its secret opens
+  everything, so it keeps one low ceiling for all addresses together
+  (10 attempts per minute) plus the address ceiling. It is separate
+  from the password form in both directions: flooding one does not
+  close the other. Failing on purpose can still pause the token form.
+
+  The address is the one resolved for auditing — from `X-Forwarded-For`
+  only with `server.useForwardHeaders`. Behind a proxy **without** it
+  every request has the proxy's address: the address layer is then one
+  ceiling shared by everyone (30 per minute, where the first version
+  had 10) and the streak no longer tells people apart. Set the flag
+  behind a proxy. Counters are in memory, per process (an HA
+  deployment throttles per node). There is deliberately no CAPTCHA: a
+  third-party one would put an outside script on the page that receives
+  passwords and need outbound access from the server.
 - **[implemented]** Self-service password change revokes the
   account's **other** sessions (#739) — changing your password is the
   natural response to a suspected compromise, so every other live

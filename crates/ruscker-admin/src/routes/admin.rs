@@ -386,19 +386,23 @@ async fn login_submit(
     }
     let next = app_next_path(form.next.as_deref(), &state.base_path);
     // Throttled per account and per address (see `LoginRateLimiter`).
+    // The attempt is counted HERE, before the slow password check, so a
+    // burst of parallel requests cannot all slip in first; a correct
+    // password gives the slot back below.
     let address = crate::activity::address_bucket(client.ip.as_deref());
-    let account = Some(form.username.as_str());
-    if let Err(wait) = state.login_limiter.check(account, &address) {
-        return rate_limited(&state, loc, theme, false, next.unwrap_or_default(), wait).await;
-    }
+    let attempt = match state.login_limiter.begin(&form.username, &address) {
+        Ok(attempt) => attempt,
+        Err(wait) => {
+            return rate_limited(&state, loc, theme, false, next.unwrap_or_default(), wait).await
+        }
+    };
 
     // Username/password login needs the user store. Without a DB the
     // only way in is the break-glass token.
     let Some(pool) = state.db.as_ref() else {
-        // Count this against the limiter too (#328) — symmetric with the
+        // Already counted by `begin` above (#328) — symmetric with the
         // DB-present and token paths, so a no-DB deploy can't be probed
         // without tripping the same backoff.
-        state.login_limiter.record_failure(account, &address);
         return login_error(
             &state,
             loc,
@@ -412,7 +416,6 @@ async fn login_submit(
     let user = match db::users::verify_login(pool, &form.username, &form.password).await {
         Ok(Some(u)) => u,
         Ok(None) => {
-            state.login_limiter.record_failure(account, &address);
             // Audit the refusal. The typed name is kept only when it is
             // a real account — people do type passwords into the wrong
             // field, and those must not land in a table.
@@ -422,9 +425,7 @@ async fn login_submit(
                 .flatten()
                 .map(|u| u.username);
             let reason = if known.is_some() { "wrong-password" } else { "unknown-account" };
-            // Budgeted per address: this is reachable without an account
-            // (and the login limiter is checked BEFORE the slow password
-            // verification, so a parallel burst gets past it).
+            // Budgeted per address: this is reachable without an account.
             let key = format!("login.failed|{address}");
             state.activity.record_limited(
                 "login.failed",
@@ -447,7 +448,7 @@ async fn login_submit(
         }
     };
 
-    state.login_limiter.record_success(account, &address);
+    state.login_limiter.success(attempt);
     let session_id = state
         .admin_sessions
         .create(user.role, Some(user.username.clone()))
@@ -584,15 +585,18 @@ async fn token_login(
             .into_response();
     }
     let next = app_next_path(form.next.as_deref(), &state.base_path);
-    // No account here: the token form is throttled per address (and by
-    // the global ceiling).
+    // No account here, and one secret that opens everything: the token
+    // form keeps a low ceiling of its own that ignores the address, on
+    // top of the address and global ones.
     let client = crate::activity::ClientInfo::from_request(&state, &headers, peer.0.as_ref());
     let address = crate::activity::address_bucket(client.ip.as_deref());
-    if let Err(wait) = state.login_limiter.check(None, &address) {
-        return rate_limited(&state, loc, theme, true, next.unwrap_or_default(), wait).await;
-    }
+    let attempt = match state.login_limiter.begin_token(&address) {
+        Ok(attempt) => attempt,
+        Err(wait) => {
+            return rate_limited(&state, loc, theme, true, next.unwrap_or_default(), wait).await
+        }
+    };
     if !state.admin_auth.matches_token(&form.token) {
-        state.login_limiter.record_failure(None, &address);
         cookies.remove(Cookie::new(COOKIE_NAME, ""));
         return login_error(
             &state,
@@ -604,6 +608,7 @@ async fn token_login(
         ).await;
     }
 
+    state.login_limiter.success(attempt);
     let session_id = state.admin_sessions.create(Role::Admin, None).await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
 

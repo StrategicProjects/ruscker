@@ -81,6 +81,7 @@ admin-login-username-placeholder = tu usuario
 admin-login-password-label = Contraseña
 admin-login-password-placeholder = tu contraseña
 admin-login-error-credentials = Usuario o contraseña inválidos.
+admin-login-error-throttled = Demasiados intentos. Espere un momento y vuelva a intentarlo.
 admin-login-use-token = Entrar con token de administrador
 admin-login-use-password = Volver al inicio con contraseña
 # — Configuración del primer admin

@@ -483,6 +483,171 @@ async fn password_page_explains_itself_to_a_token_session() {
     assert!(body.contains(r#"name="new_password""#));
 }
 
+/// One request to the password or token form: status, `Retry-After`, body.
+async fn sign_in(state: AppState, uri: &'static str, body: &'static str, from: Option<&'static str>) -> (StatusCode, Option<String>, String) {
+    let mut req = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .header("content-type", "application/x-www-form-urlencoded");
+    if let Some(from) = from {
+        req = req.header("x-forwarded-for", from);
+    }
+    let resp = router(state).oneshot(req.body(Body::from(body)).unwrap()).await.unwrap();
+    let status = resp.status();
+    let retry = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).map(str::to_string);
+    let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    (status, retry, String::from_utf8_lossy(&body).into_owned())
+}
+
+/// A state behind a trusted proxy, with two accounts and a throttle whose
+/// first wait is a full minute — so no assertion depends on how fast a
+/// password check runs on the test machine.
+async fn throttled_state() -> AppState {
+    use ruscker_admin::auth::{LoginPolicy, LoginRateLimiter};
+    let (mut state, pool) = state_with_db().await;
+    state.config = Arc::new(
+        Config::from_yaml("server:\n  useForwardHeaders: true\nproxy:\n  title: T\n  specs: []\n").unwrap(),
+    );
+    state.login_limiter = Arc::new(LoginRateLimiter::with_policy(LoginPolicy {
+        backoff_base: std::time::Duration::from_secs(60),
+        ..LoginPolicy::default()
+    }));
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    for who in ["alice", "bob"] {
+        ruscker_admin::db::users::create(&db, who, "Correct#Pass9", Role::Editor, false, &[], None)
+            .await
+            .unwrap();
+    }
+    state
+}
+
+const WRONG: &str = "username=alice&password=WRONG";
+const RIGHT: &str = "username=alice&password=Correct%23Pass9";
+const BOB: &str = "username=bob&password=Correct%23Pass9";
+const MALLORY: Option<&str> = Some("203.0.113.66");
+
+/// The sign-in throttle works per account and per address: repeated wrong
+/// passwords for one account get `429` + `Retry-After` and the sign-in
+/// page saying so — while another person signs in normally, which the
+/// old single global window did not allow.
+#[tokio::test]
+async fn repeated_wrong_passwords_slow_one_account_not_everyone() {
+    let state = throttled_state().await;
+    for _ in 0..3 {
+        let (status, _, _) = sign_in(state.clone(), "/admin/login", WRONG, MALLORY).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    // The next attempt is told to wait, even with the RIGHT password:
+    // the throttle answers before the password is looked at.
+    let (status, retry, body) = sign_in(state.clone(), "/admin/login", RIGHT, MALLORY).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    let secs: u64 = retry.expect("Retry-After").parse().unwrap();
+    assert!((50..=60).contains(&secs), "{secs}");
+    assert!(body.contains("admin-login-card") && body.contains("Muitas tentativas"), "the sign-in page, saying why");
+
+    // Nobody else is affected: bob from the same address, and alice
+    // herself from her own.
+    assert_eq!(sign_in(state.clone(), "/admin/login", BOB, MALLORY).await.0, StatusCode::SEE_OTHER);
+    assert_eq!(sign_in(state.clone(), "/admin/login", RIGHT, Some("198.51.100.20")).await.0, StatusCode::SEE_OTHER);
+    // Her success does not lift the guesser's own wait.
+    assert_eq!(sign_in(state.clone(), "/admin/login", WRONG, MALLORY).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
+/// Attempts are counted when admitted, not when they fail: a burst that
+/// arrives before any password has been checked is bounded all the same.
+#[tokio::test]
+async fn a_parallel_burst_cannot_outrun_the_throttle() {
+    let state = throttled_state().await;
+    let mut tasks = Vec::new();
+    for _ in 0..40 {
+        let state = state.clone();
+        tasks.push(tokio::spawn(async move { sign_in(state, "/admin/login", WRONG, MALLORY).await.0 }));
+    }
+    let mut checked = 0;
+    for t in tasks {
+        match t.await.unwrap() {
+            StatusCode::UNAUTHORIZED => checked += 1,
+            StatusCode::TOO_MANY_REQUESTS => {}
+            other => panic!("unexpected {other}"),
+        }
+    }
+    assert_eq!(checked, 3, "only three of forty simultaneous guesses reached the password check");
+    // And the burst did not close sign-in for anyone else.
+    assert_eq!(sign_in(state.clone(), "/admin/login", BOB, Some("198.51.100.20")).await.0, StatusCode::SEE_OTHER);
+}
+
+/// Guesses against one account spread over many addresses stop at the
+/// account's own ceiling — except for the person signing in from where
+/// they have signed in before.
+#[tokio::test]
+async fn the_account_ceiling_holds_but_not_against_a_known_address() {
+    let state = throttled_state().await;
+    const HOME: Option<&str> = Some("198.51.100.20");
+    assert_eq!(sign_in(state.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+    // 30 wrong passwords for alice, one per address.
+    const ADDRS: [&str; 30] = [
+        "192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5", "192.0.2.6", "192.0.2.7", "192.0.2.8",
+        "192.0.2.9", "192.0.2.10", "192.0.2.11", "192.0.2.12", "192.0.2.13", "192.0.2.14", "192.0.2.15",
+        "192.0.2.16", "192.0.2.17", "192.0.2.18", "192.0.2.19", "192.0.2.20", "192.0.2.21", "192.0.2.22",
+        "192.0.2.23", "192.0.2.24", "192.0.2.25", "192.0.2.26", "192.0.2.27", "192.0.2.28", "192.0.2.29",
+        "192.0.2.30",
+    ];
+    for from in ADDRS {
+        assert_eq!(sign_in(state.clone(), "/admin/login", WRONG, Some(from)).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // A 31st address is refused without a password check…
+    let (status, retry, _) = sign_in(state.clone(), "/admin/login", RIGHT, Some("192.0.2.99")).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(retry.unwrap().parse::<u64>().unwrap() > 500, "the ten-minute account window");
+    // …but alice, from the address she signed in from, gets in.
+    assert_eq!(sign_in(state.clone(), "/admin/login", RIGHT, HOME).await.0, StatusCode::SEE_OTHER);
+}
+
+/// The break-glass token is one secret that opens everything: its form
+/// keeps one low ceiling for all addresses together, and is separate
+/// from the password form in both directions.
+#[tokio::test]
+async fn the_token_form_has_its_own_ceiling() {
+    let state = throttled_state().await;
+    const ADDRS: [&str; 10] = [
+        "192.0.2.1", "192.0.2.2", "192.0.2.3", "192.0.2.4", "192.0.2.5", "192.0.2.6", "192.0.2.7", "192.0.2.8",
+        "192.0.2.9", "192.0.2.10",
+    ];
+    for from in ADDRS {
+        assert_eq!(sign_in(state.clone(), "/admin/login/token", "token=nope", Some(from)).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // Ten wrong tokens in a minute close the form to an eleventh address:
+    // spreading guesses over addresses buys nothing.
+    let (status, retry, body) = sign_in(state.clone(), "/admin/login/token", "token=nope", Some("192.0.2.200")).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert!(retry.is_some() && body.contains("Muitas tentativas"));
+    // Accounts still sign in.
+    assert_eq!(sign_in(state.clone(), "/admin/login", BOB, Some("192.0.2.200")).await.0, StatusCode::SEE_OTHER);
+}
+
+/// Without trusted forwarded headers every request has the same address
+/// (the proxy's, or none in this harness): the address layer is then one
+/// ceiling shared by everyone, as documented — not a way around it.
+#[tokio::test]
+async fn without_trusted_forwarded_headers_the_address_is_shared() {
+    use ruscker_admin::auth::{LoginPolicy, LoginRateLimiter};
+    let (mut state, pool) = state_with_db().await;
+    state.login_limiter = Arc::new(LoginRateLimiter::with_policy(LoginPolicy { address_max: 4, ..LoginPolicy::default() }));
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "bob", "Correct#Pass9", Role::Editor, false, &[], None).await.unwrap();
+    // Four wrong guesses on four accounts, each claiming another address.
+    for (body, claimed) in [
+        ("username=u1&password=x", "192.0.2.1"),
+        ("username=u2&password=x", "192.0.2.2"),
+        ("username=u3&password=x", "192.0.2.3"),
+        ("username=u4&password=x", "192.0.2.4"),
+    ] {
+        assert_eq!(sign_in(state.clone(), "/admin/login", body, Some(claimed)).await.0, StatusCode::UNAUTHORIZED);
+    }
+    // The claimed addresses were ignored: the shared ceiling is reached.
+    assert_eq!(sign_in(state.clone(), "/admin/login", BOB, Some("192.0.2.9")).await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
 /// Refused sign-ins are reachable without an account, so their audit
 /// rows are budgeted: a burst from one address leaves a handful of rows,
 /// not one per attempt — and cannot push real events out of the queue.

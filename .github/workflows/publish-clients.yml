@@ -57,6 +57,8 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      # Pinned to a commit, not a branch: this step receives the
+      # credential that can publish the package.
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
         with:
           packages-dir: clients/python/dist

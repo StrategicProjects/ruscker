@@ -105,9 +105,15 @@ The raw claims stay available.
 
 ## Status
 
-Not published to any registry yet: install from this directory (each
-package's README says how). The versions are `0.1.0`; the contract
-above is what stays stable.
+| Package | Where | Install |
+|---|---|---|
+| TypeScript | [npm](https://www.npmjs.com/package/ruscker-sso) | `npm install ruscker-sso` |
+| Python | [PyPI](https://pypi.org/project/ruscker-sso/) | `pip install ruscker-sso` |
+| Rust | [crates.io](https://crates.io/crates/ruscker-sso) | `ruscker-sso = "0.1"` |
+| Go | [pkg.go.dev](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go) | `go get github.com/StrategicProjects/ruscker/clients/go` |
+| R | from the repository (CRAN submission pending) | `remotes::install_github("StrategicProjects/ruscker", subdir = "clients/r")` |
+
+The versions are `0.1.0`; the contract above is what stays stable.
 
 ## Testing against a real provider
 

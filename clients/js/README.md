@@ -16,12 +16,8 @@ to **your own backend**.
 
 ## Install
 
-Not published to a registry. From a checkout:
-
 ```sh
-cd clients/js && npm install && npm run build
-# in your app:
-npm install /path/to/clients/js
+npm install ruscker-sso
 ```
 
 ## Split flow (a frontend with its own backend) — the usual path

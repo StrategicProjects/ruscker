@@ -1,7 +1,6 @@
 {
   "name": "ruscker-sso",
   "version": "0.1.0",
-  "private": true,
   "description": "Sign people in through a Ruscker portal (OpenID Connect): a dependency-free browser half and a Node backend half.",
   "license": "Apache-2.0",
   "author": "André Leite <leite@castlab.org>",

@@ -13,11 +13,10 @@ sessions: after a sign-in, the application issues its own.
 
 ## Install
 
-Python 3.10 or later. The package is not on PyPI; install it from this
-directory:
+Python 3.10 or later.
 
 ```sh
-pip install ./clients/python          # or: uv add ./clients/python
+pip install ruscker-sso          # or: uv add ruscker-sso
 ```
 
 ## Example: FastAPI

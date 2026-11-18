@@ -455,13 +455,90 @@ State lives in two places:
 
 ## Upgrading
 
-Build the new `.deb`, copy it over, and reinstall keeping your config:
+The package installs an updater, `ruscker-update`. It finds the newest
+release, downloads the package for the server's architecture, checks it
+against the checksum published with the release, installs it keeping
+your configuration, and verifies that the service came back on the new
+version and is ready. If that verification fails, it puts the previous
+version and the database copy back by itself.
+
+```sh
+sudo ruscker-update --check     # is there a newer release? changes nothing
+sudo ruscker-update --apply     # install it now
+ruscker-update --status         # what the last run found or did
+```
+
+Before installing, the updater checks that the service is healthy now,
+fetches the package of the installed version (to be able to go back),
+stops the service and copies the database to `/var/backups/ruscker/`
+(the five newest copies are kept). If any of that cannot be done, it
+stops there: nothing is changed and the service is started again.
+
+### Releases that change the database
+
+Each release states which database version it carries (`ruscker
+schema-version`). When the new release carries a newer one, starting it
+migrates the database — and from then on, going back to the previous
+version means restoring the copy, not just reinstalling the package. So
+the updater does not install such a release unless you say so:
+
+```sh
+sudo ruscker-update --apply --allow-migrations
+```
+
+Read the [release notes](./news.md) first. If the release fails its
+verification, the updater restores the copy it made before installing
+and reinstalls the previous version. A release that was undone is not
+tried again by the timer; after looking into it, run `ruscker-update
+--apply` to try again.
+
+### Following releases automatically
+
+The package also ships a timer, **turned off**. Turning it on makes the
+server look for a new release every hour:
+
+```sh
+sudo systemctl enable --now ruscker-update.timer
+```
+
+What the timer does is set in `/etc/ruscker/update.conf`:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MODE` | `check` | `check` only records that a newer release exists; `auto` installs it. |
+| `APPLY_MIGRATIONS` | `no` | In `auto`, whether the timer may install a release that changes the database. With `no`, such a release waits for a person. |
+| `WINDOW` | `01-05` | Hours (local time, `from-to`, may cross midnight) in which the timer may install. Empty means any hour. |
+| `PIN` | empty | Never go past this version. |
+
+A sensible setup for a production server is `MODE=auto` with the other
+defaults: routine releases install themselves at night, a release that
+migrates the database waits for you, and a release that does not come up
+is undone. `systemctl status ruscker-update.service` and `journalctl -u
+ruscker-update` show what each run did; a run that had to go back to the
+previous version is reported as failed.
+
+A setting that cannot be read (an unknown `MODE`, a malformed `WINDOW`)
+stops the update with an error instead of being guessed.
+
+The updater needs the server to reach `github.com` and
+`release-assets.githubusercontent.com` (where GitHub serves release
+files from) over HTTPS. It does not use the GitHub API, so it is not
+affected by the API's per-address rate limit.
+
+When the catalog lives in a shared Postgres database (`--config-db-url`
+or `RUSCKER_CONFIG_DB_URL`), the updater refuses a release that migrates
+it, by hand or by the timer: a migration of a shared database cannot be
+undone from one node. Install those with `dpkg`, node by node.
+
+### By hand
+
+Download the `.deb` from the releases page, copy it over, and install
+keeping your configuration:
 
 ```sh
 sudo dpkg -i --force-confold ruscker_<version>-1_amd64.deb
-sudo systemctl restart ruscker
 ```
 
 `--force-confold` preserves `ruscker.env` (your token) and the config;
-the systemd drop-in is untouched. New DB migrations apply on the next
-start.
+the systemd drop-in is untouched. New database migrations apply on the
+next start.

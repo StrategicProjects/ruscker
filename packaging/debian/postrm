@@ -11,6 +11,8 @@ set -e
 if [ "$1" = "purge" ]; then
     # The catalog DB, images, audit log, showcase-seed marker, etc.
     rm -rf /var/lib/ruscker
+    # The updater's own state, package cache and database copies.
+    rm -rf /var/lib/ruscker-update /var/cache/ruscker /var/backups/ruscker
     # dpkg removes the conffiles themselves (ruscker.yml, ruscker.env)
     # on purge, but can leave behind `.dpkg-{bak,old,dist}` variants and
     # the now-empty directory. Drop the whole dir so nothing — including

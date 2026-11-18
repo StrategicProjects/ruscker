@@ -50,8 +50,14 @@ assets = [
     ["../../packaging/ruscker.yml.example", "usr/share/ruscker/ruscker.yml.example", "644"],
     ["../../packaging/ruscker.env.example", "etc/ruscker/ruscker.env", "640"],
     ["../../packaging/README.Debian", "usr/share/doc/ruscker/README.Debian", "644"],
+    # The updater (#1105): the program, its settings, and a timer that
+    # the package installs but does NOT enable.
+    ["../../packaging/ruscker-update", "usr/sbin/ruscker-update", "755"],
+    ["../../packaging/update/update.conf", "etc/ruscker/update.conf", "644"],
+    ["../../packaging/update/ruscker-update.service", "lib/systemd/system/ruscker-update.service", "644"],
+    ["../../packaging/update/ruscker-update.timer", "lib/systemd/system/ruscker-update.timer", "644"],
 ]
-conf-files = ["/etc/ruscker/ruscker.yml", "/etc/ruscker/ruscker.env"]
+conf-files = ["/etc/ruscker/ruscker.yml", "/etc/ruscker/ruscker.env", "/etc/ruscker/update.conf"]
 maintainer-scripts = "../../packaging/debian/"
 
 [package.metadata.deb.systemd-units]

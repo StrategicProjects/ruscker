@@ -1,0 +1,12 @@
+# Not enabled by the package. To turn it on:
+#   systemctl enable --now ruscker-update.timer
+[Unit]
+Description=Ruscker — hourly check for a newer release
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=15min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

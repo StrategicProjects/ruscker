@@ -48,6 +48,18 @@ jobs:
       - name: Test workspace
         run: cargo test --locked
 
+  updater:
+    # The package updater (packaging/ruscker-update), end to end in a
+    # Debian container with stand-in packages: install, hold, go back.
+    name: Updater
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shellcheck
+        run: shellcheck -S warning packaging/ruscker-update
+      - name: Run the updater scenarios
+        run: packaging/tests/update-test.sh
+
   clippy:
     name: Clippy
     runs-on: ubuntu-24.04

@@ -86,6 +86,11 @@ enum Command {
         path: PathBuf,
     },
 
+    /// Print the number of the newest database migration this binary
+    /// carries, and nothing else. Used by the package updater to tell
+    /// whether a new release changes the database.
+    SchemaVersion,
+
     /// Import a YAML configuration into an admin database (SQLite via
     /// `--db`, or a shared Postgres catalog via `--config-db-url`).
     /// Idempotent — re-running with unchanged YAML produces zero
@@ -227,6 +232,10 @@ fn main() -> Result<()> {
         } => cmd_validate(&path, json, strict, strict_compat),
         Command::Show { path } => cmd_show(&path),
         Command::Inspect { path } => cmd_inspect(&path),
+        Command::SchemaVersion => {
+            println!("{}", ruscker_admin::db::schema_version());
+            Ok(())
+        }
         Command::Import {
             path,
             db,

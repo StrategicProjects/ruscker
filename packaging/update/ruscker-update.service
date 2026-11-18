@@ -1,0 +1,13 @@
+# Runs the updater once. Started by ruscker-update.timer; what it does
+# is decided by /etc/ruscker/update.conf (MODE=check only looks,
+# MODE=auto installs). See ruscker-update --help.
+[Unit]
+Description=Ruscker — check for (and optionally install) a newer release
+Documentation=https://ruscker.com/deploying.html#upgrading
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/ruscker-update --timer
+# An update that rolled back exits 1 and shows as failed here, on purpose.

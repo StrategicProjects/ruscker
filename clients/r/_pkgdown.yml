@@ -16,7 +16,7 @@ home:
 
 navbar:
   structure:
-    left: [intro, reference]
+    left: [intro, reference, articles]
     right: [portal, github]
   components:
     portal:

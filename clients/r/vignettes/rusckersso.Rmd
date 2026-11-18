@@ -1,0 +1,201 @@
+---
+title: "Knowing who is using your app"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Knowing who is using your app}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+A Ruscker portal keeps the accounts, the groups and the sign-in of an
+organisation in one place. An R web application can rely on it instead
+of managing passwords of its own, and `rusckersso` is the small piece
+that tells the application **who** is on the other side.
+
+There are two situations, and the package has one half for each.
+
+| Where the app runs | What the app does | Functions |
+|---|---|---|
+| **Inside** the portal, as one of its hosted apps | Nothing: the portal has already signed the person in and passes their identity along | `hosted_identity()`, `hosted_identity_plumber()` |
+| **Outside** the portal, on its own server | Sends the person to the portal to sign in, and checks what comes back | `sso_client()`, `sso_start()`, `sso_finish()` |
+
+Both halves end in the same **identity** object.
+
+```{r setup}
+library(rusckersso)
+```
+
+## Inside the portal
+
+The portal's proxy adds the person's identity to every request it
+forwards to a hosted app, as HTTP headers. The app's entry in the
+portal's configuration has to ask for them — nothing is sent by default:
+
+```yaml
+add-default-http-headers: true          # the username and the groups
+identity-claims: [email, setor, roles]  # optional extras
+```
+
+In a Shiny app, the identity is one call inside the server function:
+
+```{r, eval = FALSE}
+server <- function(input, output, session) {
+  id <- hosted_identity(session)
+  if (is.null(id)) {
+    # nobody is signed in (a public app), or the headers are not enabled
+  }
+}
+```
+
+In a plumber2 handler it is `hosted_identity_plumber(request)`.
+
+Here is what comes back, using a stand-in for the Shiny session so the
+example runs anywhere:
+
+```{r}
+session <- list(request = list(
+  HTTP_X_SP_USERID          = "ana",
+  HTTP_X_SP_USERGROUPS      = "fiscal,obras",
+  HTTP_X_RUSCKER_USER_EMAIL = "ana@example.org",
+  HTTP_X_RUSCKER_USER_ROLES = "fiscal:analista,fiscal:gestor"
+))
+
+id <- hosted_identity(session)
+id
+```
+
+Two things worth knowing:
+
+* **Read the identity from the request, never from an environment
+  variable.** One container serves many people; an environment variable
+  can only ever describe one of them.
+* **A value the app sees was put there by the portal.** The proxy removes
+  these headers from whatever the visitor's browser sent, so they cannot
+  be forged from outside — provided the app is reachable only through
+  the portal.
+
+## Asking questions about the identity
+
+What a group or a role *means* is the application's business. The
+package only answers the questions:
+
+```{r}
+has_group(id, "fiscal")
+has_role(id, "fiscal", "gestor")
+has_role(id, "obras", "gestor")
+roles(id, "fiscal")
+```
+
+A typical use is to turn group roles into the application's own
+profiles, instead of keeping a table of users:
+
+```{r}
+profile <- if (has_role(id, "fiscal", "gestor")) {
+  "manager"
+} else if (has_group(id, "fiscal")) {
+  "analyst"
+} else {
+  "visitor"
+}
+profile
+```
+
+## Outside the portal
+
+An app on its own server signs people in the way "Sign in with Google"
+works: it sends the browser to the portal, the person signs in there,
+and the portal sends them back with a one-time code that the app
+exchanges for the identity.
+
+First, an Admin of the portal registers the app (**SSO → Clients**) and
+gives its developer four values:
+
+```{r}
+client <- sso_client(
+  issuer        = "https://portal.example.org",   # the portal's address
+  client_id     = "my-app",
+  client_secret = "from-an-environment-variable", # never in the code
+  redirect_uri  = "https://app.example.org/"      # exactly as registered
+)
+client
+```
+
+The sign-in then takes two calls. They need a real portal, so they are
+shown but not run here.
+
+```{r, eval = FALSE}
+# 1. When the person asks to sign in:
+start <- sso_start(client)
+start$url      # send the browser to this address
+start$pending  # keep these three values until the person comes back
+
+# 2. When the portal sends the person back to redirect_uri:
+id <- sso_finish(client, session$clientData$url_search, start$pending)
+id$sub         # the person's permanent id on the portal
+```
+
+`sso_finish()` checks, in this order, and stops at the first problem:
+that the portal did not report an error, that the callback belongs to
+the sign-in that was started, that it really came from the portal, that
+the code can be exchanged, and that the identity token is authentic,
+meant for this app, not expired and tied to this sign-in.
+
+Store **`id$sub`** as the key for the person in your own data. A
+username can be given to someone else after an account is deleted; the
+`sub` cannot.
+
+The package's README has a complete Shiny app built on these two calls.
+
+## When a sign-in fails
+
+Every failure is an R condition with its own class, so the app can
+react to each case without reading message text. Two of them can be
+shown without a portal, because they are detected before anything is
+sent over the network.
+
+A callback that does not belong to the sign-in that was started:
+
+```{r}
+pending <- list(state = "what-we-stored", nonce = "n", code_verifier = "v")
+
+tryCatch(
+  sso_finish(client, "?code=abc&state=something-else", pending),
+  rusckersso_state_mismatch = function(e) "This link is not from your sign-in. Start again."
+)
+```
+
+The portal refusing the person — for instance because they are not in
+the groups allowed to use this app:
+
+```{r}
+tryCatch(
+  sso_finish(client, "?error=access_denied&state=what-we-stored", pending),
+  rusckersso_provider_error = function(e) {
+    if (identical(e$error, "access_denied")) {
+      "You do not have access to this application."
+    } else {
+      "The sign-in could not be completed."
+    }
+  }
+)
+```
+
+Choose your own wording from the error's class or code, as above. Do
+not show the error's message to the person as it is: part of it
+arrives in the address of the callback, which anyone can craft.
+
+Catching `rusckersso_error` handles every case at once. The full list
+is in `?"rusckersso-errors"`.
+
+## What the package does not do
+
+* **Sessions.** After a sign-in the application keeps its own session,
+  as it does today.
+* **Signing out of the portal.** Ending the application's session is
+  local.
+* **Deciding permissions.** It reports groups and roles; what they
+  allow is up to the application.

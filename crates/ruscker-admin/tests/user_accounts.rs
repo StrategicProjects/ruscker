@@ -1808,3 +1808,75 @@ async fn a_failing_session_store_leaves_no_cached_clearance() {
         "the barrier holds once the store is back"
     );
 }
+
+/// Security review 2026-11-19 (finding 3): a sign-in verifies the
+/// password against a snapshot of the account; a demotion, reset or
+/// delete landing before the session exists would not revoke it. The
+/// session is confirmed against the account right after creation and
+/// withdrawn when the account changed. This drives the confirmation step
+/// directly — the interleaving itself cannot be forced through HTTP.
+#[tokio::test]
+async fn a_session_created_after_the_account_changed_is_withdrawn() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "jade", "Jade-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    // Another Admin, so jade is not the last one (that demotion is refused).
+    ruscker_admin::db::users::create(&db, "boss", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let (_, stamp) = ruscker_admin::db::users::verify_login_stamped(&db, "jade", "Jade-Pass9!")
+        .await
+        .unwrap()
+        .unwrap();
+    // Unchanged: the session stands.
+    let sid = state.admin_sessions.create(Role::Admin, Some("jade".into())).await;
+    assert!(ruscker_admin::routes::admin::session_still_backed(&state, &sid, "jade", &stamp).await);
+    assert!(state.admin_sessions.validate(&sid).await.is_some());
+    // Demoted while the password was being checked: withdrawn.
+    ruscker_admin::db::users::set_role(&db, "jade", Role::Viewer, None).await.unwrap();
+    let sid = state.admin_sessions.create(Role::Admin, Some("jade".into())).await;
+    assert!(!ruscker_admin::routes::admin::session_still_backed(&state, &sid, "jade", &stamp).await);
+    assert!(state.admin_sessions.validate(&sid).await.is_none(), "the stale Admin session is gone");
+    // Deleted: withdrawn too.
+    ruscker_admin::db::users::delete(&db, "jade", None).await.unwrap();
+    let sid = state.admin_sessions.create(Role::Admin, Some("jade".into())).await;
+    assert!(!ruscker_admin::routes::admin::session_still_backed(&state, &sid, "jade", &stamp).await);
+}
+
+/// Finding 3, second half: the session minted after a password change
+/// takes the account's CURRENT role, not the one the old session carried.
+#[tokio::test]
+async fn password_change_mints_the_current_role() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "kim", "Kim-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    // A session that (wrongly) still says Admin — e.g. issued before a demotion.
+    let sid = state.admin_sessions.create(Role::Admin, Some("kim".into())).await;
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/account/password")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                .body(Body::from("current=Kim-Pass9%21&new_password=Kim-Nova9%21&confirm=Kim-Nova9%21"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let new_sid = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|c| c.split(';').next())
+        .and_then(|c| c.split('=').nth(1))
+        .unwrap()
+        .to_string();
+    let info = state.admin_sessions.validate(&new_sid).await.unwrap();
+    assert_eq!(info.role, Role::Viewer, "the new session is not an Admin one");
+}

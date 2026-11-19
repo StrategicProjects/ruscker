@@ -315,6 +315,22 @@ async fn remember_sign_in(
     }
 }
 
+/// Whether a session just created for `username` still rests on the
+/// credentials verified (`stamp`); when not (or when that cannot be
+/// read), the session is removed at once. See `login_submit`.
+pub async fn session_still_backed(state: &AppState, session_id: &str, username: &str, stamp: &str) -> bool {
+    let current = match state.db.as_ref() {
+        Some(db) => db::users::security_stamp(db, username).await.ok().flatten(),
+        None => None,
+    };
+    if current.as_deref() == Some(stamp) {
+        return true;
+    }
+    tracing::warn!(user = %username, "account changed during sign-in; session withdrawn");
+    state.admin_sessions.remove(session_id).await;
+    false
+}
+
 /// After a correct password sign-in was remembered (in memory, and maybe
 /// in the table): if the account's password changed around the time the
 /// credentials were checked, forget everything about the account. Closes
@@ -508,8 +524,8 @@ async fn login_submit(
     // remembered under, so a password change that lands while this
     // request is still running is "after" it, and wins.
     let verified_at = chrono::Utc::now();
-    let user = match db::users::verify_login(pool, &form.username, &form.password).await {
-        Ok(Some(u)) => u,
+    let (user, stamp) = match db::users::verify_login_stamped(pool, &form.username, &form.password).await {
+        Ok(Some(pair)) => pair,
         Ok(None) => {
             // Audit the refusal. The typed name is kept only when it is
             // a real account — people do type passwords into the wrong
@@ -551,6 +567,16 @@ async fn login_submit(
         .admin_sessions
         .create(user.role, Some(user.username.clone()))
         .await;
+    // The password was checked against a snapshot of the account, and the
+    // check is slow. A demotion, a password reset or a delete that landed
+    // meanwhile has already revoked the account's sessions — but not this
+    // one, created after. So confirm, now that the session exists, that
+    // the account is still what was verified (security review 2026-11-19).
+    // Every revocation writes its change BEFORE revoking, so a change
+    // after this check revokes this session like any other.
+    if !session_still_backed(&state, &session_id, &user.username, &stamp).await {
+        return login_error(&state, loc, theme, "wrong-login", false, next.unwrap_or_default()).await;
+    }
     // Record the successful password login (#1021). Non-blocking enqueue;
     // the session id is the dedup key so the same login isn't double-counted
     // across HA instances. (Break-glass token logins are operator emergency
@@ -1028,9 +1054,17 @@ async fn password_submit(
     // and re-issue the cookie: every other session dies, the user
     // stays signed in.
     state.admin_sessions.revoke_by_actor(&actor).await;
+    // The new session takes the role the account has NOW, read after the
+    // revocation — not the one this (possibly hours-old) session carried,
+    // which a demotion in the meantime would otherwise restore (security
+    // review 2026-11-19). An account that is gone gets no session.
+    let role = match db::users::fetch(pool, &actor).await {
+        Ok(Some(u)) => u.role,
+        _ => return Redirect::to("/admin/login").into_response(),
+    };
     let session_id = state
         .admin_sessions
-        .create(session.role, Some(actor.clone()))
+        .create(role, Some(actor.clone()))
         .await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
     // Return to the app that triggered authentication when one was carried

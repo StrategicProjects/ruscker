@@ -696,6 +696,24 @@ pub async fn verify_login(
     username: &str,
     password: &str,
 ) -> Result<Option<UserRow>> {
+    Ok(verify_login_stamped(db, username, password).await?.map(|(user, _)| user))
+}
+
+/// What a session's authority rests on: the account's id, role and
+/// password hash. Two reads with the same stamp saw the same credentials;
+/// a demotion, a password change or a delete-and-recreate changes it.
+fn stamp_of(id: &str, role: &str, password_hash: &str) -> String {
+    format!("{id}\u{1f}{role}\u{1f}{password_hash}")
+}
+
+/// [`verify_login`], also returning the [`stamp_of`] the password was
+/// checked against, for [`security_stamp`] to confirm later that nothing
+/// changed in between (security review 2026-11-19).
+pub async fn verify_login_stamped(
+    db: &ConfigDb,
+    username: &str,
+    password: &str,
+) -> Result<Option<(UserRow, String)>> {
     type Row = (
         String,
         String,
@@ -742,11 +760,33 @@ pub async fn verify_login(
         .await
         .context("password verify task")?;
     match row {
-        Some((id, u, r, m, g, c, by, se, em, ce, _)) if found && verified => {
-            Ok(Some(row_from(id, u, r, m, g, c, by, se, em, ce)))
+        Some((id, u, r, m, g, c, by, se, em, ce, hash)) if found && verified => {
+            let stamp = stamp_of(&id, &r, &hash);
+            Ok(Some((row_from(id, u, r, m, g, c, by, se, em, ce), stamp)))
         }
         _ => Ok(None),
     }
+}
+
+/// The account's current [`stamp_of`], or `None` when it no longer exists.
+pub async fn security_stamp(db: &ConfigDb, username: &str) -> Result<Option<String>> {
+    let username = normalize_username(username);
+    let row: Option<(String, String, String)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT id, role, password_hash FROM users WHERE username = ?")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT id, role, password_hash FROM users WHERE username = $1")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("security stamp {username}"))?;
+    Ok(row.map(|(id, role, hash)| stamp_of(&id, &role, &hash)))
 }
 
 /// A real argon2id hash of a throwaway password, computed once, used

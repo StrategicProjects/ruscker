@@ -37,6 +37,10 @@ pub struct Grant {
     /// the only place the audit row can learn them from.
     pub client_ip: Option<String>,
     pub user_agent: Option<String>,
+    /// The second factor was proved in the session that obtained this
+    /// code. The token endpoint refuses a code without it when the client
+    /// requires MFA by the time the code is redeemed.
+    pub mfa_proved: bool,
 }
 
 /// A redeemed code: the grant plus when the code was issued. That is
@@ -82,8 +86,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             sqlx::query(
                 "INSERT INTO oidc_auth_codes
                    (code_hash, client_id, user_id, username, redirect_uri,
-                    code_challenge, nonce, scope, client_ip, user_agent, created_at, expires_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    code_challenge, nonce, scope, client_ip, user_agent, mfa_proved, created_at, expires_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&code_hash)
             .bind(&grant.client_id)
@@ -95,6 +99,7 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             .bind(&grant.scope)
             .bind(&grant.client_ip)
             .bind(&grant.user_agent)
+            .bind(grant.mfa_proved)
             .bind(now)
             .bind(expires)
             .execute(pool)
@@ -110,8 +115,8 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             sqlx::query(
                 "INSERT INTO oidc_auth_codes
                    (code_hash, client_id, user_id, username, redirect_uri,
-                    code_challenge, nonce, scope, client_ip, user_agent, created_at, expires_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
+                    code_challenge, nonce, scope, client_ip, user_agent, mfa_proved, created_at, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
             )
             .bind(&code_hash)
             .bind(&grant.client_id)
@@ -123,6 +128,7 @@ pub async fn issue(db: &ConfigDb, grant: &Grant) -> Result<String> {
             .bind(&grant.scope)
             .bind(&grant.client_ip)
             .bind(&grant.user_agent)
+            .bind(grant.mfa_proved)
             .bind(now)
             .bind(expires)
             .execute(pool)
@@ -143,6 +149,7 @@ type Row = (
     String,
     Option<String>,
     Option<String>,
+    bool,
     DateTime<Utc>,
     DateTime<Utc>,
 );
@@ -165,7 +172,7 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
                   WHERE code_hash = ? AND consumed_at IS NULL
               RETURNING client_id, user_id, username, redirect_uri,
                         code_challenge, nonce, scope, client_ip, user_agent,
-                        created_at, expires_at",
+                        mfa_proved, created_at, expires_at",
             )
             .bind(now)
             .bind(&code_hash)
@@ -178,7 +185,7 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
                   WHERE code_hash = $2 AND consumed_at IS NULL
               RETURNING client_id, user_id, username, redirect_uri,
                         code_challenge, nonce, scope, client_ip, user_agent,
-                        created_at, expires_at",
+                        mfa_proved, created_at, expires_at",
             )
             .bind(now)
             .bind(&code_hash)
@@ -194,7 +201,7 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
     // Compared here rather than in SQL: the two dialects store the
     // instant differently (TEXT vs TIMESTAMPTZ), chrono compares it the
     // same way on both.
-    if r.10 <= now {
+    if r.11 <= now {
         return Ok(None);
     }
     Ok(Some(Redeemed {
@@ -208,8 +215,9 @@ pub async fn consume(db: &ConfigDb, code: &str) -> Result<Option<Redeemed>> {
             scope: r.6,
             client_ip: r.7,
             user_agent: r.8,
+            mfa_proved: r.9,
         },
-        issued_at: r.9,
+        issued_at: r.10,
     }))
 }
 
@@ -232,6 +240,7 @@ mod tests {
             scope: "openid email".into(),
             client_ip: Some("203.0.113.9".into()),
             user_agent: Some("Mozilla/5.0 test".into()),
+            mfa_proved: true,
         }
     }
 

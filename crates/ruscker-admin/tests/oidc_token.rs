@@ -868,3 +868,35 @@ async fn stored_scope(db: &ConfigDb) -> String {
         .await
         .unwrap()
 }
+
+/// Security review 2026-11-19 (finding 8): policies that change during
+/// a code's minute apply at redemption. A code issued for a client that
+/// did not require MFA is refused once the client does; a code is
+/// refused once the account must change its password.
+#[tokio::test]
+async fn policy_changes_during_the_code_lifetime_apply_at_redemption() {
+    let f = fixture(ON).await;
+
+    // MFA turned on for the client after the code was issued.
+    let code = authorize(&f, "norma", "openid").await;
+    let mut c = ruscker_admin::db::oidc_clients::fetch(&f.db, "norma").await.unwrap().unwrap();
+    c.require_mfa = true;
+    let settings = ClientSettings {
+        name: c.name.clone(),
+        redirect_uris: c.redirect_uris.clone(),
+        access_groups: c.access_groups.clone(),
+        require_mfa: true,
+        enabled: c.enabled,
+        logo: c.logo.clone(),
+        allowed_scopes: c.allowed_scopes.clone(),
+        client_uri: c.client_uri.clone(),
+        post_logout_redirect_uris: c.post_logout_redirect_uris.clone(),
+    };
+    ruscker_admin::db::oidc_clients::update(&f.db, "norma", &settings, None).await.unwrap();
+    assert_grant_refused(&token_basic(&f, "norma", &f.norma, &exchange(&code)).await);
+
+    // A mandatory password change set after the code was issued.
+    let code = authorize(&f, "radar", "openid").await;
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
+    assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+}

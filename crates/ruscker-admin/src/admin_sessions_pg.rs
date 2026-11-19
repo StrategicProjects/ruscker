@@ -41,6 +41,7 @@ use dashmap::DashMap;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::Row;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::warn;
 
@@ -82,7 +83,27 @@ pub struct PostgresAdminSessionStore {
     cache: DashMap<String, CachedEntry>,
     /// `validate` calls since the last cache sweep.
     since_sweep: AtomicU32,
+    /// Revocations whose DELETE has not reached Postgres yet (security
+    /// review 2026-11-19: they used to be logged and forgotten, so a
+    /// "signed out" session came back once the database recovered).
+    /// While here, this node denies them; a background task keeps
+    /// retrying the DELETE and clears the entry once it lands.
+    pending: Arc<PendingRevocations>,
 }
+
+/// See [`PostgresAdminSessionStore::pending`].
+#[derive(Debug, Default)]
+struct PendingRevocations {
+    /// Session ids to deny.
+    sids: DashMap<String, ()>,
+    /// Accounts whose sessions created up to this instant are denied.
+    actors: DashMap<String, DateTime<Utc>>,
+}
+
+/// Attempts of a revoking DELETE before it is handed to the background
+/// retry, and the pause between background retries.
+const REVOKE_ATTEMPTS: u32 = 3;
+const REVOKE_RETRY_EVERY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 struct CachedEntry {
@@ -120,6 +141,7 @@ impl PostgresAdminSessionStore {
             cache_ttl,
             cache: DashMap::new(),
             since_sweep: AtomicU32::new(0),
+            pending: Arc::default(),
         })
     }
 
@@ -249,6 +271,12 @@ impl AdminSessionStore for PostgresAdminSessionStore {
             self.cache.retain(|_, e| e.valid_until > now);
         }
 
+        // A revocation of this very session that has not reached the
+        // database yet: denied, whatever the cache or the row says.
+        if self.pending.sids.contains_key(id) {
+            return None;
+        }
+
         // Cache hit (fresh) — the hot path.
         if let Some(entry) = self.cache.get(id) {
             if entry.valid_until > now {
@@ -288,6 +316,14 @@ impl AdminSessionStore for PostgresAdminSessionStore {
                         return None;
                     }
                 };
+                // Created before an account-wide revocation that has not
+                // reached the database: denied (created = expiry − ttl).
+                let revoked_before = actor.as_deref().and_then(|a| self.pending.actors.get(a).map(|t| *t));
+                let created_at = expires_at
+                    - chrono::Duration::from_std(self.ttl).unwrap_or_else(|_| chrono::Duration::zero());
+                if revoked_before.is_some_and(|t| created_at <= t) {
+                    return None;
+                }
                 if expires_at <= Utc::now() {
                     // Expired — lazy GC, then cache the negative answer.
                     let _ = sqlx::query("DELETE FROM admin_sessions WHERE sid = $1")
@@ -332,12 +368,14 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         // Best-effort delete + cache eviction (write-through). If the
         // DB delete fails the cache still drops the entry, so the
         // signed-out user can't bounce on this node.
-        if let Err(e) = sqlx::query("DELETE FROM admin_sessions WHERE sid = $1")
-            .bind(id)
-            .execute(&self.pool)
-            .await
-        {
-            warn!(error = ?e, "admin session DELETE failed");
+        if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE sid = $1", id).await {
+            // Deny it here until the DELETE lands; keep trying.
+            self.pending.sids.insert(id.to_string(), ());
+            let (pool, pending, sid) = (self.pool.clone(), self.pending.clone(), id.to_string());
+            tokio::spawn(async move {
+                retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE sid = $1", &sid).await;
+                pending.sids.remove(&sid);
+            });
         }
         self.cache.remove(id);
         // Drop a tombstone so a sibling instance with a still-cached
@@ -355,12 +393,19 @@ impl AdminSessionStore for PostgresAdminSessionStore {
 
     async fn revoke_by_actor(&self, actor: &str) {
         // Authoritative delete of every session for this user (#544).
-        if let Err(e) = sqlx::query("DELETE FROM admin_sessions WHERE actor = $1")
-            .bind(actor)
-            .execute(&self.pool)
-            .await
-        {
-            warn!(error = ?e, "admin session revoke-by-actor DELETE failed");
+        let revoked_at = Utc::now();
+        if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE actor = $1", actor).await {
+            // Deny the account's existing sessions here until the DELETE
+            // lands; sessions created after this instant are not affected
+            // (the password change re-mints one right away).
+            self.pending.actors.insert(actor.to_string(), revoked_at);
+            let (pool, pending, who) = (self.pool.clone(), self.pending.clone(), actor.to_string());
+            tokio::spawn(async move {
+                retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE actor = $1", &who).await;
+                // Only clear the marker this task set (a newer revocation
+                // may have replaced it).
+                pending.actors.remove_if(&who, |_, t| *t == revoked_at);
+            });
         }
         // Evict this node's positive cache entries for the actor so it
         // stops serving them immediately; negative tombstones and other
@@ -368,6 +413,36 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         // same as logout.
         self.cache
             .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
+    }
+}
+
+/// Run a revoking DELETE (one `$1` bind) up to [`REVOKE_ATTEMPTS`] times.
+/// `true` once it succeeded.
+async fn delete_with_retries(pool: &PgPool, sql: &'static str, key: &str) -> bool {
+    for attempt in 1..=REVOKE_ATTEMPTS {
+        match sqlx::query(sql).bind(key).execute(pool).await {
+            Ok(_) => return true,
+            Err(e) => {
+                warn!(error = ?e, attempt, "admin session revocation DELETE failed");
+                if attempt < REVOKE_ATTEMPTS {
+                    tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Keep retrying a revoking DELETE until it lands. Sessions live a day at
+/// most, so after that long there is nothing left to revoke.
+async fn retry_until_deleted(pool: &PgPool, sql: &'static str, key: &str) {
+    let give_up = Instant::now() + DEFAULT_TTL;
+    while Instant::now() < give_up {
+        tokio::time::sleep(REVOKE_RETRY_EVERY).await;
+        if sqlx::query(sql).bind(key).execute(pool).await.is_ok() {
+            tracing::info!("admin session revocation reached the database");
+            return;
+        }
     }
 }
 
@@ -587,5 +662,49 @@ mod postgres_it {
             .await
             .unwrap();
         assert!(row.is_none(), "expired row should be GC'd on lookup");
+    }
+
+    /// Security review 2026-11-19 (finding 4): a revoking DELETE that
+    /// fails used to be logged and forgotten, so the session came back
+    /// once the database recovered. Now the node denies it at once and a
+    /// background task deletes it when it can. Simulated by renaming the
+    /// table for the duration of the revocation.
+    #[tokio::test]
+    async fn a_failed_revocation_is_denied_and_retried() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let store = PostgresAdminSessionStore::connect_with(&pg_url(), DEFAULT_TTL, Duration::from_millis(50))
+            .await
+            .unwrap();
+        reset_rows(&store.pool).await;
+        let stolen = store.create(Role::Admin, Some("mallory".into())).await;
+        let other = store.create(Role::Viewer, Some("mallory".into())).await;
+        sqlx::query("ALTER TABLE admin_sessions RENAME TO admin_sessions_away")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.revoke_by_actor("mallory").await;
+        store.remove(&other).await;
+        sqlx::query("ALTER TABLE admin_sessions_away RENAME TO admin_sessions")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        // The rows survived the failed DELETEs, yet both are denied now…
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(store.validate(&stolen).await.is_none(), "account-wide revocation holds");
+        assert!(store.validate(&other).await.is_none(), "single revocation holds");
+        // …a session created after the revocation is not caught by it…
+        let fresh = store.create(Role::Viewer, Some("mallory".into())).await;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        assert!(store.validate(&fresh).await.is_some(), "a later session stands");
+        // …and the background retry deletes the old rows.
+        tokio::time::sleep(REVOKE_RETRY_EVERY + Duration::from_millis(500)).await;
+        for sid in [&stolen, &other] {
+            let row = sqlx::query("SELECT 1 FROM admin_sessions WHERE sid = $1")
+                .bind(sid)
+                .fetch_optional(&store.pool)
+                .await
+                .unwrap();
+            assert!(row.is_none(), "the retry reached the database");
+        }
     }
 }

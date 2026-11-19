@@ -587,6 +587,9 @@ async fn authorize(
         // when the client's server redeems the code.
         client_ip: origin.ip.clone(),
         user_agent: origin.user_agent.clone(),
+        // Step 6 only lets a code through for an MFA-requiring client
+        // after the proof; for any other client nothing was proved.
+        mfa_proved: client.require_mfa,
     };
     match crate::db::oidc_codes::issue(db, &grant).await {
         // `iss` (RFC 9207) lets a client that talks to several providers
@@ -906,6 +909,16 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
             return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
         }
     };
+    // 4b. The policies the authorization checked, as they are NOW
+    // (security review 2026-11-19): an administrator who resets the
+    // password with a mandatory change, or who starts requiring MFA for
+    // this client, within the code's minute must not see a code issued
+    // under the old rules still turn into tokens.
+    if user.must_change_password || (client.require_mfa && !grant.mfa_proved) {
+        tracing::warn!(client = %client.client_id, user = %user.username,
+            "authorization code refused: password change pending or MFA now required");
+        return invalid_grant();
+    }
 
     // 5. Sign.
     let key = match crate::oidc::ensure_signing_key(db, &state.master_key).await {

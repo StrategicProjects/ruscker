@@ -175,6 +175,31 @@ in the discovery document:
 Other systems keep their own sessions until those expire. The portal
 does not notify them (no back-channel logout).
 
+### Keeping a system's session honest
+
+The portal's tokens live five minutes; how long the system keeps the
+person signed in is the system's choice. Changing a password, signing
+out of the portal, disabling an account or removing it from the client's
+groups ends or refuses **portal** sessions. A session the system already
+handed out keeps running until the system ends it. The portal does not
+notify systems (no back-channel logout).
+
+The pattern that closes the gap without anything new on the portal:
+
+1. Keep the system's own session short: 30 to 60 minutes.
+2. When it expires, start a sign-in again with `prompt=none`, as a
+   top-level navigation. The session cookie is `SameSite=Strict` and the
+   portal cannot be framed, so this cannot run in an iframe.
+3. If the portal session is still good and the person still has access,
+   the browser comes straight back with a code and no page is shown. If
+   not (signed out, password changed, account disabled, no longer in the
+   groups), the system receives `login_required` or `access_denied` and
+   asks the person to sign in.
+
+The cost is one quick round trip per period. For a read-only dashboard a
+longer session (a working day) is a reasonable trade-off. Choose it on
+purpose and write it down.
+
 ### What the system's developers need
 
 Give them three things: the **issuer URL**, the **client ID** and the
@@ -555,8 +580,11 @@ misconfigure:
 - no implicit or password flows, no refresh tokens, no dynamic client
   registration, no consent screen (every client is registered by an
   Admin);
-- no single logout: signing out of Ruscker does not sign the user out of
-  systems that already have their own session;
+- no back-channel logout: signing out of Ruscker, or changing the
+  password, does not end the sessions systems already hold. A system
+  can sign people out of the portal ("Signing out everywhere"), and can
+  re-check the portal session with `prompt=none` ("Keeping a system's
+  session honest");
 - `max_age`, `prompt=login` and `auth_time` are not supported;
 - no self-service sign-up or password reset by e-mail.
 

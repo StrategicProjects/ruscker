@@ -982,6 +982,17 @@ async fn password_submit(
     if form.new_password != form.confirm {
         return pw_err("mismatch");
     }
+    // The current-password check is a password oracle for whoever holds a
+    // session (security review 2026-11-19): it shares the re-authentication
+    // budget of the MFA pages, counted BEFORE the slow verification so a
+    // parallel burst cannot run past it.
+    if !crate::mfa::REAUTH_LIMITER.try_reserve(&actor) {
+        let mut resp = pw_err("rate-limited");
+        *resp.status_mut() = StatusCode::TOO_MANY_REQUESTS;
+        resp.headers_mut()
+            .insert(axum::http::header::RETRY_AFTER, axum::http::HeaderValue::from_static("60"));
+        return resp;
+    }
     // Verify the current password before allowing a change.
     if db::users::verify_login(pool, &actor, &form.current)
         .await
@@ -990,6 +1001,12 @@ async fn password_submit(
         .is_none()
     {
         return pw_err("wrong-current");
+    }
+    crate::mfa::REAUTH_LIMITER.record_success(&actor);
+    // The same password again is not a change — and it would clear a
+    // mandatory rotation while keeping the administrator-assigned secret.
+    if form.new_password == form.current {
+        return pw_err("same");
     }
 
     if let Err(e) =

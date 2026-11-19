@@ -75,7 +75,30 @@ async fn app_state(db: ConfigDb) -> AppState {
 
 /// Mint an admin session straight into the shared store and return the
 /// cookie header value.
+/// A session for `name` with `role`, creating the account first: a session
+/// whose account does not exist is sent to the login (security review
+/// 2026-11-19), which would hide the role check a test is about.
+async fn session_as(state: &AppState, role: Role, name: &str) -> String {
+    if let Some(db) = state.db.as_ref() {
+        if ruscker_admin::db::users::fetch(db, name).await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
+    }
+    state.admin_sessions.create(role, Some(name.to_string())).await
+}
+
 async fn admin_cookie(state: &AppState) -> String {
+    // The account behind the session must exist: a session whose account
+    // is gone is sent back to the login (security review 2026-11-19).
+    if let Some(db) = state.db.as_ref() {
+        if ruscker_admin::db::users::fetch(db, "root").await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
+    }
     let sid = state
         .admin_sessions
         .create(Role::Admin, Some("root".into()))
@@ -261,10 +284,7 @@ async fn toggle_and_delete_round_trip() {
 #[tokio::test]
 async fn schedules_are_admin_only() {
     let state = app_state(open_db().await).await;
-    let editor = state
-        .admin_sessions
-        .create(Role::Editor, Some("ed".into()))
-        .await;
+    let editor = session_as(&state, Role::Editor, "ed").await;
     let cookie = format!("{COOKIE_NAME}={editor}");
 
     let (status, _) = get(state.clone(), "/admin/schedules", &cookie).await;

@@ -729,6 +729,10 @@ async fn assigning_a_role_reaches_the_next_request() {
     let state = state(db, "roles-open", upstream).await;
     let alice = state.admin_sessions.create(Role::Viewer, Some("alice".into())).await;
     let alice = format!("{COOKIE_NAME}={alice}");
+    // The admin's account must exist (security review 2026-11-19).
+    ruscker_admin::db::users::create(state.db.as_ref().unwrap(), "root", "RootPass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
     let admin = state.admin_sessions.create(Role::Admin, Some("root".into())).await;
     let admin = format!("{COOKIE_NAME}={admin}");
 

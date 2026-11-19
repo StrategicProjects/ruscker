@@ -959,6 +959,69 @@ const MUST_CHANGE_TTL: std::time::Duration = std::time::Duration::from_secs(300)
 /// without bound (same spirit as the rate-limiter sweep, #737).
 const MUST_CHANGE_CACHE_CAP: usize = 256;
 
+/// Whether a session may be used for anything but changing its password.
+///
+/// Shared by the admin guard below and the proxy (security review
+/// 2026-11-19: hosted apps used to ignore a pending mandatory change).
+pub(crate) enum PasswordState {
+    /// No change pending (or no account to rotate: break-glass token).
+    Clear,
+    /// The account must replace its administrator-assigned password.
+    MustChange,
+    /// The session names an account that no longer exists.
+    AccountMissing,
+    /// The session could not be confirmed (unknown, expired, revoked, or
+    /// the session store failing). Refused: the caller must not fall back
+    /// on an identity it extracted earlier (Codex review of #1122).
+    NoSession,
+    /// The account could not be read; callers fail closed.
+    Unavailable,
+}
+
+/// [`PasswordState`] of session `id`. Definitive answers are cached per
+/// session id ([`MUST_CHANGE_CACHE`]); an error or a missing account is
+/// never cached, so the next request asks again.
+pub(crate) async fn session_password_state(
+    state: &AppState,
+    pool: &db::ConfigDb,
+    id: &str,
+) -> PasswordState {
+    // A recent answer for this exact session id. `must_change` cannot
+    // change under a live id (a password change re-mints the session), so
+    // a cache hit is authoritative until the TTL evicts it.
+    if let Some(must) = MUST_CHANGE_CACHE
+        .get(id)
+        .and_then(|e| (e.0.elapsed() < MUST_CHANGE_TTL).then_some(e.1))
+    {
+        return if must { PasswordState::MustChange } else { PasswordState::Clear };
+    }
+    // No live session: refuse, and cache NOTHING — the Postgres store also
+    // answers "none" when the database is failing; a cached or returned
+    // "clear" would let a must-change session through, now or for the
+    // whole TTL once the database is back (Codex review of #1122).
+    let Some(info) = state.admin_sessions.validate(id).await else {
+        return PasswordState::NoSession;
+    };
+    let actor = info.actor;
+    let answer = match actor {
+        Some(actor) => match db::users::fetch(pool, &actor).await {
+            Ok(Some(u)) => u.must_change_password,
+            Ok(None) => return PasswordState::AccountMissing,
+            Err(e) => {
+                tracing::warn!(error = ?e, "must-change lookup failed; refusing this request");
+                return PasswordState::Unavailable;
+            }
+        },
+        // No actor: the break-glass token, nothing to rotate.
+        None => false,
+    };
+    if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {
+        MUST_CHANGE_CACHE.retain(|_, e| e.0.elapsed() < MUST_CHANGE_TTL);
+    }
+    MUST_CHANGE_CACHE.insert(id.to_string(), (std::time::Instant::now(), answer));
+    if answer { PasswordState::MustChange } else { PasswordState::Clear }
+}
+
 /// Force a first-login password change (#454).
 ///
 /// A user account created in the admin gets `must_change_password = true`
@@ -980,7 +1043,8 @@ const MUST_CHANGE_CACHE_CAP: usize = 256;
 /// We therefore cache the per-session answer ([`MUST_CHANGE_CACHE`]) and
 /// do the indexed `users` lookup at most once per session per TTL, instead
 /// of on every gated admin navigation (#903). The panel is low-traffic
-/// and the proxy hot path (`/app`, `/api`) never reaches this layer.
+/// and the proxy (`/app`, `/api`) does not pass through this layer: it
+/// asks [`session_password_state`] itself.
 async fn must_change_password_guard(
     axum::extract::State(state): axum::extract::State<AppState>,
     req: axum::extract::Request,
@@ -1003,52 +1067,27 @@ async fn must_change_password_guard(
                 .get::<tower_cookies::Cookies>()
                 .and_then(|c| c.get(auth::COOKIE_NAME).map(|c| c.value().to_string()));
             if let Some(id) = session_id {
-                // Fast path: a recent answer for this exact session id.
-                // `must_change` can't change under a live id (see above), so
-                // a cache hit is authoritative until the TTL evicts it.
-                let cached = MUST_CHANGE_CACHE.get(&id).and_then(|e| {
-                    (e.0.elapsed() < MUST_CHANGE_TTL).then_some(e.1)
-                });
-                let must = match cached {
-                    Some(v) => v,
-                    None => {
-                        // Resolve the session, then the account, once.
-                        let actor = state
-                            .admin_sessions
-                            .validate(&id)
-                            .await
-                            .and_then(|info| info.actor);
-                        // `(answer, cacheable)`. A DB **error** is NOT
-                        // cacheable: caching its `false` would let a real
-                        // must-change user skip the prompt for the whole TTL
-                        // on one transient blip (#903 follow-up). We still
-                        // let the request through this once (matching the
-                        // pre-cache fail-open), but re-check next request so
-                        // the user is caught as soon as the DB recovers.
-                        let (v, cacheable) = match actor {
-                            Some(actor) => match db::users::fetch(pool, &actor).await {
-                                Ok(u) => (u.map(|u| u.must_change_password).unwrap_or(false), true),
-                                Err(e) => {
-                                    tracing::warn!(error = ?e, "must-change lookup failed; not caching");
-                                    (false, false)
-                                }
-                            },
-                            // No actor (break-glass token / unknown id):
-                            // nothing to rotate — a definitive `false`.
-                            None => (false, true),
-                        };
-                        if cacheable {
-                            if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {
-                                MUST_CHANGE_CACHE.retain(|_, e| e.0.elapsed() < MUST_CHANGE_TTL);
-                            }
-                            MUST_CHANGE_CACHE.insert(id.clone(), (std::time::Instant::now(), v));
-                        }
-                        v
+                match session_password_state(&state, pool, &id).await {
+                    PasswordState::Clear => {}
+                    PasswordState::MustChange => {
+                        return axum::response::Redirect::to("/admin/account/password")
+                            .into_response();
                     }
-                };
-                if must {
-                    return axum::response::Redirect::to("/admin/account/password")
-                        .into_response();
+                    // The session outlived its account: nothing it asks
+                    // for here can be right. Sign in again.
+                    PasswordState::AccountMissing | PasswordState::NoSession => {
+                        return axum::response::Redirect::to("/admin/login").into_response();
+                    }
+                    // Fail CLOSED (security review 2026-11-19): when the
+                    // account cannot be read, the barrier is not dropped
+                    // for this request. The next request asks again.
+                    PasswordState::Unavailable => {
+                        return (
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "account check unavailable, try again\n",
+                        )
+                            .into_response();
+                    }
                 }
             }
         }

@@ -315,7 +315,7 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
         .unwrap()
         .generate_current()
         .unwrap();
-    let (confirm_status, _, _, _) = request_full(
+    let (confirm_status, _, _, confirm_cookies) = request_full(
         state.clone(),
         "POST",
         "/admin/account/mfa/confirm",
@@ -324,6 +324,14 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
     )
     .await;
     assert_eq!(confirm_status, StatusCode::OK);
+    // The browser that confirmed holds this session's second-factor proof.
+    let device = confirm_cookies
+        .iter()
+        .find(|c| c.starts_with(&format!("{}=", ruscker_admin::mfa::DEVICE_COOKIE)))
+        .and_then(|c| c.split(';').next())
+        .expect("confirm grants this browser the proof")
+        .to_string();
+    let proved_cookie = format!("{user_cookie}; {device}");
     let ruscker_admin::db::ConfigDb::Sqlite(pool) = &db else {
         unreachable!()
     };
@@ -334,13 +342,34 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
             .unwrap();
     assert_eq!(old_hashes.len(), 10);
 
+    // The password alone is NOT enough (security review 2026-11-19):
+    // recovery codes are a second factor, so minting them needs the second
+    // factor proved in this session. A password-only session is sent to the
+    // challenge and nothing is replaced.
+    let (status, _, location) = request(
+        state.clone(),
+        "POST",
+        "/admin/account/mfa/recovery/regenerate",
+        "current_password=CorrectPass9%21",
+        &user_cookie,
+    )
+    .await;
+    assert_eq!(status, StatusCode::SEE_OTHER);
+    assert_eq!(location.as_deref(), Some("/admin/account/mfa/challenge?next=%2Fadmin%2Faccount%2Fmfa"));
+    let still: Vec<(String,)> =
+        sqlx::query_as("SELECT code_hash FROM user_mfa_recovery WHERE username = 'erin'")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    assert_eq!(still, old_hashes, "a password-only session must not mint codes");
+
     // Wrong password: 401, nothing replaced.
     let (status, body, _) = request(
         state.clone(),
         "POST",
         "/admin/account/mfa/recovery/regenerate",
         "current_password=WrongPass9%21",
-        &user_cookie,
+        &proved_cookie,
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
@@ -367,7 +396,7 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
         "POST",
         "/admin/account/mfa/recovery/regenerate",
         "current_password=CorrectPass9%21&generation=1",
-        &user_cookie,
+        &proved_cookie,
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
@@ -388,7 +417,7 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
         "POST",
         "/admin/account/mfa/recovery/regenerate",
         &regen_body,
-        &user_cookie,
+        &proved_cookie,
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -419,7 +448,7 @@ async fn recovery_codes_regenerate_behind_password_and_warn_when_low() {
         "POST",
         "/admin/account/mfa/recovery/regenerate",
         &regen_body,
-        &user_cookie,
+        &proved_cookie,
     )
     .await;
     assert_eq!(status, StatusCode::CONFLICT);

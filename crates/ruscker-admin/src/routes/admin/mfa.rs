@@ -779,6 +779,7 @@ async fn confirm(
 async fn regenerate_recovery(
     session: AdminSession,
     State(state): State<AppState>,
+    cookies: Cookies,
     loc: Locale,
     theme: Theme,
     Form(form): Form<RegenerateForm>,
@@ -803,6 +804,30 @@ async fn regenerate_recovery(
         )
             .into_response();
     };
+    // The second factor itself, proved IN THIS SESSION, before anything
+    // else (security review 2026-11-19): recovery codes ARE a second
+    // factor, so minting a new set behind the password alone let anyone
+    // with the password pass every MFA gate. Someone who lost the
+    // authenticator proves with a recovery code at the challenge; someone
+    // who lost both asks an Admin for a reset.
+    let session_id = cookies
+        .get(crate::auth::COOKIE_NAME)
+        .map(|c| c.value().to_string())
+        .unwrap_or_default();
+    // `EnrollmentRequired` (no confirmed factor) goes on: the database
+    // refuses that case below with its own "not enrolled" answer.
+    if crate::mfa::evaluate_with_validity(&state, &username, &session_id, &cookies, 0).await
+        == crate::mfa::MfaDecision::ChallengeRequired
+    {
+        // Back to this page after the proof (keeping its own `next`).
+        let back = if next.is_empty() {
+            "/admin/account/mfa".to_string()
+        } else {
+            crate::routes::with_next_query("/admin/account/mfa", &next)
+        };
+        let target = crate::routes::with_next_query("/admin/account/mfa/challenge", &back);
+        return Redirect::to(&target).into_response();
+    }
     if !crate::mfa::REAUTH_LIMITER.try_reserve(&username) {
         let mut response = render_status(
             &state,

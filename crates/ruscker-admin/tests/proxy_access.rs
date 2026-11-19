@@ -233,3 +233,88 @@ async fn non_member_forbidden_from_restricted_app() {
         "dave lacks the group → 403"
     );
 }
+
+/// Security review 2026-11-19: an account that must still replace its
+/// administrator-assigned password could skip the prompt and open hosted
+/// apps directly. Its session reaches no app (open or restricted, page or
+/// API) until the password is changed; a page navigation is sent to the
+/// password page and comes back afterwards.
+#[tokio::test]
+async fn must_change_account_reaches_no_app_until_it_rotates() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "newbie",
+        "Initial-Pass9!",
+        Role::Viewer,
+        true,
+        &["analysts".to_string()],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let state = app_state(db).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("newbie".to_string()))
+        .await;
+    let cookie = Some(format!("{COOKIE_NAME}={sid}"));
+    let resp = get_response(state.clone(), "/app/open-app/?x=1", cookie.clone()).await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/account/password?next=%2Fapp%2Fopen-app%2F%3Fx%3D1")
+    );
+    for path in ["/app/analysts-app/", "/api/open-api/x", "/api/locked-api/x"] {
+        let status = get(state.clone(), path, cookie.clone()).await;
+        assert!(status == StatusCode::SEE_OTHER || status == StatusCode::FORBIDDEN, "{path}: {status}");
+    }
+    // Anonymous visitors of an open app are unaffected.
+    assert_eq!(get(state, "/app/open-app/", None).await, ALLOWED);
+}
+
+/// Codex review of #1122: the proxy reads the session once to know who is
+/// asking, and the password barrier reads it again. If the second read
+/// cannot confirm it (revoked meanwhile, or the store failing), the
+/// request is refused — not forwarded on the identity from the first read.
+#[tokio::test]
+async fn a_session_lost_mid_request_is_not_forwarded() {
+    use ruscker_admin::auth::{AdminSessionStore, InMemoryAdminSessionStore, SessionInfo};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    /// Confirms the session on the first lookup only.
+    #[derive(Debug, Default)]
+    struct OnceThenGone {
+        inner: InMemoryAdminSessionStore,
+        lookups: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl AdminSessionStore for OnceThenGone {
+        async fn create(&self, role: Role, actor: Option<String>) -> String {
+            self.inner.create(role, actor).await
+        }
+        async fn validate(&self, id: &str) -> Option<SessionInfo> {
+            if self.lookups.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.inner.validate(id).await
+            } else {
+                None
+            }
+        }
+        async fn remove(&self, id: &str) {
+            self.inner.remove(id).await
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.inner.revoke_by_actor(actor).await
+        }
+    }
+    let db = open_db().await;
+    ruscker_admin::db::users::create(&db, "olga", "Olga-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let mut state = app_state(db).await;
+    let store = std::sync::Arc::new(OnceThenGone::default());
+    let sid = store.inner.create(Role::Viewer, Some("olga".into())).await;
+    state.admin_sessions = store.clone();
+    let status = get(state, "/app/open-app/", Some(format!("{COOKIE_NAME}={sid}"))).await;
+    assert!(store.lookups.load(Ordering::SeqCst) >= 2, "both reads happened");
+    assert_eq!(status, StatusCode::FORBIDDEN, "not forwarded on the stale identity");
+}

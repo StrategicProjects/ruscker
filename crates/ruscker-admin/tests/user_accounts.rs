@@ -1630,3 +1630,181 @@ async fn must_change_login_headed_for_the_password_page_goes_there_once() {
     let html = String::from_utf8(axum::body::to_bytes(page.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
     assert!(html.contains(r#"name="new_password""#), "the form is still there");
 }
+
+/// Security review 2026-11-19: the password page's "current password"
+/// check is a password oracle for whoever holds a session, so it shares
+/// the re-authentication budget (5 per minute per account, counted at
+/// admission), and the right password is refused too once over budget.
+#[tokio::test]
+async fn password_change_guesses_are_throttled() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "gina", "CorrectPass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let sid = state.admin_sessions.create(Role::Viewer, Some("gina".into())).await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let app = router(state);
+    let try_current = |current: &str| {
+        let app = app.clone();
+        let cookie = cookie.clone();
+        let body = format!("current={current}&new_password=Nova-Senha9%21&confirm=Nova-Senha9%21");
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/admin/account/password")
+                    .header("content-type", "application/x-www-form-urlencoded")
+                    .header("cookie", cookie)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+    for _ in 0..5 {
+        assert_eq!(try_current("Wrong-Guess9%21").await, StatusCode::OK, "a wrong guess re-renders the form");
+    }
+    assert_eq!(try_current("Wrong-Guess9%21").await, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(try_current("CorrectPass9%21").await, StatusCode::TOO_MANY_REQUESTS, "over budget: even the right one waits");
+    assert!(
+        ruscker_admin::db::users::verify_login(&db, "gina", "CorrectPass9!").await.unwrap().is_some(),
+        "the password did not change"
+    );
+}
+
+/// Security review 2026-11-19: "changing" the administrator-assigned
+/// password to itself must not clear the mandatory rotation.
+#[tokio::test]
+async fn new_password_must_differ_from_the_current_one() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "hugo", "Initial-Pass9!", Role::Viewer, true, &[], None)
+        .await
+        .unwrap();
+    let sid = state.admin_sessions.create(Role::Viewer, Some("hugo".into())).await;
+    let resp = router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/account/password")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                .body(Body::from(
+                    "current=Initial-Pass9%21&new_password=Initial-Pass9%21&confirm=Initial-Pass9%21",
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "re-rendered with an error, not a redirect");
+    let u = ruscker_admin::db::users::fetch(&db, "hugo").await.unwrap().unwrap();
+    assert!(u.must_change_password, "rotation still required");
+}
+
+/// Security review 2026-11-19: the mandatory-password barrier used to
+/// let the request through when the account could not be read. It now
+/// refuses (503) instead, and a session whose account is gone is sent to
+/// sign in again.
+#[tokio::test]
+async fn must_change_barrier_fails_closed() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool.clone());
+    ruscker_admin::db::users::create(&db, "ivo", "Initial-Pass9!", Role::Admin, true, &[], None)
+        .await
+        .unwrap();
+    let app = router(state.clone());
+    let get = |cookie: String| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", cookie)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    // A session for an account that does not exist.
+    let ghost = state.admin_sessions.create(Role::Admin, Some("ghost".into())).await;
+    let r = get(format!("{COOKIE_NAME}={ghost}")).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers().get("location").and_then(|v| v.to_str().ok()), Some("/admin/login"));
+    // The database goes away: a must-change account is not let through.
+    let sid = state.admin_sessions.create(Role::Admin, Some("ivo".into())).await;
+    pool.close().await;
+    let r = get(format!("{COOKIE_NAME}={sid}")).await;
+    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+/// Codex review of #1122: the Postgres session store answers "no
+/// session" when its database fails. The must-change decision used to
+/// cache "no change required" for that answer, so once the database came
+/// back the same session skipped the barrier for the whole cache TTL.
+#[tokio::test]
+async fn a_failing_session_store_leaves_no_cached_clearance() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use ruscker_admin::auth::AdminSessionStore as _;
+    /// The in-memory store, made to answer "no session" while `down`.
+    #[derive(Debug)]
+    struct Flaky {
+        inner: ruscker_admin::auth::InMemoryAdminSessionStore,
+        down: AtomicBool,
+    }
+    #[async_trait::async_trait]
+    impl ruscker_admin::auth::AdminSessionStore for Flaky {
+        async fn create(&self, role: Role, actor: Option<String>) -> String {
+            self.inner.create(role, actor).await
+        }
+        async fn validate(&self, id: &str) -> Option<ruscker_admin::auth::SessionInfo> {
+            if self.down.load(Ordering::SeqCst) { None } else { self.inner.validate(id).await }
+        }
+        async fn remove(&self, id: &str) {
+            self.inner.remove(id).await
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.inner.revoke_by_actor(actor).await
+        }
+    }
+    let (mut state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "lia", "Initial-Pass9!", Role::Admin, true, &[], None)
+        .await
+        .unwrap();
+    let store = std::sync::Arc::new(Flaky {
+        inner: ruscker_admin::auth::InMemoryAdminSessionStore::default(),
+        down: AtomicBool::new(false),
+    });
+    state.admin_sessions = store.clone();
+    let sid = store.create(Role::Admin, Some("lia".into())).await;
+    let get = || {
+        let app = router(state.clone());
+        let sid = sid.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    store.down.store(true, Ordering::SeqCst);
+    let _ = get().await; // the store is failing: refused, and nothing cached
+    store.down.store(false, Ordering::SeqCst);
+    let r = get().await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/account/password"),
+        "the barrier holds once the store is back"
+    );
+}

@@ -98,14 +98,18 @@ struct PendingRevocations {
     sids: DashMap<String, ()>,
     /// Accounts whose sessions created up to this instant are denied.
     actors: DashMap<String, DateTime<Utc>>,
+    /// One background worker drains both lists; set while it runs.
+    worker_running: std::sync::atomic::AtomicBool,
 }
 
 /// Attempts of a revoking DELETE before it is handed to the background
 /// retry, and the pause between background retries.
 const REVOKE_ATTEMPTS: u32 = 3;
-/// At most this many revocations waiting for the database at once. A
-/// flood of sign-outs during an outage must not turn into a flood of
-/// day-long background tasks (Codex review of #1123).
+/// Above this many waiting single-session revocations, only sessions this
+/// node KNOWS are real (a positive cache entry) are still queued: a flood
+/// of sign-outs with made-up ids during an outage cannot grow the list
+/// without bound, and a real revocation is never dropped for it (Codex
+/// review and the automated security review of #1123).
 const MAX_PENDING_REVOCATIONS: usize = 4096;
 
 /// Whether `id` has the shape [`mint_session_id`] gives every session (64
@@ -163,6 +167,69 @@ impl PostgresAdminSessionStore {
     #[doc(hidden)]
     pub fn cache_len(&self) -> usize {
         self.cache.len()
+    }
+
+    /// Start the background worker that retries waiting revocations, if
+    /// it is not running. One worker at most, however many are waiting.
+    fn ensure_worker(&self) {
+        use std::sync::atomic::Ordering as O;
+        if self.pending.worker_running.swap(true, O::SeqCst) {
+            return;
+        }
+        let (pool, pending) = (self.pool.clone(), self.pending.clone());
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(REVOKE_RETRY_EVERY).await;
+                drain_pending(&pool, &pending).await;
+                if pending.sids.is_empty() && pending.actors.is_empty() {
+                    pending.worker_running.store(false, O::SeqCst);
+                    // A revocation queued between the check and the store
+                    // would find the flag still set and not start a worker:
+                    // look once more, and carry on if so.
+                    if (pending.sids.is_empty() && pending.actors.is_empty())
+                        || pending.worker_running.swap(true, O::SeqCst)
+                    {
+                        return;
+                    }
+                }
+            }
+        });
+    }
+}
+
+/// One pass of the worker: delete every waiting session in one statement,
+/// then each waiting account. Whatever lands is cleared; the rest waits.
+async fn drain_pending(pool: &PgPool, pending: &PendingRevocations) {
+    let sids: Vec<String> = pending.sids.iter().map(|e| e.key().clone()).collect();
+    if !sids.is_empty() {
+        match sqlx::query("DELETE FROM admin_sessions WHERE sid = ANY($1)")
+            .bind(&sids)
+            .execute(pool)
+            .await
+        {
+            Ok(_) => {
+                for sid in &sids {
+                    pending.sids.remove(sid);
+                }
+                tracing::info!(count = sids.len(), "waiting admin session revocations reached the database");
+            }
+            Err(e) => warn!(error = ?e, "waiting admin session revocations still failing"),
+        }
+    }
+    let actors: Vec<String> = pending.actors.iter().map(|e| e.key().clone()).collect();
+    for actor in actors {
+        // A successful DELETE removes every session the account had when
+        // it ran: it settles every revocation up to that instant, and a
+        // later one (whose own DELETE failed too) stays for the next pass.
+        let started = Utc::now();
+        if sqlx::query("DELETE FROM admin_sessions WHERE actor = $1")
+            .bind(&actor)
+            .execute(pool)
+            .await
+            .is_ok()
+        {
+            pending.actors.remove_if(&actor, |_, t| *t <= started);
+        }
     }
 }
 
@@ -389,19 +456,17 @@ impl AdminSessionStore for PostgresAdminSessionStore {
             return;
         }
         if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE sid = $1", id).await {
-            // Deny it here until the DELETE lands; keep trying — once per
-            // sid, and within the global bound.
-            if self.pending.sids.len() >= MAX_PENDING_REVOCATIONS
-                || self.pending.sids.insert(id.to_string(), ()).is_some()
-            {
-                self.cache.remove(id);
-                return;
+            // Deny it here until the DELETE lands; the worker keeps trying.
+            let known_real = self.cache.get(id).is_some_and(|e| e.info.is_some());
+            if known_real || self.pending.sids.len() < MAX_PENDING_REVOCATIONS {
+                self.pending.sids.insert(id.to_string(), ());
+                self.ensure_worker();
+            } else {
+                tracing::error!(
+                    "admin session revocation not queued: {MAX_PENDING_REVOCATIONS} already waiting \
+                     and this id is not a session this node knows"
+                );
             }
-            let (pool, pending, sid) = (self.pool.clone(), self.pending.clone(), id.to_string());
-            tokio::spawn(async move {
-                retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE sid = $1", &sid).await;
-                pending.sids.remove(&sid);
-            });
         }
         self.cache.remove(id);
         // Drop a tombstone so a sibling instance with a still-cached
@@ -423,29 +488,14 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE actor = $1", actor).await {
             // Deny the account's existing sessions here until the DELETE
             // lands; sessions created after this instant are not affected
-            // (the password change re-mints one right away). One retry
-            // task per account: a newer revocation just moves the instant.
-            let already_retrying = self.pending.actors.insert(actor.to_string(), revoked_at).is_some();
-            if already_retrying {
-                self.cache
-                    .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
-                return;
-            }
-            let (pool, pending, who) = (self.pool.clone(), self.pending.clone(), actor.to_string());
-            tokio::spawn(async move {
-                // A successful DELETE removes every session of the account
-                // that existed when it ran, so it settles every revocation
-                // up to that instant. A revocation that came later (its
-                // own DELETE failed too) keeps the marker: go again.
-                loop {
-                    let started = Utc::now();
-                    retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE actor = $1", &who).await;
-                    pending.actors.remove_if(&who, |_, t| *t <= started);
-                    if !pending.actors.contains_key(&who) {
-                        break;
-                    }
-                }
-            });
+            // (the password change re-mints one right away). A newer
+            // revocation of the same account just moves the instant forward.
+            self.pending
+                .actors
+                .entry(actor.to_string())
+                .and_modify(|t| *t = (*t).max(revoked_at))
+                .or_insert(revoked_at);
+            self.ensure_worker();
         }
         // Evict this node's positive cache entries for the actor so it
         // stops serving them immediately; negative tombstones and other
@@ -473,20 +523,6 @@ async fn delete_with_retries(pool: &PgPool, sql: &'static str, key: &str) -> boo
     false
 }
 
-/// Keep retrying a revoking DELETE until it lands. Sessions live a day at
-/// most, so after that long there is nothing left to revoke.
-async fn retry_until_deleted(pool: &PgPool, sql: &'static str, key: &str) {
-    let give_up = Instant::now() + DEFAULT_TTL;
-    while Instant::now() < give_up {
-        tokio::time::sleep(REVOKE_RETRY_EVERY).await;
-        // (Each attempt's start is before the statement runs, so the
-        // caller's `started` is never later than the deleting statement.)
-        if sqlx::query(sql).bind(key).execute(pool).await.is_ok() {
-            tracing::info!("admin session revocation reached the database");
-            return;
-        }
-    }
-}
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
@@ -767,5 +803,42 @@ mod postgres_it {
         }
         assert!(store.pending.sids.is_empty(), "nothing queued for a malformed id");
         assert!(well_formed_sid(&mint_session_id()));
+    }
+
+    /// Automated security review of #1123: above the bound, a revocation
+    /// of a session this node knows is real must still be denied and
+    /// retried — only made-up ids are dropped.
+    #[tokio::test]
+    async fn a_known_session_is_revoked_even_over_the_bound() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let store = PostgresAdminSessionStore::connect(&pg_url()).await.unwrap();
+        reset_rows(&store.pool).await;
+        let real = store.create(Role::Admin, Some("nina".into())).await; // cached positive
+        for i in 0..MAX_PENDING_REVOCATIONS {
+            store.pending.sids.insert(format!("{i:064x}"), ());
+        }
+        sqlx::query("ALTER TABLE admin_sessions RENAME TO admin_sessions_away")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store.remove(&real).await;
+        let unknown = format!("{:064x}", u64::MAX);
+        store.remove(&unknown).await;
+        sqlx::query("ALTER TABLE admin_sessions_away RENAME TO admin_sessions")
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert!(store.pending.sids.contains_key(&real), "the real session is queued");
+        assert!(!store.pending.sids.contains_key(&unknown), "a made-up id over the bound is not");
+        assert!(store.validate(&real).await.is_none(), "and denied meanwhile");
+        // The single worker clears the queue once the database answers.
+        tokio::time::sleep(REVOKE_RETRY_EVERY + Duration::from_millis(800)).await;
+        assert!(store.pending.sids.is_empty(), "drained in one pass");
+        let row = sqlx::query("SELECT 1 FROM admin_sessions WHERE sid = $1")
+            .bind(&real)
+            .fetch_optional(&store.pool)
+            .await
+            .unwrap();
+        assert!(row.is_none());
     }
 }

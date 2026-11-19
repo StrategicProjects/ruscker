@@ -9,6 +9,20 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.59 — 2026-11-19
+
+- **Saving an SSO client returns to the list.** The edit form used to
+  stay open after **Save**, with only a small note, and it looked as if
+  nothing had happened. It now goes back to **SSO → Clients** with the
+  confirmation, like the other admin forms. A form with an error still
+  stays open with what was typed.
+- The sign-in client packages are at **0.2.0** on PyPI, crates.io and Go,
+  with the sign-out address, the password page address and
+  `prompt=none` (see [Client packages](./client-packages.md)). The R
+  package keeps these in its development version.
+
+No database migration in this release.
+
 ## v0.2.58 — 2026-11-19
 
 What the first real "Sign in with Ruscker" client asked for, and a tidier

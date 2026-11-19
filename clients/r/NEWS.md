@@ -1,4 +1,4 @@
-# rusckersso 0.2.0
+# rusckersso (development version)
 
 * `sso_sign_out_url()` builds the address of the portal's sign-out page
   (OpenID Connect RP-Initiated Logout), from the discovery document's

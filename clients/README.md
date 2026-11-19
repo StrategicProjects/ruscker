@@ -147,9 +147,10 @@ client's registered *System address*.
 | Go | [pkg.go.dev](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go) | `go get github.com/StrategicProjects/ruscker/clients/go` |
 | R | from the repository (CRAN submission pending) | `remotes::install_github("StrategicProjects/ruscker", subdir = "clients/r")` |
 
-The versions are `0.2.0` (sign-out, the password page, `prompt=none`).
-The R package is `0.1.0` on CRAN while its first submission is reviewed;
-`0.2.0` is in the repository. The contract above is what stays stable.
+The versions are `0.2.0` (sign-out, the password page, `prompt=none`),
+except R: `0.1.0` was sent to CRAN and is under review, and the
+repository carries the development version `0.1.0.9000` with the new
+functions. The contract above is what stays stable.
 
 ## Testing against a real provider
 

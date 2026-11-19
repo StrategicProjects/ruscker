@@ -80,7 +80,11 @@ async fn app_state(db: ConfigDb) -> AppState {
 /// 2026-11-19), which would hide the role check a test is about.
 async fn session_as(state: &AppState, role: Role, name: &str) -> String {
     if let Some(db) = state.db.as_ref() {
-        let _ = ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None).await;
+        if ruscker_admin::db::users::fetch(db, name).await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
     }
     state.admin_sessions.create(role, Some(name.to_string())).await
 }
@@ -89,7 +93,11 @@ async fn admin_cookie(state: &AppState) -> String {
     // The account behind the session must exist: a session whose account
     // is gone is sent back to the login (security review 2026-11-19).
     if let Some(db) = state.db.as_ref() {
-        let _ = ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None).await;
+        if ruscker_admin::db::users::fetch(db, "root").await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
     }
     let sid = state
         .admin_sessions

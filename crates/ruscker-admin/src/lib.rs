@@ -970,6 +970,10 @@ pub(crate) enum PasswordState {
     MustChange,
     /// The session names an account that no longer exists.
     AccountMissing,
+    /// The session could not be confirmed (unknown, expired, revoked, or
+    /// the session store failing). Refused: the caller must not fall back
+    /// on an identity it extracted earlier (Codex review of #1122).
+    NoSession,
     /// The account could not be read; callers fail closed.
     Unavailable,
 }
@@ -991,13 +995,12 @@ pub(crate) async fn session_password_state(
     {
         return if must { PasswordState::MustChange } else { PasswordState::Clear };
     }
-    // No live session: nothing to decide, and NOTHING to cache — the
-    // Postgres store also answers "none" when the database is failing, and
-    // a cached "clear" would outlast the outage and let a must-change
-    // session through for the whole TTL (Codex review of #1122). The
-    // route's own session check refuses the request.
+    // No live session: refuse, and cache NOTHING — the Postgres store also
+    // answers "none" when the database is failing; a cached or returned
+    // "clear" would let a must-change session through, now or for the
+    // whole TTL once the database is back (Codex review of #1122).
     let Some(info) = state.admin_sessions.validate(id).await else {
-        return PasswordState::Clear;
+        return PasswordState::NoSession;
     };
     let actor = info.actor;
     let answer = match actor {
@@ -1072,7 +1075,7 @@ async fn must_change_password_guard(
                     }
                     // The session outlived its account: nothing it asks
                     // for here can be right. Sign in again.
-                    PasswordState::AccountMissing => {
+                    PasswordState::AccountMissing | PasswordState::NoSession => {
                         return axum::response::Redirect::to("/admin/login").into_response();
                     }
                     // Fail CLOSED (security review 2026-11-19): when the

@@ -262,7 +262,11 @@ async fn scoped_cookie(state: &AppState, role: Role, actor: Option<&str>) -> Str
     // A session's account must exist (security review 2026-11-19): create
     // it when the fixture has not (an existing one is left as it is).
     if let (Some(db), Some(name)) = (state.db.as_ref(), actor) {
-        let _ = ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None).await;
+        if ruscker_admin::db::users::fetch(db, name).await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
     }
     let id = state
         .admin_sessions

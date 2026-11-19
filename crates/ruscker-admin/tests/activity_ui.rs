@@ -66,7 +66,11 @@ async fn admin_cookie(state: &AppState) -> String {
     // The account behind the session must exist: a session whose account
     // is gone is sent back to the login (security review 2026-11-19).
     if let Some(db) = state.db.as_ref() {
-        let _ = ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None).await;
+        if ruscker_admin::db::users::fetch(db, "root").await.unwrap().is_none() {
+            ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None)
+                .await
+                .expect("fixture account");
+        }
     }
     let sid = state
         .admin_sessions

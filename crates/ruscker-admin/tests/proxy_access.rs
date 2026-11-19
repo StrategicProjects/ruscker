@@ -272,3 +272,49 @@ async fn must_change_account_reaches_no_app_until_it_rotates() {
     // Anonymous visitors of an open app are unaffected.
     assert_eq!(get(state, "/app/open-app/", None).await, ALLOWED);
 }
+
+/// Codex review of #1122: the proxy reads the session once to know who is
+/// asking, and the password barrier reads it again. If the second read
+/// cannot confirm it (revoked meanwhile, or the store failing), the
+/// request is refused — not forwarded on the identity from the first read.
+#[tokio::test]
+async fn a_session_lost_mid_request_is_not_forwarded() {
+    use ruscker_admin::auth::{AdminSessionStore, InMemoryAdminSessionStore, SessionInfo};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    /// Confirms the session on the first lookup only.
+    #[derive(Debug, Default)]
+    struct OnceThenGone {
+        inner: InMemoryAdminSessionStore,
+        lookups: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl AdminSessionStore for OnceThenGone {
+        async fn create(&self, role: Role, actor: Option<String>) -> String {
+            self.inner.create(role, actor).await
+        }
+        async fn validate(&self, id: &str) -> Option<SessionInfo> {
+            if self.lookups.fetch_add(1, Ordering::SeqCst) == 0 {
+                self.inner.validate(id).await
+            } else {
+                None
+            }
+        }
+        async fn remove(&self, id: &str) {
+            self.inner.remove(id).await
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.inner.revoke_by_actor(actor).await
+        }
+    }
+    let db = open_db().await;
+    ruscker_admin::db::users::create(&db, "olga", "Olga-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let mut state = app_state(db).await;
+    let store = std::sync::Arc::new(OnceThenGone::default());
+    let sid = store.inner.create(Role::Viewer, Some("olga".into())).await;
+    state.admin_sessions = store.clone();
+    let status = get(state, "/app/open-app/", Some(format!("{COOKIE_NAME}={sid}"))).await;
+    assert!(store.lookups.load(Ordering::SeqCst) >= 2, "both reads happened");
+    assert_eq!(status, StatusCode::FORBIDDEN, "not forwarded on the stale identity");
+}

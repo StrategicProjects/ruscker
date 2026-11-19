@@ -9,6 +9,47 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.58 — 2026-11-19
+
+What the first real "Sign in with Ruscker" client asked for, and a tidier
+admin.
+
+**Sign-in for other systems**
+
+- **Sign out everywhere.** A system can now end the portal session too:
+  the provider announces an `end_session_endpoint` (`/oauth/logout`,
+  OpenID Connect RP-Initiated Logout). The person is asked first. A link
+  alone never signs anyone out. Afterwards the browser goes back to one
+  of the system's registered **Return addresses after sign-out**.
+- **Back to the system after changing the password.** A system can link
+  to `/admin/account/password?client_id=…`. Someone who is not signed in
+  signs in and lands on that page, not on the panel. With the client's
+  new **System address**, the page offers "Back to …" before and after
+  the change. The address comes from the client's registration, never
+  from the link.
+- The authentication guide explains how a system keeps its own session
+  in step with the portal (short sessions plus `prompt=none`). The portal
+  does not notify systems when a session ends (no back-channel logout).
+- **SSO → Clients:** the client's id and name open its edit page, and the
+  one-time secret has an "I saved it, close" button.
+- **Sign-in page:** no "Sign in with admin token" link. The operator's
+  break-glass is still at `/admin/login?token=1`. When the sign-in is for
+  another system, there is no "public portal" link either.
+
+**Admin**
+
+- **Schedules** follows the Apps and SSO tabs: what is scheduled comes
+  first and **New schedule** is a button. Rows show the app's name and
+  the whole command. Run outcomes are words (Succeeded, Failed, Could not
+  run), and the tags are readable in the dark theme.
+- **Selects in admin forms** no longer look disabled and have an arrow.
+- The older status tags keep their dark colours when the theme follows
+  the system.
+
+**Database migration 0044** adds two columns to the SSO clients table.
+`ruscker-update` holds a release that migrates until it is allowed
+(`--allow-migrations`, or `APPLY_MIGRATIONS=yes`).
+
 ## v0.2.57 — 2026-11-19
 
 The SSO section of the admin, rearranged.

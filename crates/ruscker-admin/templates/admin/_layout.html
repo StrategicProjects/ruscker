@@ -78,7 +78,7 @@
     {% endif %}
     {# SSO (#1079): client systems and who signed in to them. #}
     {% if role.can_access_section("sso") %}
-    <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if nav_section == "sso" %}is-active{% endif %}">
+    <a href="{{ base }}/admin/sso-access" class="admin-nav-link {% if nav_section == "sso" %}is-active{% endif %}">
       <i class="ti ti-login" aria-hidden="true"></i>
       <span>{{ self.t("admin-nav-sso") }}</span>
     </a>
@@ -554,7 +554,10 @@ window.ruscker.imagePicker = (filenames) => ({
   (function () {
     var wrap = document.getElementById("ruscker-toasts");
     if (!wrap) return;
-    document.querySelectorAll(".admin-flash-ok").forEach(function (flash) {
+    // `data-keep` opts a banner out: the client secret is shown exactly
+    // once, so it must stay on the page until the admin leaves it — and
+    // re-homing by innerHTML would also drop its copy button's listener.
+    document.querySelectorAll(".admin-flash-ok:not([data-keep])").forEach(function (flash) {
       var toast = document.createElement("div");
       toast.className = "toast";
       toast.setAttribute("role", "status");

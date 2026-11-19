@@ -114,7 +114,9 @@ server:
 
 ### Registering a system
 
-Under **SSO → Clients** (Admin only), register each system:
+The **SSO** section (Admin only) opens on **Access** — who signed in to
+which system, and who was refused. **Register client**, there and on the
+**Clients** list, opens the form for a new system:
 
 | Field | Notes |
 |---|---|
@@ -123,7 +125,7 @@ Under **SSO → Clients** (Admin only), register each system:
 | **Redirect URIs** | Where Ruscker may send the user back. Matched **exactly** — no wildcards, no prefixes. HTTPS, or loopback HTTP for development. |
 | **Allowed groups** | Only members of at least one of these groups can sign in to the system. Empty means any signed-in user. An Admin account gets no bypass. |
 | **Require two-step verification** | The user must have confirmed a second factor in this login session. |
-| **System logo** | A Media-library image. With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
+| **System logo** | A Media-library image, chosen from a gallery with thumbnails and search (you can upload one right there). With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
 | **What the system may receive** | Which optional scopes it can be granted: `profile`, `email`, `groups`, `roles`, `setor`. A scope left unticked is never granted, even if the system asks for it; `openid` (the person's id) always is. Systems registered before this setting existed are unrestricted until edited. |
 
 The **client secret** is shown once, when the client is created or when

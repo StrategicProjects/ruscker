@@ -68,8 +68,9 @@ and returns the **identity**.
 Which of these a system receives is decided on the portal, per client
 (see [what the system may receive](./authentication.md#registering-a-system)).
 
-**Since 0.2.0**, every package also builds two addresses, with no
-network call beyond the cached discovery document:
+**Since 0.2.0** (R: in the development version, from the repository),
+every package also builds two addresses, with no network call beyond the
+cached discovery document:
 
 - the **sign-out** address ("sign out everywhere"): the application
   ends its own session, then sends the browser there. The portal asks

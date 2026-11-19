@@ -195,6 +195,11 @@ async fn scoped_state() -> (AppState, ruscker_admin::db::ConfigDb) {
     )
     .await
     .expect("create scoped Editor");
+    // The Admin the tests sign in as must exist: a session whose account
+    // is gone is sent back to the login (security review 2026-11-19).
+    ruscker_admin::db::users::create(&db, "admin", "AdminPass9!", Role::Admin, false, &[], Some("seed"))
+        .await
+        .expect("create the Admin account");
     {
         let mut registry = state.replicas.write().await;
         registry.add(replica(TIME_A_REPLICA, "time-a"));
@@ -254,6 +259,11 @@ async fn scoped_user_state() -> (AppState, ruscker_admin::db::ConfigDb) {
 }
 
 async fn scoped_cookie(state: &AppState, role: Role, actor: Option<&str>) -> String {
+    // A session's account must exist (security review 2026-11-19): create
+    // it when the fixture has not (an existing one is left as it is).
+    if let (Some(db), Some(name)) = (state.db.as_ref(), actor) {
+        let _ = ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None).await;
+    }
     let id = state
         .admin_sessions
         .create(role, actor.map(str::to_string))

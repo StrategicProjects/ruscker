@@ -233,3 +233,42 @@ async fn non_member_forbidden_from_restricted_app() {
         "dave lacks the group → 403"
     );
 }
+
+/// Security review 2026-11-19: an account that must still replace its
+/// administrator-assigned password could skip the prompt and open hosted
+/// apps directly. Its session reaches no app (open or restricted, page or
+/// API) until the password is changed; a page navigation is sent to the
+/// password page and comes back afterwards.
+#[tokio::test]
+async fn must_change_account_reaches_no_app_until_it_rotates() {
+    let db = open_db().await;
+    ruscker_admin::db::users::create(
+        &db,
+        "newbie",
+        "Initial-Pass9!",
+        Role::Viewer,
+        true,
+        &["analysts".to_string()],
+        Some("admin"),
+    )
+    .await
+    .unwrap();
+    let state = app_state(db).await;
+    let sid = state
+        .admin_sessions
+        .create(Role::Viewer, Some("newbie".to_string()))
+        .await;
+    let cookie = Some(format!("{COOKIE_NAME}={sid}"));
+    let resp = get_response(state.clone(), "/app/open-app/?x=1", cookie.clone()).await;
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        resp.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/account/password?next=%2Fapp%2Fopen-app%2F%3Fx%3D1")
+    );
+    for path in ["/app/analysts-app/", "/api/open-api/x", "/api/locked-api/x"] {
+        let status = get(state.clone(), path, cookie.clone()).await;
+        assert!(status == StatusCode::SEE_OTHER || status == StatusCode::FORBIDDEN, "{path}: {status}");
+    }
+    // Anonymous visitors of an open app are unaffected.
+    assert_eq!(get(state, "/app/open-app/", None).await, ALLOWED);
+}

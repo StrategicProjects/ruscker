@@ -456,6 +456,53 @@ async fn forward(
     // Byte cap to hand to the forward step; `None` ⇒ unlimited.
     let body_cap = max_body.map(|l| usize::try_from(l).unwrap_or(usize::MAX));
 
+    // 2c'. A session whose account must still replace its administrator-
+    //      assigned password reaches no app until it does (security review
+    //      2026-11-19 — the admin-only guard left `/app` and `/api` open to
+    //      someone ignoring the prompt). Page navigations go to the password
+    //      page and come back; everything else is refused. Fails closed when
+    //      the account cannot be read. Anonymous and break-glass requests
+    //      are unaffected.
+    if acting_user.is_some() {
+        if let (Some(pool), Some(sid)) = (
+            state.db.as_ref(),
+            cookies.get(crate::auth::COOKIE_NAME).map(|c| c.value().to_string()),
+        ) {
+            match crate::session_password_state(&state, pool, &sid).await {
+                crate::PasswordState::Clear => {}
+                crate::PasswordState::MustChange
+                    if route_prefix == APP_PREFIX
+                        && ws_upgrade.0.is_none()
+                        && req.method() == axum::http::Method::GET =>
+                {
+                    let next = req
+                        .uri()
+                        .path_and_query()
+                        .map(|value| value.as_str())
+                        .unwrap_or_else(|| req.uri().path());
+                    let page = super::with_next_query(
+                        &format!("{}/admin/account/password", state.base_path),
+                        next,
+                    );
+                    return Redirect::to(&page).into_response();
+                }
+                crate::PasswordState::Unavailable => {
+                    return with_cors(
+                        (StatusCode::SERVICE_UNAVAILABLE, "account check unavailable\n").into_response(),
+                        cors_on,
+                    );
+                }
+                _ => {
+                    return with_cors(
+                        (StatusCode::FORBIDDEN, "change your password in the portal first\n")
+                            .into_response(),
+                        cors_on,
+                    );
+                }
+            }
+        }
+    }
+
     // 2d. Access control (#155). An open spec (no `access-groups` /
     //     `access-users`) stays reachable by anyone — including
     //     anonymous `/api` clients, so unrestricted APIs keep working.
@@ -807,11 +854,16 @@ async fn forward(
         // still scrub the inbound map before building that handshake so the
         // reserved namespace has one unconditional rule across transports.
         strip_reserved_identity_headers(req.headers_mut());
+        // The same filter as the HTTP path, so both transports agree on
+        // what is ours (encoded names, several Cookie lines, odd bytes).
+        // The connector takes text: an app cookie that is not valid UTF-8
+        // means no Cookie header upstream — never the unfiltered one.
+        strip_ruscker_cookies(req.headers_mut());
         let cookie = req
             .headers()
             .get(header::COOKIE)
             .and_then(|v| v.to_str().ok())
-            .and_then(filter_ruscker_cookies);
+            .map(str::to_string);
         let subprotocols = req
             .headers()
             .get(header::SEC_WEBSOCKET_PROTOCOL)
@@ -2414,42 +2466,54 @@ fn is_ruscker_cookie(name: &str) -> bool {
         || name.starts_with("__ruscker_mfa_")
 }
 
-/// Drop Ruscker's own cookies from a raw `Cookie` header value,
-/// preserving any cookies the app itself set. Returns `None` when
-/// nothing remains (the caller should then omit the header entirely).
-fn filter_ruscker_cookies(raw: &str) -> Option<String> {
-    let kept: Vec<&str> = raw
-        .split(';')
-        .map(str::trim)
-        .filter(|pair| !pair.is_empty())
-        .filter(|pair| {
-            let name = pair.split('=').next().unwrap_or("").trim();
-            !is_ruscker_cookie(name)
-        })
-        .collect();
-    if kept.is_empty() {
-        None
-    } else {
-        Some(kept.join("; "))
-    }
+/// Is this raw cookie NAME one of ours, however it is spelled?
+///
+/// Works on bytes (a name may carry non-UTF-8 junk) and checks both the
+/// name as sent and its percent-decoded form: the cookie parser that
+/// authenticates requests (`tower-cookies` → `Cookie::parse_encoded`)
+/// decodes names, so `%72uscker_admin_session` IS `ruscker_admin_session`
+/// to it and must be to this filter too (security review 2026-11-19).
+fn is_reserved_cookie_name(raw: &[u8]) -> bool {
+    let raw = raw.trim_ascii();
+    let plain = String::from_utf8_lossy(raw);
+    let decoded = urlencoding::decode_binary(raw);
+    let decoded = String::from_utf8_lossy(&decoded);
+    is_ruscker_cookie(plain.trim()) || is_ruscker_cookie(decoded.trim())
 }
 
-/// Drop Ruscker's own cookies from the upstream-bound `Cookie` header,
-/// preserving any cookies the app itself set. If nothing remains, the
+/// Drop Ruscker's own cookies from the upstream-bound `Cookie` header(s),
+/// preserving any cookies the app itself set; if nothing remains, the
 /// header is removed entirely.
+///
+/// Fails CLOSED (security review 2026-11-19): it reads raw bytes, so a
+/// non-ASCII app cookie can no longer make it give up and forward the
+/// whole header — admin session included; it reads EVERY `Cookie` line
+/// (HTTP/2 sends one per cookie); and if the filtered result cannot be
+/// rebuilt as a header, no `Cookie` header goes upstream at all.
 fn strip_ruscker_cookies(headers: &mut HeaderMap) {
-    let Some(raw) = headers.get(header::COOKIE).and_then(|v| v.to_str().ok()) else {
+    let values: Vec<HeaderValue> = headers.get_all(header::COOKIE).iter().cloned().collect();
+    if values.is_empty() {
         return;
-    };
-    match filter_ruscker_cookies(raw) {
-        None => {
-            headers.remove(header::COOKIE);
-        }
-        Some(kept) => {
-            if let Ok(v) = HeaderValue::from_str(&kept) {
-                headers.insert(header::COOKIE, v);
+    }
+    headers.remove(header::COOKIE);
+    let mut kept: Vec<Vec<u8>> = Vec::new();
+    for value in &values {
+        for pair in value.as_bytes().split(|&b| b == b';') {
+            let pair = pair.trim_ascii();
+            if pair.is_empty() {
+                continue;
+            }
+            let name = pair.split(|&b| b == b'=').next().unwrap_or(&[]);
+            if !is_reserved_cookie_name(name) {
+                kept.push(pair.to_vec());
             }
         }
+    }
+    if kept.is_empty() {
+        return;
+    }
+    if let Ok(v) = HeaderValue::from_bytes(&kept.join(&b"; "[..])) {
+        headers.insert(header::COOKIE, v);
     }
 }
 
@@ -2553,9 +2617,8 @@ fn strip_reserved_set_cookies(headers: &mut HeaderMap, spec_id: &str) {
             .next()
             .unwrap_or(&[])
             .trim_ascii();
-        let reserved = std::str::from_utf8(name)
-            .ok()
-            .is_some_and(is_ruscker_cookie);
+        // Also its percent-decoded form (security review 2026-11-19).
+        let reserved = is_reserved_cookie_name(name);
         if reserved {
             stripped += 1;
         } else {
@@ -2659,6 +2722,55 @@ mod tests {
         assert!(!got.contains(crate::theme::COOKIE_NAME));
         assert!(!got.contains(crate::i18n::COOKIE_NAME));
         assert!(got.contains("app_token=keepme"), "app cookie dropped: {got}");
+    }
+
+    /// Security review 2026-11-19: the filter must hold whatever else the
+    /// request carries. A non-ASCII app cookie used to make `to_str()` fail
+    /// and the WHOLE header (admin session included) went upstream; a second
+    /// `Cookie` line (HTTP/2 sends one per cookie) was never looked at; and
+    /// a percent-encoded name (`%72uscker_…`, which the cookie parser
+    /// decodes) slipped past the name check.
+    #[test]
+    fn strip_ruscker_cookies_holds_for_odd_bytes_split_headers_and_encoded_names() {
+        let admin = crate::auth::COOKIE_NAME;
+        let leaked = |h: &HeaderMap| -> bool {
+            h.get_all(header::COOKIE)
+                .iter()
+                .any(|v| String::from_utf8_lossy(v.as_bytes()).contains("secret-sid"))
+        };
+        // Non-ASCII byte in an app cookie.
+        let mut h = HeaderMap::new();
+        let raw = format!("app_marker=\u{20ac}; {admin}=secret-sid; keep=1");
+        h.insert(header::COOKIE, HeaderValue::from_bytes(raw.as_bytes()).unwrap());
+        strip_ruscker_cookies(&mut h);
+        assert!(!leaked(&h), "admin cookie leaked past a non-ASCII cookie");
+        // Several Cookie lines.
+        let mut h = HeaderMap::new();
+        h.append(header::COOKIE, HeaderValue::from_static("keep=1"));
+        h.append(header::COOKIE, HeaderValue::from_str(&format!("{admin}=secret-sid")).unwrap());
+        strip_ruscker_cookies(&mut h);
+        assert!(!leaked(&h), "admin cookie leaked in a second Cookie line");
+        assert!(String::from_utf8_lossy(h.get(header::COOKIE).unwrap().as_bytes()).contains("keep=1"));
+        // Percent-encoded reserved name.
+        let mut h = HeaderMap::new();
+        h.insert(header::COOKIE, HeaderValue::from_static("%72uscker_admin_session=secret-sid; keep=1"));
+        strip_ruscker_cookies(&mut h);
+        assert!(!leaked(&h), "encoded reserved name passed");
+    }
+
+    #[test]
+    fn strip_reserved_set_cookies_catches_encoded_names() {
+        let mut h = HeaderMap::new();
+        h.append(header::SET_COOKIE, HeaderValue::from_static("%72uscker_admin_session=evil; Path=/"));
+        h.append(header::SET_COOKIE, HeaderValue::from_static("__ruscker%5Fmfa_device=evil; Path=/"));
+        h.append(header::SET_COOKIE, HeaderValue::from_static("app=1; Path=/"));
+        strip_reserved_set_cookies(&mut h, "demo");
+        let left: Vec<String> = h
+            .get_all(header::SET_COOKIE)
+            .iter()
+            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+            .collect();
+        assert_eq!(left, vec!["app=1; Path=/".to_string()]);
     }
 
     #[test]
@@ -2888,22 +3000,28 @@ mod tests {
 
     #[test]
     fn filter_ruscker_cookies_strips_for_ws_handshake() {
-        // The WS upgrade branch forwards the cookie via this filter
-        // (not `strip_ruscker_cookies`), so the admin session id must not
-        // survive here either (#258).
+        // The WS upgrade branch forwards what `strip_ruscker_cookies`
+        // leaves, so the admin session id must not survive here either
+        // (#258).
         let raw = format!(
             "{}=secret-admin-sid; app_token=keepme; {}=pt",
             crate::auth::COOKIE_NAME,
             crate::i18n::COOKIE_NAME,
         );
-        let kept = filter_ruscker_cookies(&raw).expect("app cookie remains");
+        let filter = |raw: &str| {
+            let mut h = HeaderMap::new();
+            h.insert(header::COOKIE, HeaderValue::from_str(raw).unwrap());
+            strip_ruscker_cookies(&mut h);
+            h.get(header::COOKIE).map(|v| v.to_str().unwrap().to_string())
+        };
+        let kept = filter(&raw).expect("app cookie remains");
         assert!(!kept.contains("secret-admin-sid"), "admin cookie leaked: {kept}");
         assert!(!kept.contains(crate::auth::COOKIE_NAME));
         assert!(!kept.contains(crate::i18n::COOKIE_NAME));
         assert_eq!(kept, "app_token=keepme");
         // Only-ours ⇒ None, so the WS branch sends no Cookie header.
         let only_ours = format!("{}=sid", crate::auth::COOKIE_NAME);
-        assert!(filter_ruscker_cookies(&only_ours).is_none());
+        assert!(filter(&only_ours).is_none());
     }
 
     #[test]

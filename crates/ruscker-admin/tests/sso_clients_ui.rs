@@ -74,7 +74,22 @@ async fn app_state(db: ConfigDb) -> AppState {
 
 /// Mint an admin session straight into the shared store and return the
 /// cookie header value.
+/// A session for `name` with `role`, creating the account first: a session
+/// whose account does not exist is sent to the login (security review
+/// 2026-11-19), which would hide the role check a test is about.
+async fn session_as(state: &AppState, role: Role, name: &str) -> String {
+    if let Some(db) = state.db.as_ref() {
+        let _ = ruscker_admin::db::users::create(db, name, "SessionPass9!", role, false, &[], None).await;
+    }
+    state.admin_sessions.create(role, Some(name.to_string())).await
+}
+
 async fn admin_cookie(state: &AppState) -> String {
+    // The account behind the session must exist: a session whose account
+    // is gone is sent back to the login (security review 2026-11-19).
+    if let Some(db) = state.db.as_ref() {
+        let _ = ruscker_admin::db::users::create(db, "root", "RootPass9!", Role::Admin, false, &[], None).await;
+    }
     let sid = state
         .admin_sessions
         .create(Role::Admin, Some("root".into()))
@@ -359,7 +374,7 @@ async fn registry_is_admin_only() {
 
     let mut cookies: Vec<(String, StatusCode)> = Vec::new();
     for role in [Role::Editor, Role::Viewer] {
-        let sid = state.admin_sessions.create(role, Some("someone".into())).await;
+        let sid = session_as(&state, role, &format!("someone-{}", role.as_str())).await;
         cookies.push((format!("{COOKIE_NAME}={sid}"), StatusCode::FORBIDDEN));
     }
     // No session at all is sent to the login page.
@@ -502,7 +517,7 @@ async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
     assert!(!creds.contains(r#"href="/admin/sso-clients""#));
 
     // Admin only.
-    let sid = state.admin_sessions.create(Role::Editor, Some("ed".into())).await;
+    let sid = session_as(&state, Role::Editor, "ed").await;
     let (status, html) = get(state.clone(), "/admin/sso-access", &format!("{COOKIE_NAME}={sid}")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(!html.contains("203.0.113.9"));
@@ -619,7 +634,7 @@ async fn section_opens_on_access_and_registration_has_its_own_page() {
     assert!(html.contains(FORM) && html.contains(r#"value="okid""#) && html.contains(r#"value="Meu Sistema""#));
 
     // Not open to an Editor.
-    let sid = state.admin_sessions.create(Role::Editor, Some("someone".into())).await;
+    let sid = session_as(&state, Role::Editor, "someone").await;
     let (status, _) = get(state, "/admin/sso-clients/new", &format!("{COOKIE_NAME}={sid}")).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 }

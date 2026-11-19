@@ -101,6 +101,8 @@ admin-pw-error-current = La contraseña actual es incorrecta.
 admin-pw-error-mismatch = Las contraseñas no coinciden.
 admin-pw-error-short = La contraseña no cumple la política: mínimo 8 caracteres, con 1 mayúscula, 1 minúscula, 1 número y 1 carácter especial.
 admin-pw-submit = Guardar contraseña
+admin-pw-back-to = Volver a { $name }
+admin-pw-changed = Contraseña cambiada. Se cerraron las demás sesiones de esta cuenta en el portal.
 admin-pw-reveal = Mostrar/ocultar contraseña
 # — Gestión de usuarios (admin)
 admin-nav-users = Usuarios
@@ -494,6 +496,12 @@ admin-sso-scope-roles = Funciones en los grupos
 admin-sso-scope-setor = Sector
 admin-sso-scopes-help = El identificador permanente de la persona siempre se envía. Desmarque lo que este sistema no necesita: aunque lo pida, no lo recibe.
 admin-sso-error-logo = Logo no válido: elija una imagen de la biblioteca de Medios.
+admin-sso-client-uri = Dirección del sistema
+admin-sso-client-uri-help = Página de inicio del sistema. El portal la usa para ofrecer el camino de vuelta, por ejemplo después de que la persona cambie su contraseña. Opcional.
+admin-sso-post-logout-uris = Direcciones de retorno tras cerrar sesión
+admin-sso-post-logout-uris-help = Adónde puede enviar el portal a la persona después de cerrar su sesión a pedido del sistema ("Cerrar sesión en todo"). Una por línea, coincidencia exacta. Vacío: el sistema no puede pedir una dirección de retorno.
+admin-sso-error-client-uri = Dirección del sistema no válida: usa una URL HTTPS completa, sin fragmento (HTTP solo para loopback).
+admin-sso-error-logout-uri = Dirección de retorno tras cerrar sesión no válida: URLs HTTPS completas, una por línea, sin comodines ni fragmentos, como máximo 10.
 admin-sso-error-uri-chars = La URI de redirección no puede contener espacios, caracteres de control, barras invertidas ni caracteres fuera de ASCII (escriba los nombres de host internacionales en su forma punycode).
 admin-sso-error-rotate-stale = El secreto ya se había reemplazado desde que se cargó esta página, así que no se cambió nada. Si no acaba de copiar un secreto nuevo, genere otro.
 

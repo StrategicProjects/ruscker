@@ -218,6 +218,47 @@ struct AccountPasswordPage<'a> {
     /// Validated app destination carried through a mandatory first-login
     /// password change.
     next: String,
+    /// The client system the person came from (`?client_id=`), when it is
+    /// registered, enabled and has a home address: the page links back to
+    /// it. The address comes from the registry, never from the request.
+    back: Option<ClientBack>,
+    /// The password was just changed (`?changed=1`, only with `back`).
+    changed: bool,
+}
+
+/// A link back to a client system.
+struct ClientBack {
+    client_id: String,
+    name: String,
+    uri: String,
+}
+
+impl AccountPasswordPage<'_> {
+    /// "Back to <system>", localized.
+    fn back_label(&self) -> String {
+        let name = self.back.as_ref().map(|b| b.name.clone()).unwrap_or_default();
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("name", name);
+        self.locales.t(self.locale, "admin-pw-back-to", Some(&args))
+    }
+}
+
+/// The link back to `client_id`, if it names a registered, enabled
+/// client with a home address.
+async fn client_back(state: &AppState, client_id: Option<&str>) -> Option<ClientBack> {
+    let id = client_id?;
+    if !db::oidc_clients::is_valid_client_id(id) {
+        return None;
+    }
+    let client = db::oidc_clients::fetch(state.db.as_ref()?, id).await.ok()??;
+    if !client.enabled {
+        return None;
+    }
+    Some(ClientBack {
+        uri: client.client_uri?,
+        client_id: client.client_id,
+        name: client.name,
+    })
 }
 
 impl AccountPasswordPage<'_> {
@@ -528,10 +569,12 @@ async fn login_submit(
     // First login with an admin-assigned password ⇒ ask whether to
     // change it.
     if user.must_change_password {
-        let target = next
-            .as_deref()
-            .map(|next| super::with_next_query("/admin/account/password", next))
-            .unwrap_or_else(|| "/admin/account/password".to_string());
+        let target = match next.as_deref() {
+            // Already headed for the password page: go there as is.
+            Some(next) if next.split(['?', '#']).next() == Some(PASSWORD_PATH) => next.to_string(),
+            Some(next) => super::with_next_query(PASSWORD_PATH, next),
+            None => PASSWORD_PATH.to_string(),
+        };
         return Redirect::to(&target).into_response();
     }
 
@@ -601,6 +644,9 @@ fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
     }
 }
 
+/// The account's own password page.
+const PASSWORD_PATH: &str = "/admin/account/password";
+
 /// Validate an explicit post-login destination and normalize it to the
 /// router's base-less form. Deliberately a short allowlist — arbitrary
 /// admin paths keep using the existing role-aware Referer fallback:
@@ -608,12 +654,20 @@ fn strip_base_prefix<'a>(path: &'a str, base: &str) -> &'a str {
 /// * `/app/...`, produced by the restricted-app guard;
 /// * exactly `/oauth/authorize`, produced by the OIDC provider when a
 ///   client sends a user who is not signed in yet. After login the
-///   browser returns there and the authorization continues.
+///   browser returns there and the authorization continues;
+/// * exactly [`PASSWORD_PATH`], a client system's "change your password"
+///   link: the session extractor sends a signed-out visitor to the login
+///   with it, and after login the person lands where they asked.
 fn app_next_path(next: Option<&str>, base: &str) -> Option<String> {
     let path = super::local_next_path(next)?;
     let path = strip_base_prefix(path, base);
     let path_only = path.split(['?', '#']).next().unwrap_or(path);
-    (path_only.starts_with("/app/") || path_only == "/oauth/authorize").then(|| path.to_string())
+    (path_only.starts_with("/app/")
+        || path_only == "/oauth/authorize"
+        // A client system's "change your password" link (#1068): after
+        // signing in, the person lands on the page they asked for.
+        || path_only == PASSWORD_PATH)
+        .then(|| path.to_string())
 }
 
 #[derive(Debug, Deserialize)]
@@ -793,6 +847,10 @@ async fn setup_submit(
 #[derive(Debug, Deserialize)]
 struct PasswordQuery {
     next: Option<String>,
+    /// The client system that sent the person here.
+    client_id: Option<String>,
+    /// `1` right after a successful change.
+    changed: Option<String>,
 }
 
 async fn password_form(
@@ -819,6 +877,8 @@ async fn password_form(
             no_account: true,
             error: "",
             next: String::new(),
+            back: None,
+            changed: false,
         });
     };
     let first = match state.db.as_ref() {
@@ -831,6 +891,11 @@ async fn password_form(
         None => false,
     };
     let next = app_next_path(query.next.as_deref(), &state.base_path).unwrap_or_default();
+    let back = client_back(&state, query.client_id.as_deref()).await;
+    // `changed=1` is only a hint in the URL, so anyone can put it in a
+    // link: it never hides the form from an account that still MUST
+    // change its password, and it claims nothing beyond "changed".
+    let changed = back.is_some() && query.changed.is_some() && !first;
     render(&AccountPasswordPage {
         locale: loc,
         theme,
@@ -843,6 +908,8 @@ async fn password_form(
         no_account: false,
         error: "",
         next,
+        back,
+        changed,
     })
 }
 
@@ -852,6 +919,8 @@ pub struct PasswordForm {
     pub new_password: String,
     pub confirm: String,
     pub next: Option<String>,
+    /// Carried from the page: the client system to link back to.
+    pub client_id: Option<String>,
 }
 
 async fn password_submit(
@@ -874,6 +943,7 @@ async fn password_submit(
             .into_response();
     };
     let next = app_next_path(form.next.as_deref(), &state.base_path);
+    let back = client_back(&state, form.client_id.as_deref()).await;
 
     // First login is mandatory (#454): there is no "keep current"
     // escape — the only way past the prompt is a real password change
@@ -897,6 +967,12 @@ async fn password_submit(
             no_account: false,
             error,
             next: next.clone().unwrap_or_default(),
+            back: back.as_ref().map(|b| ClientBack {
+                client_id: b.client_id.clone(),
+                name: b.name.clone(),
+                uri: b.uri.clone(),
+            }),
+            changed: false,
         })
     };
 
@@ -941,9 +1017,17 @@ async fn password_submit(
         .await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
     // Return to the app that triggered authentication when one was carried
-    // through the mandatory password rotation. Otherwise use the role home
-    // (a Viewer goes to the portal, not the dashboard it cannot open).
-    Redirect::to(next.as_deref().unwrap_or(session.role.home())).into_response()
+    // through the mandatory password rotation. Sent here by a client
+    // system: the page again, saying it is done, with the way back to that
+    // system. Otherwise the role home (a Viewer goes to the portal, not
+    // the dashboard it cannot open).
+    if let Some(next) = next.as_deref() {
+        return Redirect::to(next).into_response();
+    }
+    if let Some(b) = back {
+        return Redirect::to(&format!("{PASSWORD_PATH}?client_id={}&changed=1", b.client_id)).into_response();
+    }
+    Redirect::to(session.role.home()).into_response()
 }
 
 /// Map an `/admin/...` path to the `nav_section` it belongs to, for
@@ -1210,6 +1294,13 @@ mod tests {
             None
         );
         assert_eq!(app_next_path(Some("//evil.example/app/demo"), ""), None);
+        // The password page, with its query (a client system's link).
+        assert_eq!(
+            app_next_path(Some("/admin/account/password?client_id=ykatu"), ""),
+            Some("/admin/account/password?client_id=ykatu".to_string())
+        );
+        assert_eq!(app_next_path(Some("/admin/users"), ""), None, "other admin pages are not accepted");
+        assert_eq!(app_next_path(Some("/admin/account/password/x"), ""), None);
         assert_eq!(app_next_path(Some("/admin/dashboard"), ""), None);
         // The OIDC authorization endpoint, and only that exact path.
         assert_eq!(

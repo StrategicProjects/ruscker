@@ -101,6 +101,8 @@ admin-pw-error-current = Le mot de passe actuel est incorrect.
 admin-pw-error-mismatch = Les mots de passe ne correspondent pas.
 admin-pw-error-short = Le mot de passe ne respecte pas la politique : au moins 8 caractères, dont 1 majuscule, 1 minuscule, 1 chiffre et 1 caractère spécial.
 admin-pw-submit = Enregistrer le mot de passe
+admin-pw-back-to = Retour à { $name }
+admin-pw-changed = Mot de passe modifié. Les autres sessions de ce compte sur le portail ont été fermées.
 admin-pw-reveal = Afficher/masquer le mot de passe
 # — Gestion des utilisateurs (admin)
 admin-nav-users = Utilisateurs
@@ -494,6 +496,12 @@ admin-sso-scope-roles = Rôles dans les groupes
 admin-sso-scope-setor = Service
 admin-sso-scopes-help = L’identifiant permanent de la personne est toujours envoyé. Décochez ce dont ce système n’a pas besoin : même s’il le demande, il ne le recevra pas.
 admin-sso-error-logo = Logo invalide : choisissez une image de la médiathèque.
+admin-sso-client-uri = Adresse du système
+admin-sso-client-uri-help = La page d’accueil du système. Le portail s’en sert pour proposer le chemin du retour, par exemple après un changement de mot de passe. Facultatif.
+admin-sso-post-logout-uris = Adresses de retour après déconnexion
+admin-sso-post-logout-uris-help = Où le portail peut renvoyer la personne après avoir fermé sa session à la demande du système (« Se déconnecter partout »). Une par ligne, correspondance exacte. Vide : le système ne peut pas demander d’adresse de retour.
+admin-sso-error-client-uri = Adresse du système invalide : utilisez une URL HTTPS complète, sans fragment (HTTP seulement en loopback).
+admin-sso-error-logout-uri = Adresse de retour après déconnexion invalide : URLs HTTPS complètes, une par ligne, sans jokers ni fragments, 10 au plus.
 admin-sso-error-uri-chars = L’URI de redirection ne peut pas contenir d’espaces, de caractères de contrôle, de barres obliques inverses ni de caractères non ASCII (écrivez les noms d’hôte internationaux sous leur forme punycode).
 admin-sso-error-rotate-stale = Le secret avait déjà été remplacé depuis le chargement de cette page ; rien n’a donc été modifié. Si vous ne venez pas de copier un nouveau secret, générez-en un autre.
 

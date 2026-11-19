@@ -101,6 +101,8 @@ admin-pw-error-current = Current password is incorrect.
 admin-pw-error-mismatch = Passwords don't match.
 admin-pw-error-short = Password doesn't meet the policy: at least 8 characters, with 1 uppercase, 1 lowercase, 1 digit and 1 special character.
 admin-pw-submit = Save password
+admin-pw-back-to = Back to { $name }
+admin-pw-changed = Password changed. This account's other sessions on the portal were signed out.
 admin-pw-reveal = Show/hide password
 # — User management (admin)
 admin-nav-users = Users
@@ -494,6 +496,12 @@ admin-sso-scope-roles = Roles in groups
 admin-sso-scope-setor = Department
 admin-sso-scopes-help = The person's permanent id is always sent. Untick what this system does not need: even if it asks, it will not get it.
 admin-sso-error-logo = Invalid logo: choose an image from the Media library.
+admin-sso-client-uri = System address
+admin-sso-client-uri-help = The system's home page. The portal uses it to offer the way back, for example after the person changes their password. Optional.
+admin-sso-post-logout-uris = Return addresses after sign-out
+admin-sso-post-logout-uris-help = Where the portal may send the person after ending their session at the system's request ("Sign out everywhere"). One per line, matched exactly. Empty: the system cannot ask for a return address.
+admin-sso-error-client-uri = Invalid system address: use a full HTTPS URL without a fragment (HTTP only for loopback).
+admin-sso-error-logout-uri = Invalid return address after sign-out: full HTTPS URLs, one per line, no wildcards or fragments, at most 10.
 admin-sso-error-uri-chars = A redirect URI cannot contain spaces, control characters, backslashes or non-ASCII characters (write an international host name in its punycode form).
 admin-sso-error-rotate-stale = The secret had already been replaced since this page was loaded, so nothing was changed. If you did not just copy a new secret, generate one again.
 

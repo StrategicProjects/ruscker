@@ -183,6 +183,14 @@ pub struct ClientForm {
     /// Media-library filename of the system's logo; empty = none.
     #[serde(default)]
     pub logo: String,
+    /// The system's home page; empty = none. `None` (the field was not
+    /// in the form at all — a script, an older page) keeps what is stored.
+    #[serde(default)]
+    pub client_uri: Option<String>,
+    /// Return addresses after signing out, one per line. `None` keeps
+    /// what is stored, like `client_uri`.
+    #[serde(default)]
+    pub post_logout_redirect_uris: Option<String>,
     /// Present when the form carried the scope checkboxes. A form
     /// without it (a script, a page loaded before the setting existed)
     /// leaves the client's allowed scopes alone instead of clearing them.
@@ -214,6 +222,8 @@ impl ClientForm {
             require_mfa: c.require_mfa.then(|| "on".to_string()),
             enabled: c.enabled.then(|| "on".to_string()),
             logo: c.logo.clone().unwrap_or_default(),
+            client_uri: Some(c.client_uri.clone().unwrap_or_default()),
+            post_logout_redirect_uris: Some(c.post_logout_redirect_uris.join("\n")),
             scopes_present: Some("1".into()),
             scope_profile: on(c.allows_scope("profile")),
             scope_email: on(c.allows_scope("email")),
@@ -297,6 +307,18 @@ impl ClientForm {
         if logo.starts_with('.') || logo.contains(['/', '\\']) || logo.chars().count() > 200 {
             return Err("admin-sso-error-logo");
         }
+        // The system's home page: same rules as a redirect URI (absolute,
+        // HTTPS or loopback HTTP, no fragment, no credentials).
+        let client_uri = self.client_uri.as_deref().map(str::trim).unwrap_or("");
+        if !client_uri.is_empty() && validate_redirect_uri(client_uri).is_err() {
+            return Err("admin-sso-error-client-uri");
+        }
+        let logout_uris = parse_redirect_uris(self.post_logout_redirect_uris.as_deref().unwrap_or(""));
+        if logout_uris.len() > MAX_REDIRECT_URIS
+            || logout_uris.iter().any(|u| validate_redirect_uri(u).is_err())
+        {
+            return Err("admin-sso-error-logout-uri");
+        }
         Ok(ClientSettings {
             name: name.to_string(),
             redirect_uris,
@@ -305,6 +327,8 @@ impl ClientForm {
             enabled,
             logo: (!logo.is_empty()).then(|| logo.to_string()),
             allowed_scopes: self.allowed_scopes(),
+            client_uri: (!client_uri.is_empty()).then(|| client_uri.to_string()),
+            post_logout_redirect_uris: logout_uris,
         })
     }
 }
@@ -579,6 +603,13 @@ async fn edit_submit(
             return render_edit(&state, loc, theme, &client, form, EditNotice::Error(key)).await
         }
     };
+    // Same rule for the two address fields: absent from the post ⇒ keep.
+    if form.client_uri.is_none() {
+        settings.client_uri = client.client_uri.clone();
+    }
+    if form.post_logout_redirect_uris.is_none() {
+        settings.post_logout_redirect_uris = client.post_logout_redirect_uris.clone();
+    }
     if no_scope_boxes {
         settings.allowed_scopes = client.allowed_scopes.clone();
     }
@@ -715,6 +746,24 @@ mod tests {
             f.logo = bad.into();
             assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-logo", "{bad}");
         }
+    }
+
+    #[test]
+    fn home_and_sign_out_addresses_are_validated() {
+        let mut f = form("https://ok.example/cb");
+        assert_eq!(f.settings(true).unwrap().client_uri, None);
+        f.client_uri = Some(" https://ykatu.example/ ".into());
+        f.post_logout_redirect_uris = Some("https://ykatu.example/\n\nhttp://127.0.0.1:8765/".into());
+        let s = f.settings(true).unwrap();
+        assert_eq!(s.client_uri.as_deref(), Some("https://ykatu.example/"));
+        assert_eq!(s.post_logout_redirect_uris, vec!["https://ykatu.example/", "http://127.0.0.1:8765/"]);
+        for bad in ["http://ykatu.example/", "/relative", "https://x.example/#frag", "javascript:alert(1)"] {
+            f.client_uri = Some(bad.into());
+            assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-client-uri", "{bad}");
+        }
+        f.client_uri = None;
+        f.post_logout_redirect_uris = Some("https://*.example/".into());
+        assert_eq!(f.settings(true).unwrap_err(), "admin-sso-error-logout-uri");
     }
 
     #[test]

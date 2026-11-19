@@ -105,6 +105,8 @@ admin-pw-error-current = Senha atual incorreta.
 admin-pw-error-mismatch = As senhas não coincidem.
 admin-pw-error-short = A senha não atende à política: mínimo de 8 caracteres, com 1 maiúscula, 1 minúscula, 1 número e 1 caractere especial.
 admin-pw-submit = Salvar senha
+admin-pw-back-to = Voltar a { $name }
+admin-pw-changed = Senha alterada. As outras sessões desta conta no portal foram encerradas.
 admin-pw-reveal = Mostrar/ocultar senha
 # — Gestão de usuários (admin)
 admin-nav-users = Usuários
@@ -498,6 +500,12 @@ admin-sso-scope-roles = Funções nos grupos
 admin-sso-scope-setor = Setor
 admin-sso-scopes-help = O identificador permanente da pessoa é sempre enviado. Desmarque o que este sistema não precisa: mesmo que ele peça, não recebe.
 admin-sso-error-logo = Logo inválido: escolha uma imagem da biblioteca de Mídia.
+admin-sso-client-uri = Endereço do sistema
+admin-sso-client-uri-help = Página inicial do sistema. O portal usa este endereço para oferecer o caminho de volta, por exemplo depois de a pessoa trocar a senha. Opcional.
+admin-sso-post-logout-uris = Endereços de retorno após sair
+admin-sso-post-logout-uris-help = Para onde o portal pode mandar a pessoa depois de encerrar a sessão a pedido do sistema ("Sair de tudo"). Um por linha, com correspondência exata. Vazio: o sistema não pode pedir um endereço de retorno.
+admin-sso-error-client-uri = Endereço do sistema inválido: use uma URL HTTPS completa, sem fragmento (HTTP só para loopback).
+admin-sso-error-logout-uri = Endereço de retorno após sair inválido: URLs HTTPS completas, uma por linha, sem curingas nem fragmento, no máximo 10.
 admin-sso-error-uri-chars = A URI de redirecionamento não pode conter espaços, caracteres de controle, barra invertida nem caracteres fora do ASCII (escreva nomes de host internacionais na forma punycode).
 admin-sso-error-rotate-stale = O segredo já tinha sido trocado desde que esta página foi carregada, então nada foi alterado. Se você não acabou de copiar um segredo novo, gere outro.
 

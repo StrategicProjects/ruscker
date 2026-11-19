@@ -186,6 +186,9 @@ struct SessionEntry {
     expiry: Instant,
     role: Role,
     actor: Option<String>,
+    epoch: i64,
+    issued_at: chrono::DateTime<chrono::Utc>,
+    account_id: Option<String>,
 }
 
 /// What [`AdminSessionStore::validate`] yields for a live session —
@@ -194,6 +197,20 @@ struct SessionEntry {
 pub struct SessionInfo {
     pub role: Role,
     pub actor: Option<String>,
+    /// The account's authentication generation when the session was
+    /// issued (`users.auth_epoch`). The session stands only while the
+    /// account is still at this generation — see [`confirm_session`].
+    pub epoch: i64,
+    /// When the session was issued. A session older than its account
+    /// belonged to an earlier account of the same name, deleted and created
+    /// again — whose generation starts over (automated security review of
+    /// #1123).
+    pub issued_at: chrono::DateTime<chrono::Utc>,
+    /// The immutable id (`users.id`) of the account whose credentials
+    /// issued the session. A name can be deleted and created again; an id
+    /// cannot (Codex review of #1123). `None` only for sessions minted
+    /// without one (break-glass token, older rows, test fixtures).
+    pub account_id: Option<String>,
 }
 
 /// Server-side store of opaque admin session ids → (expiry, role).
@@ -218,18 +235,35 @@ pub struct SessionInfo {
 /// server-side ids keep logout/restart revocable (SECURITY.md §1).
 #[async_trait::async_trait]
 pub trait AdminSessionStore: Send + Sync + std::fmt::Debug {
-    /// Mint a new session for `role`/`actor` and return its opaque id.
-    /// `actor` is the DB username (or `None` for a break-glass token
-    /// session).
-    async fn create(&self, role: Role, actor: Option<String>) -> String;
+    /// Mint a new session for `role`/`actor` at authentication generation
+    /// `epoch` (the account's `auth_epoch`, read together with whatever
+    /// authorised the session) and return its opaque id. `actor` is the DB
+    /// username (or `None` for a break-glass token session).
+    /// `account_id` is the account's immutable id, read with `epoch`.
+    async fn create_at_epoch(
+        &self,
+        role: Role,
+        actor: Option<String>,
+        epoch: i64,
+        account_id: Option<String>,
+    ) -> String;
+
+    /// [`Self::create_at_epoch`] at generation 0 with no account id — the
+    /// break-glass token session. (Account sessions in production are
+    /// always minted with both; see `routes::admin`.)
+    async fn create(&self, role: Role, actor: Option<String>) -> String {
+        self.create_at_epoch(role, actor, 0, None).await
+    }
 
     /// Resolve `id` to its [`SessionInfo`] when the session is live, or
     /// `None` if the id is unknown or expired. Implementations may
     /// prune expired entries lazily on lookup.
     async fn validate(&self, id: &str) -> Option<SessionInfo>;
 
-    /// Invalidate a session (logout / forced revoke).
-    async fn remove(&self, id: &str);
+    /// Invalidate a session (logout / forced revoke). `false` when the
+    /// store could not confirm it (the Postgres DELETE failed): the caller
+    /// must not tell the person they are signed out as if it were done.
+    async fn remove(&self, id: &str) -> bool;
 
     /// Invalidate **every** live session belonging to `actor` (the DB
     /// username). Called when a user is demoted, deleted, or has their
@@ -275,7 +309,13 @@ pub(crate) fn mint_session_id() -> String {
 
 #[async_trait::async_trait]
 impl AdminSessionStore for InMemoryAdminSessionStore {
-    async fn create(&self, role: Role, actor: Option<String>) -> String {
+    async fn create_at_epoch(
+        &self,
+        role: Role,
+        actor: Option<String>,
+        epoch: i64,
+        account_id: Option<String>,
+    ) -> String {
         let id = mint_session_id();
         self.sessions.insert(
             id.clone(),
@@ -283,6 +323,9 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
                 expiry: Instant::now() + self.ttl,
                 role,
                 actor,
+                epoch,
+                issued_at: chrono::Utc::now(),
+                account_id,
             },
         );
         id
@@ -291,11 +334,11 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
     async fn validate(&self, id: &str) -> Option<SessionInfo> {
         let info = self.sessions.get(id).map(|e| {
             let v = e.value();
-            (v.expiry, v.role, v.actor.clone())
+            (v.expiry, v.role, v.actor.clone(), v.epoch, v.issued_at, v.account_id.clone())
         });
         match info {
-            Some((expiry, role, actor)) if expiry > Instant::now() => {
-                Some(SessionInfo { role, actor })
+            Some((expiry, role, actor, epoch, issued_at, account_id)) if expiry > Instant::now() => {
+                Some(SessionInfo { role, actor, epoch, issued_at, account_id })
             }
             Some(_) => {
                 self.sessions.remove(id);
@@ -305,8 +348,9 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
         }
     }
 
-    async fn remove(&self, id: &str) {
+    async fn remove(&self, id: &str) -> bool {
         self.sessions.remove(id);
+        true
     }
 
     async fn revoke_by_actor(&self, actor: &str) {
@@ -1048,6 +1092,8 @@ pub struct AdminSession {
     /// DB username for a password login, or `None` for a break-glass
     /// token session. Use [`AdminSession::actor`] for audit logging.
     pub actor: Option<String>,
+    /// The authentication generation the session was confirmed under.
+    pub epoch: i64,
 }
 
 impl AdminSession {
@@ -1056,6 +1102,51 @@ impl AdminSession {
     pub fn actor(&self) -> &str {
         self.actor.as_deref().unwrap_or("token")
     }
+}
+
+
+/// How long a node may trust an account's authentication generation it
+/// read. A change made on THIS node invalidates the cache at once; another
+/// node sees it within this window. Short on purpose: it bounds how long a
+/// revoked session can still be used elsewhere.
+const AUTH_EPOCH_TTL: Duration = Duration::from_secs(2);
+
+/// Resolve a session id to its [`SessionInfo`] — the ONE place sessions
+/// are trusted (security review 2026-11-19).
+///
+/// The store says whether the session exists; for an account session, the
+/// account must also still be at the authentication generation the session
+/// was issued under. A password change, a role change or a deletion moves
+/// or removes it in the same transaction as the change itself, so every
+/// session issued before — including one minted by a request that raced
+/// the change — stops here, on every node, whatever happened to the
+/// store's own DELETE. Fails closed: an account that cannot be read
+/// confirms nothing.
+pub async fn confirm_session(state: &crate::AppState, id: &str) -> Option<SessionInfo> {
+    let info = state.admin_sessions.validate(id).await?;
+    let Some(username) = info.actor.as_deref() else {
+        return Some(info); // the break-glass token: no account to check
+    };
+    if state.db.is_none() {
+        // No catalog, so no accounts and no sign-in that could have made
+        // an account session: nothing to compare against.
+        return Some(info);
+    }
+    let identity = crate::routes::proxy::resolve_identity_within(state, username, AUTH_EPOCH_TTL).await;
+    let (Some(current), Some(account_id), Some(created_at)) =
+        (identity.auth_epoch, identity.account_id.as_deref(), identity.account_created_at)
+    else {
+        return None;
+    };
+    // The same account: by its immutable id when the session carries it
+    // (every account session minted by this version). Older sessions and
+    // fixtures without one fall back to "issued after the account was
+    // created" — weaker (wall clocks), and gone once those sessions expire.
+    let same_account = match info.account_id.as_deref() {
+        Some(id) => id == account_id,
+        None => info.issued_at + chrono::Duration::seconds(2) >= created_at,
+    };
+    (same_account && current == info.epoch).then_some(info)
 }
 
 impl FromRequestParts<crate::AppState> for AdminSession {
@@ -1097,10 +1188,11 @@ impl FromRequestParts<crate::AppState> for AdminSession {
         // the server-side store — not the token itself. A live session
         // yields its role + actor.
         match cookies.get(COOKIE_NAME).map(|c| c.value().to_string()) {
-            Some(c) => match state.admin_sessions.validate(&c).await {
+            Some(c) => match confirm_session(state, &c).await {
                 Some(info) => Ok(AdminSession {
                     role: info.role,
                     actor: info.actor,
+                    epoch: info.epoch,
                 }),
                 None => Err(to_login()),
             },

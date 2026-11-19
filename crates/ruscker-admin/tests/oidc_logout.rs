@@ -134,6 +134,11 @@ async fn setup() -> (AppState, ConfigDb, String) {
     };
     ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&[BYE]), None).await.unwrap();
     ruscker_admin::db::oidc_clients::create(&db, "norma", &client(&[]), None).await.unwrap();
+    // The account behind the session must exist (sessions are confirmed
+    // against its authentication generation).
+    ruscker_admin::db::users::create(&db, "ana", "Ana-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
     let sid = state.admin_sessions.create(Role::Viewer, Some("ana".into())).await;
     (state, db, format!("{COOKIE_NAME}={sid}"))
 }
@@ -331,4 +336,40 @@ async fn provider_off_means_no_endpoint() {
     let state = app_state(db, "proxy:\n  title: T\n  port: 8088\n  specs: []\n", Some(KEY)).await;
     let r = send(&state, get("/oauth/logout", None, None)).await;
     assert_eq!(r.status, StatusCode::NOT_FOUND);
+}
+
+/// Codex review of #1123 (third pass): when the store cannot record the
+/// sign-out, the confirmation does not send the person back as if it were
+/// done — it says so on the portal's page.
+#[tokio::test]
+async fn an_unrecorded_sign_out_is_reported_not_redirected() {
+    use ruscker_admin::auth::{AdminSessionStore, InMemoryAdminSessionStore, SessionInfo};
+    /// Signs out in memory but reports that nothing was recorded.
+    #[derive(Debug, Default)]
+    struct Unrecorded(InMemoryAdminSessionStore);
+    #[async_trait::async_trait]
+    impl AdminSessionStore for Unrecorded {
+        async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64, id: Option<String>) -> String {
+            self.0.create_at_epoch(role, actor, epoch, id).await
+        }
+        async fn validate(&self, id: &str) -> Option<SessionInfo> {
+            self.0.validate(id).await
+        }
+        async fn remove(&self, id: &str) -> bool {
+            self.0.remove(id).await;
+            false
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.0.revoke_by_actor(actor).await
+        }
+    }
+    let (mut state, _, _) = setup().await;
+    let store = std::sync::Arc::new(Unrecorded::default());
+    let sid = store.0.create(Role::Viewer, Some("ana".into())).await;
+    state.admin_sessions = store;
+    let form = format!("client_id=radar&post_logout_redirect_uri={}&state=xyz", enc(BYE));
+    let r = send(&state, post(&form, &format!("{COOKIE_NAME}={sid}"), "same-origin")).await;
+    assert_eq!(r.status, StatusCode::OK, "no redirect to the system");
+    assert!(r.location.is_empty());
+    assert!(r.body.contains(r#"role="alert""#), "the page says it was not confirmed");
 }

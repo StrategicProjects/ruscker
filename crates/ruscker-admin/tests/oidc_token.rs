@@ -123,7 +123,10 @@ async fn fixture(yaml: &str) -> Fixture {
 /// Run the browser half as `ana`: returns a fresh authorization code
 /// for `client_id` with the given scope.
 async fn authorize(f: &Fixture, client_id: &str, scope: &str) -> String {
-    let sid = f.state.admin_sessions.create(Role::Viewer, Some("ana".into())).await;
+    // Signed in now: at the account's current authentication generation,
+    // as a real sign-in mints it.
+    let (_, epoch) = ruscker_admin::db::users::role_and_epoch(&f.db, "ana").await.unwrap().unwrap();
+    let sid = f.state.admin_sessions.create_at_epoch(Role::Viewer, Some("ana".into()), epoch, None).await;
     let mut q = url::form_urlencoded::Serializer::new(String::new());
     for (k, v) in [
         ("response_type", "code"),
@@ -867,4 +870,115 @@ async fn stored_scope(db: &ConfigDb) -> String {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+/// Security review 2026-11-19 (finding 8): policies that change during
+/// a code's minute apply at redemption. A code issued for a client that
+/// did not require MFA is refused once the client does; a code is
+/// refused once the account must change its password.
+#[tokio::test]
+async fn policy_changes_during_the_code_lifetime_apply_at_redemption() {
+    let f = fixture(ON).await;
+
+    // MFA turned on for the client after the code was issued.
+    let code = authorize(&f, "norma", "openid").await;
+    let mut c = ruscker_admin::db::oidc_clients::fetch(&f.db, "norma").await.unwrap().unwrap();
+    c.require_mfa = true;
+    let settings = ClientSettings {
+        name: c.name.clone(),
+        redirect_uris: c.redirect_uris.clone(),
+        access_groups: c.access_groups.clone(),
+        require_mfa: true,
+        enabled: c.enabled,
+        logo: c.logo.clone(),
+        allowed_scopes: c.allowed_scopes.clone(),
+        client_uri: c.client_uri.clone(),
+        post_logout_redirect_uris: c.post_logout_redirect_uris.clone(),
+    };
+    ruscker_admin::db::oidc_clients::update(&f.db, "norma", &settings, None).await.unwrap();
+    assert_grant_refused(&token_basic(&f, "norma", &f.norma, &exchange(&code)).await);
+
+    // A mandatory password change set after the code was issued.
+    let code = authorize(&f, "radar", "openid").await;
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
+    assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+}
+
+/// Codex review of #1123: a code issued before a password reset became
+/// usable again once the person completed the mandatory change within the
+/// code's minute (`must_change_password` was false again). The code is
+/// bound to the account's authentication generation, which the reset and
+/// the change both moved.
+#[tokio::test]
+async fn a_code_from_before_a_password_change_is_refused_even_after_rotation() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid").await;
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Chosen-Pass9!", false, None).await.unwrap();
+    assert!(!ruscker_admin::db::users::fetch(&f.db, "ana").await.unwrap().unwrap().must_change_password);
+    // (The routes that change a password drop this node's cached copy.)
+    f.state.invalidate_identity_cache();
+    assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+    // A code issued AFTER the change is fine.
+    let code = authorize(&f, "radar", "openid").await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+}
+
+/// Codex review of #1123 (third pass): a code for a client that requires
+/// MFA records WHICH factor was proved. A factor reset (or "forget all
+/// devices") before redemption refuses it.
+#[tokio::test]
+async fn a_code_dies_with_the_factor_that_proved_it() {
+    use ruscker_admin::db::oidc_codes::{self, Grant};
+    let f = fixture(ON).await;
+    // A confirmed factor for ana.
+    ruscker_admin::db::mfa::begin_enrollment(&f.db, "ana", b"cipher", b"nonce", "cer-1").await.unwrap();
+    ruscker_admin::db::mfa::confirm_with_recovery_codes(&f.db, "ana", "ana", None, "cer-1").await.unwrap();
+    // norma now requires MFA.
+    let c = ruscker_admin::db::oidc_clients::fetch(&f.db, "norma").await.unwrap().unwrap();
+    let settings = ClientSettings {
+        name: c.name.clone(),
+        redirect_uris: c.redirect_uris.clone(),
+        access_groups: c.access_groups.clone(),
+        require_mfa: true,
+        enabled: true,
+        logo: None,
+        allowed_scopes: None,
+        client_uri: None,
+        post_logout_redirect_uris: Vec::new(),
+    };
+    ruscker_admin::db::oidc_clients::update(&f.db, "norma", &settings, None).await.unwrap();
+    let user = ruscker_admin::db::users::fetch(&f.db, "ana").await.unwrap().unwrap();
+    let (_, _, epoch) = ruscker_admin::db::users::account_ref(&f.db, "ana").await.unwrap().unwrap();
+    let issue = || async {
+        let marker = ruscker_admin::db::mfa::fetch(&f.db, "ana").await.unwrap().and_then(|r| r.marker());
+        oidc_codes::issue(
+            &f.db,
+            &Grant {
+                client_id: "norma".into(),
+                user_id: user.id.clone(),
+                username: "ana".into(),
+                redirect_uri: CB.into(),
+                code_challenge: CHALLENGE.into(),
+                nonce: None,
+                scope: "openid".into(),
+                client_ip: None,
+                user_agent: None,
+                mfa_proved: true,
+                auth_epoch: epoch,
+                mfa_marker: marker,
+            },
+        )
+        .await
+        .unwrap()
+    };
+    // Same factor at redemption: tokens.
+    let code = issue().await;
+    let r = token_basic(&f, "norma", &f.norma, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+    // Factor reset between issue and redemption: refused.
+    let code = issue().await;
+    ruscker_admin::db::mfa::reset(&f.db, "ana", "admin").await.unwrap();
+    assert_grant_refused(&token_basic(&f, "norma", &f.norma, &exchange(&code)).await);
 }

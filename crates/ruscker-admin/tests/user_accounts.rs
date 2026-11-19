@@ -1735,11 +1735,13 @@ async fn must_change_barrier_fails_closed() {
     let r = get(format!("{COOKIE_NAME}={ghost}")).await;
     assert_eq!(r.status(), StatusCode::SEE_OTHER);
     assert_eq!(r.headers().get("location").and_then(|v| v.to_str().ok()), Some("/admin/login"));
-    // The database goes away: a must-change account is not let through.
+    // The database goes away: the session cannot be confirmed against the
+    // account, so nothing is let through — back to the sign-in.
     let sid = state.admin_sessions.create(Role::Admin, Some("ivo".into())).await;
     pool.close().await;
     let r = get(format!("{COOKIE_NAME}={sid}")).await;
-    assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(r.headers().get("location").and_then(|v| v.to_str().ok()), Some("/admin/login"));
 }
 
 /// Codex review of #1122: the Postgres session store answers "no
@@ -1758,13 +1760,19 @@ async fn a_failing_session_store_leaves_no_cached_clearance() {
     }
     #[async_trait::async_trait]
     impl ruscker_admin::auth::AdminSessionStore for Flaky {
-        async fn create(&self, role: Role, actor: Option<String>) -> String {
-            self.inner.create(role, actor).await
+        async fn create_at_epoch(
+            &self,
+            role: Role,
+            actor: Option<String>,
+            epoch: i64,
+            account_id: Option<String>,
+        ) -> String {
+            self.inner.create_at_epoch(role, actor, epoch, account_id).await
         }
         async fn validate(&self, id: &str) -> Option<ruscker_admin::auth::SessionInfo> {
             if self.down.load(Ordering::SeqCst) { None } else { self.inner.validate(id).await }
         }
-        async fn remove(&self, id: &str) {
+        async fn remove(&self, id: &str) -> bool {
             self.inner.remove(id).await
         }
         async fn revoke_by_actor(&self, actor: &str) {
@@ -1807,4 +1815,288 @@ async fn a_failing_session_store_leaves_no_cached_clearance() {
         Some("/admin/account/password"),
         "the barrier holds once the store is back"
     );
+}
+
+/// Security review 2026-11-19 (finding 3), redone after the Codex review
+/// of #1123: a sign-in verifies the password against one read of the
+/// account and creates the session afterwards. A demotion, reset or delete
+/// that lands in between has already revoked the account's sessions — not
+/// this one. The session carries the account's authentication generation
+/// read with the password, and every change moves it in its own
+/// transaction, so the session is refused from its first use. The race is
+/// staged by minting at the generation the sign-in read, after the change.
+#[tokio::test]
+async fn a_session_issued_under_an_old_generation_is_refused() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "jade", "Jade-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    // Another Admin, so jade is not the last one (that demotion is refused).
+    ruscker_admin::db::users::create(&db, "boss", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let app = router(state.clone());
+    let get = |sid: String| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+    let (_, epoch) = ruscker_admin::db::users::verify_login_with_epoch(&db, "jade", "Jade-Pass9!")
+        .await
+        .unwrap()
+        .unwrap();
+    // Unchanged: the session stands.
+    let sid = state.admin_sessions.create_at_epoch(Role::Admin, Some("jade".into()), epoch, None).await;
+    assert_eq!(get(sid).await, StatusCode::OK);
+    // Demoted while the password was being checked: refused.
+    ruscker_admin::db::users::set_role(&db, "jade", Role::Viewer, None).await.unwrap();
+    state.invalidate_identity_cache();
+    let stale = state.admin_sessions.create_at_epoch(Role::Admin, Some("jade".into()), epoch, None).await;
+    assert_eq!(get(stale).await, StatusCode::SEE_OTHER, "the stale Admin session is refused");
+    // A password reset moves it too.
+    let (_, epoch) = ruscker_admin::db::users::role_and_epoch(&db, "jade").await.unwrap().unwrap();
+    ruscker_admin::db::users::set_password(&db, "jade", "Reset-Pass9!", false, None).await.unwrap();
+    state.invalidate_identity_cache();
+    let stale = state.admin_sessions.create_at_epoch(Role::Viewer, Some("jade".into()), epoch, None).await;
+    assert_eq!(get(stale).await, StatusCode::SEE_OTHER);
+}
+
+/// Codex review of #1123: an account edit decided "role changed?" on a
+/// role it had read before its transaction, so a concurrent promotion
+/// could be overwritten without ending the promoted sessions. The decision
+/// is now made inside the transaction, on the stored role.
+#[tokio::test]
+async fn an_account_edit_moves_the_generation_only_on_a_real_role_change() {
+    let (_state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "pia", "Pia-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let epoch = |db: ruscker_admin::db::ConfigDb| async move {
+        ruscker_admin::db::users::role_and_epoch(&db, "pia").await.unwrap().unwrap().1
+    };
+    let edit = |role: Role| ruscker_admin::db::users::AccountUpdate {
+        role,
+        groups: &[],
+        setor: None,
+        email: None,
+        celular: None,
+    };
+    let e0 = epoch(db.clone()).await;
+    // Same role: no change, no move.
+    ruscker_admin::db::users::update_account(&db, "pia", edit(Role::Viewer), None).await.unwrap();
+    assert_eq!(epoch(db.clone()).await, e0);
+    // Someone promotes her meanwhile…
+    ruscker_admin::db::users::set_role(&db, "pia", Role::Editor, None).await.unwrap();
+    let e1 = epoch(db.clone()).await;
+    assert!(e1 > e0);
+    // …and an edit written from a page that still showed "Viewer" puts the
+    // Viewer role back: a real change, so the generation moves again.
+    ruscker_admin::db::users::update_account(&db, "pia", edit(Role::Viewer), None).await.unwrap();
+    assert!(epoch(db.clone()).await > e1);
+}
+
+/// Finding 3, second half: the session minted after a password change
+/// takes the account's CURRENT role, not the one the old session carried.
+#[tokio::test]
+async fn password_change_mints_the_current_role() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "kim", "Kim-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    // A session that (wrongly) still says Admin — e.g. issued before a demotion.
+    let sid = state.admin_sessions.create(Role::Admin, Some("kim".into())).await;
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/account/password")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                .body(Body::from("current=Kim-Pass9%21&new_password=Kim-Nova9%21&confirm=Kim-Nova9%21"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
+    let new_sid = resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|c| c.split(';').next())
+        .and_then(|c| c.split('=').nth(1))
+        .unwrap()
+        .to_string();
+    let info = state.admin_sessions.validate(&new_sid).await.unwrap();
+    assert_eq!(info.role, Role::Viewer, "the new session is not an Admin one");
+}
+
+/// Automated security review of #1123: an account deleted and created again
+/// under the same name starts its generation over, so a session of the old
+/// account would match it. A session issued before the account existed is
+/// refused.
+#[tokio::test]
+async fn a_session_of_a_deleted_account_does_not_revive_with_a_namesake() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "rui", "Rui-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    ruscker_admin::db::users::create(&db, "boss2", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let old = state.admin_sessions.create(Role::Admin, Some("rui".into())).await;
+    ruscker_admin::db::users::delete(&db, "rui", None).await.unwrap();
+    // (The store's own revocation is what normally removes it; the point
+    // is that nothing depends on that having worked.)
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+    ruscker_admin::db::users::create(&db, "rui", "Other-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    state.invalidate_identity_cache();
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/users")
+                .header("cookie", format!("{COOKIE_NAME}={old}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "the old Admin session is not the new account's");
+}
+
+/// Automated security review of #1123: the 2-second generation check fell
+/// back on the 30-second identity cache, so a change made on ANOTHER node
+/// (which cannot invalidate this node's cache) took up to 30 s to apply.
+#[tokio::test]
+async fn a_change_on_another_node_applies_within_seconds() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "sol", "Sol-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    ruscker_admin::db::users::create(&db, "boss3", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let sid = state.admin_sessions.create(Role::Admin, Some("sol".into())).await;
+    let get = || {
+        let app = router(state.clone());
+        let sid = sid.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+    assert_eq!(get().await, StatusCode::OK); // fills this node's identity cache
+    // Demoted "elsewhere": the database changes, this node's cache is NOT told.
+    ruscker_admin::db::users::set_role(&db, "sol", Role::Viewer, None).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+    assert_eq!(get().await, StatusCode::SEE_OTHER, "refused once the 2 s window passed");
+}
+
+/// Codex review of #1123 (third pass), problem 1: the account's own
+/// password change is applied only to the account and generation its
+/// current password verified. Another change landing in between (a second
+/// password change, a demotion) wins, and this one writes nothing — it
+/// must not adopt that change's generation.
+#[tokio::test]
+async fn an_own_password_change_does_not_overtake_a_concurrent_change() {
+    let (_state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "tia", "Tia-Pass9!", Role::Editor, false, &[], None)
+        .await
+        .unwrap();
+    let (user, epoch) = ruscker_admin::db::users::verify_login_with_epoch(&db, "tia", "Tia-Pass9!")
+        .await
+        .unwrap()
+        .unwrap();
+    // The owner changes it first…
+    ruscker_admin::db::users::set_password(&db, "tia", "Owner-Pass9!", false, None).await.unwrap();
+    // …so the slower change, verified before, writes nothing.
+    let r = ruscker_admin::db::users::set_own_password(&db, "tia", "Late-Pass9!", &user.id, epoch)
+        .await
+        .unwrap();
+    assert!(r.is_none());
+    assert!(ruscker_admin::db::users::verify_login(&db, "tia", "Owner-Pass9!").await.unwrap().is_some());
+    // Same after a role change.
+    let (user, epoch) = ruscker_admin::db::users::verify_login_with_epoch(&db, "tia", "Owner-Pass9!")
+        .await
+        .unwrap()
+        .unwrap();
+    ruscker_admin::db::users::set_role(&db, "tia", Role::Viewer, None).await.unwrap();
+    assert!(ruscker_admin::db::users::set_own_password(&db, "tia", "Late-Pass9!", &user.id, epoch)
+        .await
+        .unwrap()
+        .is_none());
+    // Nothing in between: applied, returning the role and the new generation.
+    let (user, epoch) = ruscker_admin::db::users::verify_login_with_epoch(&db, "tia", "Owner-Pass9!")
+        .await
+        .unwrap()
+        .unwrap();
+    let (role, new_epoch) = ruscker_admin::db::users::set_own_password(&db, "tia", "Next-Pass9!", &user.id, epoch)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(role, Role::Viewer);
+    assert_eq!(new_epoch, epoch + 1);
+}
+
+/// Codex review of #1123 (third pass), problem 2: sessions carry the
+/// account's immutable id, so a session of a deleted account is refused by
+/// a namesake created at once — no clock involved.
+#[tokio::test]
+async fn a_session_is_bound_to_the_account_id_not_the_name() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "uma", "Uma-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    ruscker_admin::db::users::create(&db, "boss4", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let (old_id, _, epoch) = ruscker_admin::db::users::account_ref(&db, "uma").await.unwrap().unwrap();
+    ruscker_admin::db::users::delete(&db, "uma", None).await.unwrap();
+    ruscker_admin::db::users::create(&db, "uma", "Other-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    state.invalidate_identity_cache();
+    // Minted AFTER the re-creation (a sign-in that verified the old account
+    // and finished late), same generation, old id: refused.
+    let late = state
+        .admin_sessions
+        .create_at_epoch(Role::Admin, Some("uma".into()), epoch, Some(old_id))
+        .await;
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/users")
+                .header("cookie", format!("{COOKIE_NAME}={late}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER);
 }

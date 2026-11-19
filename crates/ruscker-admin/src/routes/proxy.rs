@@ -1426,10 +1426,22 @@ pub(crate) const SPEC_CACHE_TTL: std::time::Duration = std::time::Duration::from
 pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
-    if let Some(identity) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
+pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
+    resolve_identity_within(state, username, IDENTITY_CACHE_TTL).await
+}
+
+/// [`resolve_identity`] accepting a cached copy at most `max_age` old, and
+/// otherwise reading the database — never an older cached copy (the
+/// session check asks for 2 s; the proxy's attributes accept 30 s).
+pub(crate) async fn resolve_identity_within(
+    state: &AppState,
+    username: &str,
+    max_age: std::time::Duration,
+) -> Arc<CachedIdentity> {
+    if let Some(identity) = state.identity_cache.get(username, max_age) {
         return identity;
     }
+    let read_at = std::time::Instant::now();
 
     // Snapshot BEFORE the read: `get` rejects this fill after it lands if
     // an admin mutation invalidated the cache while we were at the DB, so a
@@ -1438,6 +1450,24 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
     let identity = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
             Ok(Some(user)) => {
+                // The authentication generation (security review
+                // 2026-11-19). A failed read leaves it unknown — which
+                // confirms no session — and is NOT cached.
+                let auth_epoch = match crate::db::users::role_and_epoch(db, username).await {
+                    Ok(row) => row.map(|(_, epoch)| epoch),
+                    Err(error) => {
+                        tracing::warn!(user = username, error = ?error, "auth epoch lookup failed");
+                        return Arc::new(CachedIdentity {
+                            groups: Arc::new(user.groups),
+                            email: user.email,
+                            setor: user.setor,
+                            group_roles: Arc::default(),
+                            auth_epoch: None,
+                            account_created_at: None,
+                            account_id: None,
+                        });
+                    }
+                };
                 // Group roles (#1067). A failed read sends no roles (fail
                 // closed) and is NOT cached, so the next request retries
                 // instead of serving the gap for the whole TTL.
@@ -1450,6 +1480,9 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
                             email: user.email,
                             setor: user.setor,
                             group_roles: Arc::default(),
+                            auth_epoch,
+                            account_created_at: Some(user.created_at),
+                            account_id: Some(user.id.clone()),
                         });
                     }
                 };
@@ -1458,6 +1491,9 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
                     email: user.email,
                     setor: user.setor,
                     group_roles: Arc::new(group_roles),
+                    auth_epoch,
+                    account_created_at: Some(user.created_at),
+                    account_id: Some(user.id),
                 })
             }
             Ok(None) => Arc::new(CachedIdentity::default()),
@@ -1470,7 +1506,7 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
     };
     state
         .identity_cache
-        .store(generation, username, identity.clone());
+        .store_read_at(generation, username, identity.clone(), read_at);
     identity
 }
 

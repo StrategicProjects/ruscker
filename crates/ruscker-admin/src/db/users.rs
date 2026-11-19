@@ -696,6 +696,19 @@ pub async fn verify_login(
     username: &str,
     password: &str,
 ) -> Result<Option<UserRow>> {
+    Ok(verify_login_with_epoch(db, username, password).await?.map(|(user, _)| user))
+}
+
+/// [`verify_login`], also returning the account's authentication
+/// generation read in the SAME row as the password hash and role. A
+/// session minted with it dies as soon as a later change moves the
+/// generation, even one that landed while the password was being checked
+/// (security review 2026-11-19).
+pub async fn verify_login_with_epoch(
+    db: &ConfigDb,
+    username: &str,
+    password: &str,
+) -> Result<Option<(UserRow, i64)>> {
     type Row = (
         String,
         String,
@@ -708,18 +721,19 @@ pub async fn verify_login(
         Option<String>,
         Option<String>,
         String,
+        i64,
     );
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash, auth_epoch
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash, auth_epoch
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -735,18 +749,63 @@ pub async fn verify_login(
     // timing doesn't reveal whether the account exists.
     let pw = password.to_string();
     let (hash_to_check, found) = match &row {
-        Some((.., hash)) => (hash.clone(), true),
+        Some((.., hash, _)) => (hash.clone(), true),
         None => (dummy_hash().to_string(), false),
     };
     let verified = tokio::task::spawn_blocking(move || verify_password(&pw, &hash_to_check))
         .await
         .context("password verify task")?;
     match row {
-        Some((id, u, r, m, g, c, by, se, em, ce, _)) if found && verified => {
-            Ok(Some(row_from(id, u, r, m, g, c, by, se, em, ce)))
+        Some((id, u, r, m, g, c, by, se, em, ce, _, epoch)) if found && verified => {
+            Ok(Some((row_from(id, u, r, m, g, c, by, se, em, ce), epoch)))
         }
         _ => Ok(None),
     }
+}
+
+/// The account's immutable id, role and authentication generation, read
+/// together; `None` when the account does not exist. What a session is
+/// minted against.
+pub async fn account_ref(db: &ConfigDb, username: &str) -> Result<Option<(String, Role, i64)>> {
+    let username = normalize_username(username);
+    let row: Option<(String, String, i64)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT id, role, auth_epoch FROM users WHERE username = ?")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT id, role, auth_epoch FROM users WHERE username = $1")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("account of {username}"))?;
+    Ok(row.map(|(id, role, epoch)| (id, Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
+}
+
+/// The account's role and authentication generation, read together;
+/// `None` when the account does not exist.
+pub async fn role_and_epoch(db: &ConfigDb, username: &str) -> Result<Option<(Role, i64)>> {
+    let username = normalize_username(username);
+    let row: Option<(String, i64)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT role, auth_epoch FROM users WHERE username = ?")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT role, auth_epoch FROM users WHERE username = $1")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("role and auth epoch of {username}"))?;
+    Ok(row.map(|(role, epoch)| (Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
 }
 
 /// A real argon2id hash of a throwaway password, computed once, used
@@ -840,6 +899,37 @@ pub async fn set_password(
     must_change: bool,
     actor: Option<&str>,
 ) -> Result<()> {
+    match set_password_guarded(db, username, new_password, must_change, actor, None).await? {
+        Some(_) => Ok(()),
+        None => anyhow::bail!("user {} not found", normalize_username(username)),
+    }
+}
+
+/// [`set_password`] for the account's OWN change: applied only while the
+/// account is still the one (`id`) and at the generation (`epoch`) its
+/// current password was verified under, and returning the role and the new
+/// generation from the same statement. `None` when that no longer holds —
+/// a concurrent change (another password change, a role change, a delete)
+/// got there first, and this one must not adopt its generation (Codex
+/// review of #1123).
+pub async fn set_own_password(
+    db: &ConfigDb,
+    username: &str,
+    new_password: &str,
+    id: &str,
+    epoch: i64,
+) -> Result<Option<(Role, i64)>> {
+    set_password_guarded(db, username, new_password, false, Some(username), Some((id, epoch))).await
+}
+
+async fn set_password_guarded(
+    db: &ConfigDb,
+    username: &str,
+    new_password: &str,
+    must_change: bool,
+    actor: Option<&str>,
+    guard: Option<(&str, i64)>,
+) -> Result<Option<(Role, i64)>> {
     let username = normalize_username(username);
     let hash = {
         let pw = new_password.to_string();
@@ -853,21 +943,30 @@ pub async fn set_password(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin password tx")?;
-            let res = sqlx::query(
+            let (guard_id, guard_epoch) = guard.unzip();
+            let row: Option<(String, i64)> = sqlx::query_as(
                 "UPDATE users
-                    SET password_hash = ?, must_change_password = ?, updated_at = ?
-                  WHERE username = ?",
+                    SET password_hash = ?, must_change_password = ?, updated_at = ?,
+                        auth_epoch = auth_epoch + 1
+                  WHERE username = ?
+                    AND (? IS NULL OR id = ?)
+                    AND (? IS NULL OR auth_epoch = ?)
+              RETURNING role, auth_epoch",
             )
             .bind(&hash)
             .bind(must_change as i64)
             .bind(now)
             .bind(&username)
-            .execute(&mut *tx)
+            .bind(guard_id)
+            .bind(guard_id)
+            .bind(guard_epoch)
+            .bind(guard_epoch)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("set password for {username}"))?;
-            if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
-            }
+            let Some((role, epoch)) = row else {
+                return Ok(None);
+            };
             crate::db::mfa_grants::delete_all_sqlite(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -880,24 +979,32 @@ pub async fn set_password(
             .await
             .context("audit password change")?;
             tx.commit().await.context("commit password change")?;
+            Ok(Some((Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin password tx")?;
-            let res = sqlx::query(
+            let (guard_id, guard_epoch) = guard.unzip();
+            let row: Option<(String, i64)> = sqlx::query_as(
                 "UPDATE users
-                    SET password_hash = $1, must_change_password = $2, updated_at = $3
-                  WHERE username = $4",
+                    SET password_hash = $1, must_change_password = $2, updated_at = $3,
+                        auth_epoch = auth_epoch + 1
+                  WHERE username = $4
+                    AND ($5::TEXT IS NULL OR id = $5)
+                    AND ($6::BIGINT IS NULL OR auth_epoch = $6)
+              RETURNING role, auth_epoch",
             )
             .bind(&hash)
             .bind(must_change)
             .bind(now)
             .bind(&username)
-            .execute(&mut *tx)
+            .bind(guard_id)
+            .bind(guard_epoch)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("set password for {username}"))?;
-            if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
-            }
+            let Some((role, epoch)) = row else {
+                return Ok(None);
+            };
             crate::db::mfa_grants::delete_all_postgres(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -910,9 +1017,9 @@ pub async fn set_password(
             .await
             .context("audit password change")?;
             tx.commit().await.context("commit password change")?;
+            Ok(Some((Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
         }
     }
-    Ok(())
 }
 
 /// Change a user's role.
@@ -963,6 +1070,16 @@ pub async fn update_account(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin account update")?;
+            // A role change ends the account's sessions: decided HERE, on the
+            // stored role inside this transaction, not on a role the page
+            // read earlier (Codex review of #1123: a concurrent promotion
+            // could otherwise be overwritten without a revocation).
+            sqlx::query("UPDATE users SET auth_epoch = auth_epoch + 1 WHERE username = ? AND role <> ?")
+                .bind(&username)
+                .bind(update.role.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("advance auth epoch on role change")?;
             let res = sqlx::query(
                 "UPDATE users
                     SET role = ?, groups = ?, setor = ?, email = ?, celular = ?, updated_at = ?
@@ -1009,6 +1126,12 @@ pub async fn update_account(
                 .execute(&mut *tx)
                 .await
                 .context("acquire admin-mutation lock")?;
+            sqlx::query("UPDATE users SET auth_epoch = auth_epoch + 1 WHERE username = $1 AND role <> $2")
+                .bind(&username)
+                .bind(update.role.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("advance auth epoch on role change")?;
             let res = sqlx::query(
                 "UPDATE users
                     SET role = $1, groups = $2, setor = $3, email = $4, celular = $5, updated_at = $6
@@ -1067,7 +1190,7 @@ pub async fn set_role(
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin role tx")?;
             let res = sqlx::query(
-                "UPDATE users SET role = ?, updated_at = ? WHERE username = ?
+                "UPDATE users SET role = ?, updated_at = ?, auth_epoch = auth_epoch + 1 WHERE username = ?
                    AND (role <> 'admin' OR ? = 'admin'
                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
             )
@@ -1092,7 +1215,7 @@ pub async fn set_role(
                 .await
                 .context("acquire admin-mutation lock")?;
             let res = sqlx::query(
-                "UPDATE users SET role = $1, updated_at = $2 WHERE username = $3
+                "UPDATE users SET role = $1, updated_at = $2, auth_epoch = auth_epoch + 1 WHERE username = $3
                    AND (role <> 'admin' OR $1 = 'admin'
                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
             )

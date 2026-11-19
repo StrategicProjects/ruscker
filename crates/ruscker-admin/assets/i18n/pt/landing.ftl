@@ -85,6 +85,7 @@ admin-login-username-placeholder = seu usuário
 admin-login-password-label = Senha
 admin-login-password-placeholder = sua senha
 admin-login-error-credentials = Usuário ou senha inválidos.
+admin-login-error-signout-unconfirmed = O servidor não confirmou a saída. Este navegador esqueceu a sessão, mas, se ela puder ter sido copiada, entre e saia de novo ou troque a senha.
 admin-login-error-throttled = Muitas tentativas. Aguarde um pouco e tente de novo.
 admin-login-use-password = Voltar ao login por senha
 # — Configuração do primeiro admin

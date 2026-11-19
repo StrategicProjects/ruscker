@@ -351,6 +351,8 @@ pub fn discovery(issuer: &str) -> Value {
         "token_endpoint": format!("{issuer}/oauth/token"),
         "userinfo_endpoint": format!("{issuer}/oauth/userinfo"),
         "jwks_uri": format!("{issuer}/oauth/jwks"),
+        // RP-Initiated Logout 1.0: a client's "sign out everywhere".
+        "end_session_endpoint": format!("{issuer}/oauth/logout"),
         "response_types_supported": ["code"],
         "response_modes_supported": ["query"],
         "grant_types_supported": ["authorization_code"],

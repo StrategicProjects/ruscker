@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="{{ locale.code() }}"{% match theme.data_attr() %}{% when Some with (t) %} data-theme="{{ t }}"{% when None %}{% endmatch %}>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0f6e56">
+<meta name="robots" content="noindex,nofollow">
+<title>{% if confirm %}{{ self.t("sso-logout-title") }}{% else %}{{ self.t("sso-logout-done-title") }}{% endif %} · {{ brand_title }}</title>
+{% include "_favicons.html" %}
+<link rel="stylesheet" href="{{ base }}/assets/styles.css?v={{ crate::APP_VERSION }}">
+<link rel="stylesheet" href="{{ base }}/assets/icons/tabler-icons.min.css?v={{ crate::APP_VERSION }}">
+{% if !theme_style.is_empty() %}<style>{{ theme_style|safe }}</style>{% endif %}
+</head>
+{# A client system's "sign out everywhere" (OpenID Connect RP-Initiated
+   Logout). Same card as the sign-in page. Everything shown comes from the
+   registry (the client's name, its registered addresses), never from the
+   request as typed. #}
+<body class="min-h-screen flex flex-col items-center justify-center px-4 relative admin-login-page admin-login-page--card">
+
+<div class="absolute top-4 right-4 z-50">
+  {% include "_chrome_cluster_anon.html" %}
+</div>
+
+<div class="admin-login-card">
+  <div class="admin-login-brand">
+    {% match brand_logo %}{% when Some with (src) %}
+      <img src="{{ src }}" alt="" style="height:48px;max-width:160px;object-fit:contain">
+    {% when None %}
+    <svg viewBox="0 0 80 80" width="48" height="48" aria-hidden="true">
+      <polygon points="14,52 40,40 66,52 40,64" fill="#0F6E56"/>
+      <polygon points="14,40 40,28 66,40 40,52" fill="#1D9E75"/>
+      <polygon points="14,28 40,16 66,28 40,40" fill="#5DCAA5"/>
+    </svg>
+    {% endmatch %}
+    <div class="brand-wordmark text-base" style="min-width:0;overflow-wrap:anywhere">{{ brand_title }}</div>
+  </div>
+
+  {% match client_name %}{% when Some with (name) %}
+  <div class="admin-login-sso" role="note">
+    <i class="ti ti-logout" aria-hidden="true"></i>
+    <div style="min-width:0">
+      <div class="text-[11px] text-[color:var(--text-muted)]">{{ self.t("sso-logout-from") }}</div>
+      <div class="font-medium" style="overflow-wrap:anywhere">{{ name }}</div>
+    </div>
+  </div>
+  {% when None %}{% endmatch %}
+
+  {% if confirm %}
+    <h1 class="text-lg font-medium tracking-tight">{{ self.t("sso-logout-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("sso-logout-question") }}</p>
+    <form method="post" action="{{ base }}/oauth/logout">
+      {% if !client_id.is_empty() %}<input type="hidden" name="client_id" value="{{ client_id }}">{% endif %}
+      {% if !return_to.is_empty() %}<input type="hidden" name="post_logout_redirect_uri" value="{{ return_to }}">{% endif %}
+      {% if !state_param.is_empty() %}<input type="hidden" name="state" value="{{ state_param }}">{% endif %}
+      <button type="submit" class="admin-login-btn admin-login-btn--primary">
+        <i class="ti ti-logout" aria-hidden="true"></i>
+        {{ self.t("sso-logout-confirm") }}
+      </button>
+    </form>
+    <div class="admin-login-footer admin-login-footer--end">
+      {% match back_href %}{% when Some with (href) %}
+        <a href="{{ href }}" rel="noopener">{{ self.t("sso-logout-stay") }}</a>
+      {% when None %}
+        <a href="{{ base }}/">{{ self.t("sso-logout-stay") }}</a>
+      {% endmatch %}
+    </div>
+  {% else %}
+    <h1 class="text-lg font-medium tracking-tight">{{ self.t("sso-logout-done-title") }}</h1>
+    <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("sso-logout-done") }}</p>
+    {% match back_href %}{% when Some with (href) %}
+      <a class="admin-login-btn admin-login-btn--primary" href="{{ href }}" rel="noopener">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i>{{ self.back_label() }}
+      </a>
+    {% when None %}
+      <a class="admin-login-btn admin-login-btn--primary" href="{{ base }}/">
+        <i class="ti ti-arrow-left" aria-hidden="true"></i>{{ self.t("sso-logout-portal") }}
+      </a>
+    {% endmatch %}
+  {% endif %}
+</div>
+
+</body>
+</html>

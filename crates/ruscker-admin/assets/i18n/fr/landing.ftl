@@ -103,6 +103,14 @@ admin-pw-error-short = Le mot de passe ne respecte pas la politique : au moins 8
 admin-pw-submit = Enregistrer le mot de passe
 admin-pw-back-to = Retour à { $name }
 admin-pw-changed = Mot de passe modifié. Les autres sessions de ce compte sur le portail ont été fermées.
+sso-logout-title = Se déconnecter aussi du portail ?
+sso-logout-from = Vous vous êtes déconnecté de
+sso-logout-question = Fermer aussi votre session sur ce portail ? Les autres systèmes qui passent par lui vous demanderont de vous reconnecter.
+sso-logout-confirm = Se déconnecter du portail
+sso-logout-stay = Rester connecté au portail
+sso-logout-done-title = Vous êtes déconnecté
+sso-logout-done = Votre session sur ce portail est fermée.
+sso-logout-portal = Aller au portail
 admin-pw-reveal = Afficher/masquer le mot de passe
 # — Gestion des utilisateurs (admin)
 admin-nav-users = Utilisateurs

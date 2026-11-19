@@ -127,6 +127,7 @@ which system, and who was refused. **Register client**, there and on the
 | **Require two-step verification** | The user must have confirmed a second factor in this login session. |
 | **System logo** | A Media-library image, chosen from a gallery with thumbnails and search (you can upload one right there). With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
 | **System address** | Optional. The system's home page. The portal links people back to it — see *Changing the password* below. Same rules as a redirect URI. |
+| **Return addresses after sign-out** | Optional. Where the portal may send people after signing them out at the system's request — see *Signing out everywhere*. One per line, matched exactly. |
 | **What the system may receive** | Which optional scopes it can be granted: `profile`, `email`, `groups`, `roles`, `setor`. A scope left unticked is never granted, even if the system asks for it; `openid` (the person's id) always is. Systems registered before this setting existed are unrestricted until edited. |
 
 The **client secret** is shown once, when the client is created or when
@@ -148,6 +149,56 @@ same link. The address always comes from the client's registration,
 never from the link, so the link cannot be used to send people to
 another site. Changing the password signs the account out of every other
 portal session; the system's own session is not affected.
+
+### Signing out everywhere
+
+A system's own "Sign out" ends only its own session. To end the portal
+session too, the system sends the browser to the portal's
+`end_session_endpoint` (OpenID Connect RP-Initiated Logout), announced
+in the discovery document:
+
+```
+{issuer}/oauth/logout?id_token_hint=<the ID token>&post_logout_redirect_uri=<address>&state=<value>
+```
+
+- `id_token_hint` (or `client_id`) says which system is asking. A hint
+  must be an ID token this portal issued; it may have expired.
+- `post_logout_redirect_uri` must be one of the client's **Return
+  addresses after sign-out**, exactly. Otherwise the request is refused
+  and nobody is redirected.
+- A person who is signed in to the portal is **asked** first. A link
+  alone never ends a session. After the confirmation, the portal session
+  of that browser ends, the same as the portal's own "Sign out", and the
+  browser goes to the return address, with `state` when one was sent.
+- Someone who was not signed in to the portal goes straight back.
+
+Other systems keep their own sessions until those expire. The portal
+does not notify them (no back-channel logout).
+
+### Keeping a system's session honest
+
+The portal's tokens live five minutes; how long the system keeps the
+person signed in is the system's choice. Changing a password, signing
+out of the portal, disabling an account or removing it from the client's
+groups ends or refuses **portal** sessions. A session the system already
+handed out keeps running until the system ends it. The portal does not
+notify systems (no back-channel logout).
+
+The pattern that closes the gap without anything new on the portal:
+
+1. Keep the system's own session short: 30 to 60 minutes.
+2. When it expires, start a sign-in again with `prompt=none`, as a
+   top-level navigation. The session cookie is `SameSite=Strict` and the
+   portal cannot be framed, so this cannot run in an iframe.
+3. If the portal session is still good and the person still has access,
+   the browser comes straight back with a code and no page is shown. If
+   not (signed out, password changed, account disabled, no longer in the
+   groups), the system receives `login_required` or `access_denied` and
+   asks the person to sign in.
+
+The cost is one quick round trip per period. For a read-only dashboard a
+longer session (a working day) is a reasonable trade-off. Choose it on
+purpose and write it down.
 
 ### What the system's developers need
 
@@ -529,8 +580,11 @@ misconfigure:
 - no implicit or password flows, no refresh tokens, no dynamic client
   registration, no consent screen (every client is registered by an
   Admin);
-- no single logout: signing out of Ruscker does not sign the user out of
-  systems that already have their own session;
+- no back-channel logout: signing out of Ruscker, or changing the
+  password, does not end the sessions systems already hold. A system
+  can sign people out of the portal ("Signing out everywhere"), and can
+  re-check the portal session with `prompt=none` ("Keeping a system's
+  session honest");
 - `max_age`, `prompt=login` and `auth_time` are not supported;
 - no self-service sign-up or password reset by e-mail.
 

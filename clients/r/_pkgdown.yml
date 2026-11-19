@@ -44,6 +44,8 @@ reference:
       - sso_client
       - sso_start
       - sso_finish
+      - sso_sign_out_url
+      - sso_password_url
   - title: The identity
     contents:
       - has_group

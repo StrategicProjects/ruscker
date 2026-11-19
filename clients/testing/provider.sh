@@ -27,6 +27,8 @@ PORT="${RUSCKER_TEST_PORT:-18200}"
 mkdir -p "$DIR"; rm -f "$DIR"/dev.db* "$DIR/env"
 O="http://127.0.0.1:$PORT"; B="$O/box"; A="$DIR/admin.cookies"; U="$DIR/ana.cookies"
 REDIRECT="http://127.0.0.1:18299/cb"
+# A return address after sign-out (since 0.2.0 of the packages).
+SIGNED_OUT="${REDIRECT%/*}/signed-out"
 cat > "$DIR/dev.yml" <<YML
 server:
   oidc-provider:
@@ -57,7 +59,8 @@ for gr in fiscal:analista fiscal:gestor outro:leitor; do
   post --data-urlencode "group=${gr%%:*}" --data-urlencode "role=${gr##*:}" --data-urlencode username=ana "$B/admin/groups/roles/assign"
 done
 SECRET=$(curl -s -b "$A" "${H[@]}" --data-urlencode client_id=demo --data-urlencode name=Demo \
-  --data-urlencode "redirect_uris=$REDIRECT" --data-urlencode access_groups=fiscal "$B/admin/sso-clients" \
+  --data-urlencode "redirect_uris=$REDIRECT" --data-urlencode access_groups=fiscal \
+  --data-urlencode "post_logout_redirect_uris=$SIGNED_OUT" "$B/admin/sso-clients" \
   | grep -o 'data-sso-secret-value[^<]*<' | sed -E 's/.*>([0-9a-f]{64})</\1/')
 [ ${#SECRET} = 64 ] || { echo "could not register the client; see $DIR/server.log" >&2; exit 1; }
 # Sign the person in and get the forced first password change out of the way.
@@ -69,6 +72,7 @@ export RUSCKER_ISSUER=$B
 export RUSCKER_CLIENT_ID=demo
 export RUSCKER_CLIENT_SECRET=$SECRET
 export RUSCKER_REDIRECT_URI=$REDIRECT
+export RUSCKER_POST_LOGOUT_URI=$SIGNED_OUT
 export RUSCKER_TEST_COOKIES=$U
 ENV
 echo "provider ready at $B — source $DIR/env"

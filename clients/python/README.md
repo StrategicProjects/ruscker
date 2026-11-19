@@ -79,6 +79,45 @@ Create one `RusckerSSO` at start-up and share it: it caches the
 discovery document and the keys, and is thread-safe. Pass
 `http_client=httpx.Client(...)` for proxies or a custom CA bundle.
 
+## Signing out, the password page, silent checks
+
+Since 0.2.0.
+
+`sso.sign_out_url(*, post_logout_redirect_uri=None, state=None,
+id_token_hint=None)` builds the address of the portal's sign-out page.
+End the application's **own** session first, then redirect there: the
+portal asks the person before ending its session and sends the browser
+back to `post_logout_redirect_uri` (with `state`, at most 512
+characters). That address must be one of the client's *Return addresses
+after sign-out* on the portal, exactly. The endpoint comes from the
+cached discovery document; a portal that does not announce one is older
+than this feature and the call raises `SignInError`.
+
+```python
+@app.get("/auth/logout")
+def logout(request: Request):
+    request.session.clear()                          # the app's own session first
+    return RedirectResponse(sso.sign_out_url(
+        post_logout_redirect_uri="https://app.example.org/signed-out"))
+```
+
+`sso.password_change_url()` returns
+`{issuer}/admin/account/password?client_id=…`, with no network call. The
+portal signs the person in if needed and its page links back to the
+client's *System address*:
+
+```python
+@app.get("/account/password")
+def change_password():
+    return RedirectResponse(sso.password_change_url())
+```
+
+`sso.start_sign_in(prompt="none")` asks the portal not to show a sign-in
+page: a person still signed in there comes straight back with a code, and
+anyone else comes back with `error=login_required` (`ProviderError`).
+Use it when the application's own session expires, to notice that the
+portal session ended.
+
 ## The identity
 
 | Attribute | Claim | Notes |

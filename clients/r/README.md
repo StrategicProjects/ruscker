@@ -131,6 +131,39 @@ random key that finds them. A Shiny session ends on reload, so a
 long-lived login needs the app's own cookie as well, set in front of
 Shiny (a reverse proxy or a plumber2 route).
 
+## Signing out and changing the password
+
+Sign-out ends the app's own session first, then sends the browser to the
+portal, which asks the person before ending its session there too:
+
+```r
+# 1. forget the app's own session (Shiny: session$userData$identity <- NULL,
+#    or clear your own cookie)
+# 2. then redirect the browser:
+url <- sso_sign_out_url(
+  client,
+  post_logout_redirect_uri = "https://app.example.org/signed-out", # registered on the portal
+  state = "optional, at most 512 characters"
+)
+```
+
+`post_logout_redirect_uri` must be one of the client's *Return addresses
+after sign-out* on the portal, exactly. A portal older than this feature
+announces no `end_session_endpoint`, and the call fails with
+`rusckersso_http_error`.
+
+A link to the portal's own password page (no network call):
+
+```r
+sso_password_url(client)
+#> "https://portal.example.org/admin/account/password?client_id=my-app"
+```
+
+To notice that the portal session ended without showing a page, start a
+sign-in with `sso_start(client, prompt = "none")` when the app's own
+session expires: a person still signed in comes straight back with a code,
+anyone else comes back with `error=login_required`.
+
 ## The identity
 
 | Field | Notes |

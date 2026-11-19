@@ -68,11 +68,27 @@ and returns the **identity**.
 Which of these a system receives is decided on the portal, per client
 (see [what the system may receive](./authentication.md#registering-a-system)).
 
+**Since 0.2.0**, every package also builds two addresses, with no
+network call beyond the cached discovery document:
+
+- the **sign-out** address ("sign out everywhere"): the application
+  ends its own session, then sends the browser there. The portal asks
+  the person, ends its session, and sends the browser back to a
+  *Return address after sign-out* registered for the client (see
+  [Signing out everywhere](./authentication.md#signing-out-everywhere));
+- the **password** address, the portal's own page, which links back to
+  the client's *System address* (see
+  [Changing the password from the system](./authentication.md#changing-the-password-from-the-system)).
+
+Starting a sign-in also takes `prompt=none`, so an application can check
+in silence that the portal session is still good when its own session
+expires (see
+[Keeping a system's session honest](./authentication.md#keeping-a-systems-session-honest)).
+
 **What the packages do not do:** keep sessions (the application issues
 its own after a sign-in; the portal's tokens live five minutes and
-there is no refresh), sign out at the portal, or decide permissions —
-they report groups and roles; what those mean is the application's
-business.
+there is no refresh), or decide permissions: they report groups and
+roles, and what those mean is the application's business.
 
 ## TypeScript
 
@@ -135,7 +151,7 @@ let id = sso.finish_sign_in(callback_query, &pending).await?;
 
 ```toml
 [dependencies]
-ruscker-sso = "0.1"
+ruscker-sso = "0.2"
 ```
 
 The README has the complete axum example, including how to turn group
@@ -226,5 +242,5 @@ touching a real portal:
 ```sh
 cargo build
 clients/testing/provider.sh target/debug/ruscker /tmp/sso-dev &
-source /tmp/sso-dev/env    # RUSCKER_ISSUER, RUSCKER_CLIENT_ID, RUSCKER_CLIENT_SECRET, RUSCKER_REDIRECT_URI
+source /tmp/sso-dev/env    # RUSCKER_ISSUER, RUSCKER_CLIENT_ID, RUSCKER_CLIENT_SECRET, RUSCKER_REDIRECT_URI, RUSCKER_POST_LOGOUT_URI
 ```

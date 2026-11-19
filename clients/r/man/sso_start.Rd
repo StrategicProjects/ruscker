@@ -4,10 +4,18 @@
 \alias{sso_start}
 \title{Start a sign-in}
 \usage{
-sso_start(client)
+sso_start(client, prompt = NULL)
 }
 \arguments{
 \item{client}{A client from \code{\link[=sso_client]{sso_client()}}.}
+
+\item{prompt}{Optional. \code{"none"} asks the portal not to show any page:
+a person already signed in to the portal comes straight back with a
+code, and anyone else comes back with \code{error=login_required} (which
+\code{\link[=sso_finish]{sso_finish()}} reports as a \code{rusckersso_provider_error}). Use it to
+check quietly whether the portal session is still open, for instance
+when the app's own session expires. The default (\code{NULL}) sends no
+\code{prompt} at all.}
 }
 \value{
 A list with \code{url} and \code{pending} (a list of \code{state}, \code{nonce} and
@@ -34,5 +42,8 @@ client <- sso_client(
 start <- sso_start(client)
 start$url      # send the browser here
 start$pending  # keep until the person comes back
+
+# A quiet check: no page is shown to the person.
+quiet <- sso_start(client, prompt = "none")
 }
 }

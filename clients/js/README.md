@@ -134,6 +134,62 @@ app.get("/callback", async (req, res) => {
 the ID token (JWKS signature, **ES256 only**, `iss`, `aud`, `exp`,
 `nonce`). The first three need no network call.
 
+## Signing out everywhere, changing the password (since 0.2.0)
+
+Signing out of your system ends **your** session. To also end the
+person's session on the portal, end yours first, then send the browser
+to the portal's sign-out page. The portal asks the person before ending
+its session; someone not signed in there goes straight back.
+
+```js
+// Backend: the endpoint comes from the cached discovery document.
+app.post("/logout", async (req, res) => {
+  const url = await sso.signOutUrl({
+    postLogoutRedirectUri: "https://app.example.org/", // one of the client's "Return addresses after sign-out"
+    state: "bye",                                       // optional, at most 512 characters
+    // idTokenHint: the raw ID token, if you kept it
+  });
+  req.session.destroy(() => res.redirect(url)); // your own session first
+});
+```
+
+```js
+// Browser: {issuer}/oauth/logout, no discovery read.
+import { signOutUrl, passwordChangeUrl } from "ruscker-sso/browser";
+
+await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); // end your own session first
+location.assign(signOutUrl({ ...options, postLogoutRedirectUri: "https://app.example.org/" }));
+```
+
+The query carries `client_id` always, then `id_token_hint`,
+`post_logout_redirect_uri` and `state` when given.
+`post_logout_redirect_uri` must match one of the client's return
+addresses on the portal exactly, or the portal refuses. A `state` over
+512 characters is a `RangeError`. On the backend, a portal that does not
+announce `end_session_endpoint` (older than this feature) gives a
+`DiscoveryError`.
+
+A "Change password" link: `sso.passwordChangeUrl()` (backend) or
+`passwordChangeUrl({ issuer, clientId })` (browser) returns
+`{issuer}/admin/account/password?client_id=…`, no network call. The
+portal signs the person in if needed and links back to the client's
+System address.
+
+### Noticing that the portal session ended: `prompt: "none"`
+
+The portal's tokens live five minutes; your session lives longer. When
+your session expires, re-run a sign-in with `prompt: "none"`: the portal
+shows no page. A person still signed in there comes straight back with a
+code; anyone else comes back with `error=login_required` (a
+`ProviderError`), and then you show your own sign-in button.
+
+```js
+const { url, pending } = await sso.startSignIn({ prompt: "none" });          // backend
+await redirectToSignIn({ ...options, prompt: "none" });                       // browser
+```
+
+Left out, the sign-in behaves as before.
+
 ## The identity
 
 | Field | Claim | Notes |
@@ -165,7 +221,10 @@ All extend `SignInError`.
 | `NoPendingSignInError` | browser: nothing stored (direct visit, other tab, already used) |
 | `TokenExchangeError` | the token endpoint refused (`.status`, `.error`: `invalid_client`, `invalid_grant`). Never retry the code |
 | `IdTokenError` | the ID token failed a check (`.reason`) |
-| `DiscoveryError` | the discovery document could not be read |
+| `DiscoveryError` | the discovery document could not be read, or lacks an endpoint (`end_session_endpoint` for `signOutUrl`) |
+
+`signOutUrl` with a `state` over 512 characters throws a `RangeError`
+(an argument error, not a `SignInError`).
 
 ## Tests
 

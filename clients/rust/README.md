@@ -20,7 +20,7 @@ MSRV: Rust 1.85.
 
 ```toml
 [dependencies]
-ruscker-sso = "0.1"
+ruscker-sso = "0.2"
 ```
 
 ## Example (axum 0.8)
@@ -106,6 +106,41 @@ fn profile(id: &ruscker_sso::Identity) -> Option<Profile> {
 }
 ```
 
+### Signing out, and the password page
+
+Sign-out ends the application's **own** session first, then sends the
+browser to the portal, which asks the person before ending its session
+there. `post_logout_redirect_uri` must be one of the system's *Return
+addresses after sign-out* on the portal, exactly.
+
+```rust
+use ruscker_sso::SignOutOptions;
+
+async fn sign_out(State(app): State<App>, jar: PrivateCookieJar) -> impl IntoResponse {
+    let jar = jar.remove(Cookie::build("session").path("/")); // 1. end your own session
+    let options = SignOutOptions::new()
+        .post_logout_redirect_uri("https://app.example.org/signed-out")
+        .state("bye");
+    match app.sso.sign_out_url(&options) {
+        Ok(url) => (jar, Redirect::to(url.as_str())).into_response(), // 2. then the portal
+        // Error::Discovery: the portal is older than sign-out support.
+        Err(_) => (jar, Redirect::to("/")).into_response(),
+    }
+}
+
+// A "change your password" link; no network.
+let link = app.sso.password_change_url();
+```
+
+To notice that the portal session ended without showing a page, start a
+sign-in with `prompt=none` when the application's own session expires;
+the portal answers `login_required` instead of its sign-in page:
+
+```rust
+use ruscker_sso::SignInOptions;
+let (url, pending) = app.sso.start_sign_in_with(&SignInOptions::new().prompt("none"));
+```
+
 ## API
 
 | | |
@@ -113,6 +148,9 @@ fn profile(id: &ruscker_sso::Identity) -> Option<Profile> {
 | `Config::new(issuer, client_id, client_secret, redirect_uri)` | `.scopes("…")` to change the default `openid profile email groups roles setor` |
 | `Client::discover(config).await` | reads `{issuer}/.well-known/openid-configuration` and the JWKS once; refuses a document whose `issuer` differs. `discover_with(config, reqwest::Client)` to bring your own HTTP client (disable redirects on it) |
 | `client.start_sign_in()` | `(Url, Pending)` — redirect to the URL, keep the `Pending` (serde) bound to the browser |
+| `client.start_sign_in_with(&SignInOptions::new().prompt("none"))` | the same, with `prompt=none` (the only value the portal gives a meaning to) |
+| `client.sign_out_url(&SignOutOptions)` | `Result<Url, Error>` — the discovery document's `end_session_endpoint` with `client_id`, then `id_token_hint`, `post_logout_redirect_uri`, `state` (each only when set; `state` at most 512 characters). No network; `Error::Discovery` when the portal announces no such endpoint |
+| `client.password_change_url()` | `String` — `{issuer}/admin/account/password?client_id=…`; no network |
 | `client.finish_sign_in(query, &pending).await` | `Result<Identity, Error>`; accepts the query with or without `?`, or the full callback URL |
 | `exchange_code`, `verify_id_token` | the two network steps of `finish_sign_in`, for tests and special cases |
 
@@ -144,7 +182,8 @@ Helpers: `has_group(g)`, `has_role(g, r)`, `roles(g) -> &[String]`.
 | `InvalidCallback(reason)` | no `code`, or a repeated parameter |
 | `TokenRefused { status, error, description }` | the token endpoint refused: `invalid_client` (wrong secret), `invalid_grant` (code used, expired, not ours) |
 | `InvalidIdToken(reason)` | signature, algorithm, `iss`, `aud`, `exp` or `nonce` failed |
-| `Discovery(reason)` | the discovery document or key set is unusable |
+| `Discovery(reason)` | the discovery document or key set is unusable, or has no `end_session_endpoint` (for `sign_out_url`) |
+| `InvalidArgument(reason)` | a value given to the crate is refused, e.g. a sign-out `state` over 512 characters |
 | `Http(reqwest::Error)` | the provider could not be reached or sent unexpected JSON |
 
 A code is used once; the crate never retries an exchange.

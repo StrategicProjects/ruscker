@@ -9,10 +9,19 @@
  *
  * No dependencies; only Web Crypto, `URL` and `sessionStorage`.
  */
-import { buildSignIn, checkCallback, trimSlash, type PendingSignIn, type StartedSignIn } from "./core.js";
+import {
+  buildPasswordChangeUrl,
+  buildSignIn,
+  buildSignOutUrl,
+  checkCallback,
+  trimSlash,
+  type PendingSignIn,
+  type SignOutOptions,
+  type StartedSignIn,
+} from "./core.js";
 import { NoPendingSignInError } from "./errors.js";
 
-export { DEFAULT_SCOPES, type PendingSignIn, type StartedSignIn } from "./core.js";
+export { DEFAULT_SCOPES, MAX_SIGN_OUT_STATE, type PendingSignIn, type SignOutOptions, type StartedSignIn } from "./core.js";
 export * from "./errors.js";
 
 export interface BrowserSignInOptions {
@@ -30,6 +39,13 @@ export interface BrowserSignInOptions {
    * `authorizationEndpoint()` here if you prefer to take it from there.
    */
   authorizationEndpoint?: string;
+  /**
+   * `"none"`: the portal must not show a page. A person still signed in
+   * to the portal comes straight back with a code; anyone else comes back
+   * with `?error=login_required` (a `ProviderError` from `readCallback`).
+   * Left out, the portal shows its sign-in page when needed.
+   */
+  prompt?: "none";
 }
 
 /** What the callback page hands to its backend. */
@@ -65,7 +81,34 @@ export function startSignIn(opts: BrowserSignInOptions): Promise<StartedSignIn> 
     clientId: opts.clientId,
     redirectUri: opts.redirectUri,
     scopes: opts.scopes,
+    prompt: opts.prompt,
   });
+}
+
+/** Who is signing out: the portal and this system's id. */
+export interface BrowserSignOutOptions extends SignOutOptions {
+  issuer: string;
+  clientId: string;
+}
+
+/**
+ * The portal's sign-out address ("sign out everywhere"):
+ * `{issuer}/oauth/logout`, the provider's fixed path — the browser does
+ * not read the discovery document (it is served without CORS headers).
+ * End your application's own session first, then `location.assign` this.
+ * A `state` over 512 characters is a `RangeError`.
+ */
+export function signOutUrl(opts: BrowserSignOutOptions): string {
+  const { issuer, clientId, ...rest } = opts;
+  return buildSignOutUrl(`${trimSlash(issuer)}/oauth/logout`, clientId, rest);
+}
+
+/**
+ * The portal's "change your password" page for this system:
+ * `{issuer}/admin/account/password?client_id=…`. No network call.
+ */
+export function passwordChangeUrl(opts: { issuer: string; clientId: string }): string {
+  return buildPasswordChangeUrl(opts.issuer, opts.clientId);
 }
 
 /**

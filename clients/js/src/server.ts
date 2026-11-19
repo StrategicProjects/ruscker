@@ -16,18 +16,29 @@
 import { timingSafeEqual } from "node:crypto";
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import {
+  buildPasswordChangeUrl,
   buildSignIn,
+  buildSignOutUrl,
   checkCallback,
+  checkSignOutState,
   toSearchParams,
   trimSlash,
   type CallbackInput,
   type PendingSignIn,
+  type SignOutOptions,
   type StartedSignIn,
 } from "./core.js";
 import { DiscoveryError, IdTokenError, IssuerMismatchError, SignInError, TokenExchangeError } from "./errors.js";
 import { Identity } from "./identity.js";
 
-export { DEFAULT_SCOPES, type CallbackInput, type PendingSignIn, type StartedSignIn } from "./core.js";
+export {
+  DEFAULT_SCOPES,
+  MAX_SIGN_OUT_STATE,
+  type CallbackInput,
+  type PendingSignIn,
+  type SignOutOptions,
+  type StartedSignIn,
+} from "./core.js";
 export * from "./errors.js";
 export { Identity } from "./identity.js";
 
@@ -52,6 +63,19 @@ interface Discovery {
   authorization_endpoint: string;
   token_endpoint: string;
   jwks_uri: string;
+  /** Announced by portals that have the sign-out page (Ruscker 0.2.58 and later). */
+  end_session_endpoint?: string;
+}
+
+/** Options for `startSignIn`. */
+export interface StartSignInOptions {
+  /**
+   * `"none"`: the portal must not show a page. A person still signed in
+   * to the portal comes straight back with a code; anyone else comes back
+   * with `?error=login_required` (a `ProviderError`). Use it to notice
+   * that the portal session ended when your own session expires.
+   */
+  prompt?: "none";
 }
 
 /**
@@ -84,14 +108,46 @@ export class SignInClient {
    * Build the authorization URL and the values to keep until the person
    * comes back. Store `pending` in the session, redirect to `url`.
    */
-  async startSignIn(): Promise<StartedSignIn> {
+  async startSignIn(opts: StartSignInOptions = {}): Promise<StartedSignIn> {
     const d = await this.discover();
     return buildSignIn({
       authorizationEndpoint: d.authorization_endpoint,
       clientId: this.config.clientId,
       redirectUri: this.config.redirectUri,
       scopes: this.config.scopes,
+      prompt: opts.prompt,
     });
+  }
+
+  /**
+   * The portal's sign-out address ("sign out everywhere"). End your OWN
+   * session first, then redirect the browser here. The portal asks the
+   * person before ending its session, then returns to
+   * `postLogoutRedirectUri` (with `state`) when one was given.
+   *
+   * The endpoint comes from the cached discovery document; a portal that
+   * does not announce `end_session_endpoint` is older than this feature
+   * and gives a `DiscoveryError`. A `state` over 512 characters is a
+   * `RangeError`.
+   */
+  async signOutUrl(opts: SignOutOptions = {}): Promise<string> {
+    // Checked before discovery, so a bad argument never costs a request.
+    checkSignOutState(opts.state);
+    const d = await this.discover();
+    if (typeof d.end_session_endpoint !== "string") {
+      throw new DiscoveryError(
+        "the discovery document has no end_session_endpoint: the portal is older than the sign-out feature",
+      );
+    }
+    return buildSignOutUrl(d.end_session_endpoint, this.config.clientId, opts);
+  }
+
+  /**
+   * The portal's "change your password" page for this system:
+   * `{issuer}/admin/account/password?client_id=…`. No network call.
+   */
+  passwordChangeUrl(): string {
+    return buildPasswordChangeUrl(this.config.issuer, this.config.clientId);
   }
 
   /**

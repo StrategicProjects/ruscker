@@ -1,3 +1,15 @@
+# rusckersso 0.2.0
+
+* `sso_sign_out_url()` builds the address of the portal's sign-out page
+  (OpenID Connect RP-Initiated Logout), from the discovery document's
+  `end_session_endpoint`. A portal that does not announce one is reported
+  as a `rusckersso_http_error`.
+* `sso_password_url()` returns the address of the portal's "change your
+  password" page for this client. No network call.
+* `sso_start()` gains `prompt`: `prompt = "none"` checks quietly whether
+  the person is still signed in to the portal. Without it the URL is
+  unchanged.
+
 # rusckersso 0.1.0
 
 First release.

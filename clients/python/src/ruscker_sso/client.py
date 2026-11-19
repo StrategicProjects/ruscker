@@ -46,6 +46,11 @@ DEFAULT_SCOPES = ("openid", "profile", "email", "groups", "roles", "setor")
 # forged token pick a weaker one.
 _ALGORITHMS = ["ES256"]
 
+# The provider refuses a sign-out ``state`` longer than this; the package
+# refuses it first, so the mistake shows up in the application, not as a
+# portal error page.
+_MAX_STATE_LEN = 512
+
 
 @dataclass(frozen=True)
 class PendingSignIn:
@@ -211,6 +216,63 @@ class RusckerSSO:
         endpoint = self._discover()["authorization_endpoint"]
         separator = "&" if "?" in endpoint else "?"
         return SignInRequest(url=endpoint + separator + urlencode(params), pending=pending)
+
+    # ---- signing out and the password page ---------------------------------
+
+    def sign_out_url(
+        self,
+        *,
+        post_logout_redirect_uri: str | None = None,
+        state: str | None = None,
+        id_token_hint: str | None = None,
+    ) -> str:
+        """The address of the portal's sign-out page (RP-Initiated Logout).
+
+        End the application's OWN session first, then redirect the browser
+        here. The portal asks the person before ending its session, and
+        sends the browser back to ``post_logout_redirect_uri`` (with
+        ``state``) when one is given. That address must be one of the
+        client's *Return addresses after sign-out* on the portal, exactly,
+        or the portal refuses the request.
+
+        The endpoint is the discovery document's ``end_session_endpoint``,
+        read from the cached document (no network call once it is cached).
+        A portal that does not announce one is older than this feature:
+        :class:`SignInError` is raised rather than guessing the path. A
+        ``state`` longer than 512 characters is refused the same way.
+        """
+        if state is not None and len(state) > _MAX_STATE_LEN:
+            raise SignInError(f"the sign-out state is longer than {_MAX_STATE_LEN} characters")
+        endpoint = self._discover().get("end_session_endpoint")
+        if not isinstance(endpoint, str) or not endpoint:
+            raise SignInError(
+                "the discovery document has no end_session_endpoint "
+                "(the portal is older than sign-out support)"
+            )
+        # Order is fixed by the contract: client_id, then each optional value
+        # only when given. A list of pairs keeps that order in urlencode.
+        params: list[tuple[str, str]] = [("client_id", self.client_id)]
+        if id_token_hint is not None:
+            params.append(("id_token_hint", id_token_hint))
+        if post_logout_redirect_uri is not None:
+            params.append(("post_logout_redirect_uri", post_logout_redirect_uri))
+        if state is not None:
+            params.append(("state", state))
+        separator = "&" if "?" in endpoint else "?"
+        return endpoint + separator + urlencode(params)
+
+    def password_change_url(self) -> str:
+        """The address of the portal's "change your password" page.
+
+        A fixed path, not in discovery, so no network call. The portal signs
+        the person in if needed, and its page links back to the client's
+        registered *System address*.
+        """
+        return (
+            self.issuer.rstrip("/")
+            + "/admin/account/password?"
+            + urlencode({"client_id": self.client_id})
+        )
 
     # ---- finishing --------------------------------------------------------
 

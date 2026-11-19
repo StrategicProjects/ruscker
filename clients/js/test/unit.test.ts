@@ -84,6 +84,46 @@ describe("starting a sign-in", () => {
   });
 });
 
+describe("browser sign-out, password and prompt", () => {
+  const TRICKY = "a b&c?d=é";
+
+  test("signOutUrl: issuer/oauth/logout, contract order, form encoding", () => {
+    const url = browser.signOutUrl({
+      issuer: `${ISSUER}/`, clientId: "my app",
+      idTokenHint: "h.t.s", postLogoutRedirectUri: "https://app.example.org/bye?x=1", state: TRICKY,
+    });
+    assert.equal(
+      url,
+      `${ISSUER}/oauth/logout?client_id=my+app&id_token_hint=h.t.s` +
+        "&post_logout_redirect_uri=https%3A%2F%2Fapp.example.org%2Fbye%3Fx%3D1&state=a+b%26c%3Fd%3D%C3%A9",
+    );
+    assert.equal(new URL(url).searchParams.get("state"), TRICKY);
+  });
+
+  test("signOutUrl: only client_id when nothing else is given", () => {
+    assert.equal(browser.signOutUrl({ issuer: ISSUER, clientId: "demo" }), `${ISSUER}/oauth/logout?client_id=demo`);
+  });
+
+  test("signOutUrl: a state of 512 characters passes, 513 is refused", () => {
+    browser.signOutUrl({ issuer: ISSUER, clientId: "demo", state: "s".repeat(512) });
+    assert.throws(() => browser.signOutUrl({ issuer: ISSUER, clientId: "demo", state: "s".repeat(513) }), RangeError);
+  });
+
+  test("passwordChangeUrl is the fixed path with the client id", () => {
+    assert.equal(
+      browser.passwordChangeUrl({ issuer: `${ISSUER}/`, clientId: "my app&x" }),
+      `${ISSUER}/admin/account/password?client_id=my+app%26x`,
+    );
+  });
+
+  test("prompt=none only when asked", async () => {
+    const plain = await browser.startSignIn({ issuer: ISSUER, clientId: "demo", redirectUri: REDIRECT });
+    assert.equal(new URL(plain.url).searchParams.has("prompt"), false);
+    const silent = await browser.startSignIn({ issuer: ISSUER, clientId: "demo", redirectUri: REDIRECT, prompt: "none" });
+    assert.equal(new URL(silent.url).searchParams.get("prompt"), "none");
+  });
+});
+
 describe("browser readCallback", () => {
   async function started() {
     const storage = memoryStore();
@@ -146,7 +186,7 @@ interface FakePortal {
 const realFetch = globalThis.fetch;
 let portal: FakePortal;
 
-async function installPortal(discoveryIssuer = ISSUER): Promise<FakePortal> {
+async function installPortal(discoveryIssuer = ISSUER, withEndSession = true): Promise<FakePortal> {
   const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
   const jwk: JWK = { ...(await exportJWK(publicKey)), kid: "k1", alg: "ES256", use: "sig" };
   const p: FakePortal = {
@@ -168,6 +208,7 @@ async function installPortal(discoveryIssuer = ISSUER): Promise<FakePortal> {
         authorization_endpoint: `${ISSUER}/oauth/authorize`,
         token_endpoint: `${ISSUER}/oauth/token`,
         jwks_uri: `${ISSUER}/oauth/jwks`,
+        ...(withEndSession ? { end_session_endpoint: `${ISSUER}/oauth/logout` } : {}),
       });
     }
     if (url === `${ISSUER}/oauth/jwks`) return json(200, { keys: [jwk] });
@@ -293,6 +334,48 @@ describe("server", () => {
     await assert.rejects(c.startSignIn(), DiscoveryError);
     portal = await installPortal();
     await c.startSignIn();
+  });
+
+  test("signOutUrl uses the discovered end_session_endpoint, in the contract's order", async () => {
+    const c = client("my app");
+    const url = await c.signOutUrl({
+      postLogoutRedirectUri: "https://app.example.org/bye", state: "a b&c?d", idTokenHint: "h.t.s",
+    });
+    assert.equal(
+      url,
+      `${ISSUER}/oauth/logout?client_id=my+app&id_token_hint=h.t.s` +
+        "&post_logout_redirect_uri=https%3A%2F%2Fapp.example.org%2Fbye&state=a+b%26c%3Fd",
+    );
+    assert.equal(new URL(url).searchParams.get("state"), "a b&c?d");
+  });
+
+  test("signOutUrl: only client_id when nothing else is given, and discovery stays cached", async () => {
+    const c = client();
+    await c.startSignIn();
+    assert.equal(await c.signOutUrl(), `${ISSUER}/oauth/logout?client_id=demo`);
+    assert.equal(portal.calls.filter((u) => u.includes("openid-configuration")).length, 1);
+  });
+
+  test("signOutUrl: a state over 512 characters is refused before any network call", async () => {
+    await assert.rejects(client().signOutUrl({ state: "s".repeat(513) }), RangeError);
+    assert.deepEqual(portal.calls, []);
+    await client().signOutUrl({ state: "s".repeat(512) });
+  });
+
+  test("signOutUrl: a portal without end_session_endpoint is a DiscoveryError", async () => {
+    portal = await installPortal(ISSUER, false);
+    await assert.rejects(client().signOutUrl(), (e: unknown) => e instanceof DiscoveryError && /end_session_endpoint/.test(e.message));
+  });
+
+  test("passwordChangeUrl is the fixed path, without any network call", () => {
+    assert.equal(client("my app&x").passwordChangeUrl(), `${ISSUER}/admin/account/password?client_id=my+app%26x`);
+    assert.deepEqual(portal.calls, []);
+  });
+
+  test("startSignIn sends prompt=none only when asked", async () => {
+    const c = client();
+    assert.equal(new URL((await c.startSignIn()).url).searchParams.has("prompt"), false);
+    assert.equal(new URL((await c.startSignIn({ prompt: "none" })).url).searchParams.get("prompt"), "none");
   });
 
   test("missing configuration is refused up front", () => {

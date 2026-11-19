@@ -1220,17 +1220,17 @@ mod tests {
         assert_eq!(app_next_path(Some("/oauth/authorize/extra"), ""), None);
     }
 
-    #[test]
-    fn login_page_carries_app_next_across_login_modes() {
-        let locales = Locales::load().expect("load locales");
-        let html = LoginPage {
+    /// The login page for a given mode: token form or not, and signing
+    /// in for an SSO client or not.
+    fn render_login(locales: &Locales, bootstrap: bool, sso: bool) -> String {
+        LoginPage {
             locale: Locale::En,
             theme: Theme::Auto,
-            locales: &locales,
+            locales,
             locales_all: &Locale::ALL,
             base: std::sync::Arc::from(""),
             error: "",
-            bootstrap: false,
+            bootstrap,
             next: "/app/demo/?tab=1".to_string(),
             next_encoded: "%2Fapp%2Fdemo%2F%3Ftab%3D1".to_string(),
             brand_title: "Ruscker".to_string(),
@@ -1238,14 +1238,37 @@ mod tests {
             theme_style: String::new(),
             layout: "card",
             side_image: None,
-            sso_client: None,
+            sso_client: sso.then(|| super::SsoClientBrand { name: "Ykatu".into(), logo_src: None }),
         }
         .render()
-        .expect("render login");
+        .expect("render login")
+    }
+
+    #[test]
+    fn login_page_carries_app_next_across_login_modes() {
+        let locales = Locales::load().expect("load locales");
+        let html = render_login(&locales, false, false);
         assert!(html.contains(r#"name="next" value="/app/demo/?tab=1""#));
-        assert!(html.contains(
-            r#"href="/admin/login?token=1&amp;next=%2Fapp%2Fdemo%2F%3Ftab%3D1""#
-        ));
+        // From the token form, the way back to the password form keeps the
+        // destination.
+        let html = render_login(&locales, true, false);
+        assert!(html.contains(r#"name="next" value="/app/demo/?tab=1""#));
+        assert!(html.contains(r#"href="/admin/login?next=%2Fapp%2Fdemo%2F%3Ftab%3D1""#));
+    }
+
+    /// The admin token is the operator's break-glass at
+    /// `/admin/login?token=1`: the password form does not offer it. And a
+    /// sign-in for another system does not point at this portal's catalog.
+    #[test]
+    fn login_page_offers_no_token_link_and_no_portal_link_for_sso() {
+        let locales = Locales::load().expect("load locales");
+        let plain = render_login(&locales, false, false);
+        assert!(!plain.contains("token=1"), "no token link on the password form");
+        assert!(plain.contains(r#"<a href="/">"#), "the portal link stays on a plain login");
+        let sso = render_login(&locales, false, true);
+        assert!(!sso.contains("token=1"));
+        assert!(!sso.contains(r#"<a href="/">"#), "no portal link when signing in for a system");
+        assert!(sso.contains("Ykatu"));
     }
 
     // The favicon set lives in the shared `_favicons.html` partial; the

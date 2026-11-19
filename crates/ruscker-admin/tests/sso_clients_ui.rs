@@ -174,6 +174,11 @@ async fn create_shows_the_secret_once_and_persists_the_gate() {
     assert_eq!(cache, "no-store", "a page carrying a secret must not be cached");
     let secret = shown_secret(&html).expect("secret banner");
     assert_eq!(secret.len(), 64);
+    // It can be closed: a plain link to the list, fetched again.
+    assert!(html.contains(r#"href="/admin/sso-clients" class="btn" data-sso-dismiss"#));
+    // Each client opens its edit page from its id and its name.
+    let (_, list) = get(state.clone(), "/admin/sso-clients", &cookie).await;
+    assert!(list.matches(r#"href="/admin/sso-clients/radar-fiscal/edit""#).count() >= 3);
     // Shown once, so it must not be a toast that fades away by itself.
     assert!(html.contains("data-sso-secret data-keep"));
     assert!(html.contains(r#".admin-flash-ok:not([data-keep])"#));
@@ -278,6 +283,8 @@ async fn edit_rotate_and_delete() {
     assert_eq!(cache, "no-store");
     let new = shown_secret(&html).expect("rotated secret banner");
     assert!(html.contains(r#"name="secret_version" value="2""#), "page now carries the new version");
+    assert!(html.contains(r#"href="/admin/sso-clients/radar-fiscal/edit" class="btn" data-sso-dismiss"#),
+        "closing a rotated secret returns to the edit page");
     let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
     assert!(c.verify_secret(&new) && !c.verify_secret(&old));
 

@@ -917,6 +917,8 @@ input[type="range"]::-moz-range-thumb {
   color: var(--text); transition: all 0.15s;
 }
 .btn:hover { border-color: var(--border-strong); }
+.btn--sm { padding: 5px 11px; font-size: 12px; gap: 5px; border-radius: 7px; }
+.btn--sm .ti { font-size: 14px; }
 .btn .ti { font-size: 15px; }
 .btn--primary { background: var(--color-teal-600); color: #fff; border-color: var(--color-teal-600); }
 .btn--primary:hover { background: var(--color-teal-800); border-color: var(--color-teal-800); }
@@ -2576,6 +2578,9 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
 /* Credential name tile (design handoff #623): a small teal key icon next
  * to the credential name. */
 .cred-cell { display: inline-flex; align-items: center; gap: 9px; }
+/* SSO clients list: the id and the name open the client's edit page. */
+.sso-client-link { color: inherit; text-decoration: none; }
+.sso-client-link:hover { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 .cred-ico {
   width: 28px; height: 28px; border-radius: 7px; flex: none;
   display: flex; align-items: center; justify-content: center;

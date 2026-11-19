@@ -117,14 +117,22 @@
 
   {# Secondary links only — theme + language moved to the top-right
      chrome cluster (#182 + #183). #}
+  {# The admin-token login is the OPERATOR's break-glass, not something
+     a person signing in should be offered: it stays at
+     `/admin/login?token=1` (documented), with no link here. From the
+     token form, the way back to the normal form stays visible. And when
+     the sign-in is for another system (SSO), the link to this portal's
+     catalog is beside the point — the person came from that system. #}
+  {% if bootstrap || sso_client.is_none() %}
   <div class="admin-login-footer admin-login-footer--end">
     {% if bootstrap %}
       <a href="{{ base }}/admin/login{% if next != "" %}?next={{ next_encoded }}{% endif %}">{{ self.t("admin-login-use-password") }}</a>
-    {% else %}
-      <a href="{{ base }}/admin/login?token=1{% if next != "" %}&amp;next={{ next_encoded }}{% endif %}">{{ self.t("admin-login-use-token") }}</a>
     {% endif %}
-    <a href="{{ base }}/">{{ self.t("admin-login-back-portal") }}</a>
+    {% if sso_client.is_none() %}
+      <a href="{{ base }}/">{{ self.t("admin-login-back-portal") }}</a>
+    {% endif %}
   </div>
+  {% endif %}
 </form>
 
 </body>

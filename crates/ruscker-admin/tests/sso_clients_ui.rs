@@ -625,3 +625,50 @@ async fn logo_field_carries_the_stored_value_without_scripts() {
     let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
     assert_eq!(c.logo.as_deref(), Some("radar.svg"));
 }
+
+/// The two address fields are saved, and a post that lacks them (a
+/// script, a page loaded before they existed) keeps what is stored.
+#[tokio::test]
+async fn client_addresses_are_saved_and_survive_a_form_without_them() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    let body = format!(
+        "{CREATE}&client_uri=https%3A%2F%2Fradar.example%2F&post_logout_redirect_uris=https%3A%2F%2Fradar.example%2Fbye"
+    );
+    post_page(state.clone(), "/admin/sso-clients", &body, &cookie).await;
+    let fetch = || async { ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap() };
+    let c = fetch().await;
+    assert_eq!(c.client_uri.as_deref(), Some("https://radar.example/"));
+    assert_eq!(c.post_logout_redirect_uris, vec!["https://radar.example/bye".to_string()]);
+
+    // An edit without the fields: kept.
+    let (st, _, _) = post_page(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&enabled=on",
+        &cookie,
+    )
+    .await;
+    assert_eq!(st, StatusCode::OK);
+    let c = fetch().await;
+    assert_eq!(c.name, "Radar");
+    assert_eq!(c.client_uri.as_deref(), Some("https://radar.example/"));
+    assert_eq!(c.post_logout_redirect_uris.len(), 1);
+
+    // An edit that empties them: cleared.
+    post_page(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&enabled=on&client_uri=&post_logout_redirect_uris=",
+        &cookie,
+    )
+    .await;
+    let c = fetch().await;
+    assert_eq!(c.client_uri, None);
+    assert!(c.post_logout_redirect_uris.is_empty());
+
+    // The edit page shows both fields.
+    let (_, html) = get(state, "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
+    assert!(html.contains(r#"name="client_uri""#) && html.contains(r#"name="post_logout_redirect_uris""#));
+}

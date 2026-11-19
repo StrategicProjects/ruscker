@@ -126,11 +126,28 @@ which system, and who was refused. **Register client**, there and on the
 | **Allowed groups** | Only members of at least one of these groups can sign in to the system. Empty means any signed-in user. An Admin account gets no bypass. |
 | **Require two-step verification** | The user must have confirmed a second factor in this login session. |
 | **System logo** | A Media-library image, chosen from a gallery with thumbnails and search (you can upload one right there). With the name, it is shown on the sign-in page — "You are signing in to …" — when a user arrives from this system. |
+| **System address** | Optional. The system's home page. The portal links people back to it — see *Changing the password* below. Same rules as a redirect URI. |
 | **What the system may receive** | Which optional scopes it can be granted: `profile`, `email`, `groups`, `roles`, `setor`. A scope left unticked is never granted, even if the system asks for it; `openid` (the person's id) always is. Systems registered before this setting existed are unrestricted until edited. |
 
 The **client secret** is shown once, when the client is created or when
 you generate a new one; only a salted hash is stored. Generating a new
 secret invalidates the old one immediately.
+
+### Changing the password from the system
+
+A system can send people to the portal to change their password:
+
+```
+{issuer}/admin/account/password?client_id=<client id>
+```
+
+Someone who is not signed in to the portal signs in first and comes back
+to that page. When the client has a **System address**, the page links
+back to it ("Back to …"), and after the change it says so and offers the
+same link. The address always comes from the client's registration,
+never from the link, so the link cannot be used to send people to
+another site. Changing the password signs the account out of every other
+portal session; the system's own session is not affected.
 
 ### What the system's developers need
 

@@ -1475,3 +1475,122 @@ async fn users_list_server_side_search_and_page_clamp() {
     assert!(body.contains(r#"href="/admin/users/alice/edit""#));
     assert!(body.contains(r#"href="/admin/users/bob/edit""#));
 }
+
+/// A client system's "change your password" link (#1068 follow-up): a
+/// signed-out person comes back to the password page after signing in,
+/// the page links back to the system at its REGISTERED address, and after
+/// the change it says so and offers the way back.
+#[tokio::test]
+async fn password_page_returns_to_the_client_system() {
+    use ruscker_admin::db::oidc_clients::{self, ClientSettings};
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    let client = |id: &str, home: Option<&str>| ClientSettings {
+        name: format!("Sistema {id}"),
+        redirect_uris: vec![format!("https://{id}.example/cb")],
+        access_groups: vec![],
+        require_mfa: false,
+        enabled: true,
+        logo: None,
+        allowed_scopes: None,
+        client_uri: home.map(String::from),
+        post_logout_redirect_uris: vec![],
+    };
+    oidc_clients::create(&db, "ykatu", &client("ykatu", Some("https://ykatu.example/")), None).await.unwrap();
+    oidc_clients::create(&db, "semhome", &client("semhome", None), None).await.unwrap();
+    ruscker_admin::db::users::create(&db, "ana", "CorrectPass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let app = router(state);
+    let send = |req: Request<Body>| {
+        let app = app.clone();
+        async move { app.oneshot(req).await.unwrap() }
+    };
+    let location = |r: &axum::response::Response| {
+        r.headers().get("location").and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
+    };
+    let body = |r: axum::response::Response| async move {
+        String::from_utf8(axum::body::to_bytes(r.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap()
+    };
+
+    // Signed out: the login page, carrying the way back here.
+    let r = send(Request::builder().uri("/admin/account/password?client_id=ykatu").body(Body::empty()).unwrap()).await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(location(&r), "/admin/login?next=%2Fadmin%2Faccount%2Fpassword%3Fclient_id%3Dykatu");
+    // …and only for the password page: another admin address keeps the
+    // plain login redirect.
+    let r = send(Request::builder().uri("/admin/users").body(Body::empty()).unwrap()).await;
+    assert_eq!(location(&r), "/admin/login");
+
+    // Signing in lands on the password page, not the panel.
+    let r = send(
+        Request::builder()
+            .method("POST")
+            .uri("/admin/login")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from(
+                "username=ana&password=CorrectPass9!&next=%2Fadmin%2Faccount%2Fpassword%3Fclient_id%3Dykatu",
+            ))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(location(&r), "/admin/account/password?client_id=ykatu");
+    let cookie = r.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap().split(';').next().unwrap().to_string();
+
+    // The page links back to the registered address.
+    let get = |uri: &str, cookie: &str| {
+        Request::builder().uri(uri).header("cookie", cookie).body(Body::empty()).unwrap()
+    };
+    let html = body(send(get("/admin/account/password?client_id=ykatu", &cookie)).await).await;
+    assert!(html.contains(r#"href="https://ykatu.example/""#), "link back to the system");
+    assert!(html.contains("Sistema ykatu"));
+    assert!(html.contains(r#"name="client_id" value="ykatu""#));
+    // No home address, unknown id, or an address in the query: no link.
+    for q in ["client_id=semhome", "client_id=nope", "client_id=https%3A%2F%2Fevil.example"] {
+        let html = body(send(get(&format!("/admin/account/password?{q}"), &cookie)).await).await;
+        assert!(!html.contains("pw-back"), "{q}");
+        assert!(!html.contains("evil.example"), "{q}");
+    }
+
+    // The change: back to the page, which says it is done and offers the way back.
+    let r = send(
+        Request::builder()
+            .method("POST")
+            .uri("/admin/account/password")
+            .header("content-type", "application/x-www-form-urlencoded")
+            .header("cookie", &cookie)
+            .body(Body::from("current=CorrectPass9!&new_password=Nova-Senha9!&confirm=Nova-Senha9!&client_id=ykatu"))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(location(&r), "/admin/account/password?client_id=ykatu&changed=1");
+    let cookie = r.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap().split(';').next().unwrap().to_string();
+    let html = body(send(get("/admin/account/password?client_id=ykatu&changed=1", &cookie)).await).await;
+    assert!(html.contains("data-keep"), "a lasting confirmation, not a toast");
+    assert!(!html.contains(r#"name="new_password""#), "not the form again");
+    assert!(html.matches(r#"href="https://ykatu.example/""#).count() >= 2);
+}
+
+/// A must-change account already headed for the password page is not
+/// sent to `/admin/account/password?next=/admin/account/password…`.
+#[tokio::test]
+async fn must_change_login_headed_for_the_password_page_goes_there_once() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "bob", "bobpass12", Role::Viewer, true, &[], None).await.unwrap();
+    let r = router(state)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/admin/login")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("username=bob&password=bobpass12&next=%2Fadmin%2Faccount%2Fpassword%3Fclient_id%3Dykatu"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        r.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/account/password?client_id=ykatu")
+    );
+}

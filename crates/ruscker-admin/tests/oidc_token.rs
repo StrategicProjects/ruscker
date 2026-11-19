@@ -98,6 +98,8 @@ async fn fixture(yaml: &str) -> Fixture {
         enabled: true,
         logo: None,
         allowed_scopes: None,
+        client_uri: None,
+        post_logout_redirect_uris: Vec::new(),
     };
     let radar = ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&["fiscal"], CB), None)
         .await
@@ -421,6 +423,8 @@ async fn a_client_gets_only_the_scopes_it_is_allowed() {
         enabled: true,
         logo: None,
         allowed_scopes: scopes.map(|l| l.into_iter().map(String::from).collect()),
+        client_uri: None,
+        post_logout_redirect_uris: Vec::new(),
     };
 
     // Unrestricted (the state of every client registered before): all of it.
@@ -518,6 +522,8 @@ async fn failed_client_authentication_does_not_burn_the_code() {
         enabled: false,
         logo: None,
         allowed_scopes: None,
+        client_uri: None,
+        post_logout_redirect_uris: Vec::new(),
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(token_basic(&f, "radar", &f.radar, &exchange(&code)).await.status, StatusCode::UNAUTHORIZED);
@@ -833,6 +839,8 @@ async fn userinfo_follows_revocation_and_accepts_post() {
         enabled: false,
         logo: None,
         allowed_scopes: None,
+        client_uri: None,
+        post_logout_redirect_uris: Vec::new(),
     };
     ruscker_admin::db::oidc_clients::update(&f.db, "radar", &off, None).await.unwrap();
     assert_eq!(userinfo(&f, &access).await.status, StatusCode::UNAUTHORIZED, "client disabled");

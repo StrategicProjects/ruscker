@@ -16,6 +16,23 @@
 </div>
 
 <div class="spec-form-field">
+  <label class="spec-form-label" for="sso-home">{{ self.t("admin-sso-client-uri") }}</label>
+  <input id="sso-home" type="url" name="client_uri" spellcheck="false"
+         placeholder="https://app.example.org/"
+         value="{{ form.client_uri.as_deref().unwrap_or("") }}"
+         class="spec-form-input spec-form-input--mono">
+  <div class="spec-form-help">{{ self.t("admin-sso-client-uri-help") }}</div>
+</div>
+
+<div class="spec-form-field">
+  <label class="spec-form-label" for="sso-logout-uris">{{ self.t("admin-sso-post-logout-uris") }}</label>
+  <textarea id="sso-logout-uris" name="post_logout_redirect_uris" rows="2" spellcheck="false"
+            placeholder="https://app.example.org/"
+            class="spec-form-input spec-form-input--mono">{{ form.post_logout_redirect_uris.as_deref().unwrap_or("") }}</textarea>
+  <div class="spec-form-help">{{ self.t("admin-sso-post-logout-uris-help") }}</div>
+</div>
+
+<div class="spec-form-field">
   <label class="spec-form-label" for="sso-groups">{{ self.t("admin-sso-groups") }}</label>
   <input id="sso-groups" type="text" name="access_groups"
          value="{{ form.access_groups }}" class="spec-form-input">

@@ -1073,12 +1073,25 @@ impl FromRequestParts<crate::AppState> for AdminSession {
                 .into_response());
         }
 
+        // Where a visitor without a session is sent. The password page is
+        // the one admin address a person reaches from OUTSIDE the portal
+        // (a client system's "change your password" link), so it comes
+        // back there after the sign-in instead of landing on the panel.
+        let login_target = match parts.uri.path_and_query() {
+            Some(pq) if parts.method == axum::http::Method::GET
+                && parts.uri.path().ends_with("/admin/account/password") =>
+            {
+                crate::routes::with_next_query("/admin/login", pq.as_str())
+            }
+            _ => "/admin/login".to_string(),
+        };
+        let to_login = || Redirect::to(&login_target).into_response();
         // Cookies extractor is infallible (always Some) when the
         // CookieManagerLayer is in the stack — which it is, see
         // router().
         let cookies = match Cookies::from_request_parts(parts, state).await {
             Ok(c) => c,
-            Err(_) => return Err(Redirect::to("/admin/login").into_response()),
+            Err(_) => return Err(to_login()),
         };
         // The cookie carries an opaque session id, validated against
         // the server-side store — not the token itself. A live session
@@ -1089,9 +1102,9 @@ impl FromRequestParts<crate::AppState> for AdminSession {
                     role: info.role,
                     actor: info.actor,
                 }),
-                None => Err(Redirect::to("/admin/login").into_response()),
+                None => Err(to_login()),
             },
-            None => Err(Redirect::to("/admin/login").into_response()),
+            None => Err(to_login()),
         }
     }
 }

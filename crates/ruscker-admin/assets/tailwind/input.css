@@ -3242,3 +3242,11 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   :root:not([data-theme="light"]) .use-badge--on { color: #34d399; }
   :root:not([data-theme="light"]) .use-badge--off { color: #fbbf24; }
 }
+
+/* Password page: the way back to the client system that sent the person
+   here (#1068 follow-up). */
+.pw-back {
+  display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px;
+  font-size: 13px; color: var(--text-muted); text-decoration: none;
+}
+.pw-back:hover { color: var(--text); }

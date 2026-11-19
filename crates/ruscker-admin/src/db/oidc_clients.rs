@@ -53,6 +53,16 @@ pub struct OidcClient {
     /// exactly these; an empty list means `openid` alone (the person's
     /// id and nothing else).
     pub allowed_scopes: Option<Vec<String>>,
+    /// The system's home page, for links back to it from the portal
+    /// (after a password change, for instance). Validated like a
+    /// redirect URI; the address always comes from here, never from a
+    /// request, so it cannot become an open redirect.
+    pub client_uri: Option<String>,
+    /// Where the portal may send a browser after signing it out at this
+    /// system's request (RP-Initiated Logout). Exact match, like
+    /// [`Self::redirect_uris`]; empty = the system cannot ask for a
+    /// return address.
+    pub post_logout_redirect_uris: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -95,6 +105,11 @@ impl OidcClient {
         self.redirect_uris.iter().any(|r| r == uri)
     }
 
+    /// Exact-match check of a post-logout return address.
+    pub fn post_logout_uri_registered(&self, uri: &str) -> bool {
+        self.post_logout_redirect_uris.iter().any(|r| r == uri)
+    }
+
     /// Constant-time verification of a presented client secret.
     pub fn verify_secret(&self, presented: &str) -> bool {
         // Same primitive as the MFA trusted-device token: a salted
@@ -115,6 +130,10 @@ pub struct ClientSettings {
     pub logo: Option<String>,
     /// See [`OidcClient::allowed_scopes`].
     pub allowed_scopes: Option<Vec<String>>,
+    /// See [`OidcClient::client_uri`].
+    pub client_uri: Option<String>,
+    /// See [`OidcClient::post_logout_redirect_uris`].
+    pub post_logout_redirect_uris: Vec<String>,
 }
 
 /// A client id is safe iff it is 3–64 chars of lowercase letters, digits,
@@ -233,6 +252,8 @@ type Row = (
     bool,
     Option<String>,
     Option<String>,
+    Option<String>,
+    String,
     DateTime<Utc>,
     DateTime<Utc>,
 );
@@ -243,7 +264,8 @@ macro_rules! select {
     ($tail:literal) => {
         concat!(
             "SELECT client_id, name, secret_hash, secret_version, redirect_uris, access_groups,
-                    require_mfa, enabled, logo, allowed_scopes, created_at, updated_at
+                    require_mfa, enabled, logo, allowed_scopes, client_uri,
+                    post_logout_redirect_uris, created_at, updated_at
                FROM oidc_clients ",
             $tail
         )
@@ -263,8 +285,10 @@ fn from_row(r: Row) -> OidcClient {
         logo: r.8,
         // Re-cleaned on read: a hand-edited row cannot grant an unknown scope.
         allowed_scopes: r.9.map(|s| clean_scopes(&s.split(' ').collect::<Vec<_>>())),
-        created_at: r.10,
-        updated_at: r.11,
+        client_uri: r.10,
+        post_logout_redirect_uris: parse_redirect_uris(&r.11),
+        created_at: r.12,
+        updated_at: r.13,
     }
 }
 
@@ -278,6 +302,8 @@ fn audit_diff(s: &ClientSettings) -> Result<String> {
         "enabled": s.enabled,
         "logo": s.logo,
         "allowed_scopes": s.allowed_scopes,
+        "client_uri": s.client_uri,
+        "post_logout_redirect_uris": s.post_logout_redirect_uris,
     }))?)
 }
 
@@ -298,6 +324,7 @@ pub async fn create(
     let groups = join_groups(&settings.access_groups);
     // NULL = unrestricted; otherwise the cleaned list, space-separated.
     let scopes: Option<String> = settings.allowed_scopes.as_ref().map(|l| clean_scopes(l).join(" "));
+    let logout_uris = settings.post_logout_redirect_uris.join("\n");
     let diff = audit_diff(settings)?;
     let target = format!("oidc-client:{client_id}");
 
@@ -307,8 +334,9 @@ pub async fn create(
             let n = sqlx::query(
                 "INSERT INTO oidc_clients
                    (client_id, name, secret_hash, redirect_uris, access_groups,
-                    require_mfa, enabled, logo, allowed_scopes, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    require_mfa, enabled, logo, allowed_scopes, client_uri,
+                    post_logout_redirect_uris, created_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON CONFLICT(client_id) DO NOTHING",
             )
             .bind(client_id)
@@ -320,6 +348,8 @@ pub async fn create(
             .bind(settings.enabled)
             .bind(&settings.logo)
             .bind(&scopes)
+            .bind(&settings.client_uri)
+            .bind(&logout_uris)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
@@ -347,8 +377,9 @@ pub async fn create(
             let n = sqlx::query(
                 "INSERT INTO oidc_clients
                    (client_id, name, secret_hash, redirect_uris, access_groups,
-                    require_mfa, enabled, logo, allowed_scopes, created_at, updated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                    require_mfa, enabled, logo, allowed_scopes, client_uri,
+                    post_logout_redirect_uris, created_at, updated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                  ON CONFLICT(client_id) DO NOTHING",
             )
             .bind(client_id)
@@ -360,6 +391,8 @@ pub async fn create(
             .bind(settings.enabled)
             .bind(&settings.logo)
             .bind(&scopes)
+            .bind(&settings.client_uri)
+            .bind(&logout_uris)
             .bind(now)
             .bind(now)
             .execute(&mut *tx)
@@ -399,6 +432,7 @@ pub async fn update(
     let groups = join_groups(&settings.access_groups);
     // NULL = unrestricted; otherwise the cleaned list, space-separated.
     let scopes: Option<String> = settings.allowed_scopes.as_ref().map(|l| clean_scopes(l).join(" "));
+    let logout_uris = settings.post_logout_redirect_uris.join("\n");
     let diff = audit_diff(settings)?;
     let target = format!("oidc-client:{client_id}");
 
@@ -409,6 +443,7 @@ pub async fn update(
                 "UPDATE oidc_clients
                     SET name = ?, redirect_uris = ?, access_groups = ?,
                         require_mfa = ?, enabled = ?, logo = ?, allowed_scopes = ?,
+                        client_uri = ?, post_logout_redirect_uris = ?,
                         updated_at = ?
                   WHERE client_id = ?",
             )
@@ -419,6 +454,8 @@ pub async fn update(
             .bind(settings.enabled)
             .bind(&settings.logo)
             .bind(&scopes)
+            .bind(&settings.client_uri)
+            .bind(&logout_uris)
             .bind(now)
             .bind(client_id)
             .execute(&mut *tx)
@@ -447,8 +484,9 @@ pub async fn update(
                 "UPDATE oidc_clients
                     SET name = $1, redirect_uris = $2, access_groups = $3,
                         require_mfa = $4, enabled = $5, logo = $6, allowed_scopes = $7,
-                        updated_at = $8
-                  WHERE client_id = $9",
+                        client_uri = $8, post_logout_redirect_uris = $9,
+                        updated_at = $10
+                  WHERE client_id = $11",
             )
             .bind(&settings.name)
             .bind(&uris)
@@ -457,6 +495,8 @@ pub async fn update(
             .bind(settings.enabled)
             .bind(&settings.logo)
             .bind(&scopes)
+            .bind(&settings.client_uri)
+            .bind(&logout_uris)
             .bind(now)
             .bind(client_id)
             .execute(&mut *tx)
@@ -820,6 +860,8 @@ mod tests {
             enabled: true,
             logo: None,
             allowed_scopes: None,
+            client_uri: None,
+            post_logout_redirect_uris: Vec::new(),
         }
     }
 
@@ -1000,6 +1042,8 @@ mod tests {
             enabled: true,
             logo: None,
             allowed_scopes: None,
+            client_uri: None,
+            post_logout_redirect_uris: Vec::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -1112,8 +1156,14 @@ mod tests {
         // (unrestricted), then a stored list, cleaned and ordered.
         assert!(fetch(&db, &id).await.unwrap().unwrap().allowed_scopes.is_none());
         s.allowed_scopes = Some(vec!["roles".into(), "bogus".into(), "profile".into()]);
+        s.client_uri = Some("https://radar.example/".into());
+        s.post_logout_redirect_uris = vec!["https://radar.example/a".into(), "https://radar.example/b".into()];
         assert!(update(&db, &id, &s, Some("root")).await.unwrap());
         let c = fetch(&db, &id).await.unwrap().unwrap();
+        // The two addresses (migration 0044) through the Postgres arm.
+        assert_eq!(c.client_uri.as_deref(), Some("https://radar.example/"));
+        assert!(c.post_logout_uri_registered("https://radar.example/b"));
+        assert!(!c.post_logout_uri_registered("https://radar.example/"));
         assert!(c.verify_secret(&secret) && c.require_mfa && c.enabled);
         assert_eq!(c.allowed_scopes, Some(vec!["profile".to_string(), "roles".to_string()]));
         assert!(c.allows_scope("openid") && c.allows_scope("roles") && !c.allows_scope("email"));

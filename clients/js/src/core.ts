@@ -65,6 +65,7 @@ export async function buildSignIn(opts: {
   clientId: string;
   redirectUri: string;
   scopes?: readonly string[];
+  prompt?: "none";
 }): Promise<StartedSignIn> {
   const pending: PendingSignIn = {
     state: randomValue(),
@@ -81,7 +82,58 @@ export async function buildSignIn(opts: {
   q.set("nonce", pending.nonce);
   q.set("code_challenge", await codeChallenge(pending.codeVerifier));
   q.set("code_challenge_method", "S256");
+  if (opts.prompt !== undefined) q.set("prompt", opts.prompt);
   return { url: url.toString(), pending };
+}
+
+/** What a sign-out can carry besides the client id, each optional. */
+export interface SignOutOptions {
+  /**
+   * Where the portal sends the browser afterwards. Must be one of the
+   * client's "Return addresses after sign-out" on the portal, exactly,
+   * or the portal refuses the request.
+   */
+  postLogoutRedirectUri?: string;
+  /** Echoed back on that return. At most 512 characters. */
+  state?: string;
+  /** The raw ID token, if the application kept it. */
+  idTokenHint?: string;
+}
+
+/** The longest `state` the portal accepts on a sign-out. */
+export const MAX_SIGN_OUT_STATE = 512;
+
+/** Refuse a sign-out `state` the portal would refuse anyway. */
+export function checkSignOutState(state: string | undefined): void {
+  if (state !== undefined && state.length > MAX_SIGN_OUT_STATE) {
+    throw new RangeError(`ruscker-sso: \`state\` is longer than ${MAX_SIGN_OUT_STATE} characters`);
+  }
+}
+
+/**
+ * The portal's sign-out address (OpenID Connect RP-Initiated Logout).
+ * Query in the contract's order: `client_id` always, then
+ * `id_token_hint`, `post_logout_redirect_uri` and `state` when given.
+ * `URLSearchParams` does the form encoding.
+ */
+export function buildSignOutUrl(endSessionEndpoint: string, clientId: string, opts: SignOutOptions = {}): string {
+  checkSignOutState(opts.state);
+  const url = new URL(endSessionEndpoint);
+  const q = url.searchParams;
+  q.set("client_id", clientId);
+  if (opts.idTokenHint !== undefined) q.set("id_token_hint", opts.idTokenHint);
+  if (opts.postLogoutRedirectUri !== undefined) q.set("post_logout_redirect_uri", opts.postLogoutRedirectUri);
+  if (opts.state !== undefined) q.set("state", opts.state);
+  return url.toString();
+}
+
+/**
+ * The portal's "change your password" page for this client. A fixed path
+ * (it is not in discovery), so no network call: the portal signs the
+ * person in if needed and links back to the client's System address.
+ */
+export function buildPasswordChangeUrl(issuer: string, clientId: string): string {
+  return `${trimSlash(issuer)}/admin/account/password?${new URLSearchParams({ client_id: clientId })}`;
 }
 
 /** Anything a callback query can arrive as. */

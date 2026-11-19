@@ -94,12 +94,46 @@ application's own message; do not show its text to the person as is.
 Helpers: `has_group(g)`, `has_role(group, role)`, and `roles(group)`.
 The raw claims stay available.
 
+### Signing out everywhere (since 0.2.0)
+
+A function that builds the address of the portal's sign-out page
+(OpenID Connect RP-Initiated Logout). The application ends its OWN
+session first, then sends the browser there.
+
+* Endpoint: the discovery document's `end_session_endpoint`. A portal
+  that does not announce one is older than this feature: report it as an
+  error. Do not guess the path. Exception: the browser half of the
+  TypeScript package, which never reads discovery, uses
+  `{issuer}/oauth/logout`.
+* Query, in this order, each only when present:
+  * `client_id`: always, from the configuration;
+  * `id_token_hint`: optional, the raw ID token if the application kept
+    it;
+  * `post_logout_redirect_uri`: optional, must be one of the client's
+    *Return addresses after sign-out* on the portal, exactly, or the
+    portal refuses the request;
+  * `state`: optional, at most 512 characters; anything longer is an
+    error raised by the package.
+* Values are percent-encoded with the language's standard form encoder.
+  No network call besides the (cached) discovery read.
+* The portal asks the person before ending its session. Someone not
+  signed in to the portal goes straight back. The browser returns with
+  `state` when one was sent.
+
+### Changing the password (since 0.2.0)
+
+A function that returns `{issuer}/admin/account/password?client_id=<client_id>`.
+It is a fixed path, not in discovery, and makes no network call. The
+portal signs the person in if needed, and its page links back to the
+client's registered *System address*.
+
 ### What the packages do not do
 
 * Sessions. After a sign-in the application issues its own session, as
   it does today; the portal's tokens live five minutes and there is no
-  refresh.
-* Sign-out at the portal. Ending the application's session is local.
+  refresh. To notice that the portal session ended, re-run a sign-in
+  with `prompt=none` when the application's own session expires.
+* Back-channel logout. The portal does not notify applications.
 * Deciding permissions. They report groups and roles; what those mean
   is the application's business.
 
@@ -109,11 +143,13 @@ The raw claims stay available.
 |---|---|---|
 | TypeScript | [npm](https://www.npmjs.com/package/ruscker-sso) | `npm install ruscker-sso` |
 | Python | [PyPI](https://pypi.org/project/ruscker-sso/) | `pip install ruscker-sso` |
-| Rust | [crates.io](https://crates.io/crates/ruscker-sso) | `ruscker-sso = "0.1"` |
+| Rust | [crates.io](https://crates.io/crates/ruscker-sso) | `ruscker-sso = "0.2"` |
 | Go | [pkg.go.dev](https://pkg.go.dev/github.com/StrategicProjects/ruscker/clients/go) | `go get github.com/StrategicProjects/ruscker/clients/go` |
 | R | from the repository (CRAN submission pending) | `remotes::install_github("StrategicProjects/ruscker", subdir = "clients/r")` |
 
-The versions are `0.1.0`; the contract above is what stays stable.
+The versions are `0.2.0` (sign-out, the password page, `prompt=none`).
+The R package is `0.1.0` on CRAN while its first submission is reviewed;
+`0.2.0` is in the repository. The contract above is what stays stable.
 
 ## Testing against a real provider
 
@@ -129,6 +165,7 @@ clients/testing/authorize.sh "<authorization URL>"   # → the callback URL
 ```
 
 The environment file gives `RUSCKER_ISSUER`, `RUSCKER_CLIENT_ID`,
-`RUSCKER_CLIENT_SECRET` and `RUSCKER_REDIRECT_URI`. End-to-end tests
+`RUSCKER_CLIENT_SECRET`, `RUSCKER_REDIRECT_URI` and, for the sign-out
+address, `RUSCKER_POST_LOGOUT_URI`. End-to-end tests
 are skipped when `RUSCKER_ISSUER` is not set, so each package's unit
 tests run anywhere.

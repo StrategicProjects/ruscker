@@ -15,6 +15,9 @@
 //
 // After that the application issues its own session; this package keeps
 // no state between the two calls.
+//
+// Two address builders complete the picture: SignOutURL (end the portal's
+// session after ending the application's own) and PasswordChangeURL.
 package rusckersso
 
 import (
@@ -28,6 +31,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -90,6 +94,9 @@ type Client struct {
 	oauth    oauth2.Config
 	verifier *oidc.IDTokenVerifier
 	http     *http.Client
+	// endSession is the discovery document's end_session_endpoint, read
+	// once in New; "" when the portal does not announce one.
+	endSession string
 }
 
 // Pending holds the three values that must survive between StartSignIn
@@ -120,9 +127,20 @@ func New(ctx context.Context, cfg Config) (*Client, error) {
 	providerCtx := oidc.ClientContext(context.WithoutCancel(ctx), httpClient)
 	provider, err := oidc.NewProvider(providerCtx, cfg.Issuer)
 	if err != nil {
-		return nil, fmt.Errorf("rusckersso: reading the discovery document: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrDiscovery, err)
 	}
-	return newClient(cfg, provider.Endpoint(), provider.VerifierContext(providerCtx, verifierConfig(cfg.ClientID)), httpClient), nil
+	c := newClient(cfg, provider.Endpoint(), provider.VerifierContext(providerCtx, verifierConfig(cfg.ClientID)), httpClient)
+	// The sign-out endpoint is not part of go-oidc's Endpoint; it is read
+	// from the same, already fetched, discovery document. A portal older
+	// than sign-out support simply leaves it out (SignOutURL reports that).
+	var extra struct {
+		EndSessionEndpoint string `json:"end_session_endpoint"`
+	}
+	if err := provider.Claims(&extra); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrDiscovery, err)
+	}
+	c.endSession = extra.EndSessionEndpoint
+	return c, nil
 }
 
 // verifierConfig pins the algorithm: ES256 is the only one accepted, and
@@ -172,10 +190,32 @@ func withOpenID(scopes []string) []string {
 	return append([]string{"openid"}, scopes...)
 }
 
+// SignInOption changes one detail of the authorization URL built by
+// StartSignIn. Without options the URL is the plain sign-in.
+type SignInOption func(*signInOptions)
+
+type signInOptions struct {
+	prompt string
+}
+
+// WithPrompt sends prompt=<value> on the authorization URL. The value
+// that matters is "none": the portal then answers at once, without
+// showing a page — with a code when the person is still signed in there,
+// or with ?error=login_required (a *ProviderError) when not. Use it when
+// the application's own session expires, to notice that the portal
+// session ended. An empty value sends nothing.
+func WithPrompt(value string) SignInOption {
+	return func(o *signInOptions) { o.prompt = value }
+}
+
 // StartSignIn returns the URL to redirect the browser to, and the values
 // to keep until the person comes back. Each value is fresh, from
 // crypto/rand, for every call.
-func (c *Client) StartSignIn() (string, Pending, error) {
+func (c *Client) StartSignIn(opts ...SignInOption) (string, Pending, error) {
+	var o signInOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	state, err := randomToken()
 	if err != nil {
 		return "", Pending{}, err
@@ -187,8 +227,81 @@ func (c *Client) StartSignIn() (string, Pending, error) {
 	p := Pending{State: state, Nonce: nonce, CodeVerifier: oauth2.GenerateVerifier()}
 	// AuthCodeURL always sets response_type=code; S256ChallengeOption adds
 	// code_challenge and code_challenge_method=S256.
-	authURL := c.oauth.AuthCodeURL(p.State, oidc.Nonce(p.Nonce), oauth2.S256ChallengeOption(p.CodeVerifier))
+	params := []oauth2.AuthCodeOption{oidc.Nonce(p.Nonce), oauth2.S256ChallengeOption(p.CodeVerifier)}
+	if o.prompt != "" {
+		params = append(params, oauth2.SetAuthURLParam("prompt", o.prompt))
+	}
+	authURL := c.oauth.AuthCodeURL(p.State, params...)
 	return authURL, p, nil
+}
+
+// MaxSignOutStateLength is the longest state SignOutURL accepts, in
+// characters; the portal refuses longer ones.
+const MaxSignOutStateLength = 512
+
+// SignOut holds the optional parts of a sign-out address. Every field
+// may be left empty, and an empty field is left out of the address.
+type SignOut struct {
+	// PostLogoutRedirectURI is where the portal sends the browser
+	// afterwards. It must be one of the system's "Return addresses after
+	// sign-out" on the portal, exactly, or the portal refuses the request.
+	PostLogoutRedirectURI string
+	// State comes back on that return address unchanged. At most
+	// MaxSignOutStateLength characters.
+	State string
+	// IDTokenHint is the raw ID token, if the application kept it.
+	IDTokenHint string
+}
+
+// SignOutURL builds the address of the portal's sign-out page (OpenID
+// Connect RP-Initiated Logout). End the application's OWN session first,
+// then redirect the browser there: the portal asks the person before
+// ending its session, and someone not signed in there goes straight back.
+//
+// The query carries client_id, then id_token_hint,
+// post_logout_redirect_uri and state, each only when given. No network:
+// the endpoint was read from the discovery document in New. A portal
+// that announces no end_session_endpoint is older than this feature;
+// the error then matches ErrDiscovery. A state longer than
+// MaxSignOutStateLength matches ErrStateTooLong.
+func (c *Client) SignOutURL(opts SignOut) (string, error) {
+	if utf8.RuneCountInString(opts.State) > MaxSignOutStateLength {
+		return "", ErrStateTooLong
+	}
+	if c.endSession == "" {
+		return "", fmt.Errorf("%w: it announces no end_session_endpoint (the portal is older than sign-out support)", ErrDiscovery)
+	}
+	// url.Values.Encode sorts the keys; the contract fixes the order, so
+	// the query is built pair by pair with the same encoder.
+	pairs := [][2]string{
+		{"client_id", c.oauth.ClientID},
+		{"id_token_hint", opts.IDTokenHint},
+		{"post_logout_redirect_uri", opts.PostLogoutRedirectURI},
+		{"state", opts.State},
+	}
+	var q strings.Builder
+	for _, kv := range pairs {
+		if kv[1] == "" {
+			continue
+		}
+		if q.Len() > 0 {
+			q.WriteByte('&')
+		}
+		q.WriteString(url.QueryEscape(kv[0]) + "=" + url.QueryEscape(kv[1]))
+	}
+	sep := "?"
+	if strings.Contains(c.endSession, "?") {
+		sep = "&"
+	}
+	return c.endSession + sep + q.String(), nil
+}
+
+// PasswordChangeURL returns the address of the portal's page where the
+// person changes their password. The portal signs them in first if
+// needed, and its page links back to the system's registered "System
+// address". It is a fixed path, not in discovery; no network.
+func (c *Client) PasswordChangeURL() string {
+	return c.issuer + "/admin/account/password?client_id=" + url.QueryEscape(c.oauth.ClientID)
 }
 
 // randomToken is 32 random bytes, URL-safe base64 (43 characters).

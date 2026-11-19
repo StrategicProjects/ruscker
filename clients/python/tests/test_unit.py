@@ -54,6 +54,8 @@ class FakeProvider:
         self.token_body: dict[str, Any] | None = None
         self.claims: dict[str, Any] = {}
         self.nonce = ""
+        # None = a portal older than sign-out support.
+        self.end_session_endpoint: str | None = f"{ISSUER}/oauth/logout"
 
     def sign(self, claims: dict[str, Any], *, key: Any = None, kid: str | None = None,
              alg: str = "ES256") -> str:
@@ -73,12 +75,15 @@ class FakeProvider:
         self.requests.append(request)
         path = request.url.path
         if path == "/.well-known/openid-configuration":
-            return httpx.Response(200, json={
+            doc = {
                 "issuer": self.discovery_issuer,
                 "authorization_endpoint": f"{ISSUER}/oauth/authorize",
                 "token_endpoint": f"{ISSUER}/oauth/token",
                 "jwks_uri": f"{ISSUER}/oauth/jwks",
-            })
+            }
+            if self.end_session_endpoint is not None:
+                doc["end_session_endpoint"] = self.end_session_endpoint
+            return httpx.Response(200, json=doc)
         if path == "/oauth/jwks":
             self.jwks_fetches += 1
             return httpx.Response(200, json={"keys": self.published})
@@ -167,6 +172,72 @@ def test_discovery_issuer_must_match(sso: RusckerSSO, provider: FakeProvider) ->
     with pytest.raises(IssuerMismatchError) as e:
         sso.start_sign_in()
     assert e.value.where == "the discovery document"
+
+
+def test_prompt_absent_unless_asked(sso: RusckerSSO) -> None:
+    assert "prompt" not in parse_qs(urlsplit(sso.start_sign_in().url).query)
+    q = parse_qs(urlsplit(sso.start_sign_in(prompt="none").url).query)
+    assert q["prompt"] == ["none"]
+
+
+# ---- signing out and the password page ----------------------------------------
+
+def test_sign_out_url_minimal(sso: RusckerSSO) -> None:
+    assert sso.sign_out_url() == f"{ISSUER}/oauth/logout?client_id={CLIENT_ID}"
+
+
+def test_sign_out_url_order_and_encoding(sso: RusckerSSO) -> None:
+    url = sso.sign_out_url(
+        post_logout_redirect_uri="https://app.example.org/signed-out?x=1",
+        state="back to a&b?c",
+        id_token_hint="eyJ.hint.sig",
+    )
+    assert url == (
+        f"{ISSUER}/oauth/logout?client_id={CLIENT_ID}"
+        "&id_token_hint=eyJ.hint.sig"
+        "&post_logout_redirect_uri=https%3A%2F%2Fapp.example.org%2Fsigned-out%3Fx%3D1"
+        "&state=back+to+a%26b%3Fc"
+    )
+    q = parse_qs(urlsplit(url).query)
+    assert q["state"] == ["back to a&b?c"]
+    assert q["post_logout_redirect_uri"] == ["https://app.example.org/signed-out?x=1"]
+
+
+def test_sign_out_url_omits_absent_values(sso: RusckerSSO) -> None:
+    q = parse_qs(urlsplit(sso.sign_out_url(state="s1")).query)
+    assert q == {"client_id": [CLIENT_ID], "state": ["s1"]}
+    q = parse_qs(urlsplit(sso.sign_out_url(post_logout_redirect_uri=REDIRECT)).query)
+    assert q == {"client_id": [CLIENT_ID], "post_logout_redirect_uri": [REDIRECT]}
+
+
+def test_sign_out_state_length(sso: RusckerSSO) -> None:
+    assert "state=" + "a" * 512 in sso.sign_out_url(state="a" * 512)
+    with pytest.raises(SignInError):
+        sso.sign_out_url(state="a" * 513)
+
+
+def test_sign_out_needs_end_session_endpoint(sso: RusckerSSO, provider: FakeProvider) -> None:
+    provider.end_session_endpoint = None
+    with pytest.raises(SignInError) as e:
+        sso.sign_out_url()
+    assert "end_session_endpoint" in str(e.value)
+    # Sign-in still works against such a portal.
+    assert sso.start_sign_in().url.startswith(f"{ISSUER}/oauth/authorize?")
+
+
+def test_sign_out_reads_cached_discovery(sso: RusckerSSO, provider: FakeProvider) -> None:
+    sso.start_sign_in()
+    sso.sign_out_url()
+    sso.sign_out_url(state="x")
+    assert len(provider.requests) == 1
+
+
+def test_password_change_url(sso: RusckerSSO, provider: FakeProvider) -> None:
+    assert sso.password_change_url() == f"{ISSUER}/admin/account/password?client_id=my-system"
+    odd = RusckerSSO(ISSUER, "a b&c", SECRET, REDIRECT, http_client=httpx.Client(
+        transport=httpx.MockTransport(provider.handler)))
+    assert odd.password_change_url() == f"{ISSUER}/admin/account/password?client_id=a+b%26c"
+    assert provider.requests == []
 
 
 def test_pending_round_trips_through_json() -> None:

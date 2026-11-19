@@ -150,6 +150,21 @@ username can be given to someone else after an account is deleted; the
 
 The package's README has a complete Shiny app built on these two calls.
 
+Two more addresses complete the picture. Neither is run here, the first
+because it reads the portal's discovery document:
+
+```{r, eval = FALSE}
+# Signing out: end the app's own session FIRST, then send the browser here.
+sso_sign_out_url(client, post_logout_redirect_uri = "https://app.example.org/signed-out")
+
+# The portal's "change your password" page, which links back to the app.
+sso_password_url(client)
+```
+
+And `sso_start(client, prompt = "none")` checks quietly whether the
+person is still signed in to the portal: no page is shown, and someone
+who is not comes back with `error=login_required`.
+
 ## When a sign-in fails
 
 Every failure is an R condition with its own class, so the app can
@@ -195,7 +210,8 @@ is in `?"rusckersso-errors"`.
 
 * **Sessions.** After a sign-in the application keeps its own session,
   as it does today.
-* **Signing out of the portal.** Ending the application's session is
-  local.
+* **Sign the person out by itself.** Ending the application's session
+  is the application's job; `sso_sign_out_url()` only gives the address
+  that ends the portal's session afterwards.
 * **Deciding permissions.** It reports groups and roles; what they
   allow is up to the application.

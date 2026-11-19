@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ruscker-sso"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sign people in to a backend through a Ruscker portal (OpenID Connect, authorization code + PKCE)."
 readme = "README.md"
 requires-python = ">=3.10"

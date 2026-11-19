@@ -74,6 +74,13 @@ print.rusckersso_client <- function(x, ...) {
 #' plain list, so it can be saved however the app likes. Use it once.
 #'
 #' @param client A client from [sso_client()].
+#' @param prompt Optional. `"none"` asks the portal not to show any page:
+#'   a person already signed in to the portal comes straight back with a
+#'   code, and anyone else comes back with `error=login_required` (which
+#'   [sso_finish()] reports as a `rusckersso_provider_error`). Use it to
+#'   check quietly whether the portal session is still open, for instance
+#'   when the app's own session expires. The default (`NULL`) sends no
+#'   `prompt` at all.
 #' @return A list with `url` and `pending` (a list of `state`, `nonce` and
 #'   `code_verifier`).
 #' @examples
@@ -88,9 +95,13 @@ print.rusckersso_client <- function(x, ...) {
 #' start <- sso_start(client)
 #' start$url      # send the browser here
 #' start$pending  # keep until the person comes back
+#'
+#' # A quiet check: no page is shown to the person.
+#' quiet <- sso_start(client, prompt = "none")
 #' }
 #' @export
-sso_start <- function(client) {
+sso_start <- function(client, prompt = NULL) {
+  check_optional_string(prompt, "prompt")
   conf <- get_discovery(client)
   pending <- list(
     state = random_token(),
@@ -106,9 +117,106 @@ sso_start <- function(client) {
     state = pending$state,
     nonce = pending$nonce,
     code_challenge = pkce_challenge(pending$code_verifier),
-    code_challenge_method = "S256"
+    code_challenge_method = "S256",
+    prompt = prompt # NULL leaves it out of the URL
   )
   list(url = url, pending = pending)
+}
+
+# The longest `state` the portal accepts on its sign-out page.
+max_sign_out_state <- 512L
+
+#' Address of the portal's sign-out page
+#'
+#' Builds the address that ends the person's session **on the portal**
+#' (OpenID Connect RP-Initiated Logout). End the application's own session
+#' first, then send the browser there. The portal asks the person before
+#' signing them out; someone not signed in to the portal goes straight
+#' back.
+#'
+#' The address is the discovery document's `end_session_endpoint`, read
+#' from the client's cache (no network call once the document has been
+#' read). The query carries, in this order, `client_id` (always), then
+#' `id_token_hint`, `post_logout_redirect_uri` and `state`, each only when
+#' given.
+#'
+#' @param client A client from [sso_client()].
+#' @param post_logout_redirect_uri Optional. Where the portal sends the
+#'   browser afterwards. It must be one of the client's *Return addresses
+#'   after sign-out* on the portal, exactly, or the portal refuses the
+#'   request.
+#' @param state Optional. Returned unchanged on that address. At most 512
+#'   characters.
+#' @param id_token_hint Optional. The raw ID token, if the app kept it.
+#' @return The address, a single string.
+#' @section Errors:
+#' A `rusckersso_http_error` when the discovery document has no
+#' `end_session_endpoint` (the portal is older than this feature); an
+#' error when `state` is longer than 512 characters.
+#' @seealso [sso_password_url()]
+#' @examples
+#' \dontrun{
+#' # Needs a reachable portal (or a cached discovery document).
+#' # In a plumber2 or Shiny sign-out handler: forget the app's own session
+#' # first, then redirect.
+#' url <- sso_sign_out_url(
+#'   client,
+#'   post_logout_redirect_uri = "https://app.example.org/signed-out"
+#' )
+#' }
+#' @export
+sso_sign_out_url <- function(client, post_logout_redirect_uri = NULL,
+                             state = NULL, id_token_hint = NULL) {
+  check_optional_string(post_logout_redirect_uri, "post_logout_redirect_uri")
+  check_optional_string(state, "state")
+  check_optional_string(id_token_hint, "id_token_hint")
+  # Checked before discovery, so a bad argument never costs a network call.
+  if (!is.null(state) && nchar(state, type = "chars") > max_sign_out_state) {
+    rlang::abort(sprintf("`state` must be at most %d characters.", max_sign_out_state))
+  }
+  endpoint <- get_discovery(client)$end_session_endpoint
+  if (!is.character(endpoint) || length(endpoint) != 1 || !nzchar(endpoint)) {
+    # Do not guess the path: the portal is older than sign-out support.
+    sso_abort("http_error", paste(
+      "The discovery document has no `end_session_endpoint`",
+      "(the portal is older than sign-out support)."
+    ))
+  }
+  # The order is the contract's. A NULL value leaves its parameter out.
+  httr2::url_modify_query(
+    endpoint,
+    client_id = client$client_id,
+    id_token_hint = id_token_hint,
+    post_logout_redirect_uri = post_logout_redirect_uri,
+    state = state
+  )
+}
+
+#' Address of the portal's "change your password" page
+#'
+#' Returns `{issuer}/admin/account/password?client_id={client_id}`. It is a
+#' fixed path, not in the discovery document, so nothing is fetched. The
+#' portal signs the person in if needed, and its page links back to the
+#' client's registered *System address*.
+#'
+#' @param client A client from [sso_client()].
+#' @return The address, a single string.
+#' @seealso [sso_sign_out_url()]
+#' @examples
+#' client <- sso_client(
+#'   issuer = "https://portal.example.org",
+#'   client_id = "my-app",
+#'   client_secret = "from-an-environment-variable",
+#'   redirect_uri = "https://app.example.org/"
+#' )
+#' sso_password_url(client)
+#' @export
+sso_password_url <- function(client) {
+  paste0(
+    sub("/+$", "", client$issuer),
+    "/admin/account/password?client_id=",
+    utils::URLencode(client$client_id, reserved = TRUE, repeated = TRUE)
+  )
 }
 
 #' Finish a sign-in
@@ -303,6 +411,15 @@ get_jwks <- function(client, refresh = FALSE) {
 }
 
 # ---- small helpers ---------------------------------------------------------
+
+# An optional argument: NULL, or a single non-empty string.
+check_optional_string <- function(x, arg, call = rlang::caller_env()) {
+  if (is.null(x)) return(invisible())
+  if (!is.character(x) || length(x) != 1 || is.na(x) || !nzchar(x)) {
+    rlang::abort(sprintf("`%s` must be NULL or a single non-empty string.", arg), call = call)
+  }
+  invisible()
+}
 
 # 32 random bytes from OpenSSL, base64url without padding: 43 characters,
 # which also satisfies PKCE's verifier alphabet and length (43-128).

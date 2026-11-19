@@ -146,6 +146,40 @@ r.GET("/auth/callback", func(c *gin.Context) {
 })
 ```
 
+## Signing out, changing the password, checking quietly (since 0.2.0)
+
+```go
+// Sign out everywhere: end the app's OWN session first, then send the
+// browser to the portal, which asks the person before ending its session.
+http.HandleFunc("/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+	endAppSession(w, r) // whatever your app does today
+	to, err := sso.SignOutURL(rusckersso.SignOut{
+		PostLogoutRedirectURI: "https://app.example.org/", // registered on the portal, exactly
+		State:                 "",                         // optional, at most 512 characters
+		IDTokenHint:           "",                         // optional, the raw ID token if you kept it
+	})
+	if err != nil { // errors.Is(err, rusckersso.ErrDiscovery): the portal is older than sign-out support
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	http.Redirect(w, r, to, http.StatusFound)
+})
+
+// A link to the portal's password page; it links back to the system.
+passwordLink := sso.PasswordChangeURL()
+
+// When the app's own session expires: ask the portal without showing a
+// page. A person still signed in there comes back with a code; one who
+// is not comes back with ?error=login_required (a *ProviderError).
+authURL, pending, err := sso.StartSignIn(rusckersso.WithPrompt("none"))
+```
+
+| Function | Returns |
+|---|---|
+| `(*Client).SignOutURL(SignOut) (string, error)` | the discovery document's `end_session_endpoint` with `client_id`, then `id_token_hint`, `post_logout_redirect_uri`, `state` (each only when set). No network: the endpoint was read in `New`. Errors: `ErrDiscovery` (no `end_session_endpoint`), `ErrStateTooLong` (state over 512 characters) |
+| `(*Client).PasswordChangeURL() string` | `{issuer}/admin/account/password?client_id=…`. No network |
+| `WithPrompt(value) SignInOption` | for `StartSignIn`; `"none"` sends `prompt=none`. Without it the URL is unchanged |
+
 ## The identity
 
 | Field | Claim | Notes |
@@ -175,8 +209,14 @@ Helpers: `HasGroup(g)`, `HasRole(group, role)`, `Roles(group)`.
 | ID token invalid (signature, ES256, `iss`, `aud`, `exp`, `nonce`) | `ErrIDTokenInvalid` | `*IDTokenError` — `.Reason`, `.Err` |
 
 The first three happen before any network call. A code is single-use:
-on any failure, start a new sign-in. `New` fails if the discovery
-document cannot be read or names a different issuer.
+on any failure, start a new sign-in. `New` fails (`ErrDiscovery`) if
+the discovery document cannot be read or names a different issuer.
+
+## Versions
+
+Releases are tags `clients/go/vX.Y.Z`; `go get …/clients/go@v0.2.0`.
+0.2.0 adds `SignOutURL`, `PasswordChangeURL` and `WithPrompt`;
+`StartSignIn()` calls written for 0.1 compile unchanged.
 
 ## Tests
 

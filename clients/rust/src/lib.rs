@@ -16,9 +16,16 @@
 //! `jsonwebtoken` against the provider's published keys, randomness comes
 //! from the operating system (`getrandom`), and the PKCE hash from `sha2`.
 //!
+//! Two address builders complete it: [`Client::sign_out_url`] (the
+//! portal's sign-out page, after the application ended its own session)
+//! and [`Client::password_change_url`] (the portal's "change your
+//! password" page).
+//!
 //! What the crate deliberately does not do: sessions (the portal's tokens
-//! live five minutes and there is no refresh), sign-out at the portal, and
-//! deciding what groups and roles mean inside the application.
+//! live five minutes and there is no refresh — re-run a sign-in with
+//! [`SignInOptions::prompt`] `"none"` to notice that the portal session
+//! ended), back-channel logout, and deciding what groups and roles mean
+//! inside the application.
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, RwLock};
@@ -42,6 +49,10 @@ pub const DEFAULT_SCOPES: &str = "openid profile email groups roles setor";
 /// answers in milliseconds; a hung connection should fail the sign-in
 /// rather than hold the callback request forever.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The longest `state` [`Client::sign_out_url`] accepts, in characters
+/// (the same limit in every package; the portal refuses longer ones).
+pub const MAX_SIGN_OUT_STATE_LEN: usize = 512;
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -156,6 +167,11 @@ pub enum Error {
     /// The discovery document or the key set could not be used.
     #[error("discovery failed: {0}")]
     Discovery(String),
+    /// A value given to the crate is not acceptable (e.g. a sign-out
+    /// `state` longer than [`MAX_SIGN_OUT_STATE_LEN`] characters). Nothing
+    /// was sent anywhere.
+    #[error("invalid argument: {0}")]
+    InvalidArgument(String),
     /// The provider could not be reached, or answered something that is
     /// not the expected JSON.
     #[error("HTTP error talking to the provider: {0}")]
@@ -318,6 +334,88 @@ struct Metadata {
     authorization_endpoint: String,
     token_endpoint: String,
     jwks_uri: String,
+    /// RP-Initiated Logout. Absent on portals older than sign-out support,
+    /// so optional here; [`Client::sign_out_url`] reports its absence.
+    #[serde(default)]
+    end_session_endpoint: Option<String>,
+}
+
+/// Options for [`Client::start_sign_in_with`]. The default is what
+/// [`Client::start_sign_in`] sends.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SignInOptions {
+    /// The OpenID Connect `prompt` parameter; omitted when `None`. The only
+    /// value the portal gives a meaning to is `"none"`: answer with an
+    /// error (`login_required`, …) instead of showing a sign-in page when
+    /// the person would have to interact. Use it to check, without a page,
+    /// whether the portal session is still alive.
+    pub prompt: Option<String>,
+}
+
+impl SignInOptions {
+    /// The default options (no `prompt`).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Send `prompt=<value>` — in practice `"none"`.
+    pub fn prompt(mut self, value: impl Into<String>) -> Self {
+        self.prompt = Some(value.into());
+        self
+    }
+}
+
+/// Options for [`Client::sign_out_url`]; every field is optional and is
+/// left out of the address when `None`.
+#[derive(Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct SignOutOptions {
+    /// Where the portal sends the browser afterwards. Must be one of the
+    /// client's *Return addresses after sign-out* on the portal, exactly,
+    /// or the portal refuses the request.
+    pub post_logout_redirect_uri: Option<String>,
+    /// Echoed back on that return, at most [`MAX_SIGN_OUT_STATE_LEN`]
+    /// characters.
+    pub state: Option<String>,
+    /// The raw ID token, if the application kept it.
+    pub id_token_hint: Option<String>,
+}
+
+impl SignOutOptions {
+    /// No optional values: the address carries only `client_id`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set `post_logout_redirect_uri`.
+    pub fn post_logout_redirect_uri(mut self, uri: impl Into<String>) -> Self {
+        self.post_logout_redirect_uri = Some(uri.into());
+        self
+    }
+
+    /// Set `state`.
+    pub fn state(mut self, state: impl Into<String>) -> Self {
+        self.state = Some(state.into());
+        self
+    }
+
+    /// Set `id_token_hint`.
+    pub fn id_token_hint(mut self, id_token: impl Into<String>) -> Self {
+        self.id_token_hint = Some(id_token.into());
+        self
+    }
+}
+
+// The ID token names the person; keep it out of `{:?}` output.
+impl std::fmt::Debug for SignOutOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SignOutOptions")
+            .field("post_logout_redirect_uri", &self.post_logout_redirect_uri)
+            .field("state", &self.state)
+            .field("id_token_hint", &self.id_token_hint.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 /// The token endpoint's answer. Only the ID token is used; the access
@@ -404,6 +502,15 @@ impl Client {
     ///
     /// Panics only if the operating system's random source is unavailable.
     pub fn start_sign_in(&self) -> (Url, Pending) {
+        self.start_sign_in_with(&SignInOptions::default())
+    }
+
+    /// [`Client::start_sign_in`] with options, e.g.
+    /// `SignInOptions::new().prompt("none")` to check silently whether the
+    /// portal session is still alive.
+    ///
+    /// Panics only if the operating system's random source is unavailable.
+    pub fn start_sign_in_with(&self, options: &SignInOptions) -> (Url, Pending) {
         let pending = Pending::generate();
         let config = &self.inner.config;
         let mut url = Url::parse(&self.inner.metadata.authorization_endpoint)
@@ -417,7 +524,71 @@ impl Client {
             .append_pair("nonce", &pending.nonce)
             .append_pair("code_challenge", &pkce_challenge(&pending.code_verifier))
             .append_pair("code_challenge_method", "S256");
+        if let Some(prompt) = &options.prompt {
+            url.query_pairs_mut().append_pair("prompt", prompt);
+        }
         (url, pending)
+    }
+
+    /// The address of the portal's sign-out page (OpenID Connect
+    /// RP-Initiated Logout). End the application's OWN session first, then
+    /// redirect the browser here.
+    ///
+    /// The query carries `client_id`, then `id_token_hint`,
+    /// `post_logout_redirect_uri` and `state`, each only when given. The
+    /// portal asks the person before ending its session; someone not signed
+    /// in there goes straight back (with `state`, when one was sent).
+    ///
+    /// The endpoint is the discovery document's `end_session_endpoint`,
+    /// read at [`Client::discover`]: no network call here. A portal that
+    /// does not announce one is older than this feature, and the answer is
+    /// [`Error::Discovery`] rather than a guessed path. A `state` longer
+    /// than [`MAX_SIGN_OUT_STATE_LEN`] characters is
+    /// [`Error::InvalidArgument`].
+    pub fn sign_out_url(&self, options: &SignOutOptions) -> Result<Url, Error> {
+        if let Some(state) = &options.state {
+            if state.chars().count() > MAX_SIGN_OUT_STATE_LEN {
+                return Err(Error::InvalidArgument(format!(
+                    "the sign-out state is longer than {MAX_SIGN_OUT_STATE_LEN} characters"
+                )));
+            }
+        }
+        let endpoint = self.inner.metadata.end_session_endpoint.as_deref().ok_or_else(|| {
+            Error::Discovery(
+                "the discovery document has no end_session_endpoint (the portal is older than sign-out support)"
+                    .into(),
+            )
+        })?;
+        let mut url =
+            Url::parse(endpoint).map_err(|e| Error::Discovery(format!("end_session_endpoint is not a URL: {e}")))?;
+        {
+            // Order is fixed by the contract: client_id, then each optional
+            // value only when given.
+            let mut query = url.query_pairs_mut();
+            query.append_pair("client_id", &self.inner.config.client_id);
+            for (name, value) in [
+                ("id_token_hint", &options.id_token_hint),
+                ("post_logout_redirect_uri", &options.post_logout_redirect_uri),
+                ("state", &options.state),
+            ] {
+                if let Some(value) = value {
+                    query.append_pair(name, value);
+                }
+            }
+        }
+        Ok(url)
+    }
+
+    /// The address of the portal's "change your password" page:
+    /// `{issuer}/admin/account/password?client_id=…`.
+    ///
+    /// A fixed path, not in discovery, so no network call. The portal signs
+    /// the person in if needed, and its page links back to the client's
+    /// registered *System address*.
+    pub fn password_change_url(&self) -> String {
+        let config = &self.inner.config;
+        let client_id = url::form_urlencoded::byte_serialize(config.client_id.as_bytes()).collect::<String>();
+        format!("{}/admin/account/password?client_id={client_id}", config.issuer.trim_end_matches('/'))
     }
 
     /// Finish a sign-in from the callback's query string (with or without
@@ -561,6 +732,9 @@ fn check_metadata(config: &Config, metadata: &Metadata) -> Result<(), Error> {
     ] {
         Url::parse(value).map_err(|e| Error::Discovery(format!("{name} is not a URL: {e}")))?;
     }
+    if let Some(value) = &metadata.end_session_endpoint {
+        Url::parse(value).map_err(|e| Error::Discovery(format!("end_session_endpoint is not a URL: {e}")))?;
+    }
     Ok(())
 }
 
@@ -609,6 +783,7 @@ mod tests {
             authorization_endpoint: format!("{ISSUER}/oauth/authorize"),
             token_endpoint: "http://127.0.0.1:9/oauth/token".into(),
             jwks_uri: "http://127.0.0.1:9/oauth/jwks".into(),
+            end_session_endpoint: Some(format!("{ISSUER}/oauth/logout")),
         };
         Client::from_parts(config, metadata, reqwest::Client::new(), JwkSet { keys: vec![] })
     }
@@ -633,6 +808,98 @@ mod tests {
         assert_eq!(q["code_challenge"], pkce_challenge(&pending.code_verifier));
         // The verifier itself never leaves the server.
         assert!(!url.as_str().contains(&pending.code_verifier));
+    }
+
+    #[test]
+    fn prompt_is_sent_only_when_asked() {
+        let client = offline_client();
+        let (url, _) = client.start_sign_in();
+        assert!(!query(&url).contains_key("prompt"));
+        let (url, _) = client.start_sign_in_with(&SignInOptions::default());
+        assert!(!query(&url).contains_key("prompt"));
+        let (url, _) = client.start_sign_in_with(&SignInOptions::new().prompt("none"));
+        assert_eq!(query(&url)["prompt"], "none");
+        assert!(url.as_str().ends_with("&prompt=none"));
+    }
+
+    #[test]
+    fn sign_out_url_with_only_the_client_id() {
+        let client = offline_client();
+        let url = client.sign_out_url(&SignOutOptions::new()).unwrap();
+        assert_eq!(url.as_str(), "https://portal.example.org/oauth/logout?client_id=my-system");
+    }
+
+    #[test]
+    fn sign_out_url_orders_and_encodes_the_query() {
+        let client = offline_client();
+        let options = SignOutOptions::new()
+            .state("a b&c?d")
+            .post_logout_redirect_uri("https://app.example.org/signed-out?x=1")
+            .id_token_hint("eyJ.hint.sig");
+        let url = client.sign_out_url(&options).unwrap();
+        assert_eq!(
+            url.as_str(),
+            "https://portal.example.org/oauth/logout?client_id=my-system&id_token_hint=eyJ.hint.sig\
+             &post_logout_redirect_uri=https%3A%2F%2Fapp.example.org%2Fsigned-out%3Fx%3D1&state=a+b%26c%3Fd"
+        );
+        // …and the values decode back to what was given.
+        let q = query(&url);
+        assert_eq!(q["state"], "a b&c?d");
+        assert_eq!(q["post_logout_redirect_uri"], "https://app.example.org/signed-out?x=1");
+    }
+
+    #[test]
+    fn sign_out_url_omits_absent_values() {
+        let client = offline_client();
+        let url = client.sign_out_url(&SignOutOptions::new().state("s")).unwrap();
+        assert_eq!(url.as_str(), "https://portal.example.org/oauth/logout?client_id=my-system&state=s");
+        let url = client.sign_out_url(&SignOutOptions::new().post_logout_redirect_uri("https://a.example/")).unwrap();
+        let q = query(&url);
+        assert_eq!(q.len(), 2);
+        assert_eq!(q["client_id"], "my-system");
+        assert!(!q.contains_key("state") && !q.contains_key("id_token_hint"));
+    }
+
+    #[test]
+    fn sign_out_state_longer_than_512_is_refused() {
+        let client = offline_client();
+        let ok = "é".repeat(MAX_SIGN_OUT_STATE_LEN); // counted in characters, not bytes
+        assert!(client.sign_out_url(&SignOutOptions::new().state(ok)).is_ok());
+        let long = "x".repeat(MAX_SIGN_OUT_STATE_LEN + 1);
+        assert!(matches!(client.sign_out_url(&SignOutOptions::new().state(long)), Err(Error::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn sign_out_without_end_session_endpoint_is_a_discovery_error() {
+        let mut client = offline_client();
+        Arc::get_mut(&mut client.inner).unwrap().metadata.end_session_endpoint = None;
+        let err = client.sign_out_url(&SignOutOptions::new()).unwrap_err();
+        assert!(matches!(&err, Error::Discovery(m) if m.contains("end_session_endpoint")), "{err:?}");
+    }
+
+    #[test]
+    fn discovery_document_without_end_session_endpoint_parses() {
+        let doc = json!({
+            "issuer": ISSUER, "authorization_endpoint": format!("{ISSUER}/oauth/authorize"),
+            "token_endpoint": format!("{ISSUER}/oauth/token"), "jwks_uri": format!("{ISSUER}/oauth/jwks")
+        });
+        let m: Metadata = serde_json::from_value(doc).unwrap();
+        assert_eq!(m.end_session_endpoint, None);
+    }
+
+    #[test]
+    fn sign_out_options_debug_hides_the_id_token() {
+        let o = SignOutOptions::new().id_token_hint("eyJ.secret.sig");
+        assert!(!format!("{o:?}").contains("eyJ.secret.sig"));
+    }
+
+    #[test]
+    fn password_change_url_is_exact() {
+        let client = offline_client();
+        assert_eq!(client.password_change_url(), "https://portal.example.org/admin/account/password?client_id=my-system");
+        let mut client = offline_client();
+        Arc::get_mut(&mut client.inner).unwrap().config.client_id = "a b&c".into();
+        assert_eq!(client.password_change_url(), "https://portal.example.org/admin/account/password?client_id=a+b%26c");
     }
 
     #[test]
@@ -745,6 +1012,7 @@ mod tests {
             authorization_endpoint: format!("{ISSUER}/oauth/authorize"),
             token_endpoint: format!("{ISSUER}/oauth/token"),
             jwks_uri: format!("{ISSUER}/oauth/jwks"),
+            end_session_endpoint: None,
         };
         assert!(matches!(check_metadata(&config, &metadata), Err(Error::IssuerMismatch { .. })));
         metadata.issuer = ISSUER.into();

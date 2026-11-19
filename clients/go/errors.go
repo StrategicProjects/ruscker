@@ -30,6 +30,13 @@ var (
 	ErrTokenExchange = errors.New("rusckersso: token exchange failed")
 	// ErrIDTokenInvalid: the ID token failed verification.
 	ErrIDTokenInvalid = errors.New("rusckersso: ID token is not valid")
+	// ErrDiscovery: the discovery document could not be read, or lacks
+	// what was asked of it (SignOutURL on a portal without an
+	// end_session_endpoint).
+	ErrDiscovery = errors.New("rusckersso: discovery document")
+	// ErrStateTooLong: SignOutURL was given a state longer than
+	// MaxSignOutStateLength characters.
+	ErrStateTooLong = errors.New("rusckersso: sign-out state is longer than 512 characters")
 )
 
 // ProviderError is an ?error=… callback. Code is the provider's code,

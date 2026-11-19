@@ -1169,7 +1169,6 @@ admin-schedules-disabled = Inativo
 admin-schedules-toggle = Ativar/desativar
 admin-schedules-delete = Excluir
 admin-schedules-confirm-delete = Excluir este agendamento? O histórico de execuções vai junto.
-admin-schedules-empty = Nenhum agendamento ainda — crie um acima.
 admin-schedules-runs-title = Últimas execuções
 admin-schedules-runs-empty = Nenhuma execução ainda.
 admin-schedules-runs-started = Início
@@ -1183,6 +1182,14 @@ admin-schedules-flash-toggled = Agendamento atualizado.
 admin-schedules-flash-bad-cron = Expressão cron inválida — use a forma de 5 campos, ex.: "0 3 * * *".
 admin-schedules-flash-bad-spec = App desconhecido, ou o app não tem imagem de container para executar.
 admin-schedules-flash-error = A operação falhou — verifique os logs do servidor.
+admin-schedules-col-state = Situação
+admin-schedules-cmd-default = Comando do próprio app
+admin-schedules-cancel = Cancelar
+admin-schedules-pause = Pausar
+admin-schedules-resume = Retomar
+admin-schedules-status-ok = Concluída
+admin-schedules-status-failed = Falhou
+admin-schedules-status-error = Não executou
 
 # — TOTP / autenticação em dois fatores (#1005)
 chrome-mfa = Autenticação em dois fatores

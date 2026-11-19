@@ -18,6 +18,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
@@ -40,10 +42,13 @@ pub fn routes() -> Router<AppState> {
 struct ScheduleRow {
     id: i64,
     spec_id: String,
+    /// The app's display name (the id when it has none, or when the app
+    /// left the catalog).
+    spec_name: String,
     cron: String,
-    /// First line of the argv override, or an em dash for "the spec's
-    /// own command".
-    cmd_summary: String,
+    /// The whole argv override on one line (`Rscript etl.R --full`), or
+    /// empty for "the app's own command" — the template says so in words.
+    cmd: String,
     /// `YYYY-MM-DD HH:MM <zone>` in the scheduler's timezone, or an em
     /// dash when the schedule is disabled or its cron no longer parses.
     next_run: String,
@@ -55,6 +60,7 @@ struct ScheduleRow {
 /// One run-history row, pre-formatted for the template.
 struct RunView {
     spec_id: String,
+    spec_name: String,
     started: String,
     /// `ok` | `failed` | `error` — drives the badge colour.
     status: String,
@@ -87,6 +93,11 @@ struct SchedulesPage<'a> {
     /// writing an expression shouldn't have to open `ruscker.yml` to
     /// learn which clock it will be read in (#1042).
     tz_label: String,
+    /// Whether the creation form is open: asked for (`?new=1`), nothing
+    /// scheduled yet, or the last attempt was refused. Otherwise the
+    /// page leads with what is scheduled, and the form is one click away
+    /// — the same shape as the Apps and SSO tabs.
+    show_form: bool,
     flash: Option<&'static str>,
     flash_error: bool,
 }
@@ -94,6 +105,16 @@ struct SchedulesPage<'a> {
 impl SchedulesPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+
+    /// Localized label of a run's outcome (`ok` | `failed` | `error`).
+    fn status_label(&self, status: &str) -> String {
+        match status {
+            "ok" => self.t("admin-schedules-status-ok"),
+            "failed" => self.t("admin-schedules-status-failed"),
+            "error" => self.t("admin-schedules-status-error"),
+            other => other.to_string(),
+        }
     }
 
     fn kpis(&self) -> [KpiMetric; 3] {
@@ -141,6 +162,27 @@ fn next_run(schedule: &Schedule, tz: chrono_tz::Tz) -> Option<DateTime<Utc>> {
     crate::jobs::next_occurrence(&schedule.cron, anchor, tz)
 }
 
+/// An argv as one readable line. Arguments that are empty or contain
+/// whitespace or quotes are double-quoted, so `["Rscript", "my file.R"]`
+/// does not read as three arguments.
+fn argv_line(argv: &[String]) -> String {
+    argv.iter()
+        .map(|a| {
+            if a.is_empty() || a.chars().any(|c| c.is_whitespace() || c == '"' || c == '\'') {
+                format!("\"{}\"", a.replace('\\', "\\\\").replace('"', "\\\""))
+            } else {
+                a.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Display name of an app, falling back to its id.
+fn spec_name(names: &HashMap<String, String>, id: &str) -> String {
+    names.get(id).cloned().unwrap_or_else(|| id.to_string())
+}
+
 fn schedule_row(s: Schedule, tz: chrono_tz::Tz) -> ScheduleRow {
     let next = if s.enabled {
         next_run(&s, tz).map(|dt| fmt_dt(&dt, tz))
@@ -148,16 +190,14 @@ fn schedule_row(s: Schedule, tz: chrono_tz::Tz) -> ScheduleRow {
         None // a disabled schedule has no next fire
     };
     ScheduleRow {
-        cmd_summary: s
-            .cmd_override()
-            .and_then(|argv| argv.first().cloned())
-            .unwrap_or_else(|| "—".to_string()),
+        cmd: s.cmd_override().map(|argv| argv_line(&argv)).unwrap_or_default(),
         next_run: next.unwrap_or_else(|| "—".to_string()),
         last_run: s
             .last_run_at
             .map(|dt| fmt_dt(&dt, tz))
             .unwrap_or_else(|| "—".to_string()),
         id: s.id,
+        spec_name: s.spec_id.clone(),
         spec_id: s.spec_id,
         cron: s.cron,
         enabled: s.enabled,
@@ -175,6 +215,7 @@ fn fmt_duration(ms: Option<i64>) -> String {
 
 fn run_view(r: RunRow, tz: chrono_tz::Tz) -> RunView {
     RunView {
+        spec_name: r.spec_id.clone(),
         spec_id: r.spec_id,
         started: fmt_dt(&r.started_at, tz),
         status: r.status,
@@ -187,6 +228,8 @@ fn run_view(r: RunRow, tz: chrono_tz::Tz) -> RunView {
 #[derive(Debug, Deserialize)]
 struct FlashQuery {
     flash: Option<String>,
+    /// `?new=1` opens the creation form.
+    new: Option<String>,
 }
 
 async fn index(
@@ -244,6 +287,30 @@ async fn index(
     // time, so they all render in it (#1042).
     let tz = state.config.server.effective_timezone();
 
+    // Display names for the rows. A schedule whose app has since left the
+    // catalog still shows, under its id.
+    let names: HashMap<String, String> = specs.iter().cloned().collect();
+    // Only a refused CREATION reopens the form; a failed pause or delete
+    // (also `flash=error`) is reported without it.
+    let refused_create = matches!(q.flash.as_deref(), Some("bad-cron" | "bad-spec"));
+    let show_form = q.new.is_some() || schedules.is_empty() || refused_create;
+    let schedules: Vec<ScheduleRow> = schedules
+        .into_iter()
+        .map(|s| {
+            let mut row = schedule_row(s, tz);
+            row.spec_name = spec_name(&names, &row.spec_id);
+            row
+        })
+        .collect();
+    let runs: Vec<RunView> = runs
+        .into_iter()
+        .map(|r| {
+            let mut run = run_view(r, tz);
+            run.spec_name = spec_name(&names, &run.spec_id);
+            run
+        })
+        .collect();
+
     super::render(&SchedulesPage {
         locale: loc,
         theme,
@@ -253,12 +320,13 @@ async fn index(
         nav_section: "schedules",
         role: admin.role,
         specs,
-        schedules: schedules.into_iter().map(|s| schedule_row(s, tz)).collect(),
-        runs: runs.into_iter().map(|r| run_view(r, tz)).collect(),
+        schedules,
+        runs,
         kpi_jobs,
         kpi_active,
         kpi_recent_failures,
         tz_label: tz.name().to_string(),
+        show_form,
         flash,
         flash_error,
     })
@@ -452,7 +520,7 @@ mod tests {
         );
         assert_eq!(row.next_run, "2026-07-13 03:00 UTC");
         assert_eq!(row.last_run, "2026-07-12 03:00 UTC");
-        assert_eq!(row.cmd_summary, "Rscript");
+        assert_eq!(row.cmd, "Rscript etl.R");
 
         // Disabled → no next fire; never fired → em-dash last run.
         let row = schedule_row(sched("0 3 * * *", false, None), chrono_tz::UTC);
@@ -496,6 +564,15 @@ mod tests {
             next_run(&s, tz).unwrap().to_rfc3339(),
             "2026-07-13T11:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn argv_reads_as_one_line_with_quoted_arguments() {
+        let v = |a: &[&str]| a.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(argv_line(&v(&["Rscript", "etl.R", "--full"])), "Rscript etl.R --full");
+        assert_eq!(argv_line(&v(&["Rscript", "my file.R"])), r#"Rscript "my file.R""#);
+        assert_eq!(argv_line(&v(&["echo", ""])), r#"echo """#);
+        assert_eq!(argv_line(&v(&["sh", "-c", r#"say "hi""#])), r#"sh -c "say \"hi\"""#);
     }
 
     #[test]

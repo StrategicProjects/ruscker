@@ -583,6 +583,11 @@ line; leave it empty to run the app's own `container-cmd`, or the
 image's baked `CMD`). External apps can't be scheduled — there is
 nothing to run.
 
+The page lists what is scheduled — the app, its cron, the whole command,
+the next and last run — with **Pause/Resume** and delete on each row.
+**New schedule** opens the form; it is already open when nothing is
+scheduled yet, or after an attempt was refused.
+
 Semantics worth knowing:
 
 - **No run on creation.** A new schedule waits for its next cron
@@ -602,9 +607,9 @@ Semantics worth knowing:
 - **Timeout.** Each run is capped — 1 hour by default, or the
   per-schedule *Timeout (minutes)* when set. A run over the cap is
   killed and recorded as an error.
-- **History.** The *Latest runs* table shows each run's status (`ok` /
-  `failed` = non-zero exit / `error` = couldn't run), exit code,
-  duration and an expandable log tail.
+- **History.** The *Latest runs* table shows each run's outcome —
+  *Succeeded*, *Failed* (non-zero exit) or *Could not run* (pull, start
+  or timeout) — with its exit code, duration and an expandable log tail.
 - **Alerts.** A failed run raises a `job-failed` alert through the
   webhook configured in the System tab (see below).
 

@@ -1165,7 +1165,6 @@ admin-schedules-disabled = Disabled
 admin-schedules-toggle = Enable/disable
 admin-schedules-delete = Delete
 admin-schedules-confirm-delete = Delete this schedule? Its run history goes with it.
-admin-schedules-empty = No schedules yet — create one above.
 admin-schedules-runs-title = Latest runs
 admin-schedules-runs-empty = No runs yet.
 admin-schedules-runs-started = Started
@@ -1179,6 +1178,14 @@ admin-schedules-flash-toggled = Schedule updated.
 admin-schedules-flash-bad-cron = Invalid cron expression — use the 5-field form, e.g. "0 3 * * *".
 admin-schedules-flash-bad-spec = Unknown app, or the app has no container image to run.
 admin-schedules-flash-error = The operation failed — check the server logs.
+admin-schedules-col-state = Status
+admin-schedules-cmd-default = The app's own command
+admin-schedules-cancel = Cancel
+admin-schedules-pause = Pause
+admin-schedules-resume = Resume
+admin-schedules-status-ok = Succeeded
+admin-schedules-status-failed = Failed
+admin-schedules-status-error = Could not run
 
 # — TOTP / two-factor authentication (#1005)
 chrome-mfa = Two-factor authentication

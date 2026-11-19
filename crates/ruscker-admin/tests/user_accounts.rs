@@ -1936,3 +1936,76 @@ async fn password_change_mints_the_current_role() {
     let info = state.admin_sessions.validate(&new_sid).await.unwrap();
     assert_eq!(info.role, Role::Viewer, "the new session is not an Admin one");
 }
+
+/// Automated security review of #1123: an account deleted and created again
+/// under the same name starts its generation over, so a session of the old
+/// account would match it. A session issued before the account existed is
+/// refused.
+#[tokio::test]
+async fn a_session_of_a_deleted_account_does_not_revive_with_a_namesake() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "rui", "Rui-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    ruscker_admin::db::users::create(&db, "boss2", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let old = state.admin_sessions.create(Role::Admin, Some("rui".into())).await;
+    ruscker_admin::db::users::delete(&db, "rui", None).await.unwrap();
+    // (The store's own revocation is what normally removes it; the point
+    // is that nothing depends on that having worked.)
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+    ruscker_admin::db::users::create(&db, "rui", "Other-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    state.invalidate_identity_cache();
+    let resp = router(state.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/users")
+                .header("cookie", format!("{COOKIE_NAME}={old}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::SEE_OTHER, "the old Admin session is not the new account's");
+}
+
+/// Automated security review of #1123: the 2-second generation check fell
+/// back on the 30-second identity cache, so a change made on ANOTHER node
+/// (which cannot invalidate this node's cache) took up to 30 s to apply.
+#[tokio::test]
+async fn a_change_on_another_node_applies_within_seconds() {
+    let (state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "sol", "Sol-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    ruscker_admin::db::users::create(&db, "boss3", "Boss-Pass9!", Role::Admin, false, &[], None)
+        .await
+        .unwrap();
+    let sid = state.admin_sessions.create(Role::Admin, Some("sol".into())).await;
+    let get = || {
+        let app = router(state.clone());
+        let sid = sid.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+    assert_eq!(get().await, StatusCode::OK); // fills this node's identity cache
+    // Demoted "elsewhere": the database changes, this node's cache is NOT told.
+    ruscker_admin::db::users::set_role(&db, "sol", Role::Viewer, None).await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+    assert_eq!(get().await, StatusCode::SEE_OTHER, "refused once the 2 s window passed");
+}

@@ -1427,7 +1427,18 @@ pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
 pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
-    if let Some(identity) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
+    resolve_identity_within(state, username, IDENTITY_CACHE_TTL).await
+}
+
+/// [`resolve_identity`] accepting a cached copy at most `max_age` old, and
+/// otherwise reading the database — never an older cached copy (the
+/// session check asks for 2 s; the proxy's attributes accept 30 s).
+pub(crate) async fn resolve_identity_within(
+    state: &AppState,
+    username: &str,
+    max_age: std::time::Duration,
+) -> Arc<CachedIdentity> {
+    if let Some(identity) = state.identity_cache.get(username, max_age) {
         return identity;
     }
 
@@ -1451,6 +1462,7 @@ pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<Ca
                             setor: user.setor,
                             group_roles: Arc::default(),
                             auth_epoch: None,
+                            account_created_at: None,
                         });
                     }
                 };
@@ -1467,6 +1479,7 @@ pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<Ca
                             setor: user.setor,
                             group_roles: Arc::default(),
                             auth_epoch,
+                            account_created_at: Some(user.created_at),
                         });
                     }
                 };
@@ -1476,6 +1489,7 @@ pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<Ca
                     setor: user.setor,
                     group_roles: Arc::new(group_roles),
                     auth_epoch,
+                    account_created_at: Some(user.created_at),
                 })
             }
             Ok(None) => Arc::new(CachedIdentity::default()),

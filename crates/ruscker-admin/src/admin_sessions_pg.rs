@@ -322,7 +322,7 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         self.cache.insert(
             id.clone(),
             CachedEntry {
-                info: Some(SessionInfo { role, actor, epoch }),
+                info: Some(SessionInfo { role, actor, epoch, issued_at: expires_at - ttl_as_chrono(self.ttl) }),
                 valid_until,
             },
         );
@@ -399,7 +399,16 @@ impl AdminSessionStore for PostgresAdminSessionStore {
                         .await;
                     (None, None)
                 } else {
-                    (Some(SessionInfo { role, actor, epoch }), Some(expires_at))
+                    (
+                        Some(SessionInfo {
+                            role,
+                            actor,
+                            epoch,
+                            // Issued = expiry − lifetime (sessions are never extended).
+                            issued_at: expires_at - ttl_as_chrono(self.ttl),
+                        }),
+                        Some(expires_at),
+                    )
                 }
             }
             Ok(None) => (None, None),
@@ -487,6 +496,11 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         self.cache
             .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
     }
+}
+
+/// The session lifetime as a chrono duration (for issued = expiry − ttl).
+fn ttl_as_chrono(ttl: Duration) -> chrono::Duration {
+    chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero())
 }
 
 /// Run a revoking DELETE (one `$1` bind) up to [`REVOKE_ATTEMPTS`] times.

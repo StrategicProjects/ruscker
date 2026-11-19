@@ -187,6 +187,7 @@ struct SessionEntry {
     role: Role,
     actor: Option<String>,
     epoch: i64,
+    issued_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// What [`AdminSessionStore::validate`] yields for a live session —
@@ -199,6 +200,11 @@ pub struct SessionInfo {
     /// issued (`users.auth_epoch`). The session stands only while the
     /// account is still at this generation — see [`confirm_session`].
     pub epoch: i64,
+    /// When the session was issued. A session older than its account
+    /// belonged to an earlier account of the same name, deleted and created
+    /// again — whose generation starts over (automated security review of
+    /// #1123).
+    pub issued_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Server-side store of opaque admin session ids → (expiry, role).
@@ -298,6 +304,7 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
                 role,
                 actor,
                 epoch,
+                issued_at: chrono::Utc::now(),
             },
         );
         id
@@ -306,11 +313,11 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
     async fn validate(&self, id: &str) -> Option<SessionInfo> {
         let info = self.sessions.get(id).map(|e| {
             let v = e.value();
-            (v.expiry, v.role, v.actor.clone(), v.epoch)
+            (v.expiry, v.role, v.actor.clone(), v.epoch, v.issued_at)
         });
         match info {
-            Some((expiry, role, actor, epoch)) if expiry > Instant::now() => {
-                Some(SessionInfo { role, actor, epoch })
+            Some((expiry, role, actor, epoch, issued_at)) if expiry > Instant::now() => {
+                Some(SessionInfo { role, actor, epoch, issued_at })
             }
             Some(_) => {
                 self.sessions.remove(id);
@@ -1064,6 +1071,8 @@ pub struct AdminSession {
     /// DB username for a password login, or `None` for a break-glass
     /// token session. Use [`AdminSession::actor`] for audit logging.
     pub actor: Option<String>,
+    /// The authentication generation the session was confirmed under.
+    pub epoch: i64,
 }
 
 impl AdminSession {
@@ -1102,18 +1111,16 @@ pub async fn confirm_session(state: &crate::AppState, id: &str) -> Option<Sessio
         // an account session: nothing to compare against.
         return Some(info);
     }
-    let current = current_auth_epoch(state, username).await?;
-    (current == info.epoch).then_some(info)
-}
-
-/// The account's authentication generation, through the per-user cache
-/// (at most [`AUTH_EPOCH_TTL`] old); `None` when the account is gone or
-/// cannot be read.
-pub(crate) async fn current_auth_epoch(state: &crate::AppState, username: &str) -> Option<i64> {
-    if let Some(identity) = state.identity_cache.get(username, AUTH_EPOCH_TTL) {
-        return identity.auth_epoch;
-    }
-    crate::routes::proxy::resolve_identity(state, username).await.auth_epoch
+    let identity = crate::routes::proxy::resolve_identity_within(state, username, AUTH_EPOCH_TTL).await;
+    let (Some(current), Some(created_at)) = (identity.auth_epoch, identity.account_created_at) else {
+        return None;
+    };
+    // Issued under an earlier generation, or before this account existed
+    // (an earlier account of the same name: its generation started over).
+    // The margin absorbs clock differences between nodes; a session issued
+    // that close to a re-creation is not a realistic leftover.
+    let predates_account = info.issued_at + chrono::Duration::seconds(2) < created_at;
+    (current == info.epoch && !predates_account).then_some(info)
 }
 
 impl FromRequestParts<crate::AppState> for AdminSession {
@@ -1159,6 +1166,7 @@ impl FromRequestParts<crate::AppState> for AdminSession {
                 Some(info) => Ok(AdminSession {
                     role: info.role,
                     actor: info.actor,
+                    epoch: info.epoch,
                 }),
                 None => Err(to_login()),
             },

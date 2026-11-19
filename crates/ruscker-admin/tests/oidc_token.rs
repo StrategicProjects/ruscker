@@ -123,7 +123,10 @@ async fn fixture(yaml: &str) -> Fixture {
 /// Run the browser half as `ana`: returns a fresh authorization code
 /// for `client_id` with the given scope.
 async fn authorize(f: &Fixture, client_id: &str, scope: &str) -> String {
-    let sid = f.state.admin_sessions.create(Role::Viewer, Some("ana".into())).await;
+    // Signed in now: at the account's current authentication generation,
+    // as a real sign-in mints it.
+    let (_, epoch) = ruscker_admin::db::users::role_and_epoch(&f.db, "ana").await.unwrap().unwrap();
+    let sid = f.state.admin_sessions.create_at_epoch(Role::Viewer, Some("ana".into()), epoch).await;
     let mut q = url::form_urlencoded::Serializer::new(String::new());
     for (k, v) in [
         ("response_type", "code"),
@@ -913,6 +916,8 @@ async fn a_code_from_before_a_password_change_is_refused_even_after_rotation() {
     ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
     ruscker_admin::db::users::set_password(&f.db, "ana", "Chosen-Pass9!", false, None).await.unwrap();
     assert!(!ruscker_admin::db::users::fetch(&f.db, "ana").await.unwrap().unwrap().must_change_password);
+    // (The routes that change a password drop this node's cached copy.)
+    f.state.invalidate_identity_cache();
     assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
     // A code issued AFTER the change is fine.
     let code = authorize(&f, "radar", "openid").await;

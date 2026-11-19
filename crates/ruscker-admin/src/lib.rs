@@ -112,6 +112,9 @@ pub struct CachedIdentity {
     /// `None` when the account is gone or could not be read. Read through
     /// this cache with a short TTL by [`auth::confirm_session`].
     pub(crate) auth_epoch: Option<i64>,
+    /// When the account was created; with `auth_epoch`, what a session is
+    /// confirmed against.
+    pub(crate) account_created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Shared short-TTL cache of user identity attributes for the proxy hot

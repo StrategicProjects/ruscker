@@ -576,14 +576,18 @@ async fn authorize(
 
     // 7. Issue the code, bound to the account's authentication generation
     // (read now; the session it came from was confirmed against it).
-    let auth_epoch = match crate::db::users::role_and_epoch(db, &user.username).await {
-        Ok(Some((_, epoch))) => epoch,
-        Ok(None) => return fail("access_denied"),
+    // The SESSION's generation, which it was just confirmed under; if the
+    // account has moved on since (a change landing during this request),
+    // nothing is issued (automated security review of #1123).
+    let auth_epoch = session.epoch;
+    match crate::db::users::role_and_epoch(db, &user.username).await {
+        Ok(Some((_, current))) if current == auth_epoch => {}
+        Ok(_) => return fail("access_denied"),
         Err(err) => {
             tracing::error!(error = ?err, "read auth epoch for authorization failed");
             return fail("server_error");
         }
-    };
+    }
     let grant = Grant {
         client_id: client.client_id.clone(),
         user_id: user.id.clone(),

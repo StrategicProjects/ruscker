@@ -308,7 +308,7 @@ fn no_store(mut resp: Response) -> Response {
     resp
 }
 
-/// Media-library filenames for the logo select; empty without a DB.
+/// Media-library filenames for the logo gallery; empty without a DB.
 async fn media_filenames(state: &AppState) -> Vec<String> {
     match state.db.as_ref() {
         Some(pool) => db::images::list_all(pool)

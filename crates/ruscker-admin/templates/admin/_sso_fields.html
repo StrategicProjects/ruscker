@@ -33,9 +33,9 @@
      x-data="{ logo: $el.dataset.logo, ...window.ruscker.imagePicker({{ self.logos_json() }}),
                setLogo(v) { this.logo = String(v || '').split('?')[0].split('/').pop(); } }"
      data-logo="{{ form.logo }}">
-  <span class="spec-form-label">{{ self.t("admin-sso-logo") }}</span>
+  <span class="spec-form-label" id="sso-logo-label">{{ self.t("admin-sso-logo") }}</span>
   <input type="hidden" name="logo" value="{{ form.logo }}" :value="logo">
-  <div class="logo-pick">
+  <div class="logo-pick" role="group" aria-labelledby="sso-logo-label">
     <button type="button" class="logo-pick__thumb" :title="logo"
             aria-label="{{ self.t("spec-form-choose-image") }}"
             @click="openImagePicker((v) => setLogo(v), '/assets/img/' + logo)">

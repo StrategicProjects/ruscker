@@ -103,6 +103,18 @@ struct PendingRevocations {
 /// Attempts of a revoking DELETE before it is handed to the background
 /// retry, and the pause between background retries.
 const REVOKE_ATTEMPTS: u32 = 3;
+/// At most this many revocations waiting for the database at once. A
+/// flood of sign-outs during an outage must not turn into a flood of
+/// day-long background tasks (Codex review of #1123).
+const MAX_PENDING_REVOCATIONS: usize = 4096;
+
+/// Whether `id` has the shape [`mint_session_id`] gives every session (64
+/// lowercase hex). Anything else cannot be a stored session, so it never
+/// reaches Postgres — a cookie carrying, say, a NUL would make the query
+/// fail every time (Codex review of #1123).
+fn well_formed_sid(id: &str) -> bool {
+    id.len() == 64 && id.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
 const REVOKE_RETRY_EVERY: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
@@ -271,6 +283,10 @@ impl AdminSessionStore for PostgresAdminSessionStore {
             self.cache.retain(|_, e| e.valid_until > now);
         }
 
+        // Not a session id at all: nothing to look up.
+        if !well_formed_sid(id) {
+            return None;
+        }
         // A revocation of this very session that has not reached the
         // database yet: denied, whatever the cache or the row says.
         if self.pending.sids.contains_key(id) {
@@ -368,9 +384,19 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         // Best-effort delete + cache eviction (write-through). If the
         // DB delete fails the cache still drops the entry, so the
         // signed-out user can't bounce on this node.
+        if !well_formed_sid(id) {
+            // Cannot be a stored session: nothing to delete.
+            return;
+        }
         if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE sid = $1", id).await {
-            // Deny it here until the DELETE lands; keep trying.
-            self.pending.sids.insert(id.to_string(), ());
+            // Deny it here until the DELETE lands; keep trying — once per
+            // sid, and within the global bound.
+            if self.pending.sids.len() >= MAX_PENDING_REVOCATIONS
+                || self.pending.sids.insert(id.to_string(), ()).is_some()
+            {
+                self.cache.remove(id);
+                return;
+            }
             let (pool, pending, sid) = (self.pool.clone(), self.pending.clone(), id.to_string());
             tokio::spawn(async move {
                 retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE sid = $1", &sid).await;
@@ -397,14 +423,28 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         if !delete_with_retries(&self.pool, "DELETE FROM admin_sessions WHERE actor = $1", actor).await {
             // Deny the account's existing sessions here until the DELETE
             // lands; sessions created after this instant are not affected
-            // (the password change re-mints one right away).
-            self.pending.actors.insert(actor.to_string(), revoked_at);
+            // (the password change re-mints one right away). One retry
+            // task per account: a newer revocation just moves the instant.
+            let already_retrying = self.pending.actors.insert(actor.to_string(), revoked_at).is_some();
+            if already_retrying {
+                self.cache
+                    .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
+                return;
+            }
             let (pool, pending, who) = (self.pool.clone(), self.pending.clone(), actor.to_string());
             tokio::spawn(async move {
-                retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE actor = $1", &who).await;
-                // Only clear the marker this task set (a newer revocation
-                // may have replaced it).
-                pending.actors.remove_if(&who, |_, t| *t == revoked_at);
+                // A successful DELETE removes every session of the account
+                // that existed when it ran, so it settles every revocation
+                // up to that instant. A revocation that came later (its
+                // own DELETE failed too) keeps the marker: go again.
+                loop {
+                    let started = Utc::now();
+                    retry_until_deleted(&pool, "DELETE FROM admin_sessions WHERE actor = $1", &who).await;
+                    pending.actors.remove_if(&who, |_, t| *t <= started);
+                    if !pending.actors.contains_key(&who) {
+                        break;
+                    }
+                }
             });
         }
         // Evict this node's positive cache entries for the actor so it
@@ -439,6 +479,8 @@ async fn retry_until_deleted(pool: &PgPool, sql: &'static str, key: &str) {
     let give_up = Instant::now() + DEFAULT_TTL;
     while Instant::now() < give_up {
         tokio::time::sleep(REVOKE_RETRY_EVERY).await;
+        // (Each attempt's start is before the statement runs, so the
+        // caller's `started` is never later than the deleting statement.)
         if sqlx::query(sql).bind(key).execute(pool).await.is_ok() {
             tracing::info!("admin session revocation reached the database");
             return;
@@ -619,9 +661,10 @@ mod postgres_it {
         .unwrap();
         reset_rows(&store.pool).await;
 
-        // The spray: distinct bogus sids, one cached negative each.
+        // The spray: distinct well-formed but unknown sids (malformed ones
+        // are refused before the cache), one cached negative each.
         for i in 0..200 {
-            assert!(store.validate(&format!("bogus-{i}")).await.is_none());
+            assert!(store.validate(&format!("{i:064x}")).await.is_none());
         }
         assert!(
             store.cache_len() >= 200,
@@ -706,5 +749,23 @@ mod postgres_it {
                 .unwrap();
             assert!(row.is_none(), "the retry reached the database");
         }
+    }
+
+    /// Codex review of #1123: a cookie that is not a session id (here an
+    /// encoded NUL, which Postgres refuses) must not reach the database or
+    /// start a day-long retry task; and a revocation already waiting is
+    /// not retried twice.
+    #[tokio::test]
+    async fn malformed_ids_never_reach_postgres_and_retries_are_bounded() {
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let store = PostgresAdminSessionStore::connect(&pg_url()).await.unwrap();
+        reset_rows(&store.pool).await;
+        for bad in ["\0", "x", &"g".repeat(64), &"A".repeat(64)] {
+            assert!(!well_formed_sid(bad));
+            store.remove(bad).await;
+            assert!(store.validate(bad).await.is_none());
+        }
+        assert!(store.pending.sids.is_empty(), "nothing queued for a malformed id");
+        assert!(well_formed_sid(&mint_session_id()));
     }
 }

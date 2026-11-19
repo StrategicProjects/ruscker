@@ -108,6 +108,10 @@ pub struct CachedIdentity {
     /// the per-spec `access-groups` filter is applied per request, when the
     /// header is built (`routes::proxy::Identity::header_pairs`).
     pub(crate) group_roles: Arc<Vec<(String, String)>>,
+    /// The account's authentication generation (`users.auth_epoch`);
+    /// `None` when the account is gone or could not be read. Read through
+    /// this cache with a short TTL by [`auth::confirm_session`].
+    pub(crate) auth_epoch: Option<i64>,
 }
 
 /// Shared short-TTL cache of user identity attributes for the proxy hot
@@ -999,7 +1003,7 @@ pub(crate) async fn session_password_state(
     // answers "none" when the database is failing; a cached or returned
     // "clear" would let a must-change session through, now or for the
     // whole TTL once the database is back (Codex review of #1122).
-    let Some(info) = state.admin_sessions.validate(id).await else {
+    let Some(info) = auth::confirm_session(state, id).await else {
         return PasswordState::NoSession;
     };
     let actor = info.actor;

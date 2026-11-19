@@ -942,6 +942,9 @@ async fn set_role(
                 .admin_sessions
                 .revoke_by_actor(&target.username)
                 .await;
+            // The change moved the account's generation: drop this node's
+            // cached copy so its sessions are refused now, not in 2 s.
+            state.invalidate_identity_cache();
             redirect_flash("saved")
         }
         Err(e) => {
@@ -995,6 +998,9 @@ async fn reset_password(
                 .admin_sessions
                 .revoke_by_actor(&target.username)
                 .await;
+            // The change moved the account's generation: drop this node's
+            // cached copy so its sessions are refused now, not in 2 s.
+            state.invalidate_identity_cache();
             redirect_flash("saved")
         }
         Err(e) => {

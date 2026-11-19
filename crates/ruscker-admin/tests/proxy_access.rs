@@ -289,8 +289,8 @@ async fn a_session_lost_mid_request_is_not_forwarded() {
     }
     #[async_trait::async_trait]
     impl AdminSessionStore for OnceThenGone {
-        async fn create(&self, role: Role, actor: Option<String>) -> String {
-            self.inner.create(role, actor).await
+        async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64) -> String {
+            self.inner.create_at_epoch(role, actor, epoch).await
         }
         async fn validate(&self, id: &str) -> Option<SessionInfo> {
             if self.lookups.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -299,7 +299,7 @@ async fn a_session_lost_mid_request_is_not_forwarded() {
                 None
             }
         }
-        async fn remove(&self, id: &str) {
+        async fn remove(&self, id: &str) -> bool {
             self.inner.remove(id).await
         }
         async fn revoke_by_actor(&self, actor: &str) {

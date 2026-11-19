@@ -574,7 +574,16 @@ async fn authorize(
         }
     }
 
-    // 7. Issue the code.
+    // 7. Issue the code, bound to the account's authentication generation
+    // (read now; the session it came from was confirmed against it).
+    let auth_epoch = match crate::db::users::role_and_epoch(db, &user.username).await {
+        Ok(Some((_, epoch))) => epoch,
+        Ok(None) => return fail("access_denied"),
+        Err(err) => {
+            tracing::error!(error = ?err, "read auth epoch for authorization failed");
+            return fail("server_error");
+        }
+    };
     let grant = Grant {
         client_id: client.client_id.clone(),
         user_id: user.id.clone(),
@@ -590,6 +599,7 @@ async fn authorize(
         // Step 6 only lets a code through for an MFA-requiring client
         // after the proof; for any other client nothing was proved.
         mfa_proved: client.require_mfa,
+        auth_epoch,
     };
     match crate::db::oidc_codes::issue(db, &grant).await {
         // `iss` (RFC 9207) lets a client that talks to several providers
@@ -914,7 +924,20 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
     // password with a mandatory change, or who starts requiring MFA for
     // this client, within the code's minute must not see a code issued
     // under the old rules still turn into tokens.
-    if user.must_change_password || (client.require_mfa && !grant.mfa_proved) {
+    // …and the account's authentication generation: any password or role
+    // change since the code was issued refuses it.
+    let current_epoch = match crate::db::users::role_and_epoch(db, &user.username).await {
+        Ok(Some((_, epoch))) => epoch,
+        Ok(None) => return invalid_grant(),
+        Err(err) => {
+            tracing::error!(error = ?err, "read auth epoch for token failed");
+            return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+        }
+    };
+    if current_epoch != grant.auth_epoch
+        || user.must_change_password
+        || (client.require_mfa && !grant.mfa_proved)
+    {
         tracing::warn!(client = %client.client_id, user = %user.username,
             "authorization code refused: password change pending or MFA now required");
         return invalid_grant();

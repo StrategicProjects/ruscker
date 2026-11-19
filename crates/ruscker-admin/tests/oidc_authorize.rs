@@ -526,9 +526,12 @@ async fn the_group_gate_is_read_live_and_has_no_admin_bypass() {
     let (_, token) = session(&state, Role::Admin, None).await;
     denied(&get(&state, &request("", &[]), &token).await);
 
-    // A session whose account was deleted.
+    // A session whose account was deleted is no session at all (it cannot
+    // be confirmed against the account's authentication generation): the
+    // person is asked to sign in, and no code is issued.
     let (_, ghost) = session(&state, Role::Viewer, Some("ghost")).await;
-    denied(&get(&state, &request("", &[]), &ghost).await);
+    let r = get(&state, &request("", &[]), &ghost).await;
+    assert!(r.location.contains("/admin/login"), "{}", r.location);
     assert_eq!(stored_codes(&db).await, 0);
 
     // A client that retries after a refusal (or a page that keeps
@@ -552,7 +555,6 @@ async fn the_group_gate_is_read_live_and_has_no_admin_bypass() {
             (Some("bia".to_string()), "not-in-group".to_string()),
             (Some("root".to_string()), "not-in-group".to_string()),
             (None, "no-account".to_string()),
-            (None, "account-missing".to_string()),
         ]
     );
 

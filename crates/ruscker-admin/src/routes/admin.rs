@@ -315,22 +315,6 @@ async fn remember_sign_in(
     }
 }
 
-/// Whether a session just created for `username` still rests on the
-/// credentials verified (`stamp`); when not (or when that cannot be
-/// read), the session is removed at once. See `login_submit`.
-pub async fn session_still_backed(state: &AppState, session_id: &str, username: &str, stamp: &str) -> bool {
-    let current = match state.db.as_ref() {
-        Some(db) => db::users::security_stamp(db, username).await.ok().flatten(),
-        None => None,
-    };
-    if current.as_deref() == Some(stamp) {
-        return true;
-    }
-    tracing::warn!(user = %username, "account changed during sign-in; session withdrawn");
-    state.admin_sessions.remove(session_id).await;
-    false
-}
-
 /// After a correct password sign-in was remembered (in memory, and maybe
 /// in the table): if the account's password changed around the time the
 /// credentials were checked, forget everything about the account. Closes
@@ -398,6 +382,8 @@ pub struct LoginQuery {
     pub token: Option<String>,
     /// Optional app destination captured by the restricted-app guard.
     pub next: Option<String>,
+    /// `signout-unconfirmed`: the last sign-out was not recorded.
+    pub error: Option<String>,
 }
 
 async fn login_form(
@@ -408,7 +394,12 @@ async fn login_form(
 ) -> Response {
     let bootstrap = show_token_form(&state, q.token.is_some()).await;
     let next = app_next_path(q.next.as_deref(), &state.base_path).unwrap_or_default();
-    let page = login_page(&state, loc, theme, "", bootstrap, next).await;
+    // Only known codes — the query string is user input.
+    let error = match q.error.as_deref() {
+        Some("signout-unconfirmed") => "signout-unconfirmed",
+        _ => "",
+    };
+    let page = login_page(&state, loc, theme, error, bootstrap, next).await;
     render(&page)
 }
 
@@ -524,7 +515,7 @@ async fn login_submit(
     // remembered under, so a password change that lands while this
     // request is still running is "after" it, and wins.
     let verified_at = chrono::Utc::now();
-    let (user, stamp) = match db::users::verify_login_stamped(pool, &form.username, &form.password).await {
+    let (user, epoch) = match db::users::verify_login_with_epoch(pool, &form.username, &form.password).await {
         Ok(Some(pair)) => pair,
         Ok(None) => {
             // Audit the refusal. The typed name is kept only when it is
@@ -563,20 +554,14 @@ async fn login_submit(
 
     remember_sign_in(&state, state.login_limiter.success(attempt), verified_at).await;
     forget_if_password_changed(&state, &user.username, verified_at).await;
+    // Minted at the generation read in the same row as the password and
+    // role that were verified: a demotion, reset or delete that landed
+    // while the slow check ran has already moved (or removed) it, so this
+    // session is refused from its first use (security review 2026-11-19).
     let session_id = state
         .admin_sessions
-        .create(user.role, Some(user.username.clone()))
+        .create_at_epoch(user.role, Some(user.username.clone()), epoch)
         .await;
-    // The password was checked against a snapshot of the account, and the
-    // check is slow. A demotion, a password reset or a delete that landed
-    // meanwhile has already revoked the account's sessions — but not this
-    // one, created after. So confirm, now that the session exists, that
-    // the account is still what was verified (security review 2026-11-19).
-    // Every revocation writes its change BEFORE revoking, so a change
-    // after this check revokes this session like any other.
-    if !session_still_backed(&state, &session_id, &user.username, &stamp).await {
-        return login_error(&state, loc, theme, "wrong-login", false, next.unwrap_or_default()).await;
-    }
     // Record the successful password login (#1021). Non-blocking enqueue;
     // the session id is the dedup key so the same login isn't double-counted
     // across HA instances. (Break-glass token logins are operator emergency
@@ -1058,13 +1043,18 @@ async fn password_submit(
     // revocation — not the one this (possibly hours-old) session carried,
     // which a demotion in the meantime would otherwise restore (security
     // review 2026-11-19). An account that is gone gets no session.
-    let role = match db::users::fetch(pool, &actor).await {
-        Ok(Some(u)) => u.role,
+    // Role and generation read TOGETHER, after the change committed: if a
+    // demotion lands after this read it moves the generation again and the
+    // new session is refused at once (Codex review of #1123 — reading the
+    // role alone left that window open).
+    state.invalidate_identity_cache();
+    let (role, epoch) = match db::users::role_and_epoch(pool, &actor).await {
+        Ok(Some(pair)) => pair,
         _ => return Redirect::to("/admin/login").into_response(),
     };
     let session_id = state
         .admin_sessions
-        .create(role, Some(actor.clone()))
+        .create_at_epoch(role, Some(actor.clone()), epoch)
         .await;
     issue_session_cookie(&state, &cookies, &headers, session_id);
     // Return to the app that triggered authentication when one was carried
@@ -1121,13 +1111,19 @@ fn section_for_admin_path(path: &str) -> &'static str {
 }
 
 async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Cookies) -> Redirect {
-    end_browser_session(&state, &cookies).await;
-    Redirect::to("/admin/login")
+    // The browser forgets the cookie either way. When the server could not
+    // record the sign-out, the login page says so instead of pretending
+    // (Codex review of #1123).
+    if end_browser_session(&state, &cookies).await {
+        Redirect::to("/admin/login")
+    } else {
+        Redirect::to("/admin/login?error=signout-unconfirmed")
+    }
 }
 
 /// End this browser's portal session: the admin button and a client
 /// system's "sign out everywhere" (`/oauth/logout`) do the same thing.
-pub(crate) async fn end_browser_session(state: &AppState, cookies: &Cookies) {
+pub(crate) async fn end_browser_session(state: &AppState, cookies: &Cookies) -> bool {
     // Invalidate the session server-side so a copied cookie is dead too,
     // then clear the browser's copy.
     if let Some(c) = cookies.get(COOKIE_NAME) {
@@ -1149,11 +1145,16 @@ pub(crate) async fn end_browser_session(state: &AppState, cookies: &Cookies) {
                 }
             }
         }
-        state.admin_sessions.remove(&sid).await;
+        let recorded = state.admin_sessions.remove(&sid).await;
+        let mut c = Cookie::new(COOKIE_NAME, "");
+        c.set_path("/");
+        cookies.remove(c);
+        return recorded;
     }
     let mut c = Cookie::new(COOKIE_NAME, "");
     c.set_path("/");
     cookies.remove(c);
+    true
 }
 
 /// Shared `Template → Response` (matches what landing.rs uses).

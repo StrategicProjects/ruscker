@@ -900,3 +900,22 @@ async fn policy_changes_during_the_code_lifetime_apply_at_redemption() {
     ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
     assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
 }
+
+/// Codex review of #1123: a code issued before a password reset became
+/// usable again once the person completed the mandatory change within the
+/// code's minute (`must_change_password` was false again). The code is
+/// bound to the account's authentication generation, which the reset and
+/// the change both moved.
+#[tokio::test]
+async fn a_code_from_before_a_password_change_is_refused_even_after_rotation() {
+    let f = fixture(ON).await;
+    let code = authorize(&f, "radar", "openid").await;
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Reset-Pass9!", true, None).await.unwrap();
+    ruscker_admin::db::users::set_password(&f.db, "ana", "Chosen-Pass9!", false, None).await.unwrap();
+    assert!(!ruscker_admin::db::users::fetch(&f.db, "ana").await.unwrap().unwrap().must_change_password);
+    assert_grant_refused(&token_basic(&f, "radar", &f.radar, &exchange(&code)).await);
+    // A code issued AFTER the change is fine.
+    let code = authorize(&f, "radar", "openid").await;
+    let r = token_basic(&f, "radar", &f.radar, &exchange(&code)).await;
+    assert_eq!(r.status, StatusCode::OK, "{}", r.json);
+}

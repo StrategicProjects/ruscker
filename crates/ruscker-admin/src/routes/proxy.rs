@@ -1426,7 +1426,7 @@ pub(crate) const SPEC_CACHE_TTL: std::time::Duration = std::time::Duration::from
 pub(crate) const IDENTITY_CACHE_TTL: std::time::Duration =
     std::time::Duration::from_secs(30);
 
-async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
+pub(crate) async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentity> {
     if let Some(identity) = state.identity_cache.get(username, IDENTITY_CACHE_TTL) {
         return identity;
     }
@@ -1438,6 +1438,22 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
     let identity = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
             Ok(Some(user)) => {
+                // The authentication generation (security review
+                // 2026-11-19). A failed read leaves it unknown — which
+                // confirms no session — and is NOT cached.
+                let auth_epoch = match crate::db::users::role_and_epoch(db, username).await {
+                    Ok(row) => row.map(|(_, epoch)| epoch),
+                    Err(error) => {
+                        tracing::warn!(user = username, error = ?error, "auth epoch lookup failed");
+                        return Arc::new(CachedIdentity {
+                            groups: Arc::new(user.groups),
+                            email: user.email,
+                            setor: user.setor,
+                            group_roles: Arc::default(),
+                            auth_epoch: None,
+                        });
+                    }
+                };
                 // Group roles (#1067). A failed read sends no roles (fail
                 // closed) and is NOT cached, so the next request retries
                 // instead of serving the gap for the whole TTL.
@@ -1450,6 +1466,7 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
                             email: user.email,
                             setor: user.setor,
                             group_roles: Arc::default(),
+                            auth_epoch,
                         });
                     }
                 };
@@ -1458,6 +1475,7 @@ async fn resolve_identity(state: &AppState, username: &str) -> Arc<CachedIdentit
                     email: user.email,
                     setor: user.setor,
                     group_roles: Arc::new(group_roles),
+                    auth_epoch,
                 })
             }
             Ok(None) => Arc::new(CachedIdentity::default()),

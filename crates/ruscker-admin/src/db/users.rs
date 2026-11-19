@@ -696,24 +696,19 @@ pub async fn verify_login(
     username: &str,
     password: &str,
 ) -> Result<Option<UserRow>> {
-    Ok(verify_login_stamped(db, username, password).await?.map(|(user, _)| user))
+    Ok(verify_login_with_epoch(db, username, password).await?.map(|(user, _)| user))
 }
 
-/// What a session's authority rests on: the account's id, role and
-/// password hash. Two reads with the same stamp saw the same credentials;
-/// a demotion, a password change or a delete-and-recreate changes it.
-fn stamp_of(id: &str, role: &str, password_hash: &str) -> String {
-    format!("{id}\u{1f}{role}\u{1f}{password_hash}")
-}
-
-/// [`verify_login`], also returning the [`stamp_of`] the password was
-/// checked against, for [`security_stamp`] to confirm later that nothing
-/// changed in between (security review 2026-11-19).
-pub async fn verify_login_stamped(
+/// [`verify_login`], also returning the account's authentication
+/// generation read in the SAME row as the password hash and role. A
+/// session minted with it dies as soon as a later change moves the
+/// generation, even one that landed while the password was being checked
+/// (security review 2026-11-19).
+pub async fn verify_login_with_epoch(
     db: &ConfigDb,
     username: &str,
     password: &str,
-) -> Result<Option<(UserRow, String)>> {
+) -> Result<Option<(UserRow, i64)>> {
     type Row = (
         String,
         String,
@@ -726,18 +721,19 @@ pub async fn verify_login_stamped(
         Option<String>,
         Option<String>,
         String,
+        i64,
     );
     let username = normalize_username(username);
     let row: Option<Row> = match db {
         ConfigDb::Sqlite(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash, auth_epoch
                FROM users WHERE username = ?",
         )
         .bind(&username)
         .fetch_optional(pool)
         .await,
         ConfigDb::Postgres(pool) => sqlx::query_as(
-            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash
+            "SELECT id, username, role, must_change_password, groups, created_at, created_by, setor, email, celular, password_hash, auth_epoch
                FROM users WHERE username = $1",
         )
         .bind(&username)
@@ -753,40 +749,40 @@ pub async fn verify_login_stamped(
     // timing doesn't reveal whether the account exists.
     let pw = password.to_string();
     let (hash_to_check, found) = match &row {
-        Some((.., hash)) => (hash.clone(), true),
+        Some((.., hash, _)) => (hash.clone(), true),
         None => (dummy_hash().to_string(), false),
     };
     let verified = tokio::task::spawn_blocking(move || verify_password(&pw, &hash_to_check))
         .await
         .context("password verify task")?;
     match row {
-        Some((id, u, r, m, g, c, by, se, em, ce, hash)) if found && verified => {
-            let stamp = stamp_of(&id, &r, &hash);
-            Ok(Some((row_from(id, u, r, m, g, c, by, se, em, ce), stamp)))
+        Some((id, u, r, m, g, c, by, se, em, ce, _, epoch)) if found && verified => {
+            Ok(Some((row_from(id, u, r, m, g, c, by, se, em, ce), epoch)))
         }
         _ => Ok(None),
     }
 }
 
-/// The account's current [`stamp_of`], or `None` when it no longer exists.
-pub async fn security_stamp(db: &ConfigDb, username: &str) -> Result<Option<String>> {
+/// The account's role and authentication generation, read together;
+/// `None` when the account does not exist.
+pub async fn role_and_epoch(db: &ConfigDb, username: &str) -> Result<Option<(Role, i64)>> {
     let username = normalize_username(username);
-    let row: Option<(String, String, String)> = match db {
+    let row: Option<(String, i64)> = match db {
         ConfigDb::Sqlite(pool) => {
-            sqlx::query_as("SELECT id, role, password_hash FROM users WHERE username = ?")
+            sqlx::query_as("SELECT role, auth_epoch FROM users WHERE username = ?")
                 .bind(&username)
                 .fetch_optional(pool)
                 .await
         }
         ConfigDb::Postgres(pool) => {
-            sqlx::query_as("SELECT id, role, password_hash FROM users WHERE username = $1")
+            sqlx::query_as("SELECT role, auth_epoch FROM users WHERE username = $1")
                 .bind(&username)
                 .fetch_optional(pool)
                 .await
         }
     }
-    .with_context(|| format!("security stamp {username}"))?;
-    Ok(row.map(|(id, role, hash)| stamp_of(&id, &role, &hash)))
+    .with_context(|| format!("role and auth epoch of {username}"))?;
+    Ok(row.map(|(role, epoch)| (Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
 }
 
 /// A real argon2id hash of a throwaway password, computed once, used
@@ -895,7 +891,8 @@ pub async fn set_password(
             let mut tx = pool.begin().await.context("begin password tx")?;
             let res = sqlx::query(
                 "UPDATE users
-                    SET password_hash = ?, must_change_password = ?, updated_at = ?
+                    SET password_hash = ?, must_change_password = ?, updated_at = ?,
+                        auth_epoch = auth_epoch + 1
                   WHERE username = ?",
             )
             .bind(&hash)
@@ -925,7 +922,8 @@ pub async fn set_password(
             let mut tx = pool.begin().await.context("begin password tx")?;
             let res = sqlx::query(
                 "UPDATE users
-                    SET password_hash = $1, must_change_password = $2, updated_at = $3
+                    SET password_hash = $1, must_change_password = $2, updated_at = $3,
+                        auth_epoch = auth_epoch + 1
                   WHERE username = $4",
             )
             .bind(&hash)
@@ -1003,6 +1001,16 @@ pub async fn update_account(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin account update")?;
+            // A role change ends the account's sessions: decided HERE, on the
+            // stored role inside this transaction, not on a role the page
+            // read earlier (Codex review of #1123: a concurrent promotion
+            // could otherwise be overwritten without a revocation).
+            sqlx::query("UPDATE users SET auth_epoch = auth_epoch + 1 WHERE username = ? AND role <> ?")
+                .bind(&username)
+                .bind(update.role.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("advance auth epoch on role change")?;
             let res = sqlx::query(
                 "UPDATE users
                     SET role = ?, groups = ?, setor = ?, email = ?, celular = ?, updated_at = ?
@@ -1049,6 +1057,12 @@ pub async fn update_account(
                 .execute(&mut *tx)
                 .await
                 .context("acquire admin-mutation lock")?;
+            sqlx::query("UPDATE users SET auth_epoch = auth_epoch + 1 WHERE username = $1 AND role <> $2")
+                .bind(&username)
+                .bind(update.role.as_str())
+                .execute(&mut *tx)
+                .await
+                .context("advance auth epoch on role change")?;
             let res = sqlx::query(
                 "UPDATE users
                     SET role = $1, groups = $2, setor = $3, email = $4, celular = $5, updated_at = $6
@@ -1107,7 +1121,7 @@ pub async fn set_role(
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin role tx")?;
             let res = sqlx::query(
-                "UPDATE users SET role = ?, updated_at = ? WHERE username = ?
+                "UPDATE users SET role = ?, updated_at = ?, auth_epoch = auth_epoch + 1 WHERE username = ?
                    AND (role <> 'admin' OR ? = 'admin'
                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
             )
@@ -1132,7 +1146,7 @@ pub async fn set_role(
                 .await
                 .context("acquire admin-mutation lock")?;
             let res = sqlx::query(
-                "UPDATE users SET role = $1, updated_at = $2 WHERE username = $3
+                "UPDATE users SET role = $1, updated_at = $2, auth_epoch = auth_epoch + 1 WHERE username = $3
                    AND (role <> 'admin' OR $1 = 'admin'
                         OR (SELECT count(*) FROM users WHERE role = 'admin') > 1)",
             )

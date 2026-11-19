@@ -134,6 +134,11 @@ async fn setup() -> (AppState, ConfigDb, String) {
     };
     ruscker_admin::db::oidc_clients::create(&db, "radar", &client(&[BYE]), None).await.unwrap();
     ruscker_admin::db::oidc_clients::create(&db, "norma", &client(&[]), None).await.unwrap();
+    // The account behind the session must exist (sessions are confirmed
+    // against its authentication generation).
+    ruscker_admin::db::users::create(&db, "ana", "Ana-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
     let sid = state.admin_sessions.create(Role::Viewer, Some("ana".into())).await;
     (state, db, format!("{COOKIE_NAME}={sid}"))
 }

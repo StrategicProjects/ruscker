@@ -1169,7 +1169,6 @@ admin-schedules-disabled = Inativo
 admin-schedules-toggle = Ativar/desativar
 admin-schedules-delete = Excluir
 admin-schedules-confirm-delete = Excluir este agendamento? O histórico de execuções vai junto.
-admin-schedules-empty = Nenhum agendamento ainda — crie um acima.
 admin-schedules-runs-title = Últimas execuções
 admin-schedules-runs-empty = Nenhuma execução ainda.
 admin-schedules-runs-started = Início

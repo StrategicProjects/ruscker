@@ -1165,7 +1165,6 @@ admin-schedules-disabled = Inactive
 admin-schedules-toggle = Activer/désactiver
 admin-schedules-delete = Supprimer
 admin-schedules-confirm-delete = Supprimer cette planification ? Son historique d'exécutions part avec elle.
-admin-schedules-empty = Aucune planification pour l'instant — créez-en une ci-dessus.
 admin-schedules-runs-title = Dernières exécutions
 admin-schedules-runs-empty = Aucune exécution pour l'instant.
 admin-schedules-runs-started = Début

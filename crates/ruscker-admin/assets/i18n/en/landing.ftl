@@ -1165,7 +1165,6 @@ admin-schedules-disabled = Disabled
 admin-schedules-toggle = Enable/disable
 admin-schedules-delete = Delete
 admin-schedules-confirm-delete = Delete this schedule? Its run history goes with it.
-admin-schedules-empty = No schedules yet — create one above.
 admin-schedules-runs-title = Latest runs
 admin-schedules-runs-empty = No runs yet.
 admin-schedules-runs-started = Started

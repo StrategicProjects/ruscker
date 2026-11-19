@@ -1165,7 +1165,6 @@ admin-schedules-disabled = Inactiva
 admin-schedules-toggle = Activar/desactivar
 admin-schedules-delete = Eliminar
 admin-schedules-confirm-delete = ¿Eliminar esta programación? Su historial de ejecuciones se va con ella.
-admin-schedules-empty = Aún no hay programaciones — crea una arriba.
 admin-schedules-runs-title = Últimas ejecuciones
 admin-schedules-runs-empty = Aún no hay ejecuciones.
 admin-schedules-runs-started = Inicio

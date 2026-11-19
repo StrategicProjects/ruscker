@@ -290,7 +290,10 @@ async fn index(
     // Display names for the rows. A schedule whose app has since left the
     // catalog still shows, under its id.
     let names: HashMap<String, String> = specs.iter().cloned().collect();
-    let show_form = q.new.is_some() || schedules.is_empty() || flash_error;
+    // Only a refused CREATION reopens the form; a failed pause or delete
+    // (also `flash=error`) is reported without it.
+    let refused_create = matches!(q.flash.as_deref(), Some("bad-cron" | "bad-spec"));
+    let show_form = q.new.is_some() || schedules.is_empty() || refused_create;
     let schedules: Vec<ScheduleRow> = schedules
         .into_iter()
         .map(|s| {

@@ -316,6 +316,9 @@ async fn form_opens_when_needed_and_rows_read_like_the_app() {
     assert!(html.contains(FORM));
     let (_, html) = get(state.clone(), "/admin/schedules?flash=bad-cron", &cookie).await;
     assert!(html.contains(FORM) && html.contains(r#"role="alert""#));
+    // A failed pause/delete (`flash=error`) is reported without the form.
+    let (_, html) = get(state.clone(), "/admin/schedules?flash=error", &cookie).await;
+    assert!(!html.contains(FORM) && html.contains(r#"role="alert""#));
 
     // A run's outcome is a word, not the raw status code.
     let db = state.db.clone().unwrap();

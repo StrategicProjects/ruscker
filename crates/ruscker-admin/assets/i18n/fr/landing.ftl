@@ -1179,6 +1179,14 @@ admin-schedules-flash-toggled = Planification mise à jour.
 admin-schedules-flash-bad-cron = Expression cron invalide — utilisez la forme à 5 champs, p. ex. "0 3 * * *".
 admin-schedules-flash-bad-spec = App inconnue, ou l'app n'a pas d'image de conteneur à exécuter.
 admin-schedules-flash-error = L'opération a échoué — consultez les logs du serveur.
+admin-schedules-col-state = État
+admin-schedules-cmd-default = La commande de l’app elle-même
+admin-schedules-cancel = Annuler
+admin-schedules-pause = Suspendre
+admin-schedules-resume = Reprendre
+admin-schedules-status-ok = Réussie
+admin-schedules-status-failed = Échouée
+admin-schedules-status-error = Non exécutée
 
 # — TOTP / authentification à deux facteurs (#1005)
 chrome-mfa = Authentification à deux facteurs

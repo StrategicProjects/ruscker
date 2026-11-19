@@ -1861,9 +1861,22 @@ input[type="range"]::-moz-range-thumb {
   border-color: var(--color-teal-600);
   box-shadow: 0 0 0 2px rgba(15, 110, 86, 0.15);
 }
-.spec-form-input:read-only {
+/* `select` matches `:read-only` in Chromium/WebKit (it has no editable
+   text), so the rule must skip it — otherwise every select in a form
+   looked disabled. */
+.spec-form-input:read-only:not(select) {
   background: var(--surface-soft);
   color: var(--text-muted);
+}
+/* `appearance: none` above also removes the native arrow, leaving a
+   select that reads as a text box. Draw one (a neutral grey that holds
+   in both themes); `.theme-select` brings its own chevron element. */
+select.spec-form-input:not(.theme-select) {
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238a8f98' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  cursor: pointer;
 }
 .spec-form-input--mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -3139,4 +3152,86 @@ input[type="color"].cover-swatch::-webkit-color-swatch { border: 0; border-radiu
   }
   .dash-scroll .dash-cols,
   .dash-scroll .app-group { min-width: 720px; }
+}
+
+/* ─── Schedules page (admin/schedules.html) ─────────────────────────
+   Form in the shared spec-form controls; tables with the app's name,
+   the cron and the whole command in mono; outcome pills that carry an
+   icon + a word (never colour alone) and stay legible in BOTH dark
+   modes — the explicit `data-theme="dark"` AND the system preference
+   under "auto", which the older badges forgot. */
+.sched-form__grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px;
+}
+.sched-form__wide { grid-column: 1 / -1; }
+@media (max-width: 640px) { .sched-form__grid { grid-template-columns: minmax(0, 1fr); } }
+.sched-tz {
+  font-family: var(--font-mono); font-size: 11px; white-space: nowrap;
+  padding: 1px 6px; border-radius: 4px; background: var(--surface-soft); color: var(--text-muted);
+}
+.sched-h2 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 500; letter-spacing: -0.01em; margin: 0 0 12px;
+}
+.sched-h2 .ti { color: var(--text-muted); }
+.sched-app { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.sched-app__name { font-weight: 500; }
+.sched-app__id { font-family: var(--font-mono); font-size: 11px; color: var(--text-faint); }
+.sched-cron {
+  font-family: var(--font-mono); font-size: 12px; white-space: nowrap;
+  padding: 2px 7px; border-radius: 5px;
+  background: var(--surface-soft); border: 0.5px solid var(--border);
+}
+.sched-cmd-cell { max-width: 320px; }
+.sched-cmd {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);
+}
+.sched-muted { color: var(--text-faint); font-size: 12px; }
+.sched-when { font-size: 12px; white-space: nowrap; color: var(--text-muted); }
+.sched-table tr.is-paused td { color: var(--text-faint); }
+.sched-table tr.is-paused .sched-app__name { color: var(--text-muted); }
+
+.sched-pill {
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+  font-size: 11px; font-weight: 500; padding: 2px 9px 2px 7px; border-radius: 999px;
+}
+.sched-pill .ti { font-size: 13px; }
+.sched-pill--on  { background: rgba(16, 185, 129, 0.12); color: #047857; }
+.sched-pill--off { background: rgba(156, 163, 175, 0.18); color: #4b5563; }
+.sched-pill--bad { background: rgba(239, 68, 68, 0.12); color: #b91c1c; }
+:root[data-theme="dark"] .sched-pill--on  { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+:root[data-theme="dark"] .sched-pill--off { background: rgba(156, 163, 175, 0.16); color: #d1d5db; }
+:root[data-theme="dark"] .sched-pill--bad { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .sched-pill--on  { background: rgba(16, 185, 129, 0.18); color: #6ee7b7; }
+  :root:not([data-theme="light"]) .sched-pill--off { background: rgba(156, 163, 175, 0.16); color: #d1d5db; }
+  :root:not([data-theme="light"]) .sched-pill--bad { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
+}
+
+/* No percentage width here: on phones the table is `min-width:
+   max-content`, and a 1% column makes the table 100× its own content
+   (it measured 8,000 px). */
+.sched-log-cell { white-space: nowrap; }
+.sched-log summary {
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; list-style: none;
+  font-size: 12px; color: var(--text-muted);
+  padding: 3px 9px; border-radius: 6px; border: 0.5px solid var(--border);
+}
+.sched-log summary::-webkit-details-marker { display: none; }
+.sched-log summary:hover { color: var(--text); background: var(--surface-soft); }
+.sched-log[open] summary { color: var(--text); background: var(--surface-soft); }
+.sched-log pre {
+  margin: 8px 0 2px; padding: 10px 12px; width: min(560px, 70vw);
+  max-height: 240px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; text-align: left;
+  background: var(--surface-soft); border: 0.5px solid var(--border); border-radius: 8px;
+}
+
+/* The older status badges (images, schedules before this page's own
+   pills) only had dark colours for the explicit dark theme: under
+   "auto" with a dark system they kept the light text on a dark tint. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .use-badge--on { color: #34d399; }
+  :root:not([data-theme="light"]) .use-badge--off { color: #fbbf24; }
 }

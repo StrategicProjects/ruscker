@@ -279,3 +279,51 @@ async fn schedules_are_admin_only() {
     .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "Editor cannot create schedules");
 }
+
+/// The page leads with what is scheduled; the form is a button away,
+/// and opens by itself when there is nothing yet or after a refusal.
+#[tokio::test]
+async fn form_opens_when_needed_and_rows_read_like_the_app() {
+    use ruscker_admin::db::schedules::RunStatus;
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    const FORM: &str = r#"id="new-schedule""#;
+    const BUTTON: &str = r#"href="/admin/schedules?new=1#new-schedule""#;
+
+    // Nothing scheduled: the form is open, no button.
+    let (_, html) = get(state.clone(), "/admin/schedules", &cookie).await;
+    assert!(html.contains(FORM) && !html.contains(BUTTON));
+
+    post(
+        state.clone(),
+        "/admin/schedules",
+        "spec_id=etl-app&cron=0+3+*+*+*&cmd=Rscript%0Amy+file.R%0A--full",
+        &cookie,
+    )
+    .await;
+
+    // Something scheduled: the button, not the form.
+    let (_, html) = get(state.clone(), "/admin/schedules", &cookie).await;
+    assert!(html.contains(BUTTON) && !html.contains(FORM));
+    // The row names the app and shows the WHOLE command, quoted where
+    // an argument has a space — not just `Rscript`.
+    assert!(html.contains("ETL App"));
+    assert!(html.contains("Rscript &#34;my file.R&#34; --full") || html.contains("Rscript &quot;my file.R&quot; --full"),
+        "full command rendered");
+
+    // Asked for, or after a refusal: the form again.
+    let (_, html) = get(state.clone(), "/admin/schedules?new=1", &cookie).await;
+    assert!(html.contains(FORM));
+    let (_, html) = get(state.clone(), "/admin/schedules?flash=bad-cron", &cookie).await;
+    assert!(html.contains(FORM) && html.contains(r#"role="alert""#));
+
+    // A run's outcome is a word, not the raw status code.
+    let db = state.db.clone().unwrap();
+    let id = ruscker_admin::db::schedules::list_all(&db).await.unwrap()[0].id;
+    ruscker_admin::db::schedules::record_run(&db, id, chrono::Utc::now(), RunStatus::Error, None, "pull failed", None)
+        .await
+        .unwrap();
+    let (_, html) = get(state, "/admin/schedules", &cookie).await;
+    assert!(html.contains("Could not run") || html.contains("Não executou"), "localized outcome");
+    assert!(!html.contains(">error<"));
+}

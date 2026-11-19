@@ -374,6 +374,7 @@ async fn index(
 ) -> Response {
     let flash_ok = match q.flash.as_deref() {
         Some("deleted") => Some(state.locales.t(loc, "admin-sso-flash-deleted", None)),
+        Some("saved") => Some(state.locales.t(loc, "admin-sso-flash-saved", None)),
         _ => None,
     };
     render_index(&state, loc, theme, None, flash_ok).await
@@ -492,8 +493,6 @@ async fn create(
 /// these applies to a given response.
 enum EditNotice {
     None,
-    /// Settings saved (i18n key of the message).
-    Ok(&'static str),
     /// Validation failed (i18n key of the message).
     Error(&'static str),
     /// A secret was just rotated and must be shown once.
@@ -508,11 +507,13 @@ async fn render_edit(
     form: ClientForm,
     notice: EditNotice,
 ) -> Response {
-    let (new_secret, flash_ok, flash_error) = match notice {
-        EditNotice::None => (None, None, None),
-        EditNotice::Ok(k) => (None, Some(k), None),
-        EditNotice::Error(k) => (None, None, Some(k)),
-        EditNotice::Secret(s) => (Some(s), None, None),
+    // A successful save redirects to the list, so the edit page itself
+    // never carries a success message.
+    let flash_ok: Option<&'static str> = None;
+    let (new_secret, flash_error) = match notice {
+        EditNotice::None => (None, None),
+        EditNotice::Error(k) => (None, Some(k)),
+        EditNotice::Secret(s) => (Some(s), None),
     };
     let has_secret = new_secret.is_some();
     let page = ClientEditPage {
@@ -614,10 +615,11 @@ async fn edit_submit(
         settings.allowed_scopes = client.allowed_scopes.clone();
     }
     match db::oidc_clients::update(pool, &id, &settings, Some(admin.actor())).await {
-        Ok(true) => {
-            let saved = EditNotice::Ok("admin-sso-flash-saved");
-            render_edit(&state, loc, theme, &client, form, saved).await
-        }
+        // Saved: back to the list, like every other admin form. Staying
+        // on the edit page read as "nothing happened" (lead, 2026-11-19).
+        // A validation error, above, still re-renders the form with what
+        // was typed.
+        Ok(true) => Redirect::to("/admin/sso-clients?flash=saved").into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
         Err(err) => db_error(err, "update oidc client"),
     }

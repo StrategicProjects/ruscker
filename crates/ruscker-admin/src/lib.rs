@@ -991,7 +991,15 @@ pub(crate) async fn session_password_state(
     {
         return if must { PasswordState::MustChange } else { PasswordState::Clear };
     }
-    let actor = state.admin_sessions.validate(id).await.and_then(|info| info.actor);
+    // No live session: nothing to decide, and NOTHING to cache — the
+    // Postgres store also answers "none" when the database is failing, and
+    // a cached "clear" would outlast the outage and let a must-change
+    // session through for the whole TTL (Codex review of #1122). The
+    // route's own session check refuses the request.
+    let Some(info) = state.admin_sessions.validate(id).await else {
+        return PasswordState::Clear;
+    };
+    let actor = info.actor;
     let answer = match actor {
         Some(actor) => match db::users::fetch(pool, &actor).await {
             Ok(Some(u)) => u.must_change_password,
@@ -1001,7 +1009,7 @@ pub(crate) async fn session_password_state(
                 return PasswordState::Unavailable;
             }
         },
-        // No actor (break-glass token / unknown id): nothing to rotate.
+        // No actor: the break-glass token, nothing to rotate.
         None => false,
     };
     if MUST_CHANGE_CACHE.len() >= MUST_CHANGE_CACHE_CAP {

@@ -1741,3 +1741,70 @@ async fn must_change_barrier_fails_closed() {
     let r = get(format!("{COOKIE_NAME}={sid}")).await;
     assert_eq!(r.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
+
+/// Codex review of #1122: the Postgres session store answers "no
+/// session" when its database fails. The must-change decision used to
+/// cache "no change required" for that answer, so once the database came
+/// back the same session skipped the barrier for the whole cache TTL.
+#[tokio::test]
+async fn a_failing_session_store_leaves_no_cached_clearance() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use ruscker_admin::auth::AdminSessionStore as _;
+    /// The in-memory store, made to answer "no session" while `down`.
+    #[derive(Debug)]
+    struct Flaky {
+        inner: ruscker_admin::auth::InMemoryAdminSessionStore,
+        down: AtomicBool,
+    }
+    #[async_trait::async_trait]
+    impl ruscker_admin::auth::AdminSessionStore for Flaky {
+        async fn create(&self, role: Role, actor: Option<String>) -> String {
+            self.inner.create(role, actor).await
+        }
+        async fn validate(&self, id: &str) -> Option<ruscker_admin::auth::SessionInfo> {
+            if self.down.load(Ordering::SeqCst) { None } else { self.inner.validate(id).await }
+        }
+        async fn remove(&self, id: &str) {
+            self.inner.remove(id).await
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.inner.revoke_by_actor(actor).await
+        }
+    }
+    let (mut state, pool) = state_with_db().await;
+    let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
+    ruscker_admin::db::users::create(&db, "lia", "Initial-Pass9!", Role::Admin, true, &[], None)
+        .await
+        .unwrap();
+    let store = std::sync::Arc::new(Flaky {
+        inner: ruscker_admin::auth::InMemoryAdminSessionStore::default(),
+        down: AtomicBool::new(false),
+    });
+    state.admin_sessions = store.clone();
+    let sid = store.create(Role::Admin, Some("lia".into())).await;
+    let get = || {
+        let app = router(state.clone());
+        let sid = sid.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .uri("/admin/users")
+                    .header("cookie", format!("{COOKIE_NAME}={sid}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+    store.down.store(true, Ordering::SeqCst);
+    let _ = get().await; // the store is failing: refused, and nothing cached
+    store.down.store(false, Ordering::SeqCst);
+    let r = get().await;
+    assert_eq!(r.status(), StatusCode::SEE_OTHER);
+    assert_eq!(
+        r.headers().get("location").and_then(|v| v.to_str().ok()),
+        Some("/admin/account/password"),
+        "the barrier holds once the store is back"
+    );
+}

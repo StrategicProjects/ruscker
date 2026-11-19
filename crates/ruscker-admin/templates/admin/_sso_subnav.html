@@ -1,13 +1,15 @@
-{# Sub-nav of the SSO section (#1079): client registry ⇄ access log.
+{# Sub-nav of the SSO section (#1079): access log ⇄ client registry.
+   Access comes first — it is where the section opens, the same way the
+   Apps tab opens on what is running and keeps "new" behind a button.
    The including template sets `{% let sso_access = … %}` — `true` on
    the Access tab, `false` on the Clients pages. #}
 <div class="flex gap-1 mb-4">
-  <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if !sso_access %}is-active{% endif %}" style="width:auto">
-    <i class="ti ti-login" aria-hidden="true"></i>
-    <span>{{ self.t("admin-sso-tab-clients") }}</span>
-  </a>
   <a href="{{ base }}/admin/sso-access" class="admin-nav-link {% if sso_access %}is-active{% endif %}" style="width:auto">
     <i class="ti ti-history" aria-hidden="true"></i>
     <span>{{ self.t("admin-sso-tab-access") }}</span>
+  </a>
+  <a href="{{ base }}/admin/sso-clients" class="admin-nav-link {% if !sso_access %}is-active{% endif %}" style="width:auto">
+    <i class="ti ti-login" aria-hidden="true"></i>
+    <span>{{ self.t("admin-sso-tab-clients") }}</span>
   </a>
 </div>

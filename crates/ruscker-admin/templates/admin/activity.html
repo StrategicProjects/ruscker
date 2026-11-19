@@ -9,6 +9,13 @@
     <h1 class="text-xl font-medium tracking-tight">{{ self.t(self.title_key()) }}</h1>
     <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t(self.subtitle_key()) }}</p>
   </div>
+  {# The SSO section opens here, so registering a system starts here too. #}
+  {% if sso %}
+  <a href="{{ base }}/admin/sso-clients/new" class="btn btn--primary">
+    <i class="ti ti-plus" aria-hidden="true"></i>
+    {{ self.t("admin-sso-create") }}
+  </a>
+  {% endif %}
 </div>
 
 <div id="activity-kpis" data-live-sync>{% include "admin/_kpi_band.html" %}</div>

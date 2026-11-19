@@ -174,6 +174,9 @@ async fn create_shows_the_secret_once_and_persists_the_gate() {
     assert_eq!(cache, "no-store", "a page carrying a secret must not be cached");
     let secret = shown_secret(&html).expect("secret banner");
     assert_eq!(secret.len(), 64);
+    // Shown once, so it must not be a toast that fades away by itself.
+    assert!(html.contains("data-sso-secret data-keep"));
+    assert!(html.contains(r#".admin-flash-ok:not([data-keep])"#));
 
     let db = state.db.clone().unwrap();
     let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal")
@@ -475,7 +478,8 @@ async fn access_tab_lists_sso_sign_ins_and_refusals_only() {
 
     // The SSO section has its own nav entry; Credentials no longer hosts it.
     let (_, creds) = get(state.clone(), "/admin/credentials", &cookie).await;
-    assert_eq!(creds.matches(r#"href="/admin/sso-clients""#).count(), 1, "only the top nav links there");
+    assert_eq!(creds.matches(r#"href="/admin/sso-access""#).count(), 1, "only the top nav links there");
+    assert!(!creds.contains(r#"href="/admin/sso-clients""#));
 
     // Admin only.
     let sid = state.admin_sessions.create(Role::Editor, Some("ed".into())).await;
@@ -564,4 +568,53 @@ async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
     .await;
     assert_eq!(st, StatusCode::OK);
     assert_eq!(scopes(&db).await, Some(vec![]));
+}
+
+/// The section opens on Access; registering a system is a button there
+/// and on the list, and the form lives on its own page.
+#[tokio::test]
+async fn section_opens_on_access_and_registration_has_its_own_page() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    const NEW: &str = r#"href="/admin/sso-clients/new""#;
+    const FORM: &str = r#"<form method="post" action="/admin/sso-clients""#;
+
+    let (_, access) = get(state.clone(), "/admin/sso-access", &cookie).await;
+    assert!(access.contains(NEW), "register button on the Access tab");
+    // The general activity page is the same template: no SSO button there.
+    let (_, activity) = get(state.clone(), "/admin/activity", &cookie).await;
+    assert!(!activity.contains(NEW));
+
+    let (_, list) = get(state.clone(), "/admin/sso-clients", &cookie).await;
+    assert!(list.contains(NEW) && !list.contains(FORM), "the list links to the form, it does not carry it");
+
+    let (status, new) = get(state.clone(), "/admin/sso-clients/new", &cookie).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(new.contains(FORM) && new.contains(r#"name="client_id""#));
+
+    // A refused registration comes back to the form with what was typed.
+    let bad = "client_id=okid&name=Meu+Sistema&redirect_uris=http%3A%2F%2Fa.example%2Fcb";
+    let (_, _, html) = post_page(state.clone(), "/admin/sso-clients", bad, &cookie).await;
+    assert!(html.contains(FORM) && html.contains(r#"value="okid""#) && html.contains(r#"value="Meu Sistema""#));
+
+    // Not open to an Editor.
+    let sid = state.admin_sessions.create(Role::Editor, Some("someone".into())).await;
+    let (status, _) = get(state, "/admin/sso-clients/new", &format!("{COOKIE_NAME}={sid}")).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+/// The logo travels in a hidden input rendered with the STORED value, so
+/// the gallery (which needs scripts) is never what keeps it.
+#[tokio::test]
+async fn logo_field_carries_the_stored_value_without_scripts() {
+    let state = app_state(open_db().await).await;
+    let cookie = admin_cookie(&state).await;
+    let db = state.db.clone().unwrap();
+    let body = format!("{CREATE}&logo=radar.svg");
+    post_page(state.clone(), "/admin/sso-clients", &body, &cookie).await;
+    let (_, html) = get(state.clone(), "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
+    assert!(html.contains(r#"<input type="hidden" name="logo" value="radar.svg""#));
+    assert!(!html.contains("<select id=\"sso-logo\""));
+    let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
+    assert_eq!(c.logo.as_deref(), Some("radar.svg"));
 }

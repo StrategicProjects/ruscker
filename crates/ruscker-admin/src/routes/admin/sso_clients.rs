@@ -3,12 +3,17 @@
 //! The registry of systems allowed to "Sign in with Ruscker" (OIDC
 //! provider, slice 1 — `docs/adr/0005-oidc-provider.md`). Admin-only.
 //!
-//! * `GET  /admin/sso-clients`              list + create form
+//! * `GET  /admin/sso-clients`              list
+//! * `GET  /admin/sso-clients/new`          registration form
 //! * `POST /admin/sso-clients`              create (shows the secret ONCE)
 //! * `GET  /admin/sso-clients/{id}/edit`    edit form
 //! * `POST /admin/sso-clients/{id}/edit`    save settings
 //! * `POST /admin/sso-clients/{id}/rotate`  new secret (shown ONCE)
 //! * `POST /admin/sso-clients/{id}/delete`  remove
+//!
+//! The section opens on the Access tab (`/admin/sso-access`, in
+//! `user_activity.rs`); registering is a button there and on the list,
+//! the same shape as the Apps tab.
 //!
 //! The create and rotate handlers RENDER their result instead of
 //! redirecting: the cleartext secret exists only in that one response
@@ -39,6 +44,7 @@ use super::KpiMetric;
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route("/admin/sso-clients", get(index).post(create))
+        .route("/admin/sso-clients/new", get(new_form))
         .route("/admin/sso-clients/{id}/edit", get(edit_form).post(edit_submit))
         .route("/admin/sso-clients/{id}/rotate", post(rotate))
         .route("/admin/sso-clients/{id}/delete", post(delete))
@@ -61,14 +67,8 @@ struct ClientsPage<'a> {
     nav_section: &'static str,
     role: Role,
     clients: Vec<OidcClient>,
-    /// Sticky create-form values, so a validation error doesn't wipe
-    /// what the admin typed.
-    form: ClientForm,
-    /// Media-library filenames offered as the system's logo.
-    logos: Vec<String>,
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
-    flash_error: Option<String>,
     /// Public address of the sign-in button image (#1083), for the
     /// snippet. `None` hides the kit: provider off, or no master key (the
     /// image route answers 503 then — same condition as the route).
@@ -88,6 +88,39 @@ impl ClientsPage<'_> {
             KpiMetric::new("ti-check", "admin-sso-kpi-enabled", enabled),
             KpiMetric::new("ti-lock", "admin-sso-kpi-mfa", mfa),
         ]
+    }
+}
+
+/// The gallery's file list as a JSON array, for the logo picker's
+/// `x-data` (Askama HTML-escapes it into the attribute).
+fn filenames_json(names: &[String]) -> String {
+    serde_json::to_string(names).unwrap_or_else(|_| "[]".into())
+}
+
+#[derive(Template)]
+#[template(path = "admin/sso_client_new.html")]
+struct ClientNewPage<'a> {
+    locale: Locale,
+    theme: Theme,
+    locales: &'a Locales,
+    locales_all: &'static [Locale],
+    base: std::sync::Arc<str>,
+    nav_section: &'static str,
+    role: Role,
+    /// Sticky values, so a validation error doesn't wipe what the admin
+    /// typed.
+    form: ClientForm,
+    /// Media-library filenames offered as the system's logo.
+    logos: Vec<String>,
+    flash_error: Option<String>,
+}
+
+impl ClientNewPage<'_> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+    fn logos_json(&self) -> String {
+        filenames_json(&self.logos)
     }
 }
 
@@ -115,6 +148,9 @@ struct ClientEditPage<'a> {
 impl ClientEditPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+    fn logos_json(&self) -> String {
+        filenames_json(&self.logos)
     }
 }
 
@@ -308,17 +344,50 @@ async fn index(
         Some("deleted") => Some(state.locales.t(loc, "admin-sso-flash-deleted", None)),
         _ => None,
     };
-    render_index(&state, loc, theme, ClientForm::default(), None, flash_ok, None).await
+    render_index(&state, loc, theme, None, flash_ok).await
+}
+
+async fn new_form(
+    _: RequireAdmin,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+) -> Response {
+    render_new(&state, loc, theme, ClientForm::default(), None).await
+}
+
+/// The registration form, blank or as posted with the reason it was
+/// refused.
+async fn render_new(
+    state: &AppState,
+    loc: Locale,
+    theme: Theme,
+    form: ClientForm,
+    flash_error: Option<&'static str>,
+) -> Response {
+    if state.db.is_none() {
+        return no_db();
+    }
+    super::render(&ClientNewPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &Locale::ALL,
+        base: state.base_path.clone(),
+        nav_section: "sso",
+        role: Role::Admin,
+        form,
+        logos: media_filenames(state).await,
+        flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
+    })
 }
 
 async fn render_index(
     state: &AppState,
     loc: Locale,
     theme: Theme,
-    form: ClientForm,
     new_secret: Option<NewSecret>,
     flash_ok: Option<String>,
-    flash_error: Option<&'static str>,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return no_db();
@@ -337,11 +406,8 @@ async fn render_index(
         nav_section: "sso",
         role: Role::Admin,
         clients,
-        form,
-        logos: media_filenames(state).await,
         new_secret,
         flash_ok,
-        flash_error: flash_error.map(|k| state.locales.t(loc, k, None)),
         button_src: crate::oidc::active_issuer(&state.config, &state.base_path)
             .filter(|_| state.master_key.is_configured())
             .map(|issuer| format!("{issuer}/oauth/button.svg")),
@@ -366,12 +432,12 @@ async fn create(
     };
     let client_id = form.client_id.trim().to_string();
     if !is_valid_client_id(&client_id) {
-        return render_index(&state, loc, theme, form, None, None, Some("admin-sso-error-id")).await;
+        return render_new(&state, loc, theme, form, Some("admin-sso-error-id")).await;
     }
     // A new client always starts enabled; disabling is an edit.
     let mut settings = match form.settings(true) {
         Ok(s) => s,
-        Err(key) => return render_index(&state, loc, theme, form, None, None, Some(key)).await,
+        Err(key) => return render_new(&state, loc, theme, form, Some(key)).await,
     };
     // A new client always gets an EXPLICIT list. Without the checkboxes
     // (a scripted registration) that is every scope known today — never
@@ -383,11 +449,9 @@ async fn create(
     match db::oidc_clients::create(pool, &client_id, &settings, Some(admin.actor())).await {
         Ok(Some(secret)) => {
             let shown = NewSecret { client_id, secret };
-            render_index(&state, loc, theme, ClientForm::default(), Some(shown), None, None).await
+            render_index(&state, loc, theme, Some(shown), None).await
         }
-        Ok(None) => {
-            render_index(&state, loc, theme, form, None, None, Some("admin-sso-error-exists")).await
-        }
+        Ok(None) => render_new(&state, loc, theme, form, Some("admin-sso-error-exists")).await,
         Err(err) => db_error(err, "create oidc client"),
     }
 }

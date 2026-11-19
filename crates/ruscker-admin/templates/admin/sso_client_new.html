@@ -1,0 +1,46 @@
+{% extends "admin/_layout.html" %}
+
+{% block title %}{{ self.t("admin-sso-form-title") }} · Ruscker{% endblock %}
+
+{% block content %}
+
+<div class="mb-5">
+  <h1 class="text-xl font-medium tracking-tight">{{ self.t("admin-sso-form-title") }}</h1>
+  <p class="text-xs text-[color:var(--text-muted)] mt-1">{{ self.t("admin-sso-subtitle") }}</p>
+</div>
+
+{% let sso_access = false %}
+{% include "admin/_sso_subnav.html" %}
+
+{% match flash_error %}{% when Some with (msg) %}
+  <div class="admin-login-error mb-4" role="alert">
+    <i class="ti ti-alert-circle" aria-hidden="true"></i>
+    {{ msg }}
+  </div>
+{% when None %}{% endmatch %}
+
+{# Posts to the collection. On success the answer is the client list
+   carrying the secret (shown once); on a validation error it is this
+   page again, with what was typed. #}
+<form method="post" action="{{ base }}/admin/sso-clients" class="creds-form" autocomplete="off">
+  <div class="spec-form-field">
+    <label class="spec-form-label" for="sso-id">{{ self.t("admin-sso-client-id") }}</label>
+    <input id="sso-id" type="text" name="client_id" required
+           minlength="3" maxlength="64" pattern="[a-z0-9._\-]+"
+           placeholder="radar-fiscal" value="{{ form.client_id }}"
+           class="spec-form-input spec-form-input--mono">
+    <div class="spec-form-help">{{ self.t("admin-sso-client-id-help") }}</div>
+  </div>
+
+  {% include "admin/_sso_fields.html" %}
+
+  <div class="flex justify-end gap-2 mt-2">
+    <a href="{{ base }}/admin/sso-clients" class="btn">{{ self.t("admin-sso-back") }}</a>
+    <button type="submit" class="btn btn--primary">
+      <i class="ti ti-device-floppy" aria-hidden="true"></i>
+      {{ self.t("admin-sso-create") }}
+    </button>
+  </div>
+</form>
+
+{% endblock %}

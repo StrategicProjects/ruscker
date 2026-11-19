@@ -50,8 +50,10 @@
     <tbody>
       {% for c in clients %}
         <tr>
-          <td class="id-cell"><span class="cred-cell"><span class="cred-ico"><i class="ti ti-login" aria-hidden="true"></i></span>{{ c.client_id }}</span></td>
-          <td>{{ c.name }}</td>
+          {# The id and name are mouse shortcuts to the edit page; keyboard and
+             screen-reader users get one stop per row, the Edit button. #}
+          <td class="id-cell"><a tabindex="-1" class="cred-cell sso-client-link" href="{{ base }}/admin/sso-clients/{{ c.client_id }}/edit"><span class="cred-ico"><i class="ti ti-login" aria-hidden="true"></i></span>{{ c.client_id }}</a></td>
+          <td><a tabindex="-1" class="sso-client-link" href="{{ base }}/admin/sso-clients/{{ c.client_id }}/edit">{{ c.name }}</a></td>
           <td class="text-[color:var(--text-muted)]">
             {% if c.access_groups.is_empty() %}{{ self.t("admin-sso-groups-any") }}{% else %}{{ c.access_groups.join(", ") }}{% endif %}
           </td>
@@ -59,9 +61,9 @@
           <td>{% if c.enabled %}{{ self.t("admin-sso-status-enabled") }}{% else %}<span style="color:var(--color-lock)">{{ self.t("admin-sso-status-disabled") }}</span>{% endif %}</td>
           <td class="text-[color:var(--text-muted)]"><time datetime="{{ c.created_at.format("%Y-%m-%dT%H:%M:%SZ") }}" data-rk-time="date">{{ c.created_at.format("%d/%m/%Y") }}</time></td>
           <td class="actions-cell">
-            <a href="{{ base }}/admin/sso-clients/{{ c.client_id }}/edit" class="admin-nav-link"
-               title="{{ self.t("admin-sso-edit") }}">
+            <a href="{{ base }}/admin/sso-clients/{{ c.client_id }}/edit" class="btn btn--sm">
               <i class="ti ti-pencil" aria-hidden="true"></i>
+              {{ self.t("admin-sso-edit") }}
             </a>
           </td>
         </tr>

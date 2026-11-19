@@ -82,7 +82,6 @@ admin-login-password-label = Contraseña
 admin-login-password-placeholder = tu contraseña
 admin-login-error-credentials = Usuario o contraseña inválidos.
 admin-login-error-throttled = Demasiados intentos. Espere un momento y vuelva a intentarlo.
-admin-login-use-token = Entrar con token de administrador
 admin-login-use-password = Volver al inicio con contraseña
 # — Configuración del primer admin
 admin-setup-title = Crea la cuenta de administrador
@@ -464,6 +463,7 @@ admin-sso-secret-title = Secreto del cliente: cópielo ahora
 admin-sso-secret-help = Esta es la única vez que se muestra el secreto. Guárdelo en la configuración del sistema; si se pierde, genere uno nuevo.
 admin-sso-secret-copy = Copiar secreto
 admin-sso-secret-copied = Copiado
+admin-sso-secret-dismiss = Ya lo guardé, cerrar
 admin-sso-danger-title = Secreto y eliminación
 admin-sso-rotate = Generar un secreto nuevo
 admin-sso-rotate-confirm = ¿Generar un secreto nuevo? El actual deja de funcionar de inmediato.

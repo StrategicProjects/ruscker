@@ -79,6 +79,10 @@ impl ClientsPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
     }
+    /// Where "close" on the one-time secret goes: the list, fetched again.
+    fn secret_close_path(&self) -> String {
+        "/admin/sso-clients".to_string()
+    }
 
     fn kpis(&self) -> [KpiMetric; 3] {
         let enabled = self.clients.iter().filter(|c| c.enabled).count() as i64;
@@ -148,6 +152,10 @@ struct ClientEditPage<'a> {
 impl ClientEditPage<'_> {
     fn t(&self, key: &str) -> String {
         self.locales.t(self.locale, key, None)
+    }
+    /// Where "close" on the one-time secret goes: this client's edit page.
+    fn secret_close_path(&self) -> String {
+        format!("/admin/sso-clients/{}/edit", self.client_id)
     }
     fn logos_json(&self) -> String {
         filenames_json(&self.logos)

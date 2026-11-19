@@ -265,9 +265,21 @@ async fn edit_rotate_and_delete() {
         &cookie,
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
+    // Saved: back to the list (the edit page used to stay open, which
+    // read as "nothing happened"), and the list says so.
+    assert_eq!(status, StatusCode::SEE_OTHER);
     assert_ne!(cache, "no-store", "no secret on a plain save");
     assert!(shown_secret(&html).is_none());
+    let (st, loc) = post(
+        state.clone(),
+        "/admin/sso-clients/radar-fiscal/edit",
+        "name=Radar&redirect_uris=https%3A%2F%2Fradar.example%2Fcb&access_groups=",
+        &cookie,
+    )
+    .await;
+    assert_eq!((st, loc.as_str()), (StatusCode::SEE_OTHER, "/admin/sso-clients?flash=saved"));
+    let (_, list) = get(state.clone(), "/admin/sso-clients?flash=saved", &cookie).await;
+    assert!(list.contains("admin-flash-ok"), "the list confirms the save");
     let c = ruscker_admin::db::oidc_clients::fetch(&db, "radar-fiscal").await.unwrap().unwrap();
     assert_eq!(c.name, "Radar");
     assert!(!c.require_mfa && !c.enabled && c.access_groups.is_empty());
@@ -275,6 +287,7 @@ async fn edit_rotate_and_delete() {
 
     // Rotate: new secret shown once, old one dead. The form carries the
     // version rendered on the edit page.
+    let (_, html) = get(state.clone(), "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
     assert!(html.contains(r#"name="secret_version" value="1""#), "rotate form carries the version");
     let rotate_body = "secret_version=1";
     let (status, cache, html) =
@@ -545,15 +558,16 @@ async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
         &cookie,
     )
     .await;
-    assert_eq!(st, StatusCode::OK);
+    assert_eq!(st, StatusCode::SEE_OTHER);
     assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
 
     // No checkboxes in the post: untouched — and the page that comes
     // back shows the STORED boxes, not all of them, or the next Save
     // would grant everything. Same on a validation error.
-    let (st, _, html) = post_page(state.clone(), "/admin/sso-clients/radar-fiscal/edit", base, &cookie).await;
-    assert_eq!(st, StatusCode::OK);
+    let (st, _, _) = post_page(state.clone(), "/admin/sso-clients/radar-fiscal/edit", base, &cookie).await;
+    assert_eq!(st, StatusCode::SEE_OTHER);
     assert_eq!(scopes(&db).await, Some(vec!["profile".to_string(), "roles".to_string()]));
+    let (_, html) = get(state.clone(), "/admin/sso-clients/radar-fiscal/edit", &cookie).await;
     assert_eq!(ticked(&html), ["profile", "roles"]);
     let (_, _, html) = post_page(
         state.clone(),
@@ -573,7 +587,7 @@ async fn allowed_scopes_are_saved_and_survive_a_form_without_them() {
         &cookie,
     )
     .await;
-    assert_eq!(st, StatusCode::OK);
+    assert_eq!(st, StatusCode::SEE_OTHER);
     assert_eq!(scopes(&db).await, Some(vec![]));
 }
 
@@ -650,7 +664,7 @@ async fn client_addresses_are_saved_and_survive_a_form_without_them() {
         &cookie,
     )
     .await;
-    assert_eq!(st, StatusCode::OK);
+    assert_eq!(st, StatusCode::SEE_OTHER);
     let c = fetch().await;
     assert_eq!(c.name, "Radar");
     assert_eq!(c.client_uri.as_deref(), Some("https://radar.example/"));

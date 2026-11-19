@@ -103,6 +103,14 @@ admin-pw-error-short = Password doesn't meet the policy: at least 8 characters, 
 admin-pw-submit = Save password
 admin-pw-back-to = Back to { $name }
 admin-pw-changed = Password changed. This account's other sessions on the portal were signed out.
+sso-logout-title = Sign out of the portal too?
+sso-logout-from = You signed out of
+sso-logout-question = End your session on this portal as well? The other systems that sign in through it will ask you to sign in again.
+sso-logout-confirm = Sign out of the portal
+sso-logout-stay = Stay signed in to the portal
+sso-logout-done-title = You are signed out
+sso-logout-done = Your session on this portal has ended.
+sso-logout-portal = Go to the portal
 admin-pw-reveal = Show/hide password
 # — User management (admin)
 admin-nav-users = Users

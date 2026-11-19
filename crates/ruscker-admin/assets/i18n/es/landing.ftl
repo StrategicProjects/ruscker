@@ -103,6 +103,14 @@ admin-pw-error-short = La contraseña no cumple la política: mínimo 8 caracter
 admin-pw-submit = Guardar contraseña
 admin-pw-back-to = Volver a { $name }
 admin-pw-changed = Contraseña cambiada. Se cerraron las demás sesiones de esta cuenta en el portal.
+sso-logout-title = ¿Cerrar también la sesión del portal?
+sso-logout-from = Cerraste sesión en
+sso-logout-question = ¿Cerrar también tu sesión en este portal? Los demás sistemas que entran a través de él te pedirán iniciar sesión de nuevo.
+sso-logout-confirm = Cerrar sesión del portal
+sso-logout-stay = Seguir conectado al portal
+sso-logout-done-title = Cerraste sesión
+sso-logout-done = Tu sesión en este portal se cerró.
+sso-logout-portal = Ir al portal
 admin-pw-reveal = Mostrar/ocultar contraseña
 # — Gestión de usuarios (admin)
 admin-nav-users = Usuarios

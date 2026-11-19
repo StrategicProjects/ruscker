@@ -107,6 +107,14 @@ admin-pw-error-short = A senha não atende à política: mínimo de 8 caracteres
 admin-pw-submit = Salvar senha
 admin-pw-back-to = Voltar a { $name }
 admin-pw-changed = Senha alterada. As outras sessões desta conta no portal foram encerradas.
+sso-logout-title = Sair também do portal?
+sso-logout-from = Você saiu de
+sso-logout-question = Encerrar também a sua sessão neste portal? Os outros sistemas que entram por ele vão pedir login de novo.
+sso-logout-confirm = Sair do portal
+sso-logout-stay = Continuar conectado ao portal
+sso-logout-done-title = Você saiu
+sso-logout-done = Sua sessão neste portal foi encerrada.
+sso-logout-portal = Ir para o portal
 admin-pw-reveal = Mostrar/ocultar senha
 # — Gestão de usuários (admin)
 admin-nav-users = Usuários

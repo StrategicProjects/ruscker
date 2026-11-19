@@ -61,6 +61,7 @@ pub fn routes() -> Router<AppState> {
         // credentials.
         .route("/oauth/token", post(token).layer(DefaultBodyLimit::max(MAX_QUERY_LEN)))
         .route("/oauth/userinfo", get(userinfo).post(userinfo))
+        .route("/oauth/logout", get(end_session).post(end_session_confirm))
 }
 
 /// Clients cache these documents; five minutes keeps a key rotation
@@ -304,7 +305,12 @@ fn back_to_client(redirect_uri: &str, state: Option<&str>, pairs: &[(&str, &str)
 /// A `<meta refresh>` rather than script: the admin's CSP forbids
 /// inline script, and this needs none.
 fn same_site_bounce(base: &str, raw_query: &str) -> Response {
-    let url = format!("{base}/oauth/authorize?{raw_query}");
+    bounce_to(base, "/oauth/authorize", raw_query)
+}
+
+/// [`same_site_bounce`] for any of our endpoints (`path` is a constant).
+fn bounce_to(base: &str, path: &str, raw_query: &str) -> Response {
+    let url = format!("{base}{path}?{raw_query}");
     // The query came from the request: escape it for an HTML attribute.
     let url = url
         .replace('&', "&amp;")
@@ -1076,6 +1082,279 @@ async fn userinfo(State(state): State<AppState>, headers: HeaderMap) -> Response
     )
         .into_response()
 }
+
+// ───────────────────────── RP-Initiated Logout ─────────────────────────
+
+/// Parameters of `/oauth/logout` (OpenID Connect RP-Initiated Logout 1.0),
+/// on the GET from the client and on the confirmation POST.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct EndSessionParams {
+    id_token_hint: Option<String>,
+    client_id: Option<String>,
+    post_logout_redirect_uri: Option<String>,
+    state: Option<String>,
+}
+
+/// What a sign-out request resolved to — only registry-backed values.
+struct EndSession {
+    /// The client, when the request named one (by `client_id` or by the
+    /// audience of a valid `id_token_hint`).
+    client: Option<crate::db::oidc_clients::OidcClient>,
+    /// Where to send the browser afterwards: a `post_logout_redirect_uri`
+    /// registered for that client, exactly. Never anything else.
+    return_to: Option<String>,
+    state: Option<String>,
+}
+
+/// Validate a sign-out request. `Err` is a reason shown to the person
+/// (400): like the authorization endpoint before the client is verified,
+/// a bad request is never redirected anywhere.
+///
+/// * `id_token_hint`, when given, must be an ID token WE signed for this
+///   issuer. It may be expired — the specification allows it, and a
+///   system signing someone out hours later is the normal case. Its
+///   audience names the client.
+/// * `client_id`, when given with a hint, must agree with it.
+/// * `post_logout_redirect_uri` is honoured only for an identified,
+///   enabled client that registered that exact address.
+async fn resolve_end_session(
+    state: &AppState,
+    issuer: &str,
+    p: &EndSessionParams,
+) -> Result<EndSession, &'static str> {
+    let db = state.db.as_ref().ok_or("provider not configured")?;
+    let mut client_id = p.client_id.clone().filter(|c| !c.is_empty());
+    if let Some(hint) = p.id_token_hint.as_deref().filter(|h| !h.is_empty()) {
+        let verified = crate::oidc::verify_jwt(db, hint)
+            .await
+            .map_err(|_| "server error")?
+            .filter(|t| t.typ == "JWT" && t.claims["iss"] == issuer)
+            .ok_or("invalid id_token_hint")?;
+        let aud = verified.claims["aud"].as_str().ok_or("invalid id_token_hint")?.to_string();
+        if client_id.as_deref().is_some_and(|c| c != aud) {
+            return Err("client_id does not match id_token_hint");
+        }
+        client_id = Some(aud);
+    }
+    let client = match client_id {
+        None => None,
+        Some(id) => {
+            if !crate::db::oidc_clients::is_valid_client_id(&id) {
+                return Err("unknown client");
+            }
+            let c = crate::db::oidc_clients::fetch(db, &id)
+                .await
+                .map_err(|_| "server error")?
+                .filter(|c| c.enabled)
+                .ok_or("unknown client")?;
+            Some(c)
+        }
+    };
+    let return_to = match p.post_logout_redirect_uri.as_deref().filter(|u| !u.is_empty()) {
+        None => None,
+        Some(uri) => {
+            let ok = client.as_ref().is_some_and(|c| c.post_logout_uri_registered(uri));
+            if !ok {
+                return Err("post_logout_redirect_uri is not registered for this client");
+            }
+            Some(uri.to_string())
+        }
+    };
+    Ok(EndSession {
+        client,
+        return_to,
+        state: p.state.clone().filter(|s| !s.is_empty() && s.len() <= 512),
+    })
+}
+
+/// The sign-out page: "also sign out of the portal?" or "you are signed
+/// out". Standalone, like the sign-in page, and with the portal's brand.
+#[derive(askama::Template)]
+#[template(path = "admin/sso_logout.html")]
+struct EndSessionPage<'a> {
+    locale: crate::i18n::Locale,
+    theme: crate::theme::Theme,
+    locales: &'a crate::i18n::Locales,
+    locales_all: &'static [crate::i18n::Locale],
+    base: std::sync::Arc<str>,
+    brand_title: String,
+    brand_logo: Option<String>,
+    theme_style: String,
+    /// The client's registered name, when known.
+    client_name: Option<String>,
+    /// `true`: ask (a portal session exists). `false`: signed out.
+    confirm: bool,
+    /// Carried by the confirmation form (already validated).
+    client_id: String,
+    return_to: String,
+    state_param: String,
+    /// "Stay signed in" / "back to the system": the return address with
+    /// its `state`, else the client's home page.
+    back_href: Option<String>,
+}
+
+impl EndSessionPage<'_> {
+    fn t(&self, key: &str) -> String {
+        self.locales.t(self.locale, key, None)
+    }
+    fn back_label(&self) -> String {
+        let mut args = fluent_bundle::FluentArgs::new();
+        args.set("name", self.client_name.clone().unwrap_or_default());
+        self.locales.t(self.locale, "admin-pw-back-to", Some(&args))
+    }
+}
+
+/// The address to go back to: the validated return URI with `state`,
+/// else the client's home page.
+fn back_href(es: &EndSession) -> Option<String> {
+    match &es.return_to {
+        Some(uri) => {
+            let mut q = url::form_urlencoded::Serializer::new(String::new());
+            if let Some(st) = &es.state {
+                q.append_pair("state", st);
+            }
+            let q = q.finish();
+            Some(if q.is_empty() {
+                uri.clone()
+            } else {
+                format!("{uri}{}{q}", if uri.contains('?') { '&' } else { '?' })
+            })
+        }
+        None => es.client.as_ref().and_then(|c| c.client_uri.clone()),
+    }
+}
+
+async fn render_end_session(
+    state: &AppState,
+    loc: crate::i18n::Locale,
+    theme: crate::theme::Theme,
+    es: &EndSession,
+    confirm: bool,
+) -> Response {
+    let brand = super::landing::portal_brand(state, loc).await;
+    let page = EndSessionPage {
+        locale: loc,
+        theme,
+        locales: &state.locales,
+        locales_all: &crate::i18n::Locale::ALL,
+        base: state.base_path.clone(),
+        brand_title: brand.title,
+        brand_logo: brand.logo_src,
+        theme_style: brand.theme_style,
+        client_name: es.client.as_ref().map(|c| c.name.clone()),
+        confirm,
+        client_id: es.client.as_ref().map(|c| c.client_id.clone()).unwrap_or_default(),
+        return_to: es.return_to.clone().unwrap_or_default(),
+        state_param: es.state.clone().unwrap_or_default(),
+        back_href: back_href(es),
+    };
+    let mut resp = super::admin::render(&page);
+    resp.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    resp.headers_mut().insert(REFERRER_POLICY, HeaderValue::from_static("no-referrer"));
+    // The portal's policy says `form-action 'self'`, and browsers apply it
+    // to the redirect that FOLLOWS a form post too: the confirmation's
+    // 302 to the system would be blocked. This one page may also post
+    // towards the origin of the (registered, validated) return address.
+    if confirm {
+        if let Some(origin) = es.return_to.as_deref().and_then(form_action_origin) {
+            let csp = crate::content_security_policy("")
+                .replace("form-action 'self'", &format!("form-action 'self' {origin}"));
+            if let Ok(v) = HeaderValue::from_str(&csp) {
+                resp.headers_mut().insert(axum::http::header::CONTENT_SECURITY_POLICY, v);
+            }
+        }
+    }
+    resp
+}
+
+/// `scheme://host[:port]` of a registered return address, for the CSP.
+/// `None` for anything that would not be a plain origin.
+fn form_action_origin(uri: &str) -> Option<String> {
+    let url = url::Url::parse(uri).ok()?;
+    if !matches!(url.scheme(), "https" | "http") {
+        return None;
+    }
+    let origin = url.origin().ascii_serialization();
+    (origin != "null").then_some(origin)
+}
+
+/// `GET /oauth/logout` — a client system asks to sign the person out of
+/// the portal too ("sign out everywhere").
+///
+/// Never signs anyone out by itself: a bare link must not end a session
+/// (logout CSRF), so a person who is signed in is ASKED, and the answer
+/// is a same-origin POST. Someone already signed out is sent straight
+/// back to the system (or told they are signed out).
+///
+/// The session cookie is `SameSite=Strict`, so a browser arriving from
+/// the system's site does not send it: like the authorization endpoint,
+/// a cross-site arrival is first bounced through our own origin so an
+/// existing session is seen.
+async fn end_session(
+    State(state): State<AppState>,
+    session: MaybeSession,
+    headers: HeaderMap,
+    loc: crate::i18n::Locale,
+    theme: crate::theme::Theme,
+    RawQuery(raw_query): RawQuery,
+    axum::extract::Query(params): axum::extract::Query<EndSessionParams>,
+) -> Response {
+    let issuer = match provider(&state) {
+        Ok(i) => i,
+        Err(refusal) => return refusal.into_response(),
+    };
+    let es = match resolve_end_session(&state, &issuer, &params).await {
+        Ok(es) => es,
+        Err(reason) => return refuse(reason),
+    };
+    if session.0.is_none() {
+        let cross_site = headers
+            .get("sec-fetch-site")
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|site| site == "cross-site");
+        if cross_site {
+            return bounce_to(&state.base_path, "/oauth/logout", raw_query.as_deref().unwrap_or(""));
+        }
+        // Nothing to end here.
+        return match &es.return_to {
+            Some(uri) => back_to_client(uri, es.state.as_deref(), &[]),
+            None => render_end_session(&state, loc, theme, &es, false).await,
+        };
+    }
+    render_end_session(&state, loc, theme, &es, true).await
+}
+
+/// `POST /oauth/logout` — the person confirmed. The request is checked
+/// again from scratch (the form is just another client input), the
+/// portal session of this browser is ended exactly like the admin's own
+/// "Sign out", and the browser goes back to the system.
+///
+/// Same-origin only: the global CSRF guard refuses a cross-site POST.
+async fn end_session_confirm(
+    State(state): State<AppState>,
+    cookies: Cookies,
+    loc: crate::i18n::Locale,
+    theme: crate::theme::Theme,
+    axum::extract::Form(params): axum::extract::Form<EndSessionParams>,
+) -> Response {
+    let issuer = match provider(&state) {
+        Ok(i) => i,
+        Err(refusal) => return refusal.into_response(),
+    };
+    // The form carries no hint: the client id it holds was validated on
+    // the GET and is validated again here.
+    let params = EndSessionParams { id_token_hint: None, ..params };
+    let es = match resolve_end_session(&state, &issuer, &params).await {
+        Ok(es) => es,
+        Err(reason) => return refuse(reason),
+    };
+    super::admin::end_browser_session(&state, &cookies).await;
+    match &es.return_to {
+        Some(uri) => back_to_client(uri, es.state.as_deref(), &[]),
+        None => render_end_session(&state, loc, theme, &es, false).await,
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

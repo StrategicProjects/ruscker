@@ -1070,6 +1070,13 @@ fn section_for_admin_path(path: &str) -> &'static str {
 }
 
 async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Cookies) -> Redirect {
+    end_browser_session(&state, &cookies).await;
+    Redirect::to("/admin/login")
+}
+
+/// End this browser's portal session: the admin button and a client
+/// system's "sign out everywhere" (`/oauth/logout`) do the same thing.
+pub(crate) async fn end_browser_session(state: &AppState, cookies: &Cookies) {
     // Invalidate the session server-side so a copied cookie is dead too,
     // then clear the browser's copy.
     if let Some(c) = cookies.get(COOKIE_NAME) {
@@ -1096,7 +1103,6 @@ async fn logout(_: MaybeAdminSession, State(state): State<AppState>, cookies: Co
     let mut c = Cookie::new(COOKIE_NAME, "");
     c.set_path("/");
     cookies.remove(c);
-    Redirect::to("/admin/login")
 }
 
 /// Shared `Template → Response` (matches what landing.rs uses).

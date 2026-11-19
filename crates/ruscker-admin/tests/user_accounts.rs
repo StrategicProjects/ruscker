@@ -1578,7 +1578,9 @@ async fn must_change_login_headed_for_the_password_page_goes_there_once() {
     let (state, pool) = state_with_db().await;
     let db = ruscker_admin::db::ConfigDb::Sqlite(pool);
     ruscker_admin::db::users::create(&db, "bob", "bobpass12", Role::Viewer, true, &[], None).await.unwrap();
-    let r = router(state)
+    let app = router(state);
+    let r = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
@@ -1593,4 +1595,38 @@ async fn must_change_login_headed_for_the_password_page_goes_there_once() {
         r.headers().get("location").and_then(|v| v.to_str().ok()),
         Some("/admin/account/password?client_id=ykatu")
     );
+    // A `changed=1` typed into the link does not hide the form from an
+    // account that must still change its password.
+    use ruscker_admin::db::oidc_clients::{self, ClientSettings};
+    oidc_clients::create(
+        &db,
+        "ykatu",
+        &ClientSettings {
+            name: "Ykatu".into(),
+            redirect_uris: vec!["https://ykatu.example/cb".into()],
+            access_groups: vec![],
+            require_mfa: false,
+            enabled: true,
+            logo: None,
+            allowed_scopes: None,
+            client_uri: Some("https://ykatu.example/".into()),
+            post_logout_redirect_uris: vec![],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let cookie = r.headers().get("set-cookie").and_then(|v| v.to_str().ok()).unwrap().split(';').next().unwrap().to_string();
+    let page = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/account/password?client_id=ykatu&changed=1")
+                .header("cookie", cookie)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let html = String::from_utf8(axum::body::to_bytes(page.into_body(), usize::MAX).await.unwrap().to_vec()).unwrap();
+    assert!(html.contains(r#"name="new_password""#), "the form is still there");
 }

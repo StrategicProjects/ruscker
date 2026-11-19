@@ -892,7 +892,10 @@ async fn password_form(
     };
     let next = app_next_path(query.next.as_deref(), &state.base_path).unwrap_or_default();
     let back = client_back(&state, query.client_id.as_deref()).await;
-    let changed = back.is_some() && query.changed.is_some();
+    // `changed=1` is only a hint in the URL, so anyone can put it in a
+    // link: it never hides the form from an account that still MUST
+    // change its password, and it claims nothing beyond "changed".
+    let changed = back.is_some() && query.changed.is_some() && !first;
     render(&AccountPasswordPage {
         locale: loc,
         theme,

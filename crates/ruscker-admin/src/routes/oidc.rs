@@ -1093,6 +1093,8 @@ pub struct EndSessionParams {
     client_id: Option<String>,
     post_logout_redirect_uri: Option<String>,
     state: Option<String>,
+    /// Set by our own same-site bounce, so it happens at most once.
+    bounced: Option<String>,
 }
 
 /// What a sign-out request resolved to — only registry-backed values.
@@ -1160,10 +1162,13 @@ async fn resolve_end_session(
             Some(uri.to_string())
         }
     };
+    if p.state.as_deref().is_some_and(|s| s.len() > 512) {
+        return Err("state is too long");
+    }
     Ok(EndSession {
         client,
         return_to,
-        state: p.state.clone().filter(|s| !s.is_empty() && s.len() <= 512),
+        state: p.state.clone().filter(|s| !s.is_empty()),
     })
 }
 
@@ -1308,12 +1313,18 @@ async fn end_session(
         Err(reason) => return refuse(reason),
     };
     if session.0.is_none() {
-        let cross_site = headers
-            .get("sec-fetch-site")
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|site| site == "cross-site");
-        if cross_site {
-            return bounce_to(&state.base_path, "/oauth/logout", raw_query.as_deref().unwrap_or(""));
+        // Bounce once when the cookie may have been withheld: a cross-site
+        // arrival, or a browser that sends no Fetch Metadata at all (it
+        // still withholds a Strict cookie). Unlike the authorization
+        // endpoint, "no session" here sends the person away believing
+        // they signed out, so err on the side of looking again. The
+        // `bounced` marker stops a second round.
+        let site = headers.get("sec-fetch-site").and_then(|v| v.to_str().ok());
+        let maybe_withheld = matches!(site, None | Some("cross-site"));
+        if maybe_withheld && params.bounced.is_none() {
+            let q = raw_query.as_deref().unwrap_or("");
+            let q = if q.is_empty() { "bounced=1".to_string() } else { format!("{q}&bounced=1") };
+            return bounce_to(&state.base_path, "/oauth/logout", &q);
         }
         // Nothing to end here.
         return match &es.return_to {

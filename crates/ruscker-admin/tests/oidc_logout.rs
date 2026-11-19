@@ -171,7 +171,8 @@ async fn signed_in_person_is_asked_then_signed_out_and_sent_back() {
     // Browsers apply `form-action` to the redirect after the post: the
     // page must allow the return address's origin, and only that.
     let csp = resp.headers().get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().to_string();
-    assert!(csp.contains("form-action 'self' https://radar.example;") || csp.ends_with("form-action 'self' https://radar.example"), "{csp}");
+    assert!(csp.ends_with("form-action 'self' https://radar.example"), "{csp}");
+    assert_eq!(csp.matches("radar.example").count(), 1, "nothing else widened: {csp}");
     let r = send(&state, get(&format!("/oauth/logout?{q}"), Some(&cookie), Some("same-origin"))).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.contains(r#"action="/oauth/logout""#));
@@ -206,6 +207,14 @@ async fn without_a_session_the_browser_goes_straight_back() {
     let r = send(&state, get(&format!("/oauth/logout?{q}"), None, Some("cross-site"))).await;
     assert_eq!(r.status, StatusCode::OK);
     assert!(r.body.contains(r#"http-equiv="refresh""#) && r.body.contains("/oauth/logout?client_id=radar"));
+    assert!(r.body.contains("bounced=1"));
+    // A browser without Fetch Metadata also withholds the Strict cookie:
+    // bounced too, and only once.
+    let r = send(&state, get(&format!("/oauth/logout?{q}"), None, None)).await;
+    assert!(r.body.contains(r#"http-equiv="refresh""#), "no header: bounce");
+    let r = send(&state, get(&format!("/oauth/logout?{q}&bounced=1"), None, None)).await;
+    assert_eq!(r.status, StatusCode::FOUND, "after the bounce: back to the system");
+    assert_eq!(r.location, "https://radar.example/bye?state=s1");
 
     // No return address asked for: a page that says so, linking home.
     let r = send(&state, get("/oauth/logout?client_id=radar", None, Some("same-origin"))).await;
@@ -219,6 +228,10 @@ async fn bad_requests_are_refused_not_redirected() {
     let (state, db, cookie) = setup().await;
     let foreign = id_token(&state, &db, "https://other.example", "radar").await;
     let for_norma = id_token(&state, &db, "https://portal.example", "norma").await;
+    let access = {
+        let key = ruscker_admin::oidc::ensure_signing_key(&db, &state.master_key).await.unwrap();
+        ruscker_admin::oidc::sign_jwt(&key, "at+jwt", &json!({"iss": "https://portal.example", "aud": "radar", "sub": "x", "exp": 2})).unwrap()
+    };
     let cases = [
         // Not registered for the client.
         format!("client_id=radar&post_logout_redirect_uri={}", enc("https://evil.example/")),
@@ -232,6 +245,10 @@ async fn bad_requests_are_refused_not_redirected() {
         format!("id_token_hint={for_norma}&client_id=radar"),
         // Unknown client.
         "client_id=ghost".to_string(),
+        // An access token is not an ID token.
+        format!("id_token_hint={access}"),
+        // A state the client could not get back intact.
+        format!("client_id=radar&post_logout_redirect_uri={}&state={}", enc(BYE), "s".repeat(513)),
     ];
     for q in &cases {
         for cookie in [None, Some(cookie.as_str())] {
@@ -278,6 +295,34 @@ async fn bare_request_asks_and_ends_on_a_page() {
     assert_eq!(r.status, StatusCode::OK);
     assert!(!r.body.contains(r#"action="/oauth/logout""#));
     assert!(!signed_in(&state, &cookie).await);
+}
+
+/// The widened `form-action` exists only where a post will be followed by
+/// a redirect to a registered address.
+#[tokio::test]
+async fn csp_is_widened_only_on_a_confirmation_with_a_return_address() {
+    let (state, _, cookie) = setup().await;
+    let csp_of = |req: Request<Body>| {
+        let state = state.clone();
+        async move {
+            let resp = router(state).oneshot(req).await.unwrap();
+            resp.headers().get(header::CONTENT_SECURITY_POLICY).unwrap().to_str().unwrap().to_string()
+        }
+    };
+    // Confirmation without a return address.
+    let csp = csp_of(get("/oauth/logout?client_id=radar", Some(&cookie), Some("same-origin"))).await;
+    assert!(csp.ends_with("form-action 'self'"), "{csp}");
+    // The "signed out" page.
+    let csp = csp_of(post("client_id=radar", &cookie, "same-origin")).await;
+    assert!(csp.ends_with("form-action 'self'"), "{csp}");
+}
+
+#[tokio::test]
+async fn no_master_key_means_unavailable() {
+    let db = open_db().await;
+    let state = app_state(db, ON, None).await;
+    let r = send(&state, get("/oauth/logout", None, None)).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
 }
 
 #[tokio::test]

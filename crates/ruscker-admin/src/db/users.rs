@@ -763,6 +763,29 @@ pub async fn verify_login_with_epoch(
     }
 }
 
+/// The account's immutable id, role and authentication generation, read
+/// together; `None` when the account does not exist. What a session is
+/// minted against.
+pub async fn account_ref(db: &ConfigDb, username: &str) -> Result<Option<(String, Role, i64)>> {
+    let username = normalize_username(username);
+    let row: Option<(String, String, i64)> = match db {
+        ConfigDb::Sqlite(pool) => {
+            sqlx::query_as("SELECT id, role, auth_epoch FROM users WHERE username = ?")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+        ConfigDb::Postgres(pool) => {
+            sqlx::query_as("SELECT id, role, auth_epoch FROM users WHERE username = $1")
+                .bind(&username)
+                .fetch_optional(pool)
+                .await
+        }
+    }
+    .with_context(|| format!("account of {username}"))?;
+    Ok(row.map(|(id, role, epoch)| (id, Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
+}
+
 /// The account's role and authentication generation, read together;
 /// `None` when the account does not exist.
 pub async fn role_and_epoch(db: &ConfigDb, username: &str) -> Result<Option<(Role, i64)>> {
@@ -876,6 +899,37 @@ pub async fn set_password(
     must_change: bool,
     actor: Option<&str>,
 ) -> Result<()> {
+    match set_password_guarded(db, username, new_password, must_change, actor, None).await? {
+        Some(_) => Ok(()),
+        None => anyhow::bail!("user {} not found", normalize_username(username)),
+    }
+}
+
+/// [`set_password`] for the account's OWN change: applied only while the
+/// account is still the one (`id`) and at the generation (`epoch`) its
+/// current password was verified under, and returning the role and the new
+/// generation from the same statement. `None` when that no longer holds —
+/// a concurrent change (another password change, a role change, a delete)
+/// got there first, and this one must not adopt its generation (Codex
+/// review of #1123).
+pub async fn set_own_password(
+    db: &ConfigDb,
+    username: &str,
+    new_password: &str,
+    id: &str,
+    epoch: i64,
+) -> Result<Option<(Role, i64)>> {
+    set_password_guarded(db, username, new_password, false, Some(username), Some((id, epoch))).await
+}
+
+async fn set_password_guarded(
+    db: &ConfigDb,
+    username: &str,
+    new_password: &str,
+    must_change: bool,
+    actor: Option<&str>,
+    guard: Option<(&str, i64)>,
+) -> Result<Option<(Role, i64)>> {
     let username = normalize_username(username);
     let hash = {
         let pw = new_password.to_string();
@@ -889,22 +943,30 @@ pub async fn set_password(
     match db {
         ConfigDb::Sqlite(pool) => {
             let mut tx = pool.begin().await.context("begin password tx")?;
-            let res = sqlx::query(
+            let (guard_id, guard_epoch) = guard.unzip();
+            let row: Option<(String, i64)> = sqlx::query_as(
                 "UPDATE users
                     SET password_hash = ?, must_change_password = ?, updated_at = ?,
                         auth_epoch = auth_epoch + 1
-                  WHERE username = ?",
+                  WHERE username = ?
+                    AND (? IS NULL OR id = ?)
+                    AND (? IS NULL OR auth_epoch = ?)
+              RETURNING role, auth_epoch",
             )
             .bind(&hash)
             .bind(must_change as i64)
             .bind(now)
             .bind(&username)
-            .execute(&mut *tx)
+            .bind(guard_id)
+            .bind(guard_id)
+            .bind(guard_epoch)
+            .bind(guard_epoch)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("set password for {username}"))?;
-            if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
-            }
+            let Some((role, epoch)) = row else {
+                return Ok(None);
+            };
             crate::db::mfa_grants::delete_all_sqlite(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -917,25 +979,32 @@ pub async fn set_password(
             .await
             .context("audit password change")?;
             tx.commit().await.context("commit password change")?;
+            Ok(Some((Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
         }
         ConfigDb::Postgres(pool) => {
             let mut tx = pool.begin().await.context("begin password tx")?;
-            let res = sqlx::query(
+            let (guard_id, guard_epoch) = guard.unzip();
+            let row: Option<(String, i64)> = sqlx::query_as(
                 "UPDATE users
                     SET password_hash = $1, must_change_password = $2, updated_at = $3,
                         auth_epoch = auth_epoch + 1
-                  WHERE username = $4",
+                  WHERE username = $4
+                    AND ($5::TEXT IS NULL OR id = $5)
+                    AND ($6::BIGINT IS NULL OR auth_epoch = $6)
+              RETURNING role, auth_epoch",
             )
             .bind(&hash)
             .bind(must_change)
             .bind(now)
             .bind(&username)
-            .execute(&mut *tx)
+            .bind(guard_id)
+            .bind(guard_epoch)
+            .fetch_optional(&mut *tx)
             .await
             .with_context(|| format!("set password for {username}"))?;
-            if res.rows_affected() == 0 {
-                anyhow::bail!("user {username} not found");
-            }
+            let Some((role, epoch)) = row else {
+                return Ok(None);
+            };
             crate::db::mfa_grants::delete_all_postgres(&mut tx, &username).await?;
             sqlx::query(
                 "INSERT INTO audit_log (actor, action, target, diff_json, occurred_at)
@@ -948,9 +1017,9 @@ pub async fn set_password(
             .await
             .context("audit password change")?;
             tx.commit().await.context("commit password change")?;
+            Ok(Some((Role::parse(&role).unwrap_or(Role::Viewer), epoch)))
         }
     }
-    Ok(())
 }
 
 /// Change a user's role.

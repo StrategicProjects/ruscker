@@ -588,6 +588,19 @@ async fn authorize(
             return fail("server_error");
         }
     }
+    // Which second factor was proved, for a client that requires one.
+    let mfa_marker = if client.require_mfa {
+        match crate::db::mfa::fetch(db, &user.username).await {
+            Ok(Some(row)) => row.marker(),
+            Ok(None) => None,
+            Err(err) => {
+                tracing::error!(error = ?err, "read MFA factor for authorization failed");
+                return fail("server_error");
+            }
+        }
+    } else {
+        None
+    };
     let grant = Grant {
         client_id: client.client_id.clone(),
         user_id: user.id.clone(),
@@ -604,6 +617,7 @@ async fn authorize(
         // after the proof; for any other client nothing was proved.
         mfa_proved: client.require_mfa,
         auth_epoch,
+        mfa_marker,
     };
     match crate::db::oidc_codes::issue(db, &grant).await {
         // `iss` (RFC 9207) lets a client that talks to several providers
@@ -938,10 +952,22 @@ async fn token(State(state): State<AppState>, headers: HeaderMap, body: String) 
             return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
         }
     };
-    if current_epoch != grant.auth_epoch
-        || user.must_change_password
-        || (client.require_mfa && !grant.mfa_proved)
-    {
+    // …and, for a client that requires MFA, the same factor in the same
+    // trust state as when the code was issued (not reset, devices not
+    // forgotten since).
+    let mfa_still_proved = if client.require_mfa {
+        let current = match crate::db::mfa::fetch(db, &user.username).await {
+            Ok(row) => row.and_then(|r| r.marker()),
+            Err(err) => {
+                tracing::error!(error = ?err, "read MFA factor for token failed");
+                return token_error(StatusCode::INTERNAL_SERVER_ERROR, "server_error", "try again later");
+            }
+        };
+        grant.mfa_proved && current.is_some() && current == grant.mfa_marker
+    } else {
+        true
+    };
+    if current_epoch != grant.auth_epoch || user.must_change_password || !mfa_still_proved {
         tracing::warn!(client = %client.client_id, user = %user.username,
             "authorization code refused: password change pending or MFA now required");
         return invalid_grant();
@@ -1236,6 +1262,8 @@ struct EndSessionPage<'a> {
     /// "Stay signed in" / "back to the system": the return address with
     /// its `state`, else the client's home page.
     back_href: Option<String>,
+    /// Signed out in this browser, but the server could not record it.
+    unconfirmed: bool,
 }
 
 impl EndSessionPage<'_> {
@@ -1275,6 +1303,7 @@ async fn render_end_session(
     theme: crate::theme::Theme,
     es: &EndSession,
     confirm: bool,
+    unconfirmed: bool,
 ) -> Response {
     let brand = super::landing::portal_brand(state, loc).await;
     let page = EndSessionPage {
@@ -1292,6 +1321,7 @@ async fn render_end_session(
         return_to: es.return_to.clone().unwrap_or_default(),
         state_param: es.state.clone().unwrap_or_default(),
         back_href: back_href(es),
+        unconfirmed,
     };
     let mut resp = super::admin::render(&page);
     resp.headers_mut().insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -1369,10 +1399,10 @@ async fn end_session(
         // Nothing to end here.
         return match &es.return_to {
             Some(uri) => back_to_client(uri, es.state.as_deref(), &[]),
-            None => render_end_session(&state, loc, theme, &es, false).await,
+            None => render_end_session(&state, loc, theme, &es, false, false).await,
         };
     }
-    render_end_session(&state, loc, theme, &es, true).await
+    render_end_session(&state, loc, theme, &es, true, false).await
 }
 
 /// `POST /oauth/logout` — the person confirmed. The request is checked
@@ -1399,10 +1429,14 @@ async fn end_session_confirm(
         Ok(es) => es,
         Err(reason) => return refuse(reason),
     };
-    super::admin::end_browser_session(&state, &cookies).await;
+    // When the server could not record the sign-out, say so here instead
+    // of sending the person back as if it were done (Codex review of #1123).
+    if !super::admin::end_browser_session(&state, &cookies).await {
+        return render_end_session(&state, loc, theme, &es, false, true).await;
+    }
     match &es.return_to {
         Some(uri) => back_to_client(uri, es.state.as_deref(), &[]),
-        None => render_end_session(&state, loc, theme, &es, false).await,
+        None => render_end_session(&state, loc, theme, &es, false, false).await,
     }
 }
 

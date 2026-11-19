@@ -29,6 +29,16 @@ pub struct MfaRow {
     pub security_epoch: i64,
 }
 
+impl MfaRow {
+    /// Which second factor, in which trust state: its confirmation instant
+    /// and its security epoch. A reset (a new factor), or "forget all
+    /// devices" (a new epoch), changes it. `None` while unconfirmed.
+    pub fn marker(&self) -> Option<String> {
+        self.confirmed_at
+            .map(|at| format!("{}|{}", at.timestamp_micros(), self.security_epoch))
+    }
+}
+
 type StoredRow = (
     String,
     Vec<u8>,

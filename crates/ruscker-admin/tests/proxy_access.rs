@@ -289,8 +289,14 @@ async fn a_session_lost_mid_request_is_not_forwarded() {
     }
     #[async_trait::async_trait]
     impl AdminSessionStore for OnceThenGone {
-        async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64) -> String {
-            self.inner.create_at_epoch(role, actor, epoch).await
+        async fn create_at_epoch(
+            &self,
+            role: Role,
+            actor: Option<String>,
+            epoch: i64,
+            account_id: Option<String>,
+        ) -> String {
+            self.inner.create_at_epoch(role, actor, epoch, account_id).await
         }
         async fn validate(&self, id: &str) -> Option<SessionInfo> {
             if self.lookups.fetch_add(1, Ordering::SeqCst) == 0 {
@@ -317,4 +323,58 @@ async fn a_session_lost_mid_request_is_not_forwarded() {
     let status = get(state, "/app/open-app/", Some(format!("{COOKIE_NAME}={sid}"))).await;
     assert!(store.lookups.load(Ordering::SeqCst) >= 2, "both reads happened");
     assert_eq!(status, StatusCode::FORBIDDEN, "not forwarded on the stale identity");
+}
+
+/// Codex review of #1123 (third pass): with the password barrier's cache
+/// already warm for this session, a session lost mid-request must still be
+/// refused — the barrier confirms the session before using its cache.
+#[tokio::test]
+async fn a_warm_password_cache_does_not_vouch_for_a_lost_session() {
+    use ruscker_admin::auth::{AdminSessionStore, InMemoryAdminSessionStore, SessionInfo};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    /// Confirms the session `budget` more times, then answers "none".
+    #[derive(Debug, Default)]
+    struct Budgeted {
+        inner: InMemoryAdminSessionStore,
+        budget: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl AdminSessionStore for Budgeted {
+        async fn create_at_epoch(
+            &self,
+            role: Role,
+            actor: Option<String>,
+            epoch: i64,
+            account_id: Option<String>,
+        ) -> String {
+            self.inner.create_at_epoch(role, actor, epoch, account_id).await
+        }
+        async fn validate(&self, id: &str) -> Option<SessionInfo> {
+            let left = self.budget.load(Ordering::SeqCst);
+            if left == 0 {
+                return None;
+            }
+            self.budget.store(left - 1, Ordering::SeqCst);
+            self.inner.validate(id).await
+        }
+        async fn remove(&self, id: &str) -> bool {
+            self.inner.remove(id).await
+        }
+        async fn revoke_by_actor(&self, actor: &str) {
+            self.inner.revoke_by_actor(actor).await
+        }
+    }
+    let db = open_db().await;
+    ruscker_admin::db::users::create(&db, "vera", "Vera-Pass9!", Role::Viewer, false, &[], None)
+        .await
+        .unwrap();
+    let mut state = app_state(db).await;
+    let store = std::sync::Arc::new(Budgeted::default());
+    let sid = store.inner.create(Role::Viewer, Some("vera".into())).await;
+    state.admin_sessions = store.clone();
+    let cookie = Some(format!("{COOKIE_NAME}={sid}"));
+    store.budget.store(100, Ordering::SeqCst);
+    assert_eq!(get(state.clone(), "/app/open-app/", cookie.clone()).await, ALLOWED, "warms the cache");
+    store.budget.store(1, Ordering::SeqCst); // the extractor's read only
+    assert_eq!(get(state, "/app/open-app/", cookie).await, StatusCode::FORBIDDEN);
 }

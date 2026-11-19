@@ -67,6 +67,12 @@
   {% else %}
     <h1 class="text-lg font-medium tracking-tight">{{ self.t("sso-logout-done-title") }}</h1>
     <p class="text-xs text-[color:var(--text-muted)]">{{ self.t("sso-logout-done") }}</p>
+    {% if unconfirmed %}
+    <div class="admin-login-error" role="alert">
+      <i class="ti ti-alert-circle" aria-hidden="true"></i>
+      {{ self.t("admin-login-error-signout-unconfirmed") }}
+    </div>
+    {% endif %}
     {% match back_href %}{% when Some with (href) %}
       <a class="admin-login-btn admin-login-btn--primary" href="{{ href }}" rel="noopener">
         <i class="ti ti-arrow-left" aria-hidden="true"></i>{{ self.back_label() }}

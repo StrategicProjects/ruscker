@@ -1441,6 +1441,7 @@ pub(crate) async fn resolve_identity_within(
     if let Some(identity) = state.identity_cache.get(username, max_age) {
         return identity;
     }
+    let read_at = std::time::Instant::now();
 
     // Snapshot BEFORE the read: `get` rejects this fill after it lands if
     // an admin mutation invalidated the cache while we were at the DB, so a
@@ -1463,6 +1464,7 @@ pub(crate) async fn resolve_identity_within(
                             group_roles: Arc::default(),
                             auth_epoch: None,
                             account_created_at: None,
+                            account_id: None,
                         });
                     }
                 };
@@ -1480,6 +1482,7 @@ pub(crate) async fn resolve_identity_within(
                             group_roles: Arc::default(),
                             auth_epoch,
                             account_created_at: Some(user.created_at),
+                            account_id: Some(user.id.clone()),
                         });
                     }
                 };
@@ -1490,6 +1493,7 @@ pub(crate) async fn resolve_identity_within(
                     group_roles: Arc::new(group_roles),
                     auth_epoch,
                     account_created_at: Some(user.created_at),
+                    account_id: Some(user.id),
                 })
             }
             Ok(None) => Arc::new(CachedIdentity::default()),
@@ -1502,7 +1506,7 @@ pub(crate) async fn resolve_identity_within(
     };
     state
         .identity_cache
-        .store(generation, username, identity.clone());
+        .store_read_at(generation, username, identity.clone(), read_at);
     identity
 }
 

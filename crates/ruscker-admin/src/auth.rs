@@ -188,6 +188,7 @@ struct SessionEntry {
     actor: Option<String>,
     epoch: i64,
     issued_at: chrono::DateTime<chrono::Utc>,
+    account_id: Option<String>,
 }
 
 /// What [`AdminSessionStore::validate`] yields for a live session —
@@ -205,6 +206,11 @@ pub struct SessionInfo {
     /// again — whose generation starts over (automated security review of
     /// #1123).
     pub issued_at: chrono::DateTime<chrono::Utc>,
+    /// The immutable id (`users.id`) of the account whose credentials
+    /// issued the session. A name can be deleted and created again; an id
+    /// cannot (Codex review of #1123). `None` only for sessions minted
+    /// without one (break-glass token, older rows, test fixtures).
+    pub account_id: Option<String>,
 }
 
 /// Server-side store of opaque admin session ids → (expiry, role).
@@ -233,12 +239,20 @@ pub trait AdminSessionStore: Send + Sync + std::fmt::Debug {
     /// `epoch` (the account's `auth_epoch`, read together with whatever
     /// authorised the session) and return its opaque id. `actor` is the DB
     /// username (or `None` for a break-glass token session).
-    async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64) -> String;
+    /// `account_id` is the account's immutable id, read with `epoch`.
+    async fn create_at_epoch(
+        &self,
+        role: Role,
+        actor: Option<String>,
+        epoch: i64,
+        account_id: Option<String>,
+    ) -> String;
 
-    /// [`Self::create_at_epoch`] at generation 0 — an account that never
-    /// changed password or role, or a break-glass token session.
+    /// [`Self::create_at_epoch`] at generation 0 with no account id — the
+    /// break-glass token session. (Account sessions in production are
+    /// always minted with both; see `routes::admin`.)
     async fn create(&self, role: Role, actor: Option<String>) -> String {
-        self.create_at_epoch(role, actor, 0).await
+        self.create_at_epoch(role, actor, 0, None).await
     }
 
     /// Resolve `id` to its [`SessionInfo`] when the session is live, or
@@ -295,7 +309,13 @@ pub(crate) fn mint_session_id() -> String {
 
 #[async_trait::async_trait]
 impl AdminSessionStore for InMemoryAdminSessionStore {
-    async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64) -> String {
+    async fn create_at_epoch(
+        &self,
+        role: Role,
+        actor: Option<String>,
+        epoch: i64,
+        account_id: Option<String>,
+    ) -> String {
         let id = mint_session_id();
         self.sessions.insert(
             id.clone(),
@@ -305,6 +325,7 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
                 actor,
                 epoch,
                 issued_at: chrono::Utc::now(),
+                account_id,
             },
         );
         id
@@ -313,11 +334,11 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
     async fn validate(&self, id: &str) -> Option<SessionInfo> {
         let info = self.sessions.get(id).map(|e| {
             let v = e.value();
-            (v.expiry, v.role, v.actor.clone(), v.epoch, v.issued_at)
+            (v.expiry, v.role, v.actor.clone(), v.epoch, v.issued_at, v.account_id.clone())
         });
         match info {
-            Some((expiry, role, actor, epoch, issued_at)) if expiry > Instant::now() => {
-                Some(SessionInfo { role, actor, epoch, issued_at })
+            Some((expiry, role, actor, epoch, issued_at, account_id)) if expiry > Instant::now() => {
+                Some(SessionInfo { role, actor, epoch, issued_at, account_id })
             }
             Some(_) => {
                 self.sessions.remove(id);
@@ -1112,15 +1133,20 @@ pub async fn confirm_session(state: &crate::AppState, id: &str) -> Option<Sessio
         return Some(info);
     }
     let identity = crate::routes::proxy::resolve_identity_within(state, username, AUTH_EPOCH_TTL).await;
-    let (Some(current), Some(created_at)) = (identity.auth_epoch, identity.account_created_at) else {
+    let (Some(current), Some(account_id), Some(created_at)) =
+        (identity.auth_epoch, identity.account_id.as_deref(), identity.account_created_at)
+    else {
         return None;
     };
-    // Issued under an earlier generation, or before this account existed
-    // (an earlier account of the same name: its generation started over).
-    // The margin absorbs clock differences between nodes; a session issued
-    // that close to a re-creation is not a realistic leftover.
-    let predates_account = info.issued_at + chrono::Duration::seconds(2) < created_at;
-    (current == info.epoch && !predates_account).then_some(info)
+    // The same account: by its immutable id when the session carries it
+    // (every account session minted by this version). Older sessions and
+    // fixtures without one fall back to "issued after the account was
+    // created" — weaker (wall clocks), and gone once those sessions expire.
+    let same_account = match info.account_id.as_deref() {
+        Some(id) => id == account_id,
+        None => info.issued_at + chrono::Duration::seconds(2) >= created_at,
+    };
+    (same_account && current == info.epoch).then_some(info)
 }
 
 impl FromRequestParts<crate::AppState> for AdminSession {

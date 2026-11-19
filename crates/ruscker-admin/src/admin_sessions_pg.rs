@@ -236,6 +236,9 @@ async fn ensure_schema(pool: &PgPool) -> sqlx::Result<()> {
     sqlx::query("ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS auth_epoch BIGINT NOT NULL DEFAULT 0")
         .execute(pool)
         .await?;
+    sqlx::query("ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS account_id TEXT")
+        .execute(pool)
+        .await?;
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS admin_sessions_expires_at_idx
             ON admin_sessions (expires_at)",
@@ -285,18 +288,25 @@ fn role_from_str(s: &str) -> Option<Role> {
 
 #[async_trait::async_trait]
 impl AdminSessionStore for PostgresAdminSessionStore {
-    async fn create_at_epoch(&self, role: Role, actor: Option<String>, epoch: i64) -> String {
+    async fn create_at_epoch(
+        &self,
+        role: Role,
+        actor: Option<String>,
+        epoch: i64,
+        account_id: Option<String>,
+    ) -> String {
         let id = mint_session_id();
         let expires_at: DateTime<Utc> = Utc::now() + chrono::Duration::from_std(self.ttl).unwrap();
         let result = sqlx::query(
-            "INSERT INTO admin_sessions (sid, role, actor, expires_at, auth_epoch)
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO admin_sessions (sid, role, actor, expires_at, auth_epoch, account_id)
+             VALUES ($1, $2, $3, $4, $5, $6)",
         )
         .bind(&id)
         .bind(role_to_str(role))
         .bind(&actor)
         .bind(expires_at)
         .bind(epoch)
+        .bind(&account_id)
         .execute(&self.pool)
         .await;
         if let Err(e) = result {
@@ -322,7 +332,13 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         self.cache.insert(
             id.clone(),
             CachedEntry {
-                info: Some(SessionInfo { role, actor, epoch, issued_at: expires_at - ttl_as_chrono(self.ttl) }),
+                info: Some(SessionInfo {
+                    role,
+                    actor,
+                    epoch,
+                    issued_at: expires_at - ttl_as_chrono(self.ttl),
+                    account_id,
+                }),
                 valid_until,
             },
         );
@@ -360,7 +376,7 @@ impl AdminSessionStore for PostgresAdminSessionStore {
 
         // Cache miss / stale — query Postgres.
         let row = sqlx::query(
-            "SELECT role, actor, expires_at, auth_epoch
+            "SELECT role, actor, expires_at, auth_epoch, account_id
                FROM admin_sessions
               WHERE sid = $1",
         )
@@ -376,6 +392,7 @@ impl AdminSessionStore for PostgresAdminSessionStore {
                 let actor: Option<String> = r.get("actor");
                 let expires_at: DateTime<Utc> = r.get("expires_at");
                 let epoch: i64 = r.get("auth_epoch");
+                let account_id: Option<String> = r.get("account_id");
                 let role = match role_from_str(&role_str) {
                     Some(r) => r,
                     None => {
@@ -406,6 +423,7 @@ impl AdminSessionStore for PostgresAdminSessionStore {
                             epoch,
                             // Issued = expiry − lifetime (sessions are never extended).
                             issued_at: expires_at - ttl_as_chrono(self.ttl),
+                            account_id,
                         }),
                         Some(expires_at),
                     )
@@ -789,7 +807,7 @@ mod postgres_it {
             .await
             .unwrap();
         reset_rows(&store.pool).await;
-        let sid = store.create_at_epoch(Role::Editor, Some("quinn".into()), 7).await;
+        let sid = store.create_at_epoch(Role::Editor, Some("quinn".into()), 7, None).await;
         tokio::time::sleep(Duration::from_millis(20)).await; // past the cache: read the row
         assert_eq!(store.validate(&sid).await.unwrap().epoch, 7);
     }

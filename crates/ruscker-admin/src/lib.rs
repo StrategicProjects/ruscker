@@ -115,6 +115,8 @@ pub struct CachedIdentity {
     /// When the account was created; with `auth_epoch`, what a session is
     /// confirmed against.
     pub(crate) account_created_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// The account's immutable id (`users.id`).
+    pub(crate) account_id: Option<String>,
 }
 
 /// Shared short-TTL cache of user identity attributes for the proxy hot
@@ -154,10 +156,21 @@ impl IdentityCache {
     /// current when the fill began — if an invalidation raced this fill,
     /// the entry lands already-expired and `get` never serves it.
     pub fn store(&self, generation: u64, username: &str, identity: Arc<CachedIdentity>) {
-        self.map.insert(
-            username.to_string(),
-            (generation, std::time::Instant::now(), identity),
-        );
+        self.store_read_at(generation, username, identity, std::time::Instant::now());
+    }
+
+    /// [`Self::store`], aged from `read_at` — when the database read that
+    /// produced it BEGAN. A slow fill must not come out looking fresh: the
+    /// session check's 2-second bound counts from the read (Codex review
+    /// of #1123).
+    pub fn store_read_at(
+        &self,
+        generation: u64,
+        username: &str,
+        identity: Arc<CachedIdentity>,
+        read_at: std::time::Instant,
+    ) {
+        self.map.insert(username.to_string(), (generation, read_at, identity));
     }
 
     /// Expire every entry — current AND in-flight (generation bump);
@@ -993,6 +1006,14 @@ pub(crate) async fn session_password_state(
     pool: &db::ConfigDb,
     id: &str,
 ) -> PasswordState {
+    // The session first, every time — the cached answer below is about
+    // the password, not about whether the session still stands (Codex
+    // review of #1123: a warm cache answered "clear" for a session revoked
+    // mid-request). Unconfirmed: refuse, and cache NOTHING — the Postgres
+    // store also answers "none" when its database is failing.
+    let Some(info) = auth::confirm_session(state, id).await else {
+        return PasswordState::NoSession;
+    };
     // A recent answer for this exact session id. `must_change` cannot
     // change under a live id (a password change re-mints the session), so
     // a cache hit is authoritative until the TTL evicts it.
@@ -1002,13 +1023,6 @@ pub(crate) async fn session_password_state(
     {
         return if must { PasswordState::MustChange } else { PasswordState::Clear };
     }
-    // No live session: refuse, and cache NOTHING — the Postgres store also
-    // answers "none" when the database is failing; a cached or returned
-    // "clear" would let a must-change session through, now or for the
-    // whole TTL once the database is back (Codex review of #1122).
-    let Some(info) = auth::confirm_session(state, id).await else {
-        return PasswordState::NoSession;
-    };
     let actor = info.actor;
     let answer = match actor {
         Some(actor) => match db::users::fetch(pool, &actor).await {

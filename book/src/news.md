@@ -9,6 +9,24 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.57 — 2026-11-19
+
+The SSO section of the admin, rearranged.
+
+- **It opens on Access**: sign-ins, refusals and active systems at the
+  top, the log below. **Register client** is a button there and on the
+  **Clients** list, and the form has its own page — the same shape as
+  the Apps tab.
+- **The system's logo is chosen in the image gallery** (thumbnails,
+  search, upload on the spot), like an app's logo, instead of a list of
+  file names.
+- **Fix: the client secret stays on the page.** It is shown only once,
+  but it appeared in a notice that disappeared after four seconds, and
+  its **Copy** button did nothing. It now stays until you leave the page,
+  and the button copies.
+
+No database migration in this release.
+
 ## v0.2.56 — 2026-11-18
 
 The package can now keep a server up to date by itself.

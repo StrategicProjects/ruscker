@@ -271,6 +271,17 @@ pub trait AdminSessionStore: Send + Sync + std::fmt::Debug {
     /// elevated) role until it expires (#544). Break-glass token
     /// sessions (`actor == None`) are never matched.
     async fn revoke_by_actor(&self, actor: &str);
+
+    /// Cleanup after a change that moved `actor`'s authentication
+    /// generation to `epoch`: drop the sessions issued under an EARLIER
+    /// one, and keep any already issued under `epoch` — a sign-in with the
+    /// new password on another node, landing before this cleanup, must
+    /// survive it (final security review, 2026-11-20). The generation is
+    /// what ends the old sessions; this only reclaims their rows.
+    async fn revoke_before_epoch(&self, actor: &str, epoch: i64) {
+        let _ = epoch;
+        self.revoke_by_actor(actor).await;
+    }
 }
 
 /// Single-node admin session store. The default; replaced by
@@ -358,6 +369,11 @@ impl AdminSessionStore for InMemoryAdminSessionStore {
         // never match a username, so they're left alone.
         self.sessions
             .retain(|_, e| e.actor.as_deref() != Some(actor));
+    }
+
+    async fn revoke_before_epoch(&self, actor: &str, epoch: i64) {
+        self.sessions
+            .retain(|_, e| e.actor.as_deref() != Some(actor) || e.epoch >= epoch);
     }
 }
 
@@ -1094,6 +1110,12 @@ pub struct AdminSession {
     pub actor: Option<String>,
     /// The authentication generation the session was confirmed under.
     pub epoch: i64,
+    /// The immutable id (`users.id`) of the account the session was
+    /// confirmed against; `None` for a break-glass token session. A
+    /// handler that reads the account again BY NAME must check it is still
+    /// this one — a username can be deleted and created again (final
+    /// security review, 2026-11-20).
+    pub account_id: Option<String>,
 }
 
 impl AdminSession {
@@ -1127,11 +1149,13 @@ pub async fn confirm_session(state: &crate::AppState, id: &str) -> Option<Sessio
     let Some(username) = info.actor.as_deref() else {
         return Some(info); // the break-glass token: no account to check
     };
-    if state.db.is_none() {
-        // No catalog, so no accounts and no sign-in that could have made
-        // an account session: nothing to compare against.
-        return Some(info);
-    }
+    // No catalog to confirm an account session against. Such a node
+    // cannot have minted one, but it may share a persistent session
+    // store with nodes that did (a misconfigured HA node) — and that
+    // store alone knows nothing about revocations. Refuse; only the
+    // break-glass token above works without a catalog (final security
+    // review, 2026-11-20).
+    state.db.as_ref()?;
     let identity = crate::routes::proxy::resolve_identity_within(state, username, AUTH_EPOCH_TTL).await;
     let (Some(current), Some(account_id), Some(created_at)) =
         (identity.auth_epoch, identity.account_id.as_deref(), identity.account_created_at)
@@ -1146,7 +1170,29 @@ pub async fn confirm_session(state: &crate::AppState, id: &str) -> Option<Sessio
         Some(id) => id == account_id,
         None => info.issued_at + chrono::Duration::seconds(2) >= created_at,
     };
-    (same_account && current == info.epoch).then_some(info)
+    // Hand on the account it was confirmed against, also for an older
+    // session that did not carry the id: whoever reads the account again
+    // by name compares with this.
+    (same_account && current == info.epoch).then(|| SessionInfo {
+        account_id: Some(account_id.to_string()),
+        ..info
+    })
+}
+
+/// Reclaim the session rows a change to `username` made obsolete: the
+/// ones issued before the account's CURRENT generation (read now, after
+/// the change committed), or all of them once the account is gone or
+/// cannot be read. Never what decides whether a session works — that is
+/// [`confirm_session`].
+pub async fn end_obsolete_sessions(state: &crate::AppState, username: &str) {
+    let current = match state.db.as_ref() {
+        Some(db) => crate::db::users::account_ref(db, username).await.ok().flatten(),
+        None => None,
+    };
+    match current {
+        Some((_, _, epoch)) => state.admin_sessions.revoke_before_epoch(username, epoch).await,
+        None => state.admin_sessions.revoke_by_actor(username).await,
+    }
 }
 
 impl FromRequestParts<crate::AppState> for AdminSession {
@@ -1193,6 +1239,7 @@ impl FromRequestParts<crate::AppState> for AdminSession {
                     role: info.role,
                     actor: info.actor,
                     epoch: info.epoch,
+                    account_id: info.account_id,
                 }),
                 None => Err(to_login()),
             },
@@ -1384,6 +1431,26 @@ mod tests {
             s.validate(&id).await.is_none(),
             "removed (logged-out) session is invalid"
         );
+    }
+
+    #[tokio::test]
+    async fn cleanup_spares_sessions_of_the_new_generation() {
+        // Final security review (2026-11-20), finding 7: the cleanup after
+        // a change to generation 3 drops alice's older sessions, keeps one
+        // she already signed in with at 3 (another node, new password),
+        // and touches nobody else.
+        let s = InMemoryAdminSessionStore::default_policy();
+        let old = s.create_at_epoch(Role::Admin, Some("alice".into()), 2, Some("a".into())).await;
+        let new = s.create_at_epoch(Role::Admin, Some("alice".into()), 3, Some("a".into())).await;
+        let bob = s.create_at_epoch(Role::Editor, Some("bob".into()), 0, Some("b".into())).await;
+        let token = s.create(Role::Admin, None).await;
+
+        s.revoke_before_epoch("alice", 3).await;
+
+        assert!(s.validate(&old).await.is_none(), "earlier generation removed");
+        assert!(s.validate(&new).await.is_some(), "the new generation stays");
+        assert!(s.validate(&bob).await.is_some());
+        assert!(s.validate(&token).await.is_some());
     }
 
     #[tokio::test]

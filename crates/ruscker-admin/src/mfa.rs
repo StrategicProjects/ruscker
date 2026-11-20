@@ -312,8 +312,28 @@ pub async fn evaluate_with_validity(
     cookies: &Cookies,
     validity_days: u16,
 ) -> MfaDecision {
+    match evaluate_proof(state, username, session_id, cookies, validity_days).await {
+        Ok(_) => MfaDecision::Satisfied,
+        Err(decision) => decision,
+    }
+}
+
+/// [`evaluate_with_validity`], also naming WHICH factor state the proof was
+/// checked against: on success, the marker ([`crate::db::mfa::MfaRow::marker`])
+/// of the factor row this very evaluation compared the grant with. A caller
+/// that records the proof (an OIDC code) or acts on it (regenerating the
+/// recovery codes) binds to this marker, never to a factor row it reads
+/// again later — a "forget all devices" landing in between would otherwise
+/// be adopted as if it had been proved (final security review, 2026-11-20).
+pub async fn evaluate_proof(
+    state: &crate::AppState,
+    username: &str,
+    session_id: &str,
+    cookies: &Cookies,
+    validity_days: u16,
+) -> Result<String, MfaDecision> {
     let Some(db) = state.db.as_ref() else {
-        return MfaDecision::ChallengeRequired;
+        return Err(MfaDecision::ChallengeRequired);
     };
     // Read order matters (codex review r5, #1005): the factor row is read
     // AFTER the grant, so its security_epoch is at least as fresh as the
@@ -327,31 +347,31 @@ pub async fn evaluate_with_validity(
         .and_then(|cookie| device_cookie_parts(cookie.value()).map(|(id, token)| (id.to_string(), token.to_string())));
     let Some((id, token)) = cookie_parts else {
         return match crate::db::mfa::fetch(db, username).await {
-            Ok(Some(row)) if row.confirmed_at.is_some() => MfaDecision::ChallengeRequired,
-            Ok(_) => MfaDecision::EnrollmentRequired,
+            Ok(Some(row)) if row.confirmed_at.is_some() => Err(MfaDecision::ChallengeRequired),
+            Ok(_) => Err(MfaDecision::EnrollmentRequired),
             Err(err) => {
                 tracing::warn!(error = ?err, %username, "MFA decision factor fetch failed");
-                MfaDecision::ChallengeRequired
+                Err(MfaDecision::ChallengeRequired)
             }
         };
     };
     let (id, token) = (id.as_str(), token.as_str());
     let grant = match crate::db::mfa_grants::fetch_valid(db, id).await {
         Ok(Some(grant)) => grant,
-        Ok(None) => return MfaDecision::ChallengeRequired,
+        Ok(None) => return Err(MfaDecision::ChallengeRequired),
         Err(err) => {
             tracing::warn!(error = ?err, %username, "MFA decision grant fetch failed");
-            return MfaDecision::ChallengeRequired;
+            return Err(MfaDecision::ChallengeRequired);
         }
     };
     // AUTHORITATIVE factor read — after the grant, so this epoch is at
     // least as fresh as the grant's (see the ordering note above).
     let factor = match crate::db::mfa::fetch(db, username).await {
         Ok(Some(row)) if row.confirmed_at.is_some() => row,
-        Ok(_) => return MfaDecision::EnrollmentRequired,
+        Ok(_) => return Err(MfaDecision::EnrollmentRequired),
         Err(err) => {
             tracing::warn!(error = ?err, %username, "MFA decision factor re-read failed");
-            return MfaDecision::ChallengeRequired;
+            return Err(MfaDecision::ChallengeRequired);
         }
     };
     let now = Utc::now();
@@ -367,7 +387,7 @@ pub async fn evaluate_with_validity(
         // races harmless.
         || grant.security_epoch != factor.security_epoch
     {
-        return MfaDecision::ChallengeRequired;
+        return Err(MfaDecision::ChallengeRequired);
     }
 
     if validity_days == 0 {
@@ -375,19 +395,25 @@ pub async fn evaluate_with_validity(
             grant.session_binding.as_bytes(),
             session_binding(session_id).as_bytes(),
         ) {
-            MfaDecision::Satisfied
+            proved(&factor)
         } else {
-            MfaDecision::ChallengeRequired
+            Err(MfaDecision::ChallengeRequired)
         };
     }
     let age = now.signed_duration_since(grant.mfa_verified_at);
     if age < chrono::Duration::zero()
         || age > chrono::Duration::days(i64::from(validity_days))
     {
-        MfaDecision::ChallengeRequired
+        Err(MfaDecision::ChallengeRequired)
     } else {
-        MfaDecision::Satisfied
+        proved(&factor)
     }
+}
+
+/// The marker of a factor a proof was just checked against. A confirmed
+/// factor always has one; if it somehow did not, nothing was proved.
+fn proved(factor: &crate::db::mfa::MfaRow) -> Result<String, MfaDecision> {
+    factor.marker().ok_or(MfaDecision::ChallengeRequired)
 }
 
 /// Per-username confirmation limiter. A correct code clears that username's

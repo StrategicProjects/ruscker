@@ -819,3 +819,45 @@ async fn sign_in_layouts_and_the_button_image() {
     let (off, _) = setup(OFF, false).await;
     assert_eq!(get(&off, "/oauth/button.svg", "").await.status, StatusCode::NOT_FOUND);
 }
+
+/// Final security review (2026-11-20), finding 1: a session confirmed for
+/// one account must not authorize as ANOTHER account of the same name.
+/// Here `ana` is deleted and created again (another person) while this
+/// node still holds the old account's confirmation in its identity cache
+/// — as a node does for a change made on another node. Both accounts are
+/// at generation 0, so only the immutable account id tells them apart.
+#[tokio::test]
+async fn a_recreated_account_does_not_inherit_the_old_accounts_session() {
+    let (state, db) = setup(ON, false).await;
+    let (old_id, _, epoch) =
+        ruscker_admin::db::users::account_ref(&db, "ana").await.unwrap().unwrap();
+    let sid = state
+        .admin_sessions
+        .create_at_epoch(Role::Viewer, Some("ana".into()), epoch, Some(old_id.clone()))
+        .await;
+    let cookie = format!("{COOKIE_NAME}={sid}");
+    let uri = request("", &[]);
+    // The old account signs in to the client: works, and warms the cache.
+    let r = get(&state, &uri, &cookie).await;
+    assert!(params(&r.location).contains_key("code"), "{}", r.location);
+
+    // Elsewhere: `ana` deleted, and a new `ana` created in the same group.
+    ruscker_admin::db::users::delete(&db, "ana", None).await.unwrap();
+    ruscker_admin::db::users::create(&db, "ana", PASSWORD, Role::Viewer, false, &["fiscal".to_string()], None)
+        .await
+        .unwrap();
+    let (new_id, _, new_epoch) =
+        ruscker_admin::db::users::account_ref(&db, "ana").await.unwrap().unwrap();
+    assert_ne!(new_id, old_id);
+    assert_eq!(new_epoch, epoch, "same generation: only the id differs");
+
+    let before = stored_codes(&db).await;
+    let r = get(&state, &uri, &cookie).await;
+    assert_eq!(
+        params(&r.location).get("error").map(String::as_str),
+        Some("access_denied"),
+        "{}",
+        r.location
+    );
+    assert_eq!(stored_codes(&db).await, before, "no code for the new account");
+}

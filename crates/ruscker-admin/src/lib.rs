@@ -98,7 +98,7 @@ async fn warn_editors_without_groups(db: Option<&db::ConfigDb>) {
 /// Identity attributes cached together for the proxy hot path (#1001).
 /// `celular`, roles, and authentication tokens are intentionally absent:
 /// they are not supported upstream identity claims.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct CachedIdentity {
     pub(crate) groups: Arc<Vec<String>>,
     pub(crate) email: Option<String>,

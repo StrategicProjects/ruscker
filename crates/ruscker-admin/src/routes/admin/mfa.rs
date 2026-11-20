@@ -816,9 +816,14 @@ async fn regenerate_recovery(
         .unwrap_or_default();
     // `EnrollmentRequired` (no confirmed factor) goes on: the database
     // refuses that case below with its own "not enrolled" answer.
-    if crate::mfa::evaluate_with_validity(&state, &username, &session_id, &cookies, 0).await
-        == crate::mfa::MfaDecision::ChallengeRequired
-    {
+    // The factor state this proof was checked against, re-checked when
+    // the new set is written.
+    let proved_marker = match crate::mfa::evaluate_proof(&state, &username, &session_id, &cookies, 0).await {
+        Ok(marker) => Some(marker),
+        Err(crate::mfa::MfaDecision::ChallengeRequired) => None,
+        Err(_) => Some(String::new()),
+    };
+    if proved_marker.is_none() {
         // Back to this page after the proof (keeping its own `next`).
         let back = if next.is_empty() {
             "/admin/account/mfa".to_string()
@@ -888,11 +893,21 @@ async fn regenerate_recovery(
     // refusals render the status page with a reason; an operational
     // failure is a 500, never disguised as "not enrolled".
     let expected = form.generation.unwrap_or_default();
-    match db::mfa::regenerate_recovery_codes(db, &username, &username, &hashes, expected).await {
+    // Written only while the account the session was confirmed against
+    // and the factor the proof was checked against still hold: a password
+    // change or "forget all devices" landing during the (slow) password
+    // check refuses it (final security review, 2026-11-20). Without a
+    // confirmed factor (empty marker) the database answers "not enrolled".
+    let guard = db::mfa::RegenerateGuard {
+        account_id: session.account_id.clone().unwrap_or_default(),
+        auth_epoch: session.epoch,
+        factor_marker: proved_marker.unwrap_or_default(),
+    };
+    match db::mfa::regenerate_recovery_codes_guarded(db, &username, &username, &hashes, expected, Some(&guard)).await {
         Ok(db::mfa::RegenerateOutcome::Done) => {}
         Ok(outcome) => {
             let reason = match outcome {
-                db::mfa::RegenerateOutcome::Stale => "stale",
+                db::mfa::RegenerateOutcome::Stale | db::mfa::RegenerateOutcome::Revoked => "stale",
                 _ => "not-enrolled",
             };
             tracing::info!(%username, ?outcome, "regenerate recovery codes refused");

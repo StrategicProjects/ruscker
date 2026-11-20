@@ -34,9 +34,26 @@ impl MfaRow {
     /// and its security epoch. A reset (a new factor), or "forget all
     /// devices" (a new epoch), changes it. `None` while unconfirmed.
     pub fn marker(&self) -> Option<String> {
-        self.confirmed_at
-            .map(|at| format!("{}|{}", at.timestamp_micros(), self.security_epoch))
+        marker_of(self.confirmed_at, self.security_epoch)
     }
+}
+
+fn marker_of(confirmed_at: Option<DateTime<Utc>>, security_epoch: i64) -> Option<String> {
+    confirmed_at.map(|at| format!("{}|{}", at.timestamp_micros(), security_epoch))
+}
+
+/// What a self-service regeneration was authorised under, re-checked in
+/// the transaction that writes the new codes: the account the session was
+/// confirmed against (immutable id + authentication generation) and the
+/// factor state the MFA proof was checked against. A password change or a
+/// "forget all devices" that lands while the request is in flight (the
+/// password check alone takes a while) refuses the write (final security
+/// review, 2026-11-20).
+#[derive(Debug, Clone)]
+pub struct RegenerateGuard {
+    pub account_id: String,
+    pub auth_epoch: i64,
+    pub factor_marker: String,
 }
 
 type StoredRow = (
@@ -414,6 +431,18 @@ pub enum RegenerateOutcome {
     /// The form's generation is not the current one: another regeneration
     /// (or a resubmission) already ran. Nothing changed.
     Stale,
+    /// The account or the factor moved on after the request was
+    /// authorised ([`RegenerateGuard`]). Nothing changed.
+    Revoked,
+}
+
+fn guard_holds(
+    guard: &RegenerateGuard,
+    account: Option<(String, i64)>,
+    (confirmed_at, security_epoch): (Option<DateTime<Utc>>, i64),
+) -> bool {
+    account.is_some_and(|(id, epoch)| id == guard.account_id && epoch == guard.auth_epoch)
+        && marker_of(confirmed_at, security_epoch).as_deref() == Some(guard.factor_marker.as_str())
 }
 
 /// Self-service regeneration (#1054): replace every recovery code of a
@@ -428,6 +457,19 @@ pub async fn regenerate_recovery_codes(
     actor: &str,
     hashes: &[String],
     expected_generation: i64,
+) -> Result<RegenerateOutcome> {
+    regenerate_recovery_codes_guarded(db, username, actor, hashes, expected_generation, None).await
+}
+
+/// [`regenerate_recovery_codes`], refused unless `guard` (when given) still
+/// holds inside the transaction.
+pub async fn regenerate_recovery_codes_guarded(
+    db: &ConfigDb,
+    username: &str,
+    actor: &str,
+    hashes: &[String],
+    expected_generation: i64,
+    guard: Option<&RegenerateGuard>,
 ) -> Result<RegenerateOutcome> {
     let username = crate::db::users::normalize_username(username);
     let target = format!("user:{username}");
@@ -460,6 +502,27 @@ pub async fn regenerate_recovery_codes(
             .context("bump MFA generation")?;
             if bumped.rows_affected() == 0 {
                 return Ok(RegenerateOutcome::Stale);
+            }
+            // Checked AFTER the write above, which holds SQLite's write
+            // lock: no password change can commit between this read and
+            // the commit.
+            if let Some(guard) = guard {
+                let account: Option<(String, i64)> =
+                    sqlx::query_as("SELECT id, auth_epoch FROM users WHERE username = ?")
+                        .bind(&username)
+                        .fetch_optional(&mut *tx)
+                        .await
+                        .context("read account before regeneration")?;
+                let factor: (Option<DateTime<Utc>>, i64) = sqlx::query_as(
+                    "SELECT confirmed_at, security_epoch FROM user_mfa WHERE username = ?",
+                )
+                .bind(&username)
+                .fetch_one(&mut *tx)
+                .await
+                .context("read MFA factor state before regeneration")?;
+                if !guard_holds(guard, account, factor) {
+                    return Ok(RegenerateOutcome::Revoked);
+                }
             }
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = ?")
                 .bind(&username)
@@ -519,6 +582,28 @@ pub async fn regenerate_recovery_codes(
             .context("bump MFA generation")?;
             if bumped.rows_affected() == 0 {
                 return Ok(RegenerateOutcome::Stale);
+            }
+            // The factor row is locked (FOR UPDATE above); FOR SHARE holds
+            // the account row too, so a password change waits for this
+            // transaction instead of slipping in before its commit.
+            if let Some(guard) = guard {
+                let account: Option<(String, i64)> = sqlx::query_as(
+                    "SELECT id, auth_epoch FROM users WHERE username = $1 FOR SHARE",
+                )
+                .bind(&username)
+                .fetch_optional(&mut *tx)
+                .await
+                .context("read account before regeneration")?;
+                let factor: (Option<DateTime<Utc>>, i64) = sqlx::query_as(
+                    "SELECT confirmed_at, security_epoch FROM user_mfa WHERE username = $1",
+                )
+                .bind(&username)
+                .fetch_one(&mut *tx)
+                .await
+                .context("read MFA factor state before regeneration")?;
+                if !guard_holds(guard, account, factor) {
+                    return Ok(RegenerateOutcome::Revoked);
+                }
             }
             sqlx::query("DELETE FROM user_mfa_recovery WHERE username = $1")
                 .bind(&username)
@@ -826,6 +911,66 @@ mod tests {
         assert!(!consume_recovery_code(&db, "alice", "ABCD234567")
             .await
             .unwrap());
+    }
+
+    /// Final security review (2026-11-20), finding 3: the regeneration is
+    /// written only while the account generation and the factor state it
+    /// was authorised under still hold. A password change (new
+    /// `auth_epoch`) or "forget all devices" (new `security_epoch`) that
+    /// lands during the request refuses it and leaves the codes alone.
+    #[tokio::test]
+    async fn regeneration_is_refused_once_its_authorisation_moved_on() {
+        let db = db_with_user("erin").await;
+        let hash = |c: &str| crate::mfa::hash_recovery_code(c).unwrap();
+        begin_enrollment(&db, "erin", b"cipher", b"nonce", "cer-1").await.unwrap();
+        confirm_with_recovery_codes(&db, "erin", "erin", Some(&[hash("AAAAA22222")]), "cer-1")
+            .await
+            .unwrap();
+        let guard_now = || async {
+            let (account_id, _, auth_epoch) =
+                crate::db::users::account_ref(&db, "erin").await.unwrap().unwrap();
+            let factor = fetch(&db, "erin").await.unwrap().unwrap();
+            (
+                RegenerateGuard { account_id, auth_epoch, factor_marker: factor.marker().unwrap() },
+                recovery_generation(&factor),
+            )
+        };
+        let unchanged = RecoveryCodeCounts { unused: 1, total: 1 };
+
+        // Authorised, then the password changes before the write.
+        let (guard, generation) = guard_now().await;
+        crate::db::users::set_password(&db, "erin", "Another#456", false, Some("admin")).await.unwrap();
+        assert_eq!(
+            regenerate_recovery_codes_guarded(&db, "erin", "erin", &[hash("BBBBB33333")], generation, Some(&guard))
+                .await
+                .unwrap(),
+            RegenerateOutcome::Revoked
+        );
+        assert_eq!(recovery_code_counts(&db, "erin").await.unwrap(), unchanged);
+
+        // Authorised, then every trusted device is forgotten.
+        let (guard, generation) = guard_now().await;
+        crate::db::mfa_grants::revoke_all(&db, "erin", "erin", "mfa.forget_devices").await.unwrap();
+        assert_eq!(
+            regenerate_recovery_codes_guarded(&db, "erin", "erin", &[hash("CCCCC44444")], generation, Some(&guard))
+                .await
+                .unwrap(),
+            RegenerateOutcome::Revoked
+        );
+        assert_eq!(recovery_code_counts(&db, "erin").await.unwrap(), unchanged);
+
+        // Nothing moved: written.
+        let (guard, generation) = guard_now().await;
+        assert_eq!(
+            regenerate_recovery_codes_guarded(&db, "erin", "erin", &[hash("DDDDD55555"), hash("EEEEE66666")], generation, Some(&guard))
+                .await
+                .unwrap(),
+            RegenerateOutcome::Done
+        );
+        assert_eq!(
+            recovery_code_counts(&db, "erin").await.unwrap(),
+            RecoveryCodeCounts { unused: 2, total: 2 }
+        );
     }
 
     #[tokio::test]

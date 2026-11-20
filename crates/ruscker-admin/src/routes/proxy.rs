@@ -1441,23 +1441,60 @@ pub(crate) async fn resolve_identity_within(
     if let Some(identity) = state.identity_cache.get(username, max_age) {
         return identity;
     }
-    let read_at = std::time::Instant::now();
+    // The freshness bound holds for the caller that fills the cache too,
+    // not only for later hits (final security review, 2026-11-20): a read
+    // that took longer than `max_age`, or that an invalidation on this
+    // node overtook, is read once more; if the second read is stale as
+    // well, the generation is handed back unknown — which confirms no
+    // session — instead of a value older than promised.
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let read_at = std::time::Instant::now();
+        // Snapshot BEFORE the read: `get` rejects this fill after it lands
+        // if an admin mutation invalidated the cache while we were at the
+        // DB, so a pre-revocation read can never become readable again
+        // (#1001).
+        let generation = state.identity_cache.generation();
+        let (identity, cacheable) = read_identity(state, username).await;
+        if !cacheable {
+            return identity;
+        }
+        state
+            .identity_cache
+            .store_read_at(generation, username, identity.clone(), read_at);
+        let fresh =
+            read_at.elapsed() <= max_age && state.identity_cache.generation() == generation;
+        if fresh {
+            return identity;
+        }
+        if attempt >= 2 {
+            return Arc::new(CachedIdentity {
+                auth_epoch: None,
+                ..(*identity).clone()
+            });
+        }
+    }
+}
 
-    // Snapshot BEFORE the read: `get` rejects this fill after it lands if
-    // an admin mutation invalidated the cache while we were at the DB, so a
-    // pre-revocation read can never become readable again (#1001).
-    let generation = state.identity_cache.generation();
+/// One read of an account's identity from the catalog; the flag says
+/// whether it may be cached (a partial read after an error may not).
+async fn read_identity(state: &AppState, username: &str) -> (Arc<CachedIdentity>, bool) {
     let identity = match state.db.as_ref() {
         Some(db) => match crate::db::users::fetch(db, username).await {
             Ok(Some(user)) => {
                 // The authentication generation (security review
                 // 2026-11-19). A failed read leaves it unknown — which
                 // confirms no session — and is NOT cached.
-                let auth_epoch = match crate::db::users::role_and_epoch(db, username).await {
-                    Ok(row) => row.map(|(_, epoch)| epoch),
+                // Read with the account id, and kept only for the account
+                // just fetched: a username deleted and created again
+                // between the two reads must not lend its generation to
+                // the old row (final security review, 2026-11-20).
+                let auth_epoch = match crate::db::users::account_ref(db, username).await {
+                    Ok(row) => row.and_then(|(id, _, epoch)| (id == user.id).then_some(epoch)),
                     Err(error) => {
                         tracing::warn!(user = username, error = ?error, "auth epoch lookup failed");
-                        return Arc::new(CachedIdentity {
+                        return (Arc::new(CachedIdentity {
                             groups: Arc::new(user.groups),
                             email: user.email,
                             setor: user.setor,
@@ -1465,7 +1502,7 @@ pub(crate) async fn resolve_identity_within(
                             auth_epoch: None,
                             account_created_at: None,
                             account_id: None,
-                        });
+                        }), false);
                     }
                 };
                 // Group roles (#1067). A failed read sends no roles (fail
@@ -1475,7 +1512,7 @@ pub(crate) async fn resolve_identity_within(
                     Ok(pairs) => pairs,
                     Err(error) => {
                         tracing::warn!(user = username, error = ?error, "group role lookup failed");
-                        return Arc::new(CachedIdentity {
+                        return (Arc::new(CachedIdentity {
                             groups: Arc::new(user.groups),
                             email: user.email,
                             setor: user.setor,
@@ -1483,7 +1520,7 @@ pub(crate) async fn resolve_identity_within(
                             auth_epoch,
                             account_created_at: Some(user.created_at),
                             account_id: Some(user.id.clone()),
-                        });
+                        }), false);
                     }
                 };
                 Arc::new(CachedIdentity {
@@ -1499,15 +1536,12 @@ pub(crate) async fn resolve_identity_within(
             Ok(None) => Arc::new(CachedIdentity::default()),
             Err(error) => {
                 tracing::warn!(user = username, error = ?error, "identity lookup failed");
-                return Arc::new(CachedIdentity::default());
+                return (Arc::new(CachedIdentity::default()), false);
             }
         },
         None => Arc::new(CachedIdentity::default()),
     };
-    state
-        .identity_cache
-        .store_read_at(generation, username, identity.clone(), read_at);
-    identity
+    (identity, true)
 }
 
 pub(crate) async fn find_spec(state: &AppState, id: &str) -> Option<Spec> {

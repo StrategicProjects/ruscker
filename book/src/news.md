@@ -9,6 +9,19 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.61 — 2026-11-20
+
+- **Import many images at once.** The Media page has an **Import ZIP**
+  button: send one `.zip` and every SVG, PNG, JPEG or WebP in it is
+  added, with the same treatment as a single upload. Folders are
+  ignored, sending the same archive again adds nothing, a file with an
+  existing name but different content keeps both, and a file that cannot
+  be imported is named with the reason while the rest goes in. Up to
+  64 MB per archive, 2000 files and 128 MB of images once unpacked (see
+  [Media](./admin.md#media)).
+
+No database migration in this release.
+
 ## v0.2.60 — 2026-11-20
 
 A security release: a full review of authentication, in three rounds,

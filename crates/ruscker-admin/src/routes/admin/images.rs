@@ -416,12 +416,12 @@ async fn import_zip(
     let fail = |key: &str| Flash { error: Some(t(key)), ..Flash::default() };
 
     // The archive: the first non-empty `zip` field.
-    let mut zip_bytes: Option<Vec<u8>> = None;
+    let mut zip_bytes: Option<axum::body::Bytes> = None;
     loop {
         match multipart.next_field().await {
             Ok(Some(field)) if field.name() == Some("zip") => match field.bytes().await {
                 Ok(b) if !b.is_empty() => {
-                    zip_bytes = Some(b.to_vec());
+                    zip_bytes = Some(b);
                     break;
                 }
                 Ok(_) => {}
@@ -441,11 +441,16 @@ async fn import_zip(
         return render_index(&state, loc, theme, editor.role, fail("admin-images-import-not-zip")).await;
     };
 
-    // Unpacking is CPU work (inflate): off the async workers.
-    let extracted = tokio::task::spawn_blocking(move || {
-        crate::media_zip::extract_images(&zip_bytes, images::MAX_UPLOAD_BYTES)
-    })
-    .await;
+    // One import at a time (its files sit in memory until stored), and the
+    // unpacking itself under the shared budget of blocking image jobs.
+    let _turn = match images::zip_import_turn().await {
+        Ok(turn) => turn,
+        Err(err) => {
+            tracing::error!(error = ?err, "zip import turn unavailable");
+            return (StatusCode::SERVICE_UNAVAILABLE, "import unavailable").into_response();
+        }
+    };
+    let extracted = images::extract_zip_async(zip_bytes).await;
     let extracted = match extracted {
         Ok(Ok(e)) => e,
         Ok(Err(refusal)) => {

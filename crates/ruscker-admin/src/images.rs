@@ -89,6 +89,33 @@ pub async fn process_upload_async(
     .await?
 }
 
+/// At most one batch import at a time: an archive and everything unpacked
+/// from it sit in memory while it is processed (up to
+/// `media_zip::MAX_ZIP_BYTES` + `MAX_TOTAL_BYTES`), so two Editors
+/// importing together wait in line instead of doubling that.
+static ZIP_IMPORT_SLOT: LazyLock<Arc<Semaphore>> = LazyLock::new(|| Arc::new(Semaphore::new(1)));
+
+/// Take the batch-import turn. Held by the route for the whole import and
+/// released when dropped.
+pub async fn zip_import_turn() -> Result<tokio::sync::OwnedSemaphorePermit> {
+    ZIP_IMPORT_SLOT
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|_| anyhow!("batch import unavailable"))
+}
+
+/// Unpack a `.zip` of images under the same budget of blocking image jobs
+/// as uploads and thumbnails: inflating is CPU work like decoding is.
+pub async fn extract_zip_async(
+    zip_bytes: axum::body::Bytes,
+) -> Result<std::result::Result<crate::media_zip::Extracted, crate::media_zip::ZipRefusal>> {
+    run_blocking_image_job(IMAGE_JOB_SLOTS.clone(), move || {
+        crate::media_zip::extract_images(&zip_bytes, MAX_UPLOAD_BYTES)
+    })
+    .await
+}
+
 /// Async migration-import entry point using the same resource budget.
 pub async fn process_for_import_async(
     raw_filename: String,

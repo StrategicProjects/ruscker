@@ -97,6 +97,16 @@ fn import_name(path: &str) -> Option<&str> {
 /// Unpack the image files of a zip archive. `per_file_cap` is the largest
 /// a single file may be once unpacked (the single-upload limit).
 pub fn extract_images(zip_bytes: &[u8], per_file_cap: usize) -> Result<Extracted, ZipRefusal> {
+    extract_images_within(zip_bytes, per_file_cap, MAX_TOTAL_BYTES)
+}
+
+/// [`extract_images`] with the total budget as a parameter, so a test can
+/// reach it with small files.
+fn extract_images_within(
+    zip_bytes: &[u8],
+    per_file_cap: usize,
+    total_cap: u64,
+) -> Result<Extracted, ZipRefusal> {
     let mut archive =
         zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(|_| ZipRefusal::NotAZip)?;
     if archive.len() > MAX_ENTRIES {
@@ -128,19 +138,24 @@ pub fn extract_images(zip_bytes: &[u8], per_file_cap: usize) -> Result<Extracted
             continue;
         };
         // One byte past the cap tells "exactly at the cap" from "over it",
-        // whatever size the entry claims to be.
+        // whatever size the entry claims to be — and never more than what
+        // is left of the archive's budget (plus the same one byte).
+        let left = total_cap.saturating_sub(total);
+        let limit = (per_file_cap as u64).min(left) + 1;
         let mut bytes = Vec::new();
-        let read = entry.take(per_file_cap as u64 + 1).read_to_end(&mut bytes);
+        let read = entry.take(limit).read_to_end(&mut bytes);
+        // EVERY byte inflated counts, also for an entry that is then
+        // skipped: otherwise an archive of many oversized entries would
+        // make the server inflate far more than the budget, one skipped
+        // entry at a time (security review of this change).
+        total += bytes.len() as u64;
+        if total > total_cap {
+            return Err(ZipRefusal::TooLargeUnpacked);
+        }
         match read {
             Err(_) => out.skipped.push((name, SkipReason::Unreadable)),
             Ok(_) if bytes.len() > per_file_cap => out.skipped.push((name, SkipReason::TooLarge)),
-            Ok(_) => {
-                total += bytes.len() as u64;
-                if total > MAX_TOTAL_BYTES {
-                    return Err(ZipRefusal::TooLargeUnpacked);
-                }
-                out.files.push(ZipFile { name, bytes });
-            }
+            Ok(_) => out.files.push(ZipFile { name, bytes }),
         }
     }
     Ok(out)
@@ -221,6 +236,35 @@ mod tests {
         let edge = vec![b' '; 10_000];
         let got = extract_images(&zip_of(&[("edge.svg", &edge)]), 10_000).unwrap();
         assert_eq!(got.files.len(), 1);
+    }
+
+    /// The archive's budget counts what was inflated, not what was kept:
+    /// entries skipped for being too large still spend it, so many of
+    /// them refuse the archive instead of being inflated one after another.
+    #[test]
+    fn skipped_entries_spend_the_budget_too() {
+        let big = vec![b' '; 5_000];
+        let entries: Vec<(String, &[u8])> =
+            (0..10).map(|i| (format!("big-{i}.svg"), &big[..])).collect();
+        let entries: Vec<(&str, &[u8])> = entries.iter().map(|(n, b)| (n.as_str(), *b)).collect();
+        let zip = zip_of(&entries);
+        // Per-file cap 1 000: each entry is read up to 1 001 bytes and
+        // skipped. A budget of 4 000 is spent by the fourth one.
+        assert_eq!(
+            extract_images_within(&zip, 1_000, 4_000).unwrap_err(),
+            ZipRefusal::TooLargeUnpacked
+        );
+        // With room for all ten reads, they are all just skipped.
+        let got = extract_images_within(&zip, 1_000, 20_000).unwrap();
+        assert_eq!(got.skipped.len(), 10);
+        assert!(got.files.is_empty());
+        // And kept files are bounded by the same budget.
+        let small = vec![b' '; 900];
+        let zip = zip_of(&[("a.svg", &small), ("b.svg", &small), ("c.svg", &small)]);
+        assert_eq!(
+            extract_images_within(&zip, 1_000, 2_000).unwrap_err(),
+            ZipRefusal::TooLargeUnpacked
+        );
     }
 
     #[test]

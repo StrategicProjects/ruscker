@@ -170,7 +170,12 @@ in the discovery document:
   alone never ends a session. After the confirmation, the portal session
   of that browser ends, the same as the portal's own "Sign out", and the
   browser goes to the return address, with `state` when one was sent.
-- Someone who was not signed in to the portal goes straight back.
+- Someone who was not signed in to the portal goes straight back. A
+  browser that still holds a portal session cookie the portal cannot
+  confirm (an old session, or the session store unreachable) is asked
+  too, rather than told it is signed out.
+- When the portal cannot record the sign-out, its page says so instead
+  of sending the person back as if it were done.
 
 Other systems keep their own sessions until those expire. The portal
 does not notify them (no back-channel logout).

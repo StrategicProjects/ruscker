@@ -190,6 +190,20 @@ Status: living document. Tracks the Phase 5 security audit
   session (including an attacker's) dies; the requester is re-issued a
   fresh session so they stay signed in. The admin-initiated reset has
   done this since #544.
+- **[implemented]** Sessions end by **authentication generation**
+  (v0.2.60). Each account has a `users.auth_epoch` that moves forward in
+  the same transaction as a password change, a role change or an account
+  edit that changes the role; a session records the generation and the
+  immutable account id (`users.id`) it was issued under, and
+  `auth::confirm_session` — the one place a session is trusted — accepts
+  it only while both still match. So revocation reaches every node of a
+  cluster within two seconds (the identity cache's limit; at once on the
+  node that made the change), does not depend on deleting the session
+  rows, and a username deleted and created again does not inherit the old
+  account's sessions. A node without a catalog accepts only the
+  break-glass token session. The same generation, plus the exact MFA
+  factor state proved, is recorded in every OIDC authorization code and
+  checked again when the code is redeemed.
 - **[implemented]** Operational replica actions are audited (#745) —
   dashboard stop/restart write `replica.stop`/`replica.restart` rows
   (with the acting user) to the same `audit_log` config mutations use.

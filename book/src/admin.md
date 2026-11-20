@@ -177,8 +177,12 @@ proof satisfies every protected app, subject to each app's freshness policy.
 The same **Two-factor authentication** page shows how many recovery codes
 remain (only a count is knowable: the database stores salted hashes) and
 warns when two or fewer are left. **Generate new codes** asks for the
-password again, invalidates the whole current set, shows the new one once
-and writes an `mfa.recovery_regenerated` audit row.
+second factor in the current session (a code from the authenticator, or
+one recovery code at the challenge) and the password again, invalidates
+the whole current set, shows the new one once and writes an
+`mfa.recovery_regenerated` audit row. It is refused if the password or the
+trusted devices change while it runs. Someone who lost both the
+authenticator and the codes asks an Admin for **Reset 2FA**.
 
 **MFA validity days** (`mfa-validity-days`) controls that policy: 7 days by
 default, capped at 30; `0` limits the proof to the current login session.

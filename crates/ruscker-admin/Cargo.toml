@@ -73,6 +73,9 @@ libc = "0.2"
 # Both already compile transitively (tower-http → async-compression).
 flate2 = "1.1"
 brotli = "8.0"
+# Reading a .zip of images in the media library (batch import). Deflate
+# only, through the flate2 already in the tree: no extra codecs.
+zip = { version = "9.8", default-features = false, features = ["deflate-flate2"] }
 
 # Errors / logging
 anyhow = { workspace = true }

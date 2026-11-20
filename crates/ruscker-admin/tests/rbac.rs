@@ -1874,3 +1874,111 @@ async fn without_a_catalog_only_the_token_session_is_accepted() {
     let status = send(st, "GET", "/admin/system", Some(&format!("{COOKIE_NAME}={token}"))).await;
     assert_eq!(status, StatusCode::OK);
 }
+
+// ── Media: batch import from a .zip ─────────────────────────────────
+
+/// A zip in memory from `(path, content)` pairs.
+fn zip_of(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    use std::io::Write;
+    let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts = zip::write::SimpleFileOptions::default();
+    for (path, content) in entries {
+        w.start_file(*path, opts).unwrap();
+        w.write_all(content).unwrap();
+    }
+    w.finish().unwrap().into_inner()
+}
+
+/// POST one file as `multipart/form-data` field `zip`.
+async fn post_zip(state: &AppState, cookie: &str, bytes: &[u8]) -> Response {
+    const B: &str = "rusckerzipboundary";
+    let mut body = format!(
+        "--{B}\r\nContent-Disposition: form-data; name=\"zip\"; filename=\"logos.zip\"\r\nContent-Type: application/zip\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{B}--\r\n").as_bytes());
+    send_request(
+        state.clone(),
+        "POST",
+        "/admin/media/import-zip",
+        Some(cookie),
+        Body::from(body),
+        Some(&format!("multipart/form-data; boundary={B}")),
+    )
+    .await
+}
+
+async fn media_names(state: &AppState) -> Vec<String> {
+    let mut names: Vec<String> = ruscker_admin::db::images::list_all(state.db.as_ref().unwrap())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| i.filename)
+        // `db::open` seeds the built-in logos; only what the test sent.
+        .filter(|n| n.starts_with("zipt-"))
+        .collect();
+    names.sort();
+    names
+}
+
+/// The whole import: images in folders land flat, what is not an image is
+/// left alone, a broken image is reported by name without stopping the
+/// rest, a second import of the same archive adds nothing, and a
+/// same-named file with other content keeps both.
+#[tokio::test]
+async fn a_zip_of_images_is_imported_into_the_media_library() {
+    const A: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><title>a</title></svg>";
+    const B: &[u8] = b"<svg xmlns=\"http://www.w3.org/2000/svg\"><title>b</title></svg>";
+    let st = db_state().await;
+    let c = cookie_for(&st, Role::Editor).await;
+    let archive = zip_of(&[
+        ("logos/zipt-a.svg", A),
+        ("logos/outros/zipt-b.svg", B),
+        ("logos/LEIAME.txt", b"texto"),
+        ("zipt-quebrada.png", b"isto nao e um png"),
+        ("__MACOSX/logos/._zipt-a.svg", b"lixo do macOS"),
+    ]);
+
+    let response = post_zip(&st, &c, &archive).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let page = response_body(response).await;
+    assert_eq!(media_names(&st).await, ["zipt-a.svg", "zipt-b.svg"]);
+    assert!(page.contains("zipt-quebrada.png"), "the rejected file is named");
+    assert!(!page.contains("LEIAME.txt"), "a non-image is not an error");
+
+    // The same archive again: nothing new, nothing duplicated.
+    let response = post_zip(&st, &c, &archive).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(media_names(&st).await, ["zipt-a.svg", "zipt-b.svg"]);
+
+    // Same name, other content: both are kept, as for a single upload.
+    let changed = zip_of(&[("zipt-a.svg", B)]);
+    post_zip(&st, &c, &changed).await;
+    assert_eq!(media_names(&st).await, ["zipt-a-2.svg", "zipt-a.svg", "zipt-b.svg"]);
+    let db = st.db.as_ref().unwrap();
+    let (_, first) = ruscker_admin::db::images::fetch_by_filename(db, "zipt-a.svg").await.unwrap().unwrap();
+    assert_eq!(first, A, "the image already there was not replaced");
+}
+
+#[tokio::test]
+async fn a_zip_import_refuses_what_is_not_an_archive_of_images() {
+    let st = db_state().await;
+    let c = cookie_for(&st, Role::Editor).await;
+    // Not a zip at all.
+    let page = response_body(post_zip(&st, &c, b"<svg/>").await).await;
+    assert!(page.contains(r#"role="alert""#), "an error is shown");
+    // A zip with no image in it.
+    let page = response_body(post_zip(&st, &c, &zip_of(&[("zipt-notas.txt", b"x")])).await).await;
+    assert!(page.contains(r#"role="alert""#), "an error is shown");
+    assert!(media_names(&st).await.is_empty());
+
+    // Same guard as every other write to the library: no Viewer, no
+    // anonymous request.
+    let viewer = cookie_for(&st, Role::Viewer).await;
+    let archive = zip_of(&[("zipt-v.svg", b"<svg xmlns=\"http://www.w3.org/2000/svg\"/>")]);
+    assert_eq!(post_zip(&st, &viewer, &archive).await.status(), StatusCode::FORBIDDEN);
+    let anonymous = send(st.clone(), "POST", "/admin/media/import-zip", None).await;
+    assert!(anonymous.is_redirection(), "anonymous ⇒ login, got {anonymous}");
+    assert!(media_names(&st).await.is_empty());
+}

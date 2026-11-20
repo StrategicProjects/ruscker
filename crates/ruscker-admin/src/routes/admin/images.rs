@@ -7,6 +7,10 @@
 //!   3. `db::images::insert` writes the BLOB + audit row
 //!   4. Redirect back to /admin/images
 //!
+//! Batch import (`/admin/media/import-zip`): a `.zip` is unpacked by
+//! `media_zip::extract_images` and every image in it goes through steps
+//! 2–3 exactly like a single upload.
+//!
 //! Body cap of 12 MB applied per route — slightly above the
 //! 10 MB cap inside `process_upload` to account for multipart
 //! framing overhead.
@@ -53,6 +57,40 @@ pub fn routes() -> Router<AppState> {
             get(|| async { Redirect::permanent("/admin/media") }),
         )
         .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT))
+        // The batch import has its own, larger body limit: one archive
+        // carries many images. Merged after the layer above so that limit
+        // does not apply to it.
+        .merge(
+            Router::new()
+                .route("/admin/media/import-zip", post(import_zip))
+                .layer(DefaultBodyLimit::max(ZIP_BODY_LIMIT)),
+        )
+}
+
+/// The archive itself plus multipart framing.
+const ZIP_BODY_LIMIT: usize = crate::media_zip::MAX_ZIP_BYTES + 1024 * 1024;
+
+/// What the page says once, after a form post.
+#[derive(Default)]
+struct Flash {
+    /// Set on successful upload — drives a one-shot toast.
+    uploaded: Option<String>,
+    /// The originally-requested name when the upload was auto-renamed to
+    /// avoid overwriting an existing image — drives the "renamed" note.
+    renamed: Option<String>,
+    error: Option<String>,
+    /// The outcome of a batch import.
+    import: Option<ImportFlash>,
+}
+
+/// The outcome of a `.zip` import, already in the viewer's language.
+struct ImportFlash {
+    /// "12 imported · 3 already in the library · 1 not imported".
+    summary: String,
+    /// The first few files that were not imported, as `name — reason`.
+    problems: Vec<String>,
+    /// How many more problems there were than `problems` shows.
+    more: usize,
 }
 
 #[derive(Template)]
@@ -76,12 +114,10 @@ struct ImagesPage<'a> {
     /// `/assets/img/<filename>` appears here — drives the delete warning
     /// (#433).
     refs: String,
-    /// Set on successful upload — drives a one-shot toast.
     flash_uploaded: Option<String>,
-    /// The originally-requested name when the upload was auto-renamed to
-    /// avoid overwriting an existing image — drives the "renamed" note.
     flash_renamed: Option<String>,
     flash_error: Option<String>,
+    flash_import: Option<ImportFlash>,
 }
 
 impl<'a> ImagesPage<'a> {
@@ -172,7 +208,8 @@ async fn index(
         };
         state.locales.t(loc, key, None)
     });
-    render_index(&state, loc, theme, editor.role, None, None, flash_error).await
+    let flash = Flash { error: flash_error, ..Flash::default() };
+    render_index(&state, loc, theme, editor.role, flash).await
 }
 
 async fn render_index(
@@ -180,9 +217,7 @@ async fn render_index(
     loc: Locale,
     theme: Theme,
     role: Role,
-    flash_uploaded: Option<String>,
-    flash_renamed: Option<String>,
-    flash_error: Option<String>,
+    flash: Flash,
 ) -> Response {
     let Some(pool) = state.db.as_ref() else {
         return (
@@ -254,9 +289,10 @@ async fn render_index(
         kpi_in_use,
         kpi_total_bytes,
         refs,
-        flash_uploaded,
-        flash_renamed,
-        flash_error,
+        flash_uploaded: flash.uploaded,
+        flash_renamed: flash.renamed,
+        flash_error: flash.error,
+        flash_import: flash.import,
     };
     super::render(&page)
 }
@@ -343,16 +379,178 @@ async fn upload(
         }
     }
 
-    render_index(
-        &state,
-        loc,
-        theme,
-        editor.role,
-        last_uploaded_name,
-        last_renamed_from,
-        last_error,
-    )
-    .await
+    let flash = Flash {
+        uploaded: last_uploaded_name,
+        renamed: last_renamed_from,
+        error: last_error,
+        import: None,
+    };
+    render_index(&state, loc, theme, editor.role, flash).await
+}
+
+/// How many "not imported" files the page lists by name; the rest is a
+/// count.
+const IMPORT_PROBLEMS_SHOWN: usize = 8;
+
+/// Batch import: one `.zip` (form field `zip`) whose images each go
+/// through the single-upload pipeline. Three rules worth knowing:
+///
+/// - **Re-importing the same archive adds nothing.** A file whose name and
+///   stored bytes are already in the library is counted as "already
+///   there", so an archive can be sent again after adding logos to it.
+/// - **A same-named file with DIFFERENT content keeps both** (`logo.svg` →
+///   `logo-2.svg`), the same rule as a single upload: an image in use is
+///   never replaced behind the cards that show it.
+/// - **One bad file does not stop the rest.** It is reported by name.
+async fn import_zip(
+    editor: RequireEditor,
+    State(state): State<AppState>,
+    loc: Locale,
+    theme: Theme,
+    mut multipart: Multipart,
+) -> Response {
+    let Some(pool) = state.db.as_ref() else {
+        return (StatusCode::SERVICE_UNAVAILABLE, "no db").into_response();
+    };
+    let t = |key: &str| state.locales.t(loc, key, None);
+    let fail = |key: &str| Flash { error: Some(t(key)), ..Flash::default() };
+
+    // The archive: the first non-empty `zip` field.
+    let mut zip_bytes: Option<Vec<u8>> = None;
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) if field.name() == Some("zip") => match field.bytes().await {
+                Ok(b) if !b.is_empty() => {
+                    zip_bytes = Some(b.to_vec());
+                    break;
+                }
+                Ok(_) => {}
+                // Over the body limit, or the connection dropped.
+                Err(_) => {
+                    return render_index(&state, loc, theme, editor.role, fail("admin-images-import-too-large")).await;
+                }
+            },
+            Ok(Some(_)) => {}
+            Ok(None) => break,
+            Err(_) => {
+                return render_index(&state, loc, theme, editor.role, fail("admin-images-import-too-large")).await;
+            }
+        }
+    }
+    let Some(zip_bytes) = zip_bytes else {
+        return render_index(&state, loc, theme, editor.role, fail("admin-images-import-not-zip")).await;
+    };
+
+    // Unpacking is CPU work (inflate): off the async workers.
+    let extracted = tokio::task::spawn_blocking(move || {
+        crate::media_zip::extract_images(&zip_bytes, images::MAX_UPLOAD_BYTES)
+    })
+    .await;
+    let extracted = match extracted {
+        Ok(Ok(e)) => e,
+        Ok(Err(refusal)) => {
+            use crate::media_zip::ZipRefusal;
+            let key = match refusal {
+                ZipRefusal::NotAZip => "admin-images-import-not-zip",
+                ZipRefusal::TooManyEntries => "admin-images-import-too-many",
+                ZipRefusal::TooLargeUnpacked => "admin-images-import-too-large",
+            };
+            return render_index(&state, loc, theme, editor.role, fail(key)).await;
+        }
+        Err(err) => {
+            tracing::error!(error = ?err, "zip extraction task failed");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "import failed").into_response();
+        }
+    };
+
+    // An archive with no image in it at all: say that, not "0 imported".
+    if extracted.files.is_empty() && extracted.skipped.is_empty() {
+        return render_index(&state, loc, theme, editor.role, fail("admin-images-import-empty")).await;
+    }
+
+    let (mut imported, mut already) = (0usize, 0usize);
+    // (file name, reason) for everything that looked like an image and
+    // did not make it in.
+    let mut problems: Vec<(String, String)> = extracted
+        .skipped
+        .into_iter()
+        .map(|(name, why)| {
+            let key = match why {
+                crate::media_zip::SkipReason::TooLarge => "admin-images-import-skip-large",
+                crate::media_zip::SkipReason::Unreadable => "admin-images-import-skip-unreadable",
+            };
+            (name, t(key))
+        })
+        .collect();
+    for file in extracted.files {
+        let name = file.name.clone();
+        let mut processed = match images::process_upload_async(file.name, None, file.bytes).await {
+            Ok(p) => p,
+            Err(err) => {
+                tracing::warn!(error = ?err, filename = %name, "zip import: file rejected");
+                problems.push((name, err.to_string()));
+                continue;
+            }
+        };
+        // Same name already in the library: the same bytes mean it is
+        // already there; different bytes get a free name.
+        match db::images::fetch_by_filename(pool, &processed.filename).await {
+            Ok(Some((_, stored))) if stored == processed.bytes => {
+                already += 1;
+                continue;
+            }
+            Ok(Some(_)) => match db::images::unique_filename(pool, &processed.filename).await {
+                Ok(unique) => processed.filename = unique,
+                Err(err) => {
+                    tracing::error!(error = ?err, "unique filename failed");
+                    problems.push((name, t("admin-images-import-skip-save")));
+                    continue;
+                }
+            },
+            Ok(None) => {}
+            Err(err) => {
+                tracing::error!(error = ?err, "zip import: lookup failed");
+                problems.push((name, t("admin-images-import-skip-save")));
+                continue;
+            }
+        }
+        let stored_name = processed.filename.clone();
+        match db::images::insert(pool, processed, Some(editor.actor())).await {
+            Ok(_) => {
+                crate::routes::assets::invalidate_thumb(&stored_name);
+                imported += 1;
+            }
+            Err(err) => {
+                tracing::error!(error = ?err, "zip import: insert failed");
+                problems.push((name, t("admin-images-import-skip-save")));
+            }
+        }
+    }
+    tracing::info!(
+        actor = editor.actor(),
+        imported,
+        already,
+        not_imported = problems.len(),
+        other_files = extracted.not_images,
+        "media zip import"
+    );
+
+    let mut args = fluent_bundle::FluentArgs::new();
+    args.set("imported", imported as i64);
+    args.set("already", already as i64);
+    args.set("failed", problems.len() as i64);
+    let summary = state.locales.t(loc, "admin-images-import-summary", Some(&args));
+    let more = problems.len().saturating_sub(IMPORT_PROBLEMS_SHOWN);
+    let problems = problems
+        .into_iter()
+        .take(IMPORT_PROBLEMS_SHOWN)
+        .map(|(name, why)| format!("{name} — {why}"))
+        .collect();
+    let flash = Flash {
+        import: Some(ImportFlash { summary, problems, more }),
+        ..Flash::default()
+    };
+    render_index(&state, loc, theme, editor.role, flash).await
 }
 
 /// JSON shape returned by [`upload_inline`]. On success `filename` +

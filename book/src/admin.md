@@ -397,6 +397,17 @@ the flash tells you the stored name — nothing that references the
 original changes. The gallery sorts newest-first, so the renamed upload
 is the first tile.
 
+**Import ZIP** brings in many images at once: send one `.zip` (up to
+64 MB, 2000 files, 128 MB of images once unpacked) and every SVG, PNG,
+JPEG or WebP in it goes through the same treatment as a single upload.
+Folders are ignored — the library is flat, so `logos/sepe.svg` is stored
+as `sepe.svg` — and so is anything that is not an image. Sending the
+same archive again adds nothing: a file whose name and content are
+already in the library is counted as already there. A file with a name
+that exists but different content keeps both, as above. The page then
+says how many were imported, how many were already there, and names the
+ones that could not be imported, with the reason.
+
 When editing a spec you can open a **modal picker** (search, browse, drag
 and drop, or upload inline without leaving the form) to select a logo or
 cover. A "Choose image" button auto-uploads on file select for a one-click

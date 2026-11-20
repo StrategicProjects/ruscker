@@ -405,6 +405,17 @@ admin-images-delete-confirm-inuse = Esta imagen está EN USO. Al eliminarla, los
 admin-images-search = Buscar imágenes…
 admin-images-type-all = Todos los tipos
 admin-images-no-match = Ninguna imagen coincide con la búsqueda.
+admin-images-import-zip = Importar ZIP
+admin-images-import-busy = Importando…
+admin-images-import-hint = Un .zip con varias imágenes (hasta 64 MB). Las carpetas se ignoran; lo que ya está en la biblioteca no se duplica.
+admin-images-import-summary = Importación terminada: { $imported } importadas · { $already } ya estaban en la biblioteca · { $failed } no importadas
+admin-images-import-not-zip = El archivo enviado no es un .zip válido.
+admin-images-import-empty = El .zip no contiene imágenes (SVG, PNG, JPEG o WebP).
+admin-images-import-too-many = El .zip tiene demasiados archivos (máximo 2000). Divídalo.
+admin-images-import-too-large = El .zip es demasiado grande (hasta 64 MB enviados y 128 MB de imágenes descomprimidas). Divídalo.
+admin-images-import-skip-large = mayor que 10 MB
+admin-images-import-skip-unreadable = no se pudo leer (dañado o con contraseña)
+admin-images-import-skip-save = error al guardar
 
 # Admin credentials
 admin-creds-title = Gestión de Credenciales

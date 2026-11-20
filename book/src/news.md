@@ -9,6 +9,42 @@ the [GitHub releases page](https://github.com/StrategicProjects/ruscker/releases
 
 ---
 
+## v0.2.60 — 2026-11-20
+
+A security release: a full review of authentication, in three rounds,
+with every fix tested. Update soon.
+
+- **Changing a password, a role or deleting an account now ends that
+  account's sessions everywhere, reliably.** Each account has an
+  *authentication generation* that moves forward in the same database
+  transaction as the change; a session only works while its account is
+  still at the generation it was issued under. This holds on every node
+  of a cluster (within two seconds) and does not depend on deleting the
+  session rows succeeding. A username deleted and created again is a
+  different account: the old sessions do not carry over.
+- **Sign-in codes handed to systems ("Sign in with Ruscker") are checked
+  again when the system redeems them**: the password change, the
+  required password rotation and, for a system that requires MFA, the
+  exact second factor proved. A reset factor or "forget all devices" in
+  between refuses the code.
+- **Regenerating MFA recovery codes now asks for the second factor in
+  the same session**, not only the password, and is refused if the
+  password or the trusted devices change while it runs.
+- **Signing out says so when it could not be recorded** (both the
+  portal's sign-out and `/oauth/logout`), instead of sending the person
+  away as if it were done.
+- The proxy filters Ruscker's own cookies from what hosted apps receive
+  on every `Cookie` line, in raw bytes and percent-decoded names,
+  WebSocket included; a password that must be changed blocks the apps
+  too; the password change refuses the current password and is
+  throttled like the sign-in.
+- A node without a catalog accepts only the break-glass token session.
+
+**Database migrations 0045 and 0046** (both dialects). With the package
+updater: `ruscker-update --apply --allow-migrations`. Sessions kept in
+a shared Postgres session store across the update keep working until the
+account's next password or role change.
+
 ## v0.2.59 — 2026-11-19
 
 - **Saving an SSO client returns to the list.** The edit form used to

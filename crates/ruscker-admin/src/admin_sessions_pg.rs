@@ -514,6 +514,38 @@ impl AdminSessionStore for PostgresAdminSessionStore {
         self.cache
             .retain(|_, e| e.info.as_ref().and_then(|i| i.actor.as_deref()) != Some(actor));
     }
+
+    async fn revoke_before_epoch(&self, actor: &str, epoch: i64) {
+        // Same cleanup, sparing sessions already issued under the new
+        // generation (see the trait).
+        let mut done = false;
+        for attempt in 1..=REVOKE_ATTEMPTS {
+            match sqlx::query("DELETE FROM admin_sessions WHERE actor = $1 AND auth_epoch < $2")
+                .bind(actor)
+                .bind(epoch)
+                .execute(&self.pool)
+                .await
+            {
+                Ok(_) => {
+                    done = true;
+                    break;
+                }
+                Err(e) => {
+                    warn!(error = ?e, attempt, "admin session cleanup DELETE failed");
+                    if attempt < REVOKE_ATTEMPTS {
+                        tokio::time::sleep(Duration::from_millis(100 * u64::from(attempt))).await;
+                    }
+                }
+            }
+        }
+        if !done {
+            warn!("admin sessions of an account were not deleted; its generation already ended them");
+        }
+        self.cache.retain(|_, e| match e.info.as_ref() {
+            Some(i) => i.actor.as_deref() != Some(actor) || i.epoch >= epoch,
+            None => true,
+        });
+    }
 }
 
 /// The session lifetime as a chrono duration (for issued = expiry − ttl).
@@ -635,6 +667,37 @@ mod postgres_it {
         let info = b.validate(&sid).await.expect("session survives LB hop");
         assert_eq!(info.role, Role::Viewer);
         assert_eq!(info.actor.as_deref(), Some("bob"));
+    }
+
+    #[tokio::test]
+    async fn cleanup_spares_sessions_of_the_new_generation() {
+        // Final security review (2026-11-20), finding 7: in the shared
+        // store too, the cleanup after a change to generation 3 keeps a
+        // session already issued at 3, also on a node that cached it.
+        let _guard = crate::db::pg_test_lock().lock().await;
+        let store = PostgresAdminSessionStore::connect_with(
+            &pg_url(),
+            Duration::from_secs(60),
+            Duration::from_secs(30),
+        )
+        .await
+        .unwrap();
+        reset_rows(&store.pool).await;
+        let old = store.create_at_epoch(Role::Admin, Some("alice".into()), 2, Some("a".into())).await;
+        let new = store.create_at_epoch(Role::Admin, Some("alice".into()), 3, Some("a".into())).await;
+        let bob = store.create_at_epoch(Role::Editor, Some("bob".into()), 0, Some("b".into())).await;
+        assert!(store.validate(&old).await.is_some(), "cached");
+
+        store.revoke_before_epoch("alice", 3).await;
+
+        assert!(store.validate(&old).await.is_none(), "earlier generation removed, cache too");
+        assert!(store.validate(&new).await.is_some(), "the new generation stays");
+        assert!(store.validate(&bob).await.is_some());
+        let rows: Vec<(String,)> = sqlx::query_as("SELECT sid FROM admin_sessions WHERE actor = 'alice'")
+            .fetch_all(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(rows, vec![(new.clone(),)], "only the new row is left");
     }
 
     #[tokio::test]

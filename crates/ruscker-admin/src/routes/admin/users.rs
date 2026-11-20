@@ -776,7 +776,7 @@ async fn save_edit(
         Ok(()) => {
             if current.role != role {
                 // Role changes take effect immediately, including self-demotion.
-                state.admin_sessions.revoke_by_actor(&username).await;
+                crate::auth::end_obsolete_sessions(&state, &username).await;
             }
             // Group edits must reach the proxy's access checks and
             // identity headers now, not at cache expiry (#1001).
@@ -938,10 +938,7 @@ async fn set_role(
             // Kick the user's live sessions so the new role takes effect
             // now, not after the cookie expires (#544) — a demotion must
             // drop elevated access immediately.
-            state
-                .admin_sessions
-                .revoke_by_actor(&target.username)
-                .await;
+            crate::auth::end_obsolete_sessions(&state, &target.username).await;
             // The change moved the account's generation: drop this node's
             // cached copy so its sessions are refused now, not in 2 s.
             state.invalidate_identity_cache();
@@ -994,10 +991,7 @@ async fn reset_password(
             // known: a reset is often the answer to a stolen password.
             super::forget_known_sign_ins(&state, &target.username).await;
             // A password reset must invalidate existing sessions (#544).
-            state
-                .admin_sessions
-                .revoke_by_actor(&target.username)
-                .await;
+            crate::auth::end_obsolete_sessions(&state, &target.username).await;
             // The change moved the account's generation: drop this node's
             // cached copy so its sessions are refused now, not in 2 s.
             state.invalidate_identity_cache();
@@ -1071,7 +1065,7 @@ async fn delete(
     match db::users::delete(pool, &username, Some(admin.actor())).await {
         Ok(()) => {
             // A deleted user must lose access now, not at session expiry (#544).
-            state.admin_sessions.revoke_by_actor(&username).await;
+            crate::auth::end_obsolete_sessions(&state, &username).await;
             // The username can be reused: the next person must not
             // inherit where this one was known to the sign-in throttle.
             super::forget_known_sign_ins(&state, &username).await;

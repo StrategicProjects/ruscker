@@ -525,7 +525,14 @@ async fn authorize(
         return fail("access_denied");
     };
     let user = match crate::db::users::fetch(db, username).await {
-        Ok(Some(u)) => u,
+        // The SAME account the session was confirmed against: a username
+        // deleted and created again is another person, even at the same
+        // authentication generation (final security review, 2026-11-20).
+        Ok(Some(u)) if session.account_id.as_deref() == Some(u.id.as_str()) => u,
+        Ok(Some(_)) => {
+            denied(None, "account-replaced");
+            return fail("access_denied");
+        }
         // The session outlived its account.
         Ok(None) => {
             denied(None, "account-missing");
@@ -554,25 +561,31 @@ async fn authorize(
         return fail("access_denied");
     }
 
-    // 6. MFA, session-bound (validity 0).
-    if client.require_mfa {
+    // 6. MFA, session-bound (validity 0). The marker recorded in the code
+    //    is the factor state THIS evaluation checked the proof against —
+    //    never one read again afterwards, which could already belong to a
+    //    "forget all devices" that no proof was given for (final security
+    //    review, 2026-11-20).
+    let mfa_marker = if client.require_mfa {
         let Some(session_id) = cookies
             .get(crate::auth::COOKIE_NAME)
             .map(|c| c.value().to_string())
         else {
             return fail("access_denied");
         };
-        let decision =
-            crate::mfa::evaluate_with_validity(&state, &user.username, &session_id, &cookies, 0).await;
-        let page = match decision {
-            MfaDecision::Satisfied => None,
-            MfaDecision::EnrollmentRequired => Some("/admin/account/mfa"),
-            MfaDecision::ChallengeRequired => Some("/admin/account/mfa/challenge"),
-        };
-        if let Some(page) = page {
-            return if silent { fail("interaction_required") } else { detour(page) };
+        match crate::mfa::evaluate_proof(&state, &user.username, &session_id, &cookies, 0).await {
+            Ok(marker) => Some(marker),
+            Err(decision) => {
+                let page = match decision {
+                    MfaDecision::EnrollmentRequired => "/admin/account/mfa",
+                    _ => "/admin/account/mfa/challenge",
+                };
+                return if silent { fail("interaction_required") } else { detour(page) };
+            }
         }
-    }
+    } else {
+        None
+    };
 
     // 7. Issue the code, bound to the account's authentication generation
     // (read now; the session it came from was confirmed against it).
@@ -580,27 +593,14 @@ async fn authorize(
     // account has moved on since (a change landing during this request),
     // nothing is issued (automated security review of #1123).
     let auth_epoch = session.epoch;
-    match crate::db::users::role_and_epoch(db, &user.username).await {
-        Ok(Some((_, current))) if current == auth_epoch => {}
+    match crate::db::users::account_ref(db, &user.username).await {
+        Ok(Some((id, _, current))) if id == user.id && current == auth_epoch => {}
         Ok(_) => return fail("access_denied"),
         Err(err) => {
             tracing::error!(error = ?err, "read auth epoch for authorization failed");
             return fail("server_error");
         }
     }
-    // Which second factor was proved, for a client that requires one.
-    let mfa_marker = if client.require_mfa {
-        match crate::db::mfa::fetch(db, &user.username).await {
-            Ok(Some(row)) => row.marker(),
-            Ok(None) => None,
-            Err(err) => {
-                tracing::error!(error = ?err, "read MFA factor for authorization failed");
-                return fail("server_error");
-            }
-        }
-    } else {
-        None
-    };
     let grant = Grant {
         client_id: client.client_id.clone(),
         user_id: user.id.clone(),
@@ -1365,9 +1365,11 @@ fn form_action_origin(uri: &str) -> Option<String> {
 /// the system's site does not send it: like the authorization endpoint,
 /// a cross-site arrival is first bounced through our own origin so an
 /// existing session is seen.
+#[allow(clippy::too_many_arguments)]
 async fn end_session(
     State(state): State<AppState>,
     session: MaybeSession,
+    cookies: Cookies,
     headers: HeaderMap,
     loc: crate::i18n::Locale,
     theme: crate::theme::Theme,
@@ -1395,6 +1397,14 @@ async fn end_session(
             let q = raw_query.as_deref().unwrap_or("");
             let q = if q.is_empty() { "bounced=1".to_string() } else { format!("{q}&bounced=1") };
             return bounce_to(&state.base_path, "/oauth/logout", &q);
+        }
+        // The browser DID send a session cookie that could not be
+        // confirmed: maybe it is stale, maybe the session store is down
+        // right now. Not "nothing to end", then — ask, and let the POST
+        // remove it and say so if that cannot be recorded (final security
+        // review, 2026-11-20).
+        if cookies.get(crate::auth::COOKIE_NAME).is_some() {
+            return render_end_session(&state, loc, theme, &es, true, false).await;
         }
         // Nothing to end here.
         return match &es.return_to {

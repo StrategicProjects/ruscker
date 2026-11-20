@@ -72,12 +72,22 @@ fn state() -> AppState {
 /// Mint a live session for `role` in the state's store and return the
 /// cookie header value to send it back. The store is behind an `Arc`
 /// shared with the router built from the same `state`.
+///
+/// An account session is only ever confirmed against a catalog (final
+/// security review, 2026-11-20: without one, `confirm_session` refuses it),
+/// so the state passed here must come from [`db_state`].
 async fn cookie_for(state: &AppState, role: Role) -> String {
-    let id = state
-        .admin_sessions
-        .create(role, Some("test-user".into()))
-        .await;
-    format!("{COOKIE_NAME}={id}")
+    scoped_cookie(state, role, Some("test-user")).await
+}
+
+/// [`state`] with an empty SQLite catalog of its own, for tests that sign
+/// in with an account session ([`cookie_for`]).
+async fn db_state() -> AppState {
+    let mut state = state();
+    let path = std::env::temp_dir().join(format!("ruscker-rbac-{}.db", uuid::Uuid::new_v4()));
+    let pool = ruscker_admin::db::open(&path).await.expect("open rbac db");
+    state.db = Some(ruscker_admin::db::ConfigDb::Sqlite(pool));
+    state
 }
 
 async fn send(state: AppState, method: &str, uri: &str, cookie: Option<&str>) -> StatusCode {
@@ -291,8 +301,10 @@ fn metric_values(body: &str) -> Vec<&str> {
 /// zeros during an outage would read as "nothing here".
 #[tokio::test]
 async fn system_page_carries_the_kpi_band_and_disk_hides_it_without_a_backend() {
+    // No catalog here (the band must say "none"), so the break-glass token
+    // session: an account session needs a catalog to be confirmed.
     let st = state();
-    let c = cookie_for(&st, Role::Admin).await;
+    let c = format!("{COOKIE_NAME}={}", st.admin_sessions.create(Role::Admin, None).await);
     let response = send_request(st.clone(), "GET", "/admin/system", Some(&c), Body::empty(), None).await;
     assert_eq!(response.status(), StatusCode::OK);
     let system = response_body(response).await;
@@ -321,7 +333,7 @@ async fn system_page_carries_the_kpi_band_and_disk_hides_it_without_a_backend() 
 
 #[tokio::test]
 async fn viewer_redirected_from_dashboard_to_portal() {
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Viewer).await;
     // A Viewer is NOT a panel operator (#857): it signs in to unlock its
     // group's cards on the portal, so the dashboard sends it back to the
@@ -345,7 +357,7 @@ async fn viewer_cannot_reach_apps_or_admin_sections() {
         "/admin/logs/poll?cursor=0",
         "/admin/logs/stream",
     ] {
-        let st = state();
+        let st = db_state().await;
         let c = cookie_for(&st, Role::Viewer).await;
         assert_eq!(
             send(st, "GET", uri, Some(&c)).await,
@@ -357,7 +369,7 @@ async fn viewer_cannot_reach_apps_or_admin_sections() {
 
 #[tokio::test]
 async fn viewer_cannot_perform_dashboard_actions() {
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Viewer).await;
     let uri = "/admin/dashboard/replicas/11111111-2222-3333-4444-555555555555/stop";
     assert_eq!(
@@ -371,25 +383,21 @@ async fn viewer_cannot_perform_dashboard_actions() {
 
 #[tokio::test]
 async fn editor_passes_guard_on_apps_and_media() {
-    // Guard lets the request through; the handler then 503s because
-    // no DB is attached. The point is it's NOT a 403.
+    // Guard lets the request through and the handler answers. The point
+    // is it's NOT a 403.
     for uri in ["/admin/specs", "/admin/media"] {
-        let st = state();
+        let st = db_state().await;
         let c = cookie_for(&st, Role::Editor).await;
         let status = send(st, "GET", uri, Some(&c)).await;
         assert_ne!(status, StatusCode::FORBIDDEN, "editor allowed on {uri}");
-        assert_eq!(
-            status,
-            StatusCode::SERVICE_UNAVAILABLE,
-            "guard passed, handler reached (needs --db) on {uri}"
-        );
+        assert_eq!(status, StatusCode::OK, "guard passed, handler reached on {uri}");
     }
 }
 
 #[tokio::test]
 async fn editor_can_perform_dashboard_actions() {
     // RequireEditor passes; no backend ⇒ 503, but crucially not 403.
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Editor).await;
     let uri = "/admin/dashboard/replicas/11111111-2222-3333-4444-555555555555/stop";
     let status = send(st, "POST", uri, Some(&c)).await;
@@ -407,7 +415,7 @@ async fn editor_cannot_reach_admin_only_sections() {
         "/admin/logs/poll?cursor=0",
         "/admin/logs/stream",
     ] {
-        let st = state();
+        let st = db_state().await;
         let c = cookie_for(&st, Role::Editor).await;
         assert_eq!(
             send(st, "GET", uri, Some(&c)).await,
@@ -429,7 +437,7 @@ async fn admin_passes_guard_everywhere() {
         "/admin/credentials",
         "/admin/audit",
     ] {
-        let st = state();
+        let st = db_state().await;
         let c = cookie_for(&st, Role::Admin).await;
         assert_ne!(
             send(st, "GET", uri, Some(&c)).await,
@@ -461,7 +469,7 @@ async fn unauthenticated_is_redirected_to_login() {
 #[tokio::test]
 async fn inline_upload_is_editor_gated() {
     // Viewer: forbidden before the handler runs.
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Viewer).await;
     assert_eq!(
         send(st, "POST", "/admin/media/upload-inline", Some(&c)).await,
@@ -470,7 +478,7 @@ async fn inline_upload_is_editor_gated() {
     );
     // Editor: guard passes (empty body ⇒ a 4xx/503 from the handler,
     // never 403).
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Editor).await;
     assert_ne!(
         send(st, "POST", "/admin/media/upload-inline", Some(&c)).await,
@@ -501,13 +509,13 @@ async fn image_pull_start_is_post_only() {
 #[tokio::test]
 async fn image_pull_is_editor_gated() {
     // Viewer is forbidden on both the start (POST) and the follow (GET).
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Viewer).await;
     assert_eq!(
         send(st, "POST", "/admin/specs/image-pull", Some(&c)).await,
         StatusCode::FORBIDDEN,
     );
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Viewer).await;
     assert_eq!(
         send(st, "GET", "/admin/specs/image-pull/events?job=bogus", Some(&c)).await,
@@ -519,7 +527,7 @@ async fn image_pull_is_editor_gated() {
 async fn following_an_unknown_pull_job_is_404_for_editor() {
     // Editor passes the guard; the follow GET is side-effect-free and
     // returns 404 for a token that was never issued (or already drained).
-    let st = state();
+    let st = db_state().await;
     let c = cookie_for(&st, Role::Editor).await;
     assert_eq!(
         send(st, "GET", "/admin/specs/image-pull/events?job=bogus", Some(&c)).await,
@@ -1849,4 +1857,20 @@ async fn admin_remains_unscoped_for_all_group_operations() {
             .groups
             .contains(&"time-b".to_string())
     );
+}
+
+/// Final security review (2026-11-20), finding 5: a node without a catalog
+/// (a misconfigured HA node sharing a persistent session store) cannot
+/// confirm an ACCOUNT session against its account, so it refuses it — an
+/// old Admin session must not live on there. The break-glass token
+/// session, which has no account, still works.
+#[tokio::test]
+async fn without_a_catalog_only_the_token_session_is_accepted() {
+    let st = state();
+    let account = st.admin_sessions.create(Role::Admin, Some("test-user".into())).await;
+    let status = send(st.clone(), "GET", "/admin/system", Some(&format!("{COOKIE_NAME}={account}"))).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "account session refused: to the login");
+    let token = st.admin_sessions.create(Role::Admin, None).await;
+    let status = send(st, "GET", "/admin/system", Some(&format!("{COOKIE_NAME}={token}"))).await;
+    assert_eq!(status, StatusCode::OK);
 }

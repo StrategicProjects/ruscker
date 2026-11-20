@@ -373,3 +373,42 @@ async fn an_unrecorded_sign_out_is_reported_not_redirected() {
     assert!(r.location.is_empty());
     assert!(r.body.contains(r#"role="alert""#), "the page says it was not confirmed");
 }
+
+/// Final security review (2026-11-20), finding 4: a session store that is
+/// down makes the session look absent. The browser DID send its session
+/// cookie, so the GET must not send the person back as if the sign-out
+/// were done (the cookie would work again once the store recovers): it
+/// asks, and the POST then says the sign-out was not recorded.
+#[tokio::test]
+async fn a_session_store_outage_is_not_reported_as_signed_out() {
+    use ruscker_admin::auth::{AdminSessionStore, SessionInfo};
+    /// A session store that cannot be reached: nothing validates, nothing
+    /// is recorded.
+    #[derive(Debug, Default)]
+    struct Down;
+    #[async_trait::async_trait]
+    impl AdminSessionStore for Down {
+        async fn create_at_epoch(&self, _: Role, _: Option<String>, _: i64, _: Option<String>) -> String {
+            "0".repeat(64)
+        }
+        async fn validate(&self, _: &str) -> Option<SessionInfo> {
+            None
+        }
+        async fn remove(&self, _: &str) -> bool {
+            false
+        }
+        async fn revoke_by_actor(&self, _: &str) {}
+    }
+    let (mut state, _, cookie) = setup().await;
+    state.admin_sessions = std::sync::Arc::new(Down);
+    let q = format!("client_id=radar&post_logout_redirect_uri={}&state=xyz", enc(BYE));
+    let r = send(&state, get(&format!("/oauth/logout?{q}"), Some(&cookie), Some("same-origin"))).await;
+    assert_eq!(r.status, StatusCode::OK, "not sent back to the system: {}", r.location);
+    assert!(r.location.is_empty());
+    assert!(r.body.contains(r#"action="/oauth/logout""#), "the page asks");
+
+    let form = format!("client_id=radar&post_logout_redirect_uri={}&state=xyz", enc(BYE));
+    let r = send(&state, post(&form, &cookie, "same-origin")).await;
+    assert_eq!(r.status, StatusCode::OK, "no redirect to the system");
+    assert!(r.body.contains(r#"role="alert""#), "the page says it was not confirmed");
+}

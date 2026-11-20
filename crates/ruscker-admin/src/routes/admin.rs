@@ -1054,7 +1054,9 @@ async fn password_submit(
     // also kills the session making this request, so mint a fresh one
     // and re-issue the cookie: every other session dies, the user
     // stays signed in.
-    state.admin_sessions.revoke_by_actor(&actor).await;
+    // Only the sessions of earlier generations: one already issued under
+    // the new password elsewhere stays.
+    state.admin_sessions.revoke_before_epoch(&actor, epoch).await;
     // The new session: the role and generation the change itself returned,
     // for the account it verified. A change landing after it moves the
     // generation again and refuses this session too.

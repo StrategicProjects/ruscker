@@ -405,6 +405,17 @@ admin-images-delete-confirm-inuse = This image is IN USE. Deleting it resets the
 admin-images-search = Search images…
 admin-images-type-all = All types
 admin-images-no-match = No images match your search.
+admin-images-import-zip = Import ZIP
+admin-images-import-busy = Importing…
+admin-images-import-hint = One .zip with many images (up to 64 MB). Folders are ignored; what is already in the library is not duplicated.
+admin-images-import-summary = Import finished: { $imported } imported · { $already } already in the library · { $failed } not imported
+admin-images-import-not-zip = The file sent is not a valid .zip.
+admin-images-import-empty = The .zip has no images in it (SVG, PNG, JPEG or WebP).
+admin-images-import-too-many = The .zip has too many files (2000 at most). Split it.
+admin-images-import-too-large = The .zip is too large (up to 64 MB sent and 128 MB of unpacked images). Split it.
+admin-images-import-skip-large = larger than 10 MB
+admin-images-import-skip-unreadable = could not be read (damaged or password-protected)
+admin-images-import-skip-save = could not be saved
 
 # Admin credentials
 admin-creds-title = Credential Management

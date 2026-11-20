@@ -31,6 +31,23 @@
   </div>
 {% when None %}{% endmatch %}
 
+{% match flash_import %}{% when Some with (report) %}
+  <div class="admin-flash-ok mb-4" role="status" data-keep>
+    <i class="ti ti-archive" aria-hidden="true"></i>
+    {# One block, so the list of problems sits UNDER the summary (the
+       banner is a flex row). #}
+    <div>
+      {{ report.summary }}
+      {% if !report.problems.is_empty() %}
+        <ul class="mt-2 text-xs text-[color:var(--text-muted)]" style="list-style:disc;padding-left:1.25rem">
+          {% for line in report.problems %}<li>{{ line }}</li>{% endfor %}
+          {% if report.more > 0 %}<li>+ {{ report.more }}</li>{% endif %}
+        </ul>
+      {% endif %}
+    </div>
+  </div>
+{% when None %}{% endmatch %}
+
 {# ── Upload form ──────────────────────────────────────────── #}
 <form method="post" action="{{ base }}/admin/media" enctype="multipart/form-data"
       class="image-upload-zone"
@@ -57,6 +74,27 @@
   {# Conversion note (#989): moved out of the page subtitle — it's upload
      detail, not the module's purpose. #}
   <span class="image-upload-hint">{{ self.t("admin-images-formats-help") }}</span>
+</form>
+
+{# ── Batch import: one .zip with many images ──────────────────
+   Its own form (forms cannot nest) and its own address: the archive is
+   unpacked on the server and each image goes through the same pipeline
+   as a single upload. The button shows a busy state because a large
+   archive takes a few seconds and the page gives no other sign. #}
+<form method="post" action="{{ base }}/admin/media/import-zip" enctype="multipart/form-data"
+      class="mt-3 flex flex-wrap items-center gap-3"
+      x-data="{ busy: false }">
+  <input type="file" name="zip" id="img-zip" required class="hidden"
+         accept=".zip,application/zip,application/x-zip-compressed"
+         @change="if ($el.files.length) { busy = true; $el.form.submit() }">
+  <label for="img-zip" class="btn btn--sm" style="cursor:pointer"
+         :class="busy ? 'is-busy' : ''" :aria-disabled="busy ? 'true' : 'false'"
+         :style="busy ? 'pointer-events:none;opacity:.6' : ''">
+    <i class="ti ti-archive" aria-hidden="true"></i>
+    <span x-show="!busy">{{ self.t("admin-images-import-zip") }}</span>
+    <span x-show="busy" x-cloak>{{ self.t("admin-images-import-busy") }}</span>
+  </label>
+  <span class="image-upload-hint">{{ self.t("admin-images-import-hint") }}</span>
 </form>
 
 {# ── Gallery grid ─────────────────────────────────────────── #}

@@ -34,6 +34,7 @@ pub mod jobs;
 pub mod leader;
 pub mod logbuf;
 pub mod markdown;
+pub mod media_zip;
 pub mod metrics_cache;
 pub mod mfa;
 pub mod oidc;
